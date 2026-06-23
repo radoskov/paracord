@@ -1,0 +1,21 @@
+# Pre-commit hooks for PaperRacks.
+#
+# Install once:  pre-commit install
+# Run manually:  pre-commit run --all-files
+#
+# The local secret scanner is dependency-free and is the primary guard. gitleaks is an
+# optional second layer (requires network access on first install to fetch the binary).
+repos:
+  - repo: local
+    hooks:
+      - id: paperracks-secret-scan
+        name: PaperRacks secret scan
+        entry: python scripts/check_secrets.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks

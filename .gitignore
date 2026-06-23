@@ -16,9 +16,22 @@ dist/
 
 # Environment and local config
 .env
+.env.*
+!.env.example
 config/*.local.yaml
+config/*.local.yml
 *.sqlite3
 *.db
+
+# Secrets and credential material (never commit real values) — see
+# docs/runbooks/secrets_management.md
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+agent.token
 
 # Runtime data
 data/
