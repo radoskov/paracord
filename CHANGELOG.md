@@ -8,7 +8,12 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added revocable server-side bearer sessions for login/logout.
+- Added persisted audit events for login success, login failure, and logout.
+- Added password-reset session revocation for server-console credential recovery.
+- Added authentication service tests for credential validation, token hashing, revocation, and audit persistence.
 - Added Alembic configuration and the initial `users`/`audit_events` migration.
+- Added a `user_sessions` migration for revocable tokens.
 - Added `make migrate` for applying backend database migrations.
 - Added server-console admin script tests using an isolated SQLite database.
 - Added backend YAML settings loading with environment-variable override precedence.

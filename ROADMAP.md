@@ -7,7 +7,8 @@
 - Backend settings load from YAML plus environment overrides. (started)
 - Initial database migration creates users and audit events. (started)
 - First admin can be bootstrapped from the server console. (started)
-- Server-console credential recovery exists without a web reset endpoint. (started; session revocation pending)
+- Login/logout creates and revokes server-side sessions. (started)
+- Server-console credential recovery exists without a web reset endpoint. (started)
 - Tests run through `make test`.
 - Docs compile.
 

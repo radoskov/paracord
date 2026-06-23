@@ -6,10 +6,11 @@ an unauthenticated web endpoint.
 """
 
 import getpass
+from datetime import datetime
 from pathlib import Path
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
@@ -17,6 +18,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.models.audit import AuditEvent  # noqa: E402
+from app.models.session import UserSession  # noqa: E402
 from app.models.user import User  # noqa: E402
 
 
@@ -32,13 +34,22 @@ def reset_password(username: str, password: str) -> User:
             raise RuntimeError(f"Account {username!r} was not found")
 
         user.password_hash = hash_password(password)
+        revoked = session.execute(
+            update(UserSession)
+            .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=datetime.utcnow())
+        )
         session.add(
             AuditEvent(
                 actor_user_id=user.id,
                 event_type="auth.password_reset_cli",
                 entity_type="user",
                 entity_id=str(user.id),
-                details={"method": "server_console", "sessions_revoked": False},
+                details={
+                    "method": "server_console",
+                    "sessions_revoked": True,
+                    "sessions_revoked_count": revoked.rowcount,
+                },
             )
         )
         session.commit()
@@ -56,7 +67,7 @@ def main() -> None:
         user = reset_password(username, password)
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
-    print(f"Reset password for {user.username!r}; no session table exists yet to revoke.")
+    print(f"Reset password for {user.username!r} and revoked active sessions.")
 
 
 if __name__ == "__main__":

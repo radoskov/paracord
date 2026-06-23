@@ -31,7 +31,7 @@ Credential recovery is performed by a local operator on the server PC using `scr
 3. Prompt for a new password without echo.
 4. Hash the password using the same production password hasher.
 5. Invalidate existing sessions/tokens for the account.
-6. Write an audit event with recovery method `server_console`.
+6. Write an `auth.password_reset_cli` audit event with recovery method `server_console`.
 
 Do not add a web endpoint for unauthenticated password reset unless a future security design is explicitly approved.
 

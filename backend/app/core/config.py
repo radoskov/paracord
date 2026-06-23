@@ -45,6 +45,8 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["public_base_url"] = server["public_base_url"]
     if "guest_access_enabled" in security:
         values["guest_access_enabled"] = security["guest_access_enabled"]
+    if "session_ttl_minutes" in security:
+        values["session_ttl_minutes"] = security["session_ttl_minutes"]
     if "database_url" in services:
         values["database_url"] = services["database_url"]
     if "redis_url" in services:
@@ -78,6 +80,7 @@ class Settings(BaseSettings):
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
     guest_access_enabled: bool = False
+    session_ttl_minutes: int = Field(default=720, alias="PAPERRACKS_SESSION_TTL_MINUTES")
 
 
 def _environment_overrides() -> dict[str, Any]:

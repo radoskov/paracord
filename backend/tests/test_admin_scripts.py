@@ -7,8 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.security import Role, verify_password
+from app.db.base import Base
 from app.models.audit import AuditEvent
+from app.models.session import UserSession
 from app.models.user import User
+from app.services.auth import create_user_session
 from scripts import bootstrap_admin, reset_admin_password
 
 
@@ -51,15 +54,26 @@ def test_create_first_owner_refuses_second_owner(script_session) -> None:
 
 def test_reset_password_updates_hash_and_records_audit_event(script_session) -> None:
     bootstrap_admin.create_first_owner("owner", "old-password")
+    Base.metadata.create_all(bind=script_session.kw["bind"])
+
+    with script_session() as session:
+        user = session.scalar(select(User).where(User.username == "owner"))
+        assert user is not None
+        create_user_session(session, user, ttl_minutes=60)
+        session.commit()
 
     reset_admin_password.reset_password("owner", "new-password")
 
     with script_session() as session:
         user = session.scalar(select(User).where(User.username == "owner"))
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.created_at)).all()
+        sessions = session.scalars(select(UserSession)).all()
 
     assert user is not None
     assert verify_password("new-password", user.password_hash)
     assert not verify_password("old-password", user.password_hash)
     assert [event.event_type for event in events] == ["user.created", "auth.password_reset_cli"]
     assert events[-1].details["method"] == "server_console"
+    assert events[-1].details["sessions_revoked"] is True
+    assert events[-1].details["sessions_revoked_count"] == 1
+    assert sessions[0].revoked_at is not None
