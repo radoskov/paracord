@@ -34,5 +34,5 @@
 
 ## Next recommended task
 
-- Add role/permission checks for owner-only and member-level operations, starting with admin and
-  agent enrollment flows.
+- Add role/permission checks for the `owner | editor | reader` roles (owner-only operations
+  first), starting with admin and agent enrollment flows.

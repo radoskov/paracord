@@ -53,6 +53,18 @@ Credential recovery is performed by a local operator on the server PC using `scr
 
 Do not add a web endpoint for unauthenticated password reset unless a future security design is explicitly approved.
 
+## Data egress and privacy
+
+PaperRacks is local-first and built only from open-source, auditable components (GROBID, PostgreSQL, Redis, PDF.js, Ollama, BERTopic, and the supporting tools listed in `SPECIFICATION.md` §5.3). None is a closed binary that could silently scan the host or exfiltrate data.
+
+- No component reads outside its configured roots (server roots, managed store, agent roots). There is no host-wide scanning.
+- The only outbound traffic is **opt-in metadata enrichment and GROBID consolidation**, and it carries only **bibliographic identifiers** — titles, authors, DOIs, arXiv IDs, and raw reference strings.
+- The system never transmits PDF contents, full text, annotations, notes, your shelf/rack/collection structure, filesystem paths, or any bulk export of your library to a third party.
+- Every external request is recorded as a `metadata.enrichment_called` audit event, so egress is fully visible to the owner.
+- Enrichment is configurable per service and can be disabled entirely; consolidation can be pointed at a self-hosted biblio-glutton instance for zero third-party calls.
+
+See also [Secrets and credential handling](#secrets-and-credential-handling).
+
 ## Local agent boundary
 
 The local agent owns filesystem access for its machine. It may expose only configured roots and indexed file IDs. It must reject:

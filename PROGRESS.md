@@ -73,15 +73,18 @@ Progress notes:
 - `make test` is currently blocked locally because the active interpreter is Python 3.9.18 while the project requires Python 3.11+, and backend dependencies such as FastAPI and pydantic-settings are not installed.
 - `ruff check backend agent scripts` is currently blocked locally because Ruff is not installed.
 
-## Next milestone: M1 single-file import
+## Next milestone: M1 core library, organization, and files
+
+See `ROADMAP.md` / `SPECIFICATION.md` §20 for the full plan. The local agent and teleport
+moved to M5; M1 now delivers the single-machine value loop via server-folder import.
 
 Acceptance criteria:
 
 1. Admin user can log in.
-2. Agent can register with the server using a bootstrap token.
-3. Agent can scan a configured folder and send a manifest.
-4. Server can import one PDF by file ID.
-5. Server can teleport one PDF into managed storage.
-6. Backend queues GROBID extraction for that PDF.
-7. Work, version, file, and location records are created.
+2. A server-folder source can be added and scanned (single-machine mode, no agent required).
+3. A folder of PDFs imports as file/work records with a PyMuPDF first-page preview.
+4. Works can be created/edited and added to multiple shelves; shelves to multiple racks.
+5. Works, shelves, and racks can be tagged.
+6. Basic metadata search and filters work; library, shelf/rack, file, and reading-queue views render.
+7. No arbitrary path endpoint exists.
 8. Import activity is audit logged.

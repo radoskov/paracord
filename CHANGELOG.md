@@ -24,8 +24,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 - Added DB-backed server-console owner bootstrap and password-reset script skeletons with audit events.
 - Added backend tests for settings loading and security helper behavior.
 
+### Changed
+
+- Reconciled `SPECIFICATION.md` with the implemented scaffold: roles are `owner | editor | reader` (was `owner | member`), the repository-layout and per-agent work split now defer to `WORK_SPLIT.md` (A–J) and the actual `backend/ frontend/ agent/` layout, config examples use port 8000 and bcrypt, and the milestone plan was re-ordered to front-load the single-machine loop (the local agent moved to M5).
+- Rewrote `ROADMAP.md` as a condensed mirror of the canonical `SPECIFICATION.md` §20 milestones and updated `PROGRESS.md`'s next-milestone section accordingly.
+- Integrated supporting open-source tools into the spec: PyMuPDF (fast preview), YAKE/KeyBERT (keywords), OCRmyPDF/Tesseract (OCR fallback), anystyle/refextract (reference fallback), biblio-glutton (local consolidation), Nougat/Marker (optional ML extraction), and Zotero translation-server (URL metadata).
+- Added usability features to the spec: reading queue, related-papers suggestions, live shelf/rack bibliography, and annotation/note full-text search.
+- Made topic modeling and body summaries tiered (lightweight default, heavier opt-in): BERTopic is now optional and off by default with lightweight keyword extraction as the default; paper body summaries are Tier 0 abstract → Tier 1 extractive Method/Experiment/Results (sumy/TextRank, no LLM) → Tier 2 opt-in local-LLM abstractive (Ollama). Reflected in `config/server.example.yaml`.
+
 ### Security
 
+- Added a "Data egress and privacy" section to `SECURITY.md` and `SPECIFICATION.md` (§7.8): only opt-in, audit-logged bibliographic identifiers ever leave the machine; no PDF contents, collection structure, filesystem paths, or bulk exports are transmitted.
 - Kept credential recovery as a server-console operation only.
 - Owner bootstrap now refuses to create a second owner account.
 - Added an authoritative secrets-and-credential-handling policy (`docs/runbooks/secrets_management.md`) and wired it into `SECURITY.md`, `AGENTS.md`, `HINTS_FOR_AGENTS.md`, `CONTRIBUTING.md`, the README, and the LaTeX security chapter.

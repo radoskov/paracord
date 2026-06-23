@@ -40,6 +40,9 @@ services:
   grobid_url_env: GROBID_URL
   ollama_url_env: OLLAMA_URL
 
+# External metadata enrichment. Outbound calls carry only bibliographic identifiers
+# (titles, authors, DOIs, arXiv IDs, raw reference strings) and are audit-logged.
+# See SECURITY.md "Data egress and privacy". Disable any source to keep it fully local.
 metadata_enrichment:
   enabled: true
   sources:
@@ -50,9 +53,14 @@ metadata_enrichment:
   overwrite_user_fields: false
 
 processing:
+  # Fast preview path: first-page text/thumbnails before the slower GROBID job.
+  pdf_preview: pymupdf
   grobid:
     consolidate_header: true
     consolidate_citations: true
+    # "crossref" calls the public API; "biblio_glutton" uses a local consolidation service.
+    consolidation_backend: crossref
+    biblio_glutton_url: null
     include_raw_citations: true
     include_raw_affiliations: true
     include_coordinates:
@@ -63,10 +71,28 @@ processing:
       - figure
       - formula
     segment_sentences: true
+  keywords:
+    extractor: yake          # or keybert when embeddings are enabled
+  ocr:
+    enable_fallback: false   # detect needs_ocr always; run OCR only when enabled
+    engine: ocrmypdf
+  reference_parser_fallback: null   # null | anystyle | refextract
+  advanced_extraction:       # optional ML PDF->markdown for hard documents
+    nougat_enabled: false
+    marker_enabled: false
+  # Paper body summaries are tiered. Tier 0 (abstract) is always available; Tier 1
+  # (extractive) is lightweight and needs no LLM; Tier 2 (local LLM) is opt-in.
+  summaries:
+    default_tier: abstract
+    extractive_enabled: true
+    extractive_engine: textrank          # via sumy (TextRank/LexRank), no LLM/GPU
+    structured_sections: [method, experiment_data, results]
   ai:
-    enabled: false
+    enabled: false                       # opt-in Tier-2 abstractive LLM summaries
     summary_model: qwen3:4b
     embedding_model: embeddinggemma
+  # Lightweight keyword extraction (processing.keywords above) is the default. BERTopic
+  # topic modeling is heavier and opt-in.
   topics:
     enabled: false
     default_scope: library

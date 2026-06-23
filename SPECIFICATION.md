@@ -125,11 +125,13 @@ The server may run on the same PC as the PDFs or on another machine in the local
 | Vector search | pgvector | Stores embeddings in PostgreSQL next to relational data. |
 | Background jobs | Redis + RQ | Simple Python job queue for extraction, enrichment, embeddings, summaries, imports, exports. |
 | PDF extraction | GROBID service | Scholarly PDF metadata, references, full-text structure, TEI XML, citation/reference coordinates. |
+| Fast PDF preview | PyMuPDF (fitz) | Fast first-page text, page counts, thumbnails, and rendering for instant import preview before the slower GROBID job runs. |
+| Keyword extraction | YAKE or KeyBERT | Lightweight deterministic keywords from title/abstract/headings without spinning up the full topic-modeling stack. |
 | PDF viewer | PDF.js | Browser-native PDF rendering and annotation overlay. |
 | Frontend | SvelteKit or React; choose SvelteKit for MVP | Lightweight web client, usable from Linux/macOS/Windows browsers. |
 | Graph UI | Cytoscape.js, with vis-network as fallback | Interactive citation graph and graph analytics. |
 | Local AI runner | Ollama first; llama.cpp later if needed | Simple local model serving and embeddings. |
-| Topic modeling | BERTopic | Transformer embedding + c-TF-IDF topic modeling for interpretable topics. |
+| Topic modeling (optional) | BERTopic | Opt-in interpretable topics (transformer embedding + c-TF-IDF). Off by default; lightweight keyword extraction is the default. |
 | Citation formatting | CSL JSON + citeproc + BibTeX/BibLaTeX/RIS exporters | Standard bibliography interoperability. |
 | Deployment | Docker Compose | Repeatable local/server deployment. |
 | Migrations | Alembic | Controlled schema evolution. |
@@ -146,6 +148,24 @@ The server may run on the same PC as the PDFs or on another machine in the local
 - Ollama exposes local APIs for generation and embeddings: https://docs.ollama.com/api/embed
 - CSL provides a large open ecosystem for citation/bibliography formatting: https://citationstyles.org/
 - Crossref, arXiv, OpenAlex, and Semantic Scholar provide useful scholarly metadata APIs: https://www.crossref.org/documentation/retrieve-metadata/rest-api/, https://info.arxiv.org/help/api/user-manual.html, https://developers.openalex.org/api-reference/introduction, https://www.semanticscholar.org/product/api
+
+### 5.3 Supporting and optional tools
+
+All of these are open-source and run locally. They are integrated behind replaceable interfaces so the system degrades gracefully when one is absent.
+
+| Tool | Role | Default | Notes |
+|---|---|---|---|
+| PyMuPDF (fitz) | Fast first-page text, page count, thumbnails, rendering | on | Powers the instant import preview and the reader thumbnail strip; GROBID still does the authoritative structured extraction in the background. |
+| OCRmyPDF + Tesseract | OCR fallback for PDFs with poor/no text layer | optional | OCRmyPDF wraps Tesseract. Produces a derivative OCR copy; never overwrites the original (see 8.3). |
+| YAKE / KeyBERT | Deterministic keyword extraction | on (YAKE) | YAKE is dependency-light; KeyBERT reuses the embedding model when embeddings are enabled. |
+| sumy (TextRank/LexRank) | Lightweight extractive section summaries | optional, on-demand | Pure-Python sentence ranking over GROBID Method/Experiment/Results sections; no LLM/GPU. The non-LLM tier of the body summary. |
+| Ollama (local LLM) | Abstractive structured summaries | opt-in, off | Tier-2 body summary (rewritten Method/Experiment-Data/Results); runs locally, no data leaves the machine. Already the AI provider (5.1). |
+| anystyle or refextract | Reference-string parsing fallback | optional | Used when GROBID reference parsing is low-confidence; results stored as competing assertions, never silent overwrites. |
+| biblio-glutton | Self-hosted metadata consolidation backend | optional | Lets GROBID consolidation run against a local service instead of the public Crossref API. |
+| Nougat / Marker | ML PDF→Markdown for math-heavy / poorly-structured papers | optional, off | Heavier ML models; offered as an alternative extraction path for documents GROBID handles poorly. |
+| Zotero translation-server | URL/arXiv/DOI → metadata resolution | optional | Reuses Zotero's large translator set instead of hand-writing every connector; runs locally. |
+
+All optional tools obey the same privacy rule as the rest of the system (see 7.8): they process only the files/identifiers handed to them and never read outside configured roots or export collection/filesystem data.
 
 ---
 
@@ -225,7 +245,8 @@ GROBID and Ollama must not be directly exposed to the LAN by default. They shoul
 3. Every user must have an explicit named account.
 4. MVP roles:
    - `owner`: full system control, user management, credential recovery configuration, backups, deletion.
-   - `member`: library use, imports, editing metadata, annotations, exports, shelf/rack management if granted.
+   - `editor`: library editing, imports, metadata changes, annotations, exports, and shelf/rack management.
+   - `reader`: authenticated reading, searching, and export where enabled by owner policy.
 5. Optional post-MVP roles may include custom permissions, but no default guest role shall be shipped.
 
 ### 7.2 Authentication
@@ -347,6 +368,17 @@ timestamp
 5. URL importers must block private/LAN IP ranges by default to avoid server-side request forgery.
 6. Allow fetching from private URLs only if owner enables `allow_private_url_imports`.
 
+### 7.8 Data egress and privacy
+
+The system is local-first and built only from open-source, auditable components (GROBID, PostgreSQL, Redis, PDF.js, Ollama, BERTopic, and the supporting tools in 5.3). No component is a closed binary that could silently scan the host or exfiltrate data.
+
+1. No component reads outside its configured roots (server roots, managed store, agent roots). There is no host-wide scanning.
+2. The only outbound network traffic is **opt-in metadata enrichment and GROBID consolidation**, and it carries only **bibliographic identifiers** — titles, author names, DOIs, arXiv IDs, and raw reference strings.
+3. The system never transmits PDF file contents, full text, annotations, notes, your collection/shelf/rack structure, filesystem paths, or any bulk export of your library to an external service.
+4. Every external request is logged as a `metadata.enrichment_called` audit event (service, query type, entity IDs) so egress is fully visible to the owner.
+5. Enrichment is configurable per service and can be fully disabled; consolidation may be pointed at a self-hosted biblio-glutton instance for zero third-party calls.
+6. Secrets and credentials are never committed to version control; see `docs/runbooks/secrets_management.md`.
+
 ---
 
 ## 8. Functional requirements
@@ -386,6 +418,8 @@ Required GROBID extraction tasks:
 9. sentence segmentation when citation-context extraction is enabled;
 10. storage of raw TEI blob for reprocessing.
 
+When GROBID reference parsing is low-confidence, an optional reference-string parser fallback (anystyle or refextract) may re-parse the raw reference. Fallback results are stored as competing metadata assertions and never silently overwrite GROBID or user data. For math-heavy or poorly-structured PDFs that GROBID handles badly, an optional ML extraction path (Nougat or Marker) may be enabled per import profile.
+
 GROBID options shall be configurable per import profile:
 
 ```text
@@ -407,7 +441,7 @@ Requirements:
 
 1. detect PDFs with missing/poor text layers;
 2. show `needs_ocr` warning;
-3. optionally run OCRmyPDF if installed and enabled;
+3. optionally run OCRmyPDF (which wraps Tesseract) if installed and enabled;
 4. preserve the original PDF;
 5. store OCR output as a derivative file or managed copy, not as a replacement unless user confirms.
 
@@ -712,6 +746,7 @@ Summary types:
 
 ```text
 extracted_abstract
+extractive_summary
 local_ai_summary
 external_ai_summary
 human_summary
@@ -721,9 +756,23 @@ rack_summary
 citation_context_summary
 ```
 
+Summaries are tiered from lightweight to heavy so the body summary works with or without an LLM:
+
+```text
+Tier 0 (default, free):    extracted_abstract — GROBID's abstract, always available.
+Tier 1 (lightweight, opt): extractive_summary — sentence-ranking (TextRank/LexRank via sumy)
+                           over GROBID body sections; no LLM, no GPU. Produces per-section
+                           extracts mapped to Method / Experiment-Data / Results.
+Tier 2 (opt-in, heavier):  local_ai_summary — abstractive structured summary via the local
+                           LLM provider (Ollama), giving rewritten Method / Experiment-Data /
+                           Results prose plus the fuller schema below.
+```
+
+Tier 1 is local, fast, and dependency-light; Tier 2 is off by default and enabled only when the user opts into local-LLM summaries. Both reuse GROBID's section segmentation to target the Method / Experiment-Data / Results split.
+
 Requirements:
 
-1. Never replace the abstract with an AI summary.
+1. Never replace the abstract with an AI or extractive summary.
 2. Store summary provenance:
    - model/provider;
    - prompt template ID;
@@ -743,8 +792,9 @@ Recommended local summary pipeline:
 
 ```text
 extract structured sections with GROBID
+map sections to Method / Experiment-Data / Results
 chunk by section, not arbitrary fixed text only
-summarize each section
+summarize each section (extractive by default; local LLM when opted in)
 create structured paper summary
 create shelf/rack summary from paper summaries + citation graph
 create citation-context summary from citation sentences
@@ -767,11 +817,13 @@ user notes
 
 ### 8.15 Topic modeling and keywords
 
+Keyword extraction and topic modeling are two tiers. The **lightweight keyword extractor runs by default**; the **heavier BERTopic topic-modeling pipeline is optional and off by default**, enabled per scope when the user wants interpretable clusters.
+
 Requirements:
 
-1. Extract deterministic keywords from title, abstract, headings, and author keywords.
-2. Generate embedding-based similar-paper suggestions.
-3. Run BERTopic for:
+1. Extract deterministic keywords from title, abstract, headings, and author keywords using a lightweight extractor (YAKE by default, KeyBERT when embeddings are enabled). This is the default and requires no GPU or transformer stack.
+2. Generate embedding-based similar-paper suggestions ("related papers"), surfaced on the paper detail view and reusable as a graph/export scope.
+3. Optionally run BERTopic (opt-in, disabled by default) for:
    - full library;
    - rack;
    - shelf;
@@ -812,6 +864,15 @@ Requirements:
 4. Store original source paths as aliases so restoration on another machine can remap paths.
 5. Managed library store is content-addressed and deduplicated by hash.
 6. Agent configuration is not restored blindly onto another machine; it must be re-enrolled.
+
+### 8.17 Additional usability features
+
+These build on existing data (reading status, embeddings, annotations, exports) and add little new machinery.
+
+1. **Reading queue.** A dedicated view backed by `reading_status` (`unread | skimmed | reading | read | important | revisit`) so the user can triage a to-read list across the whole library, a shelf, or a rack. Supports reordering and quick status changes.
+2. **Related papers.** On each paper's detail view, surface embedding-based nearest neighbours (semantic similarity from 8.15) with the shelves/tags they already belong to. The related set can be promoted to a search/graph/export scope.
+3. **Live shelf/rack bibliography.** A shelf or rack can expose an always-current bibliography (e.g. BibTeX) that re-renders when its works change, so it can be referenced directly while writing. Implemented on top of the export service (8.13) with cached, invalidate-on-change output.
+4. **Annotation and note search ("where did I read X").** Full-text search over annotation text, highlighted selections, and notes (already listed as searchable fields in 8.7), with results linking back to the exact page/coordinates in the reader.
 
 ---
 
@@ -859,7 +920,7 @@ username unique
 password_hash
 display_name
 email optional
-role: owner | member
+role: owner | editor | reader
 is_active
 created_at
 last_login_at
@@ -1467,8 +1528,8 @@ PDF streaming is allowed only if:
 1. Create import batch.
 2. Register source and file/location manifest.
 3. Hash file and inspect basic PDF metadata.
-4. Detect text layer quality and page count.
-5. Extract first-page text and identifiers.
+4. Detect text layer quality and page count (PyMuPDF).
+5. Extract first-page text, a thumbnail, and identifiers quickly with PyMuPDF so the work appears in the library immediately, before the slower GROBID job.
 6. Run duplicate/version precheck.
 7. Create provisional Work and File records.
 8. Queue GROBID extraction.
@@ -1558,6 +1619,7 @@ Output: TEI blob + parsed records
 ```text
 Dashboard
 Library
+Reading queue
 Shelves
 Racks
 Files
@@ -1631,7 +1693,7 @@ Features:
 4. citation summary;
 5. graph limited to shelf;
 6. topic modeling limited to shelf;
-7. export shelf bibliography;
+7. export shelf bibliography, including an always-current live bibliography (8.17);
 8. compare with another shelf;
 9. add/remove works.
 
@@ -1675,12 +1737,15 @@ Metadata
 References
 Citation contexts
 Graph neighborhood
+Related papers
 Notes/annotations
 Summaries
 Files/versions
 Topics/tags
 History/audit
 ```
+
+The Overview/Related papers area surfaces embedding-based nearest neighbours (8.17) with their existing shelves/tags.
 
 ### 13.8 PDF reader view
 
@@ -1880,12 +1945,12 @@ Example:
 ```yaml
 server:
   bind: "127.0.0.1"
-  port: 8080
+  port: 8000
   lan_mode: false
-  public_base_url: "http://127.0.0.1:8080"
+  public_base_url: "http://127.0.0.1:8000"
 
 security:
-  password_hash: "argon2id"
+  password_hash: "bcrypt"   # implemented default; argon2id is an acceptable future upgrade
   session_ttl_hours: 24
   allow_guest: false
   login_rate_limit_per_minute: 5
@@ -1908,20 +1973,36 @@ extraction:
   grobid_url: "http://grobid:8070"
   consolidate_header: 2
   consolidate_citations: 2
+  consolidation_backend: "crossref"   # or "biblio_glutton" for a local consolidation service
+  biblio_glutton_url: null
   include_raw_citations: true
   segment_sentences: true
   extract_coordinates: true
+  pdf_preview: "pymupdf"              # fast first-page text/thumbnails before GROBID
+  keyword_extractor: "yake"          # or "keybert" when embeddings are enabled
+  reference_parser_fallback: null    # null | "anystyle" | "refextract"
+  enable_ocr_fallback: false
+  ocr_engine: "ocrmypdf"
+  advanced_extraction:               # optional ML PDF->markdown for hard documents
+    nougat_enabled: false
+    marker_enabled: false
 
 ai:
-  enable_local_summaries: true
+  enable_local_llm_summaries: false   # opt-in Tier-2 abstractive summaries via local LLM
   provider: "ollama"
   ollama_url: "http://ollama:11434"
   summary_model: "qwen3:4b"
   embedding_model: "embeddinggemma"
   max_parallel_ai_jobs: 1
 
+summaries:
+  default_tier: "abstract"            # always-available GROBID abstract (free)
+  extractive_enabled: true            # Tier-1 lightweight section summaries, no LLM
+  extractive_engine: "textrank"       # via sumy (TextRank/LexRank)
+  structured_sections: ["method", "experiment_data", "results"]
+
 topic_modeling:
-  enabled: true
+  enabled: false                      # opt-in; lightweight keyword extraction is the default
   algorithm: "bertopic"
   min_topic_size: 5
 ```
@@ -2069,6 +2150,8 @@ Acceptance:
 
 ## 20. Milestone plan
 
+The ordering is value-first and dependency-sound: it front-loads the complete single-machine loop — import → organize → extract → read → export (Milestones 1–4) — so the tool is genuinely useful early, then adds the remote-machine agent (5) and the heavier analytical layers, citation graph (6) and local AI/topics (7), before final hardening (8). `ROADMAP.md` is a condensed mirror of this list and `WORK_SPLIT.md` maps the work packages onto it.
+
 ### Milestone 0: foundation
 
 Deliverables:
@@ -2095,7 +2178,9 @@ Exit criteria:
 4. CLI password reset works;
 5. audit log records login and reset events.
 
-### Milestone 1: core library and files
+### Milestone 1: core library, organization, and files
+
+This milestone delivers the organizational heart of the product and is independent of GROBID, so it comes first. After it, the tool is already useful on the machine where the PDFs live (single-machine mode via server folders); the local agent for remote machines is added later in Milestone 5.
 
 Deliverables:
 
@@ -2109,20 +2194,93 @@ shelves
 racks
 tags
 server-folder import
-basic search
+fast first-page text/thumbnail preview (PyMuPDF)
+basic metadata search and filters
 library table
+shelf view and rack view
 file view
+reading queue view
 ```
 
 Exit criteria:
 
-1. import folder of PDFs as file records;
+1. import folder of PDFs as file records with an immediate PyMuPDF preview;
 2. create/edit works manually;
-3. add works to shelves/racks;
-4. search by title/authors/tags/shelves/racks;
-5. no arbitrary path endpoint exists.
+3. add works to multiple shelves and shelves to multiple racks;
+4. tag works/shelves/racks;
+5. search by title/authors/tags/shelves/racks;
+6. browse via shelf/rack view, file view, and reading queue;
+7. no arbitrary path endpoint exists.
 
-### Milestone 2: local agent and teleport
+### Milestone 2: PDF extraction and metadata
+
+Deliverables:
+
+```text
+GROBID worker
+TEI storage
+header/abstract/reference parsing
+citation mention parsing
+metadata assertions
+deterministic keyword extraction (YAKE/KeyBERT)
+needs_ocr detection with optional OCRmyPDF fallback
+optional reference-parser fallback (anystyle/refextract)
+Crossref/arXiv/OpenAlex connectors
+metadata conflict review
+```
+
+Exit criteria:
+
+1. import PDF creates work metadata, abstract, and keywords;
+2. references and citation mentions are extracted;
+3. DOI/arXiv enrichment stored as assertions;
+4. conflicts displayed and resolvable;
+5. PDFs with poor text layers are flagged as needs_ocr.
+
+### Milestone 3: reader, annotations, and exports
+
+Deliverables:
+
+```text
+PDF.js reader
+annotation storage
+references/citation-context tabs
+annotation/note full-text search
+BibTeX/BibLaTeX/RIS/CSL JSON/Markdown/HTML/plain-text export
+citation key management
+live shelf/rack bibliography
+```
+
+Exit criteria:
+
+1. user reads PDFs in browser;
+2. annotations stored separately and are searchable;
+3. shelf/rack bibliography exports work, including a live always-current bibliography;
+4. audit log records PDF views and exports.
+
+### Milestone 4: duplicate/version/multiwork review
+
+Deliverables:
+
+```text
+exact duplicate detection
+DOI/arXiv duplicate detection
+fuzzy + text-fingerprint duplicate detection
+version linking
+multi-paper file links and segments
+review UI
+```
+
+Exit criteria:
+
+1. duplicate candidates are generated;
+2. user can merge/link/ignore;
+3. one file can link to multiple works with warning;
+4. one work can link to multiple files.
+
+### Milestone 5: local agent and teleport
+
+Adds remote-machine support: importing PDFs that live on a different workstation than the server. Deferred to here because server-folder import already covers the same-machine case from Milestone 1.
 
 Deliverables:
 
@@ -2142,66 +2300,6 @@ Exit criteria:
 2. server cannot request arbitrary path;
 3. teleport copies PDF to server library with checksum verification;
 4. agent can be revoked.
-
-### Milestone 3: GROBID extraction and metadata
-
-Deliverables:
-
-```text
-GROBID worker
-TEI storage
-header/abstract/reference parsing
-citation mention parsing
-metadata assertions
-Crossref/arXiv/OpenAlex connectors
-metadata conflict review
-```
-
-Exit criteria:
-
-1. import PDF creates work metadata;
-2. references are extracted;
-3. DOI/arXiv enrichment stored as assertions;
-4. conflicts displayed and resolvable.
-
-### Milestone 4: reader, annotations, exports
-
-Deliverables:
-
-```text
-PDF.js reader
-annotation storage
-references/citation-context tabs
-BibTeX/BibLaTeX/RIS/CSL JSON/plain-text export
-citation key management
-```
-
-Exit criteria:
-
-1. user reads PDFs in browser;
-2. annotations stored separately;
-3. shelf/rack bibliography exports work;
-4. audit log records PDF views and exports.
-
-### Milestone 5: duplicate/version/multiwork review
-
-Deliverables:
-
-```text
-exact duplicate detection
-DOI/arXiv duplicate detection
-fuzzy duplicate detection
-version linking
-multi-paper file links and segments
-review UI
-```
-
-Exit criteria:
-
-1. duplicate candidates are generated;
-2. user can merge/link/ignore;
-3. one file can link to multiple works with warning;
-4. one work can link to multiple files.
 
 ### Milestone 6: citation graph and summaries
 
@@ -2233,20 +2331,23 @@ Ollama provider
 embedding generation
 pgvector storage
 semantic search
-local paper summaries
+related-papers suggestions
+extractive paper summaries (Tier 1, no LLM) — Method/Experiment/Results
+optional local-LLM abstractive summaries (Tier 2, opt-in)
 external/human summaries
-BERTopic pipeline
+optional BERTopic topic pipeline (off by default)
 topic view
 tag suggestions
 shelf/rack topic summaries
+optional ML extraction path (Nougat/Marker) for hard documents
 ```
 
 Exit criteria:
 
-1. local summaries generated for selected papers;
+1. extractive Method/Experiment/Results summaries generate without an LLM; optional local-LLM abstractive summaries generate when enabled;
 2. user can paste external summaries;
 3. semantic search returns similar papers;
-4. BERTopic runs on a shelf/rack and suggests tags.
+4. when enabled, BERTopic runs on a shelf/rack and suggests tags (off by default).
 
 ### Milestone 8: polish, backup, deployment hardening
 
@@ -2288,460 +2389,46 @@ This section is written for multiple coding agents working in parallel.
 9. Every module must include unit tests and at least one integration test where applicable.
 10. Keep fixtures small and legally redistributable.
 
-### 21.2 Recommended repository layout
+### 21.2 Repository layout
+
+This is the actual repository layout the scaffold uses. `WORK_SPLIT.md` maps work packages onto these paths.
 
 ```text
 paperracks/
-  apps/
-    api/                 FastAPI server
-    web/                 SvelteKit frontend
-    agent/               local workstation agent
-    worker/              RQ workers and job runners
-  packages/
-    pycore/              shared Python domain models/utilities
-    client-sdk/          generated TypeScript client
-  migrations/            Alembic migrations
-  deploy/
-    docker-compose.yml
-    docker-compose.lan.yml
-    nginx/
-    caddy/
+  backend/
+    app/
+      main.py
+      core/                config, security
+      db/                  session, base
+      models/              SQLAlchemy models
+      schemas/             pydantic schemas
+      api/v1/endpoints/    routers
+      services/            domain services (storage, grobid, export, ...)
+      workers/             RQ job runners
+    alembic/               migrations
+    tests/
+  agent/
+    paperracks_agent/      local workstation agent (CLI + client)
+    tests/
+  frontend/                web client (SvelteKit)
+  config/                  *.example.yaml + local overlays (gitignored)
+  scripts/                 admin/bootstrap/backup/secret-scan helpers
   docs/
-    specification/
-    adr/
-    api/
-    deployment/
-    security/
-  tests/
-    fixtures/
-    integration/
-    e2e/
-  scripts/
-    paperracks-admin
-    backup
-    restore
+    architecture/
+    runbooks/
+    agent_handoffs/
+    latex/                 implementation manual sources
+  docker-compose.yml
+  Makefile
 ```
 
-### 21.3 Agent A: architecture and project scaffold
-
-Scope:
-
-```text
-monorepo structure
-Docker Compose
-configuration system
-logging framework
-health checks
-OpenAPI generation
-CI baseline
-```
-
-Inputs:
-
-```text
-this specification
-selected stack versions
-```
-
-Outputs:
-
-```text
-running empty system
-compose files
-config loader
-health endpoints
-CI test command
-```
-
-Acceptance tests:
-
-```text
-docker compose up starts api/web/postgres/redis
-GET /health returns OK
-OpenAPI JSON generated
-config can switch localhost/LAN mode
-```
-
-Do not implement domain features beyond stubs.
-
-### 21.4 Agent B: database and domain model
-
-Scope:
-
-```text
-SQLAlchemy/SQLModel models
-Alembic migrations
-core CRUD services
-metadata normalization utilities
-seed/dev data
-```
-
-Outputs:
-
-```text
-schema for users/agents/sources/files/works/shelves/racks/tags/references/etc.
-unit tests for constraints
-migration tests
-```
-
-Acceptance tests:
-
-```text
-create work/version/file/location
-link one file to multiple works
-link one work to multiple files
-add work to multiple shelves
-add shelf to multiple racks
-store metadata assertions
-```
-
-Coordination:
-
-- Must provide stable service functions for other agents.
-- Must not expose raw path reading.
-
-### 21.5 Agent C: auth, recovery, and audit
-
-Scope:
-
-```text
-owner bootstrap
-login/logout/session handling
-password hashing
-CLI password reset
-user management
-audit event system
-rate limiting
-```
-
-Outputs:
-
-```text
-auth endpoints
-admin CLI
-audit middleware/helpers
-security tests
-```
-
-Acceptance tests:
-
-```text
-no anonymous library access
-owner first-run setup
-password reset CLI works from server shell
-sessions revoked after reset
-auth/browsing/export audit events created
-login rate limiting works
-```
-
-Important:
-
-- No guest read-only access.
-- No web-based credential recovery in MVP.
-
-### 21.6 Agent D: source/file manager and local filesystem safety
-
-Scope:
-
-```text
-server folder sources
-path canonicalization
-managed library store
-file hashing
-file status verification
-teleport destination store
-file streaming API for managed/server files
-```
-
-Acceptance tests:
-
-```text
-allowed root import works
-symlink escape rejected
-arbitrary path API does not exist
-managed store deduplicates by hash
-PDF stream requires auth and logs audit event
-```
-
-Coordination:
-
-- Works closely with Agent E on remote agent file model.
-
-### 21.7 Agent E: local workstation agent
-
-Scope:
-
-```text
-agent daemon/CLI
-enrollment
-root configuration
-folder scanning/watching
-manifest sync
-agent file IDs
-streaming selected files
-teleport upload
-agent revocation behavior
-```
-
-Acceptance tests:
-
-```text
-enroll agent
-add root
-sync manifest
-server imports manifest
-stream registered file
-refuse unknown file ID
-refuse outside-root request
-teleport file to server with checksum
-revoked agent cannot upload/stream
-```
-
-Important:
-
-- Agent never accepts raw path requests from server.
-- Agent stores tokens with restrictive file permissions.
-
-### 21.8 Agent F: GROBID extraction worker
-
-Scope:
-
-```text
-GROBID client
-PDF submit/stream handling
-TEI blob storage
-TEI parsing
-header/abstract/reference/citation mention extraction
-coordinates and sentence contexts
-job retries
-```
-
-Acceptance tests:
-
-```text
-mock GROBID response parsed into work metadata
-references stored
-citation mentions stored with context
-raw TEI stored
-failed extraction creates warning and retry behavior
-```
-
-Coordination:
-
-- Requires file streaming from Agent D/E.
-- Emits metadata enrichment and graph refresh jobs.
-
-### 21.9 Agent G: metadata enrichment and duplicate/version resolver
-
-Scope:
-
-```text
-DOI/arXiv parsing
-Crossref connector
-arXiv connector
-OpenAlex connector
-Semantic Scholar connector optional
-metadata assertions
-conflict detection
-duplicate/version scoring
-review actions
-```
-
-Acceptance tests:
-
-```text
-DOI query creates assertions
-arXiv ID query creates version metadata
-conflicting title/year creates warning
-same DOI duplicate candidate
-same arXiv base ID version candidate
-user-confirmed metadata is not overwritten
-```
-
-Important:
-
-- External data must not silently pollute canonical metadata.
-
-### 21.10 Agent H: search and query language
-
-Scope:
-
-```text
-structured query parser
-PostgreSQL full-text indexes
-search endpoint
-saved filters
-semantic search interface hooks
-```
-
-Acceptance tests:
-
-```text
-author/title/tag/shelf/rack filters work
-full-text search works
-warning filters work
-search result can be used as export/graph scope
-invalid query gives helpful error
-```
-
-### 21.11 Agent I: frontend library, shelves, racks, files
-
-Scope:
-
-```text
-SvelteKit app shell
-login UI
-library table
-shelf view
-rack view
-file view
-work detail overview
-import queue UI
-settings shell
-```
-
-Acceptance tests:
-
-```text
-login required
-library table loads
-create shelf/rack/tag
-add work to shelf
-add shelf to rack
-show multiwork/multifile warnings
-trigger teleport
-```
-
-Coordination:
-
-- Uses generated API client.
-- Does not hardcode API shapes.
-
-### 21.12 Agent J: PDF reader and annotations
-
-Scope:
-
-```text
-PDF.js integration
-PDF streaming viewer
-annotation model UI
-highlight/page anchors
-citation overlays
-external-reader hook placeholder
-```
-
-Acceptance tests:
-
-```text
-open PDF from managed file
-open PDF from agent-streamed file
-create annotation
-annotation appears after reload
-PDF view writes audit event
-click citation marker opens reference panel if data exists
-```
-
-### 21.13 Agent K: citation graph and summaries
-
-Scope:
-
-```text
-reference resolution to graph edges
-citation graph API
-scope filters
-Cytoscape.js graph UI
-citation context panels
-shelf/rack citation summaries
-missing references view
-```
-
-Acceptance tests:
-
-```text
-graph for shelf contains only scoped works plus selected external nodes
-graph for rack unions shelves and collapses duplicate works
-edge context returned
-missing frequently cited references listed
-citation summary refreshes after references change
-```
-
-### 21.14 Agent L: export and bibliography formatting
-
-Scope:
-
-```text
-citation key generation
-BibTeX/BibLaTeX/RIS/CSL JSON/plain text/Markdown/HTML exports
-CSL style selection
-export preview
-export audit events
-```
-
-Acceptance tests:
-
-```text
-export single work BibTeX
-export shelf BibTeX
-export rack plain text bibliography with CSL style
-key collision resolved
-export warnings displayed
-export writes audit event
-```
-
-### 21.15 Agent M: local AI, embeddings, topics
-
-Scope:
-
-```text
-Ollama provider interface
-embedding jobs
-pgvector storage
-semantic search
-local summaries
-external/human summary storage
-BERTopic jobs
-topic view/tag suggestions
-```
-
-Acceptance tests:
-
-```text
-mock Ollama summary stored with provenance
-external summary can be added
-embedding generated and stored
-semantic search returns neighbors
-BERTopic job creates topics for shelf/rack
-user accepts suggested tag
-```
-
-Important:
-
-- All AI output must store provenance.
-- Small GPU mode must use chunked summaries.
-
-### 21.16 Agent N: DevOps, backup, documentation, QA
-
-Scope:
-
-```text
-backup/restore
-LAN deployment docs
-security checklist
-performance tests
-E2E tests
-sample configs
-release packaging
-```
-
-Acceptance tests:
-
-```text
-backup creates complete archive
-restore dry-run validates archive
-LAN compose exposes only intended ports
-e2e test covers first-run -> import -> read -> export
-security checklist completed
-```
+### 21.3 Work packages
+
+The detailed per-agent work packages live in `WORK_SPLIT.md`, which is the single
+source of truth for ownership boundaries and initial tasks. It defines packages A–J
+mapped onto the repository layout in 21.2 and the milestones in section 20. This
+specification defines *what* to build; `WORK_SPLIT.md` defines *who builds which part*.
+Where the two ever disagree on scope or ownership, `WORK_SPLIT.md` wins.
 
 ---
 
@@ -2800,21 +2487,25 @@ csl_json_sample.json
 
 ### 22.5 Dependency order
 
+Work-package letters below refer to `WORK_SPLIT.md` (A–J), aligned to the milestones in section 20.
+
 ```text
-Foundation -> DB/Auth/File safety -> Agent -> GROBID -> Metadata/Duplicates -> UI -> Reader/Export -> Graph -> AI/Topics -> Hardening
+Foundation (A) -> Auth/Audit (B) + Ingestion/Storage/File-safety (D) -> GROBID/Metadata (E)
+  -> Reader/Export (H) -> Duplicate/Version review (D) -> Local agent (C)
+  -> Citation graph (F) -> AI/Topics (I) -> Hardening (J)
 ```
 
 Parallelization:
 
 ```text
-Agent B and C can run after A.
-Agent D can run with B.
-Agent E can start once D defines source/file contracts.
-Agent F can mock file input before D/E are complete.
-Agent I can start with API mocks after OpenAPI skeleton.
-Agent L can start from data model and mock works.
-Agent M can start with provider interfaces and mock summaries.
-Agent K starts after references and graph contracts exist.
+B and D can start once A provides DB session, core models, settings, and the audit helper.
+E can mock file input before D's storage is complete, then integrate.
+G (frontend) can start against API mocks once the OpenAPI skeleton exists.
+H (export) can start from the data model with mock works.
+I (local AI) can start with provider interfaces and mock summaries.
+C (local agent) starts once D defines the source/file contracts.
+F (citation graph) starts after references and graph contracts exist (after E).
+J (docs/tests/DX) runs continuously alongside every package.
 ```
 
 ---
@@ -2850,23 +2541,32 @@ managed store skeleton
 ### 23.3 Third target
 
 ```text
+GROBID worker
+TEI parser
+metadata assertions
+reference extraction
+deterministic keyword extraction
+PyMuPDF first-page preview/thumbnails
+```
+
+### 23.4 Fourth target
+
+```text
+PDF.js reader
+separate annotation storage
+BibTeX/CSL JSON export
+exact + DOI/arXiv duplicate detection
+```
+
+### 23.5 Later target (remote machines)
+
+```text
 agent enrollment
 agent folder manifest sync
 remote import
 teleport with checksum
 file streaming
 security tests for path isolation
-```
-
-### 23.4 Fourth target
-
-```text
-GROBID worker
-TEI parser
-metadata assertions
-reference extraction
-PDF.js reader
-BibTeX export
 ```
 
 ---
@@ -2889,7 +2589,7 @@ Recommended defaults:
 Frontend: SvelteKit
 Browser auth: HTTP-only cookie session
 Agent auth: scoped bearer token or mTLS later
-Password hash: Argon2id
+Password hash: bcrypt (implemented; Argon2id acceptable as a future upgrade)
 GROBID consolidation: DOI-only mode where possible
 Semantic Scholar: optional, disabled by default
 OpenAlex/Crossref/arXiv: enabled if user opts in during setup
