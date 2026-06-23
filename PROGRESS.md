@@ -29,6 +29,7 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Password reset now revokes active sessions for the target account.
 - Auth service tests cover credential validation, token hashing, session revocation, and audit persistence.
 - API dependency tests cover valid, missing, and invalid bearer tokens.
+- Secrets-handling policy documented and enforced via a secret scanner, pre-commit hook, and CI workflow; hardcoded Postgres dev password removed from compose in favor of `.env`.
 
 ## In progress
 

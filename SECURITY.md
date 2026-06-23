@@ -11,6 +11,24 @@ PaperRacks is intended for authenticated local-network use. It is not designed t
 - No server request that can ask an agent for an arbitrary raw path.
 - GROBID, Redis, PostgreSQL, Ollama, and internal worker services should not be directly exposed to the LAN.
 - Credential recovery must be possible from the server PC, but not through an unauthenticated remote web endpoint.
+- No real credential, secret, or personal data may ever be committed to git. See [Secrets and credential handling](#secrets-and-credential-handling).
+
+## Secrets and credential handling
+
+The full policy lives in [`docs/runbooks/secrets_management.md`](docs/runbooks/secrets_management.md) and is **automatically enforced** (see [Enforcement](#enforcement)). Summary:
+
+- **Light, non-secret config** (URLs, hostnames, IP addresses, ports, flags) is provided through environment variables loaded from a local `.env` file and/or `config/*.local.yaml`. Only `*.example` files with placeholder values are committed.
+- **Serious machine secrets** (database passwords, `PAPERRACKS_SECRET_KEY`, agent tokens, API keys) are read from the environment / a secret store and referenced in YAML by env-var name (the `*_env` keys), never inlined. They are never committed in any form.
+- **User passwords** are stored only as bcrypt hashes via `hash_password` / `verify_password` in `backend/app/core/security.py` — one-way, never reversibly encoded, never logged. Other sensitive stored fields that must remain recoverable are **encrypted at rest** with a key supplied from the environment.
+- **Personal data** (usernames, emails) lives in the database, never in source, fixtures, logs, or examples. The only personal data in the repository is the git author name/email in commit metadata.
+- *Clearly fake* placeholders and test values are allowed; mark unavoidable realistic test values with `# pragma: allowlist secret`.
+
+### Enforcement
+
+- `.gitignore` excludes `.env`, `config/*.local.yaml`, databases, and key material (`*.pem`, `*.key`, `secrets/`, …).
+- `scripts/check_secrets.py` scans for private keys, provider tokens, and hardcoded `password`/`secret`/`token` values (`make check-secrets`).
+- A pre-commit hook runs the scan locally (`bash scripts/install_git_hooks.sh`, or `pre-commit install`).
+- `.github/workflows/secret-scan.yml` runs the scan on every push and pull request.
 
 ## Roles
 

@@ -74,6 +74,22 @@ missing abstracts
 bad OCR/text layer
 ```
 
+## Never hardcode credentials
+
+Treat every secret as radioactive. Concretely:
+
+```text
+URLs / IPs / ports / flags   -> .env or config/*.local.yaml (placeholder in *.example)
+DB passwords / API keys /
+  PAPERRACKS_SECRET_KEY /
+  agent tokens               -> read from os.environ; reference by *_env name in YAML
+user passwords               -> hash_password() / verify_password() (bcrypt), never stored or logged in plaintext
+other recoverable secrets    -> encrypt at rest with a key from the environment
+dummy/test values            -> allowed, but make them clearly fake (change_me, example, ...)
+```
+
+`backend/app/core/config.py` already layers env vars over YAML — follow that pattern for new config and never inline a real value. Run `python scripts/check_secrets.py` before committing; the pre-commit hook and CI run it for you. Full policy: `docs/runbooks/secrets_management.md`.
+
 ## UI performance
 
 For thousands of papers, use server-side pagination and virtualized tables. Graphs should default to scoped subsets rather than rendering the entire library every time.

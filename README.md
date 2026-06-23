@@ -51,6 +51,8 @@ The current scaffold will not implement all endpoints yet. The goal of the first
 
 The server and web browser must never receive arbitrary local filesystem access. Files are accessed only through configured roots, managed library objects, or local-agent file IDs. The agent refuses raw path requests and exposes only files that it has indexed from its configured roots.
 
+No real credentials, secrets, or personal data may be committed. Light config (URLs, IPs, ports) goes through `.env`/`config/*.local.yaml`, serious secrets are read from the environment, and user passwords are bcrypt-hashed. The policy in `docs/runbooks/secrets_management.md` is enforced by `scripts/check_secrets.py` via a pre-commit hook and CI. Install the hook once with `bash scripts/install_git_hooks.sh`.
+
 ## Documentation
 
 The implementation manual source lives in `docs/latex/`. To compile it:

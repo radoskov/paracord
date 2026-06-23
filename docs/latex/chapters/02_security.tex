@@ -18,6 +18,14 @@ The server and browser must not receive arbitrary filesystem access. File operat
 
 Credential recovery is performed from the server PC using a command-line tool. The implementation must not expose an unauthenticated web password-reset endpoint. The recovery command must hash the new password, invalidate existing sessions, and write an audit event.
 
+\subsection{Secrets and credential handling}
+
+No real credential, secret, or personal datum may be committed to version control. Configuration is classified into tiers. Non-secret, ``light'' configuration---service URLs, host names, IP addresses, ports, and feature flags---is supplied through environment variables loaded from a local \texttt{.env} file or a \texttt{config/*.local.yaml} overlay, and only placeholder \texttt{*.example} files are committed. Serious machine secrets---database passwords, the application secret key, agent tokens, and third-party API keys---are read from the environment or a secret store and are referenced in YAML by environment-variable name (the \texttt{*\_env} keys), never inlined.
+
+User passwords are stored exclusively as bcrypt hashes through the shared password hasher; they are one-way and are never logged, returned in API responses, or written to audit details. Other sensitive stored fields that must remain recoverable are encrypted at rest with a key drawn from the environment. Clearly fake placeholder and test values are permitted in the repository.
+
+These rules are enforced automatically by \texttt{.gitignore} exclusions, a repository secret scanner (\texttt{scripts/check\_secrets.py}) wired into a pre-commit hook and continuous integration, so a leak is blocked before it can be pushed. The operational policy is documented in \texttt{docs/runbooks/secrets\_management.md}.
+
 \subsection{Audit logging}
 
 Audit login, failed login, logout, credential recovery, agent registration, token rotation, folder scans, teleport uploads, PDF views, exports, metadata edits, duplicate merges, deletions, AI summaries, and external metadata lookups.

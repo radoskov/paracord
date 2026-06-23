@@ -28,6 +28,10 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 - Kept credential recovery as a server-console operation only.
 - Owner bootstrap now refuses to create a second owner account.
+- Added an authoritative secrets-and-credential-handling policy (`docs/runbooks/secrets_management.md`) and wired it into `SECURITY.md`, `AGENTS.md`, `HINTS_FOR_AGENTS.md`, `CONTRIBUTING.md`, the README, and the LaTeX security chapter.
+- Added `scripts/check_secrets.py`, a dependency-free secret scanner, with `make check-secrets`, a pre-commit configuration, a plain git-hook installer (`scripts/install_git_hooks.sh`), and a `secret-scan` GitHub Actions workflow.
+- Hardened `.gitignore` to exclude key material (`*.pem`, `*.key`, `secrets/`, token files) and any `.env.*` except `.env.example`.
+- Removed the hardcoded Postgres dev password from `docker-compose.yml`; credentials now come from `.env`.
 
 ## [0.0.0] - 2026-06-23
 

@@ -1,10 +1,12 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    # Credentials are read from the local .env file (see .env.example). Never hardcode
+    # real credentials here — see docs/runbooks/secrets_management.md.
     environment:
-      POSTGRES_USER: paperracks
-      POSTGRES_PASSWORD: paperracks_dev_password
-      POSTGRES_DB: paperracks
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

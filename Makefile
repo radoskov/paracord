@@ -1,4 +1,4 @@
-.PHONY: help dev-up dev-down backend-dev agent-dev migrate test lint docs zip
+.PHONY: help dev-up dev-down backend-dev agent-dev migrate test lint check-secrets docs zip
 
 help:
 	@echo "PaperRacks developer commands"
@@ -9,6 +9,7 @@ help:
 	@echo "  make migrate      Apply backend database migrations"
 	@echo "  make test         Run backend and agent tests"
 	@echo "  make lint         Run lint checks"
+	@echo "  make check-secrets Scan tracked files for committed secrets"
 	@echo "  make docs         Compile LaTeX docs"
 	@echo "  make zip          Create source archive"
 
@@ -32,6 +33,9 @@ test:
 
 lint:
 	ruff check backend agent scripts
+
+check-secrets:
+	python scripts/check_secrets.py --all
 
 docs:
 	cd docs && ./compile_docs.sh
