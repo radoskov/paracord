@@ -5,6 +5,7 @@
 - Docker Compose starts infrastructure.
 - Backend health endpoint works. (started)
 - Backend settings load from YAML plus environment overrides. (started)
+- Initial database migration creates users and audit events. (started)
 - First admin can be bootstrapped from the server console. (started)
 - Server-console credential recovery exists without a web reset endpoint. (started; session revocation pending)
 - Tests run through `make test`.

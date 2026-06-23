@@ -19,7 +19,10 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Backend settings now load supported values from server YAML with environment overrides.
 - Backend password hashing and verification helpers are implemented with bcrypt.
 - Server-console owner bootstrap and password reset scripts now touch the database and write audit events.
+- Initial Alembic migration creates `users` and `audit_events`.
+- `make migrate` applies backend migrations.
 - Backend unit tests cover settings loading and security helpers.
+- Server-console admin script tests cover first-owner creation, duplicate-owner refusal, and password reset audit logging.
 
 ## In progress
 
@@ -31,7 +34,6 @@ The project is at scaffold stage. The repository contains the planned module lay
 
 ## Not started
 
-- Real database migrations.
 - Authentication implementation.
 - Full admin bootstrap and password reset workflow with session revocation.
 - File-root scanner implementation.
@@ -60,7 +62,8 @@ Progress notes:
 
 - `GET /api/v1/health` exists and has a test.
 - Server-console admin scripts are DB-backed for users/audit events, but session revocation awaits the future session model.
-- `python -m compileall backend/app scripts` passes in the current environment.
+- Alembic is initialized for the first security tables; broader domain models still need migrations.
+- `python -m compileall backend/app backend/alembic scripts` passes in the current environment.
 - `make test` is currently blocked locally because the active interpreter is Python 3.9.18 while the project requires Python 3.11+, and backend dependencies such as FastAPI and pydantic-settings are not installed.
 - `ruff check backend agent scripts` is currently blocked locally because Ruff is not installed.
 

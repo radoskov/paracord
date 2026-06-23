@@ -8,6 +8,9 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added Alembic configuration and the initial `users`/`audit_events` migration.
+- Added `make migrate` for applying backend database migrations.
+- Added server-console admin script tests using an isolated SQLite database.
 - Added backend YAML settings loading with environment-variable override precedence.
 - Added bcrypt password hashing and verification helpers.
 - Added DB-backed server-console owner bootstrap and password-reset script skeletons with audit events.

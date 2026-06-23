@@ -27,7 +27,11 @@ agent/requirements.txt
 agent/systemd/paperracks-agent.service.example
 agent/tests/test_security.py
 backend/README.md
+backend/alembic.ini
 backend/alembic/README.md
+backend/alembic/env.py
+backend/alembic/script.py.mako
+backend/alembic/versions/0001_create_users_and_audit_events.py
 backend/app/__init__.py
 backend/app/api/__init__.py
 backend/app/api/v1/__init__.py
@@ -85,6 +89,7 @@ backend/app/utils/normalization.py
 backend/app/workers/__init__.py
 backend/app/workers/jobs.py
 backend/requirements.txt
+backend/tests/test_admin_scripts.py
 backend/tests/test_config.py
 backend/tests/test_health.py
 backend/tests/test_security.py
@@ -92,6 +97,7 @@ config/agent.example.yaml
 config/server.example.yaml
 docker-compose.yml
 docs/README.md
+docs/agent_handoffs/2026-06-23-m0-alembic-admin-tests.md
 docs/agent_handoffs/2026-06-23-m0-config-security.md
 docs/agent_handoffs/README.md
 docs/architecture/api_surface.md

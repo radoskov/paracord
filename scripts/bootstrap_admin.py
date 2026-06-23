@@ -26,7 +26,9 @@ def create_first_owner(username: str, password: str) -> User:
 
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
-        owner_count = session.scalar(select(func.count()).select_from(User).where(User.role == Role.OWNER))
+        owner_count = session.scalar(
+            select(func.count()).select_from(User).where(User.role == Role.OWNER)
+        )
         if owner_count:
             raise RuntimeError("An owner account already exists")
         if session.scalar(select(User).where(User.username == username)):

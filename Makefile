@@ -1,4 +1,4 @@
-.PHONY: help dev-up dev-down backend-dev agent-dev test lint docs zip
+.PHONY: help dev-up dev-down backend-dev agent-dev migrate test lint docs zip
 
 help:
 	@echo "PaperRacks developer commands"
@@ -6,6 +6,7 @@ help:
 	@echo "  make dev-down     Stop local infrastructure"
 	@echo "  make backend-dev  Run backend dev server"
 	@echo "  make agent-dev    Run agent CLI help"
+	@echo "  make migrate      Apply backend database migrations"
 	@echo "  make test         Run backend and agent tests"
 	@echo "  make lint         Run lint checks"
 	@echo "  make docs         Compile LaTeX docs"
@@ -22,6 +23,9 @@ backend-dev:
 
 agent-dev:
 	cd agent && python -m paperracks_agent.cli --help
+
+migrate:
+	alembic -c backend/alembic.ini upgrade head
 
 test:
 	pytest backend/tests agent/tests
