@@ -8,6 +8,9 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added a reusable FastAPI current-user dependency for bearer-token authentication.
+- Protected all non-health, non-login API routers with the authentication dependency.
+- Added API dependency tests for valid, missing, and invalid bearer tokens.
 - Added revocable server-side bearer sessions for login/logout.
 - Added persisted audit events for login success, login failure, and logout.
 - Added password-reset session revocation for server-console credential recovery.

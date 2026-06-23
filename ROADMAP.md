@@ -8,6 +8,7 @@
 - Initial database migration creates users and audit events. (started)
 - First admin can be bootstrapped from the server console. (started)
 - Login/logout creates and revokes server-side sessions. (started)
+- Non-health API stubs require bearer-token authentication. (started)
 - Server-console credential recovery exists without a web reset endpoint. (started)
 - Tests run through `make test`.
 - Docs compile.

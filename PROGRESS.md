@@ -25,8 +25,10 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Backend unit tests cover settings loading and security helpers.
 - Server-console admin script tests cover first-owner creation, duplicate-owner refusal, and password reset audit logging.
 - Minimal login/logout endpoints create and revoke server-side bearer sessions.
+- Non-health, non-login API routers now require bearer-token authentication.
 - Password reset now revokes active sessions for the target account.
 - Auth service tests cover credential validation, token hashing, session revocation, and audit persistence.
+- API dependency tests cover valid, missing, and invalid bearer tokens.
 
 ## In progress
 
@@ -38,7 +40,7 @@ The project is at scaffold stage. The repository contains the planned module lay
 
 ## Not started
 
-- Full authentication hardening, authorization dependencies, and rate limiting.
+- Role-based authorization policies and login rate limiting.
 - File-root scanner implementation.
 - Agent registration and token rotation implementation.
 - GROBID TEI parser implementation.

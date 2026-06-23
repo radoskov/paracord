@@ -34,6 +34,7 @@ backend/alembic/script.py.mako
 backend/alembic/versions/0001_create_users_and_audit_events.py
 backend/alembic/versions/0002_create_user_sessions.py
 backend/app/__init__.py
+backend/app/api/deps.py
 backend/app/api/__init__.py
 backend/app/api/v1/__init__.py
 backend/app/api/v1/endpoints/__init__.py
@@ -93,6 +94,7 @@ backend/app/workers/__init__.py
 backend/app/workers/jobs.py
 backend/requirements.txt
 backend/tests/test_admin_scripts.py
+backend/tests/test_api_deps.py
 backend/tests/test_auth_service.py
 backend/tests/test_config.py
 backend/tests/test_health.py
@@ -104,6 +106,7 @@ docs/README.md
 docs/agent_handoffs/2026-06-23-m0-alembic-admin-tests.md
 docs/agent_handoffs/2026-06-23-m0-auth-sessions.md
 docs/agent_handoffs/2026-06-23-m0-config-security.md
+docs/agent_handoffs/2026-06-23-m0-protect-api-stubs.md
 docs/agent_handoffs/README.md
 docs/architecture/api_surface.md
 docs/architecture/architecture.md
