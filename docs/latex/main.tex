@@ -1,0 +1,41 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{array}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
+\lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single}
+
+\title{PaperRacks Implementation Manual}
+\author{PaperRacks Project}
+\date{2026-06-23}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\input{chapters/00_overview}
+\input{chapters/01_architecture}
+\input{chapters/02_security}
+\input{chapters/03_data_model}
+\input{chapters/04_agent_protocol}
+\input{chapters/05_processing_pipelines}
+\input{chapters/06_api_and_ui}
+\input{chapters/07_exports_ai_topics}
+\input{chapters/08_work_split}
+
+\appendix
+\input{chapters/a_configuration}
+\input{chapters/b_glossary}
+
+\end{document}

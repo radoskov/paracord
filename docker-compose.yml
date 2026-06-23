@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: paperracks
+      POSTGRES_PASSWORD: paperracks_dev_password
+      POSTGRES_DB: paperracks
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - paperracks_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  grobid:
+    image: grobid/grobid:0.9.0-crf
+    ports:
+      - "127.0.0.1:8070:8070"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Optional local LLM service. Uncomment when desired.
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "127.0.0.1:11434:11434"
+  #   volumes:
+  #     - paperracks_ollama:/root/.ollama
+
+volumes:
+  paperracks_postgres:
+  paperracks_ollama:

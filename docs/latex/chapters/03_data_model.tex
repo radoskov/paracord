@@ -1,0 +1,22 @@
+\section{Data Model}
+
+PaperRacks separates intellectual identity from physical files.
+
+\begin{longtable}{p{0.28\textwidth}p{0.62\textwidth}}
+\textbf{Entity} & \textbf{Purpose} \\
+Work & Conceptual scholarly paper. \\
+WorkVersion & Specific version such as arXiv v1, accepted manuscript, or publisher version. \\
+File & Physical file identity, usually a PDF. \\
+FileSegment & Page range or internal segment when one file contains multiple papers. \\
+FileWorkLink & Many-to-many relationship between files and works. \\
+Location & Server path, managed object, URL, or agent-owned file reference. \\
+Shelf & Collection of works. A work may appear in many shelves. \\
+Rack & Collection of shelves. A shelf may appear in many racks. \\
+Reference & Bibliographic item extracted from a work. \\
+CitationMention & In-text citation marker and context sentence/coordinates. \\
+MetadataAssertion & Provenance-aware candidate metadata value. \\
+Summary & Extracted abstract, local AI summary, external AI summary, or human summary. \\
+AuditEvent & Authentication, browsing, export, import, and change log. \\
+\end{longtable}
+
+The model must allow one file to contain multiple works and one work to have multiple files or versions.

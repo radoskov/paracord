@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment and local config
+.env
+config/*.local.yaml
+*.sqlite3
+*.db
+
+# Runtime data
+data/
+storage/
+logs/
+
+# LaTeX build output
+docs/latex/build/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

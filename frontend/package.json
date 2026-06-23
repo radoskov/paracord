@@ -1,0 +1,21 @@
+{
+  "name": "paperracks-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@sveltejs/vite-plugin-svelte": "latest",
+    "vite": "latest",
+    "svelte": "latest",
+    "pdfjs-dist": "latest",
+    "cytoscape": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}

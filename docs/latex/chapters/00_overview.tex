@@ -1,0 +1,19 @@
+\section{Overview}
+
+PaperRacks is a local-first, self-hostable scientific-paper library and literature graph system. It supports hundreds to thousands of scientific PDFs, external metadata enrichment, citation-context extraction, local citation graphs, shelves, racks, tags, citation export, local summaries, and topic modeling.
+
+\subsection{Primary workflow}
+
+The primary workflow is literature review and citation/topic graph exploration. PDFs are kept in place by default, while selected files can be copied to the server managed-library store through the teleport workflow.
+
+\subsection{Major components}
+
+\begin{itemize}[noitemsep]
+  \item Browser web interface.
+  \item PaperRacks server API.
+  \item PostgreSQL database with optional vector extension.
+  \item Redis or equivalent background queue.
+  \item GROBID extraction service.
+  \item Optional local LLM and embedding service.
+  \item Local workstation agent.
+\end{itemize}

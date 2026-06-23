@@ -1,0 +1,26 @@
+\section{Architecture}
+
+\begin{lstlisting}
+Browser UI
+   -> PaperRacks Server API
+      -> PostgreSQL + pgvector
+      -> Redis/RQ background queue
+      -> GROBID extraction service
+      -> optional local LLM service
+      -> optional online metadata connectors
+   -> PaperRacks Local Agent(s)
+      -> configured local folders only
+      -> file hashing, manifesting, upload/teleport, optional streaming
+\end{lstlisting}
+
+The server may run on the same PC as the PDFs or on another machine in the local network. When PDFs live on a workstation and the server is external, the workstation runs a local agent. The server communicates with the agent by opaque file identifiers and scoped tokens.
+
+\subsection{Storage modes}
+
+\begin{longtable}{p{0.28\textwidth}p{0.62\textwidth}}
+\textbf{Mode} & \textbf{Behavior} \\
+Referenced original & Keep the PDF in its existing folder and store only an agent or server location reference. \\
+Watched folder & Index configured roots on the server or agent. \\
+Managed library copy & Copy selected files into server-side content-addressed storage. \\
+Remote agent file & File remains on workstation; agent can stream or teleport it by file ID. \\
+\end{longtable}

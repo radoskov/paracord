@@ -1,0 +1,17 @@
+\section{Local Agent Protocol}
+
+The local agent scans configured roots, computes file manifests, and communicates with the server. The server must not request arbitrary paths. It can request only known file IDs.
+
+\subsection{Registration}
+
+\begin{enumerate}[noitemsep]
+  \item Owner creates an agent bootstrap token.
+  \item Agent registers with the server.
+  \item Server returns agent ID and scoped token.
+  \item Agent stores token locally.
+  \item Agent sends manifests and accepts teleport requests by file ID.
+\end{enumerate}
+
+\subsection{Teleport}
+
+Teleport copies a workstation file to the server managed-library store. The server verifies the received SHA-256 digest against the manifest before accepting the file.

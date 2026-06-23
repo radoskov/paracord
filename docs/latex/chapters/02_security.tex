@@ -1,0 +1,23 @@
+\section{Security and Access Control}
+
+PaperRacks requires authentication for all library content. There is no guest account and no anonymous read-only access.
+
+\subsection{Filesystem isolation}
+
+The server and browser must not receive arbitrary filesystem access. File operations must use configured roots, managed library objects, local-agent file IDs, or uploaded streams.
+
+\subsection{Roles}
+
+\begin{itemize}[noitemsep]
+  \item \textbf{owner}: full administrative control.
+  \item \textbf{editor}: library editing, imports, metadata edits, annotations, and exports.
+  \item \textbf{reader}: authenticated reading and searching according to owner policy.
+\end{itemize}
+
+\subsection{Credential recovery}
+
+Credential recovery is performed from the server PC using a command-line tool. The implementation must not expose an unauthenticated web password-reset endpoint. The recovery command must hash the new password, invalidate existing sessions, and write an audit event.
+
+\subsection{Audit logging}
+
+Audit login, failed login, logout, credential recovery, agent registration, token rotation, folder scans, teleport uploads, PDF views, exports, metadata edits, duplicate merges, deletions, AI summaries, and external metadata lookups.

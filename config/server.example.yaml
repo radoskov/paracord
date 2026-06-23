@@ -1,0 +1,78 @@
+server:
+  name: paperracks-server
+  bind_host: 127.0.0.1
+  bind_port: 8000
+  public_base_url: http://127.0.0.1:8000
+  allow_lan_access: false
+  secret_key_env: PAPERRACKS_SECRET_KEY
+
+security:
+  guest_access_enabled: false
+  allowed_roles:
+    - owner
+    - editor
+    - reader
+  session_ttl_minutes: 720
+  failed_login_lockout:
+    enabled: true
+    max_attempts: 8
+    window_minutes: 15
+  credential_recovery:
+    method: server_console_only
+    script: scripts/reset_admin_password.py
+
+storage:
+  managed_library_root: ./storage/library
+  temp_root: ./storage/tmp
+  max_upload_mb: 512
+  content_addressed_layout: sha256_prefix
+  server_allowed_roots: []
+
+agents:
+  registration_enabled: true
+  token_ttl_days: 180
+  allow_pdf_streaming: true
+  allow_teleport: true
+
+services:
+  database_url_env: DATABASE_URL
+  redis_url_env: REDIS_URL
+  grobid_url_env: GROBID_URL
+  ollama_url_env: OLLAMA_URL
+
+metadata_enrichment:
+  enabled: true
+  sources:
+    crossref: true
+    arxiv: true
+    openalex: true
+    semantic_scholar: false
+  overwrite_user_fields: false
+
+processing:
+  grobid:
+    consolidate_header: true
+    consolidate_citations: true
+    include_raw_citations: true
+    include_raw_affiliations: true
+    include_coordinates:
+      - ref
+      - biblStruct
+      - s
+      - p
+      - figure
+      - formula
+    segment_sentences: true
+  ai:
+    enabled: false
+    summary_model: qwen3:4b
+    embedding_model: embeddinggemma
+  topics:
+    enabled: false
+    default_scope: library
+
+audit:
+  enabled: true
+  log_pdf_views: true
+  log_exports: true
+  retention_days: 365

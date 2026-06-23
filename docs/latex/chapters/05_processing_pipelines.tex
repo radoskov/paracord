@@ -1,0 +1,22 @@
+\section{Processing Pipelines}
+
+\subsection{Import pipeline}
+
+\begin{enumerate}[noitemsep]
+  \item Create import batch.
+  \item Register source or agent file ID.
+  \item Compute or receive hash and file metadata.
+  \item Run duplicate and version detection.
+  \item Queue GROBID extraction.
+  \item Store raw TEI XML.
+  \item Parse header, abstract, sections, references, citation mentions, and coordinates.
+  \item Optionally enrich metadata through trusted external services.
+  \item Create metadata assertions and select canonical values.
+  \item Resolve references to local works.
+  \item Build citation graph entries.
+  \item Queue embeddings, summaries, and topic modeling when enabled.
+\end{enumerate}
+
+\subsection{Review queues}
+
+Review queues are required for duplicate candidates, version candidates, files containing multiple works, metadata conflicts, unresolved references, failed extraction, missing abstracts, and bad text layers.
