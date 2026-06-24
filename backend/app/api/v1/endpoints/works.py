@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.citation import CitationMention, Reference
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
@@ -180,6 +181,56 @@ class FieldReview(BaseModel):
 
 class SelectAssertion(BaseModel):
     assertion_id: uuid.UUID
+
+
+class CitationContextRead(BaseModel):
+    id: uuid.UUID
+    reference_id: uuid.UUID
+    resolved_cited_work_id: uuid.UUID | None = None
+    reference_title: str | None = None
+    reference_raw_citation: str | None = None
+    reference_doi: str | None = None
+    marker_text: str | None = None
+    section_label: str | None = None
+    context_before: str | None = None
+    context_sentence: str | None = None
+    context_after: str | None = None
+    page: int | None = None
+    source_tei_id: uuid.UUID | None = None
+
+
+@router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
+def get_work_citation_contexts(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+) -> list[CitationContextRead]:
+    """Return in-text citation contexts for one work."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    rows = db.execute(
+        select(CitationMention, Reference)
+        .join(Reference, Reference.id == CitationMention.reference_id)
+        .where(CitationMention.citing_work_id == work_id)
+        .order_by(CitationMention.section_label, CitationMention.created_at)
+    ).all()
+    return [
+        CitationContextRead(
+            id=mention.id,
+            reference_id=reference.id,
+            resolved_cited_work_id=mention.resolved_cited_work_id,
+            reference_title=reference.title,
+            reference_raw_citation=reference.raw_citation,
+            reference_doi=reference.doi,
+            marker_text=mention.marker_text,
+            section_label=mention.section_label,
+            context_before=mention.context_before,
+            context_sentence=mention.context_sentence,
+            context_after=mention.context_after,
+            page=mention.page,
+            source_tei_id=mention.source_tei_id,
+        )
+        for mention, reference in rows
+    ]
 
 
 def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from app.api.v1.endpoints.works import get_work_citation_contexts
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference
@@ -177,6 +178,10 @@ def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path
     assert raw_tei.tei_xml == FIXTURE
     mention = db_session.scalar(select(CitationMention).where(CitationMention.marker_text == "[1]"))
     assert mention.source_tei_id == raw_tei.id
+    contexts = get_work_citation_contexts(work.id, db=db_session)
+    assert len(contexts) == 2
+    assert contexts[0].reference_title.startswith("Neural Machine Translation")
+    assert contexts[0].context_sentence.endswith("translation quality [1].")
     assert db_session.scalars(
         select(AuditEvent).where(AuditEvent.event_type == "extraction.completed")
     ).all()

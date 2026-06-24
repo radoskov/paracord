@@ -48,11 +48,13 @@ What works today (real, tested in-container on Python 3.12):
   `raw_tei_documents`; TEI body `ref type="bibr"` markers are parsed into
   `CitationMention` rows with section label and before/current/after sentence contexts,
   linked back to the extracted `Reference` and raw TEI source.
+- **M2 citation context API:** `GET /works/{work_id}/citation-contexts` returns persisted
+  in-text citation contexts with reference metadata.
 
 What still does NOT exist yet:
 
-- Citation context API/UI and graph integration are not implemented yet (mentions are
-  persisted, but not surfaced beyond database rows).
+- Citation context frontend/reader and graph integration are not implemented yet (the
+  work-scoped API exists).
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
 - Duplicate/version detection beyond exact-hash, arXiv/DOI/bibliography *imports* (ingest by
@@ -65,9 +67,8 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. Continue M2/M4:
 
-1. **Citation contexts surface**: expose persisted `CitationMention` rows through
-   `/works/{id}/citation-contexts` or `/citations/contexts`, then wire the frontend reader/
-   reference panel to show them.
+1. **Citation contexts UI**: wire `GET /works/{id}/citation-contexts` into the frontend
+   reader/reference panel so users can inspect contexts.
 2. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
    (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -125,6 +126,8 @@ deliberately deferred — hardening, not the product.
 - Raw TEI storage and citation mention persistence: migration `0005`, `RawTeiDocument`,
   parser support for body bibliography refs, and idempotent persistence of references and
   mentions from GROBID TEI.
+- Work-scoped citation context API returns persisted `CitationMention` rows joined to their
+  extracted references.
 
 ## In progress
 

@@ -30,6 +30,7 @@ agent/paperracks_agent/manifest.py
 agent/paperracks_agent/security.py
 agent/paperracks_agent/teleport.py
 agent/paperracks_agent/watcher.py
+agent/pyproject.toml
 agent/requirements.txt
 agent/systemd/paperracks-agent.service.example
 agent/tests/test_security.py
@@ -43,6 +44,7 @@ backend/alembic/versions/0001_create_users_and_audit_events.py
 backend/alembic/versions/0002_create_user_sessions.py
 backend/alembic/versions/0003_create_m1_core_library.py
 backend/alembic/versions/0004_create_extraction_tables.py
+backend/alembic/versions/0005_raw_tei_and_mentions.py
 backend/app/__init__.py
 backend/app/api/__init__.py
 backend/app/api/deps.py

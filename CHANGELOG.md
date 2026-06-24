@@ -12,6 +12,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of
   `CitationMention` rows from GROBID TEI.
+- Added `GET /api/v1/works/{work_id}/citation-contexts` to expose persisted citation
+  mentions with their extracted reference metadata.
 - Added external metadata enrichment (arXiv + Crossref): identifier-based connectors in
   `services/metadata_enrichment.py` that record provenance-aware `MetadataAssertion`s and
   promote trusted external fields over GROBID when the work is not user-confirmed;
