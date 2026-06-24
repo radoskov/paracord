@@ -13,6 +13,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   fuzzy-title, text-fingerprint, and exact-file candidates with idempotent candidate upserts.
 - Added duplicate review API endpoints under `/api/v1/duplicates` to list candidates, trigger
   scans, and mark candidates `accepted`, `rejected`, `ignored`, or back to `open`.
+- Added an initial Svelte duplicate-review panel: list/open-status filter, scan trigger, signal
+  display, and accept/reject/ignore status controls backed by `/api/v1/duplicates`.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of

@@ -89,6 +89,30 @@ export interface CitationContext {
   source_tei_id: string | null;
 }
 
+export type DuplicateCandidateStatus = 'open' | 'accepted' | 'rejected' | 'ignored';
+
+export interface DuplicateCandidate {
+  id: string;
+  candidate_type: string;
+  entity_a_type: string;
+  entity_a_id: string;
+  entity_b_type: string;
+  entity_b_id: string;
+  score: number;
+  signals: Record<string, unknown>;
+  status: DuplicateCandidateStatus;
+  created_at: string;
+  resolved_by_user_id: string | null;
+  resolved_at: string | null;
+}
+
+export interface DuplicateScanResult {
+  scanned_works: number;
+  scanned_files: number;
+  candidate_count: number;
+  candidates: DuplicateCandidate[];
+}
+
 export interface WorkQuery {
   q?: string;
   readingStatus?: string;
@@ -137,6 +161,32 @@ export class ApiClient {
 
   async listCitationContexts(workId: string): Promise<CitationContext[]> {
     return this.request<CitationContext[]>(`/api/v1/works/${workId}/citation-contexts`);
+  }
+
+  async listDuplicateCandidates(
+    status: DuplicateCandidateStatus | '' = 'open',
+  ): Promise<DuplicateCandidate[]> {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<DuplicateCandidate[]>(`/api/v1/duplicates${suffix}`);
+  }
+
+  async scanDuplicateCandidates(payload: { work_id?: string; file_id?: string } = {}): Promise<DuplicateScanResult> {
+    return this.request<DuplicateScanResult>('/api/v1/duplicates/scan', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async updateDuplicateCandidate(
+    id: string,
+    status: DuplicateCandidateStatus,
+  ): Promise<DuplicateCandidate> {
+    return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
+      method: 'PATCH',
+      body: { status },
+    });
   }
 
   async listShelves(): Promise<Shelf[]> {

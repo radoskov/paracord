@@ -4,6 +4,8 @@
   import {
     ApiClient,
     type CitationContext,
+    type DuplicateCandidate,
+    type DuplicateCandidateStatus,
     type FileRecord,
     type Rack,
     type ReadingStatus,
@@ -34,6 +36,8 @@
   let tags: Tag[] = [];
   let sources: Source[] = [];
   let files: FileRecord[] = [];
+  let duplicateCandidates: DuplicateCandidate[] = [];
+  let duplicateStatusFilter: DuplicateCandidateStatus | '' = 'open';
 
   let selectedWork: Work | null = null;
   let selectedShelf: Shelf | null = null;
@@ -96,6 +100,7 @@
     tags = [];
     sources = [];
     files = [];
+    duplicateCandidates = [];
     selectedWork = null;
     selectedShelf = null;
     selectedRack = null;
@@ -114,6 +119,7 @@
         loadTags(),
         loadSources(),
         loadFiles(),
+        loadDuplicateCandidates(),
       ]);
     });
   }
@@ -152,6 +158,10 @@
   async function loadFiles(): Promise<void> {
     files = await client.listFiles();
     if (!selectedFile && files[0]) selectedFile = files[0];
+  }
+
+  async function loadDuplicateCandidates(): Promise<void> {
+    duplicateCandidates = await client.listDuplicateCandidates(duplicateStatusFilter);
   }
 
   async function searchWorks(): Promise<void> {
@@ -327,6 +337,24 @@
     });
   }
 
+  async function scanDuplicateCandidates(): Promise<void> {
+    await run(async () => {
+      const result = await client.scanDuplicateCandidates();
+      await loadDuplicateCandidates();
+      message = `Duplicate scan: ${result.candidate_count} candidates across ${result.scanned_works} works and ${result.scanned_files} files`;
+    });
+  }
+
+  async function updateDuplicateStatus(
+    candidate: DuplicateCandidate,
+    status: DuplicateCandidateStatus,
+  ): Promise<void> {
+    await run(async () => {
+      await client.updateDuplicateCandidate(candidate.id, status);
+      await loadDuplicateCandidates();
+    }, `Candidate marked ${status}`);
+  }
+
   async function selectShelf(shelf: Shelf): Promise<void> {
     selectedShelf = shelf;
     selectedShelfForWork = shelf.id;
@@ -343,6 +371,23 @@
     if (value < 1024) return `${value} B`;
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function candidateLabel(value: string): string {
+    return value.replaceAll('_', ' ');
+  }
+
+  function candidateEntities(candidate: DuplicateCandidate): string {
+    return `${candidate.entity_a_type}:${candidate.entity_a_id.slice(0, 8)} -> ${candidate.entity_b_type}:${candidate.entity_b_id.slice(0, 8)}`;
+  }
+
+  function candidateSignals(candidate: DuplicateCandidate): string {
+    const entries = Object.entries(candidate.signals ?? {});
+    if (!entries.length) return 'No signals';
+    return entries
+      .slice(0, 4)
+      .map(([key, value]) => `${candidateLabel(key)}: ${String(value)}`)
+      .join(' · ');
   }
 </script>
 
@@ -436,6 +481,66 @@
                 <small>
                   {context.reference_title ?? context.reference_raw_citation ?? 'Unparsed reference'}
                 </small>
+              </article>
+            {/each}
+          </div>
+        {/if}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2>Duplicate Review</h2>
+          <span>{duplicateCandidates.length}</span>
+        </div>
+        <div class="inline-action review-actions">
+          <select bind:value={duplicateStatusFilter} on:change={loadDuplicateCandidates}>
+            <option value="open">Open</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+            <option value="ignored">Ignored</option>
+            <option value="">All</option>
+          </select>
+          <button type="button" on:click={scanDuplicateCandidates} disabled={loading}>
+            Scan
+          </button>
+        </div>
+        {#if duplicateCandidates.length === 0}
+          <p class="empty">No duplicate candidates</p>
+        {:else}
+          <div class="duplicate-list">
+            {#each duplicateCandidates as candidate}
+              <article>
+                <header>
+                  <div>
+                    <strong>{candidateLabel(candidate.candidate_type)}</strong>
+                    <span>{candidateEntities(candidate)}</span>
+                  </div>
+                  <b>{Math.round(candidate.score * 100)}%</b>
+                </header>
+                <p>{candidateSignals(candidate)}</p>
+                <div class="candidate-actions">
+                  <button
+                    type="button"
+                    on:click={() => updateDuplicateStatus(candidate, 'accepted')}
+                    disabled={loading || candidate.status === 'accepted'}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    on:click={() => updateDuplicateStatus(candidate, 'rejected')}
+                    disabled={loading || candidate.status === 'rejected'}
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    on:click={() => updateDuplicateStatus(candidate, 'ignored')}
+                    disabled={loading || candidate.status === 'ignored'}
+                  >
+                    Ignore
+                  </button>
+                </div>
               </article>
             {/each}
           </div>
@@ -821,6 +926,59 @@
     gap: 0.65rem;
     max-height: 18rem;
     overflow: auto;
+  }
+
+  .duplicate-list {
+    display: grid;
+    gap: 0.65rem;
+    max-height: 22rem;
+    overflow: auto;
+  }
+
+  .duplicate-list article {
+    background: #eef2f6;
+    border: 1px solid #d8dee6;
+    border-radius: 6px;
+    padding: 0.7rem;
+  }
+
+  .duplicate-list header,
+  .candidate-actions {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+
+  .duplicate-list header div {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .duplicate-list header span,
+  .duplicate-list p {
+    color: #667381;
+    overflow-wrap: anywhere;
+  }
+
+  .duplicate-list p {
+    font-size: 0.86rem;
+    margin: 0.45rem 0;
+  }
+
+  .candidate-actions {
+    justify-content: start;
+  }
+
+  .candidate-actions button {
+    min-height: 2rem;
+    padding: 0.3rem 0.5rem;
+  }
+
+  .review-actions {
+    grid-template-columns: minmax(8rem, 12rem) auto;
+    margin-bottom: 0.65rem;
   }
 
   .context-list article {
