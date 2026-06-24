@@ -36,6 +36,18 @@ class ShelfRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ShelfWorkRead(BaseModel):
+    id: uuid.UUID
+    canonical_title: str | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    venue: str | None = None
+    year: int | None = None
+    reading_status: str
+
+    model_config = {"from_attributes": True}
+
+
 class ShelfWorkAdd(BaseModel):
     work_id: uuid.UUID
     position: int | None = None
@@ -64,6 +76,20 @@ def create_shelf(
     db.commit()
     db.refresh(shelf)
     return shelf
+
+
+@router.get("/{shelf_id}/works", response_model=list[ShelfWorkRead])
+def list_shelf_works(shelf_id: uuid.UUID, db: Session = DB_DEP) -> list[Work]:
+    """List works in a shelf."""
+    if db.get(Shelf, shelf_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    stmt = (
+        select(Work)
+        .join(ShelfWork, ShelfWork.work_id == Work.id)
+        .where(ShelfWork.shelf_id == shelf_id)
+        .order_by(ShelfWork.position.nullslast(), Work.canonical_title)
+    )
+    return list(db.scalars(stmt).all())
 
 
 @router.post("/{shelf_id}/works", status_code=status.HTTP_204_NO_CONTENT)

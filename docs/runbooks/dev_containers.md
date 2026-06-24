@@ -2,7 +2,7 @@
 
 PaperRacks is built and validated in containers so the implementation can be run and
 tested reproducibly, independent of the host's Python version. The stack targets
-**Python 3.12**.
+**Python 3.12** for backend/agent services and **Node 20** for the frontend service.
 
 ## Services (docker-compose.yml)
 
@@ -12,6 +12,7 @@ tested reproducibly, independent of the host's Python version. The stack targets
 | `redis` | Job queue / cache | `redis:7-alpine` | default |
 | `api` | **Server** — FastAPI backend | built from `backend/Dockerfile` | default |
 | `agent` | **Client** — local workstation agent | built from `agent/Dockerfile` | default |
+| `frontend` | Web UI — Vite + Svelte | built from `frontend/Dockerfile` | default |
 | `grobid` | PDF extraction service | `grobid/grobid` | `extraction` |
 | `ollama` | Local LLM (summaries/embeddings) | `ollama/ollama` | `ai` |
 
@@ -28,6 +29,8 @@ The `postgres` service guards its required variables with `${VAR:?…}`, so a mi
 
 ```bash
 docker compose up -d --build            # start postgres, redis, api, agent
+docker compose up frontend              # start the Svelte dev server on 127.0.0.1:5173
+docker compose run --rm --no-deps frontend npm run build
 docker compose run --rm api pytest      # run the test suite (Python 3.12, SQLite — no DB needed)
 docker compose run --rm api ruff check backend agent scripts
 docker compose logs -f api              # follow server logs
@@ -37,11 +40,15 @@ docker compose --profile ai up -d ollama           # start Ollama when needed
 docker compose down -v                  # stop and drop volumes
 ```
 
-Make equivalents: `make up`, `make test`, `make lint`, `make down`.
+Make equivalents: `make up`, `make frontend-dev`, `make frontend-build`, `make test`,
+`make lint`, `make down`.
 
 ## How it runs
 
 - The `api` image installs `backend/requirements-dev.txt` (runtime deps + `pytest`/`ruff`).
+- The `frontend` image installs Node dependencies from `frontend/package.json`; Compose
+  mounts a named `paperracks_frontend_node_modules` volume at `/app/frontend/node_modules`
+  so dependency installs stay in Docker and do not create host `node_modules`.
 - `backend/docker-entrypoint.sh` applies Alembic migrations **only** when starting the
   server (`uvicorn`); `pytest`/`ruff` skip migrations, and the suite uses SQLite so it
   needs no database service.

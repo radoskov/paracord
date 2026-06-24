@@ -3,11 +3,15 @@
 from pathlib import Path
 
 import pytest
+from app.api.v1.endpoints.files import list_files
+from app.api.v1.endpoints.racks import list_rack_shelves
+from app.api.v1.endpoints.shelves import list_shelf_works
 from app.core.config import Settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.file import File, FileWorkLink, Location
+from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.work import Work
@@ -34,6 +38,10 @@ def db_session(tmp_path: Path):
             Location.__table__,
             Work.__table__,
             FileWorkLink.__table__,
+            Shelf.__table__,
+            Rack.__table__,
+            ShelfWork.__table__,
+            RackShelf.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -114,3 +122,28 @@ def test_import_server_folder_creates_file_work_location_batch_and_audit(
     assert second_batch.stats["created_files"] == 0
     assert second_batch.stats["existing_files"] == 1
     assert db_session.scalar(select(func.count()).select_from(File)) == 1
+
+
+def test_m1_read_endpoints_return_file_shelf_and_rack_memberships(db_session, owner: User) -> None:
+    file = File(
+        sha256="a" * 64,
+        size_bytes=123,
+        mime_type="application/pdf",
+        original_filename="paper.pdf",
+    )
+    work = Work(canonical_title="Paper", normalized_title="paper")
+    shelf = Shelf(name="Important", created_by_user_id=owner.id)
+    rack = Rack(name="Thesis", created_by_user_id=owner.id)
+    db_session.add_all([file, work, shelf, rack])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ShelfWork(shelf_id=shelf.id, work_id=work.id, added_by_user_id=owner.id),
+            RackShelf(rack_id=rack.id, shelf_id=shelf.id, added_by_user_id=owner.id),
+        ]
+    )
+    db_session.commit()
+
+    assert list_files(limit=100, db=db_session)[0].id == file.id
+    assert list_shelf_works(shelf.id, db=db_session)[0].id == work.id
+    assert list_rack_shelves(rack.id, db=db_session)[0].id == shelf.id

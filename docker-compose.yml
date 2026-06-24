@@ -79,6 +79,23 @@ services:
       - ./agent:/app/agent
     command: ["sleep", "infinity"]
 
+  # PaperRacks web frontend (Vite + Svelte). Dependencies live in the named
+  # node_modules volume, not on the host bind mount.
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      VITE_API_BASE_URL: "http://127.0.0.1:8000"
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./frontend:/app/frontend
+      - paperracks_frontend_node_modules:/app/frontend/node_modules
+
   # Heavy extraction service — only started with the "extraction" profile:
   #   docker compose --profile extraction up -d grobid
   grobid:
@@ -104,3 +121,4 @@ services:
 volumes:
   paperracks_postgres:
   paperracks_ollama:
+  paperracks_frontend_node_modules:

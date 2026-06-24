@@ -3,8 +3,9 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -28,6 +29,15 @@ class FileRead(BaseModel):
     last_seen_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+@router.get("", response_model=list[FileRead])
+def list_files(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = DB_DEP,
+) -> list[File]:
+    """List file metadata for the library file view."""
+    return list(db.scalars(select(File).order_by(File.created_at.desc()).limit(limit)).all())
 
 
 @router.get("/{file_id}", response_model=FileRead)

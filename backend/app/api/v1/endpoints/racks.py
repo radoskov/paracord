@@ -35,6 +35,15 @@ class RackRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RackShelfRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
 class RackShelfAdd(BaseModel):
     shelf_id: uuid.UUID
     position: int | None = None
@@ -62,6 +71,20 @@ def create_rack(
     db.commit()
     db.refresh(rack)
     return rack
+
+
+@router.get("/{rack_id}/shelves", response_model=list[RackShelfRead])
+def list_rack_shelves(rack_id: uuid.UUID, db: Session = DB_DEP) -> list[Shelf]:
+    """List shelves in a rack."""
+    if db.get(Rack, rack_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack not found")
+    stmt = (
+        select(Shelf)
+        .join(RackShelf, RackShelf.shelf_id == Shelf.id)
+        .where(RackShelf.rack_id == rack_id)
+        .order_by(RackShelf.position.nullslast(), Shelf.name)
+    )
+    return list(db.scalars(stmt).all())
 
 
 @router.post("/{rack_id}/shelves", status_code=status.HTTP_204_NO_CONTENT)

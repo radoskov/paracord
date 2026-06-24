@@ -3,7 +3,7 @@
 ## Current status
 
 **Milestone 0 (foundation) is essentially complete and validated; Milestone 1 (the core
-library — the actual product) has started with the backend persistence/import slice.**
+library — the actual product) is in progress across the backend and frontend.**
 
 What works today (real, tested in-container on Python 3.12):
 
@@ -13,11 +13,13 @@ What works today (real, tested in-container on Python 3.12):
 - Initial M1 backend path: configured server-folder sources, folder PDF scanning, SHA-256
   file registration, File/Location/Work links, import batches, basic work/shelf/rack/tag
   endpoints, and focused service tests.
+- Initial M1 frontend path: Dockerized Vite/Svelte service, login, library table, reading
+  queue, server-folder import controls, shelf/rack/tag controls, and file preview panel.
 
 What still does NOT exist yet:
 
-- Frontend product views, PDF streaming/reader, arXiv/DOI/bibliography imports, GROBID
-  extraction, citation graph, export, AI summaries, topics.
+- PDF streaming/reader, arXiv/DOI/bibliography imports, expanded shelf/rack/tag filtering,
+  GROBID extraction, citation graph, export, AI summaries, topics.
 
 Component note: **Redis is provisioned but unused** — it backs the RQ background-job queue
 (GROBID extraction, embeddings, summaries, topics). Its first real consumer is the GROBID
@@ -29,10 +31,10 @@ Build the product, not more foundation. The leftover M0 auth items (login rate l
 in-app password change) are **deliberately deferred** — they are hardening, not the product.
 
 **Next task = continue Milestone 1 (core library), in this order:**
-1. Add frontend library/shelf/rack/file/reading-queue views against the new backend endpoints.
-2. Expand M1 backend search/filtering to include shelves, racks, and tags.
-3. Add PDF streaming from configured locations and a minimal file view.
-4. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
+1. Expand M1 backend search/filtering to include shelves, racks, and tags.
+2. Add PDF streaming from configured locations and wire it into the file/reader view.
+3. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
+4. Add lightweight end-to-end smoke coverage for login → import → organize → view.
 
 See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
@@ -72,10 +74,15 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
   text preview when available, deduplicates by SHA-256, and audit-logs import activity.
 - Basic backend endpoints exist for sources, folder imports, file metadata, manual work
   create/edit/list/search, shelves, racks, membership, and tags.
+- Compose-managed frontend service (`frontend/Dockerfile`) keeps Node dependencies inside
+  Docker, with `make frontend-dev` and `make frontend-build` targets.
+- M1 frontend workspace renders login, library search/status filters, reading queue,
+  server-folder source/import controls, manual work creation, shelves/racks/tags, and a
+  file list with first-page preview text.
 
 ## In progress
 
-- M1 backend API implementation.
+- M1 backend API/frontend implementation.
 - Local agent protocol stubs.
 - LaTeX implementation manual draft.
 - Agent task partitioning.
@@ -85,7 +92,7 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 
 - Login rate limiting / failed-login lockout (role-based authorization is now implemented).
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
-- Frontend M1 library/shelf/rack/file/reading-queue views.
+- PDF streaming and PDF.js reader integration.
 - Agent registration and token rotation implementation.
 - GROBID TEI parser implementation.
 - Duplicate/version detection implementation.

@@ -1,4 +1,4 @@
-.PHONY: help build up down dev-up dev-down backend-dev agent-dev migrate test test-local docker-test lint docker-lint check-secrets docs zip
+.PHONY: help build up down dev-up dev-down backend-dev agent-dev frontend-dev frontend-build migrate test test-local docker-test lint docker-lint check-secrets docs zip
 
 help:
 	@echo "PaperRacks developer commands"
@@ -9,6 +9,8 @@ help:
 	@echo "  make dev-down     Stop infrastructure"
 	@echo "  make backend-dev  Run backend dev server on the host"
 	@echo "  make agent-dev    Run agent CLI help on the host"
+	@echo "  make frontend-dev Start the Svelte frontend in Docker"
+	@echo "  make frontend-build Build the Svelte frontend in Docker"
 	@echo "  make migrate      Apply backend database migrations"
 	@echo "  make test         Run the test suite in the api container (Python 3.12)"
 	@echo "  make test-local   Run the test suite on the host interpreter"
@@ -37,6 +39,12 @@ backend-dev:
 
 agent-dev:
 	cd agent && python -m paperracks_agent.cli --help
+
+frontend-dev:
+	docker compose up frontend
+
+frontend-build:
+	docker compose run --rm --no-deps frontend npm run build
 
 migrate:
 	alembic -c backend/alembic.ini upgrade head

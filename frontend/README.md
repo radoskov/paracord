@@ -1,18 +1,34 @@
 # PaperRacks Frontend
 
-The frontend should be a lightweight web app. The scaffold assumes Vite + Svelte, but the framework can be changed if the team decides early.
+Vite + Svelte web UI for the M1 library workflow.
 
-## Planned screens
+## Docker workflow
+
+Use the Compose service instead of installing Node dependencies on the host:
+
+```bash
+make frontend-dev
+make frontend-build
+```
+
+The `frontend` service mounts source from `./frontend` and keeps dependencies in the
+`paperracks_frontend_node_modules` Docker volume.
+
+## Current screens
 
 - Login.
-- Library table.
-- Rack/shelf browser.
-- File/folder view.
-- PDF reader with PDF.js.
-- Citation graph.
-- Citation context panel.
+- Library table and reading queue.
+- Server-folder source import controls.
+- Manual work creation.
+- Shelf and rack creation plus membership views.
+- Tag creation and tag assignment.
+- File list with quick preview text.
+
+## Still planned
+
+- PDF.js reader integration.
+- Citation graph and citation context panels.
 - Duplicate/version review queue.
-- Import batch status.
-- Export dialog.
-- Audit log admin view.
+- Export dialog implementation.
+- Audit-log admin view.
 - AI summaries and topic map.
