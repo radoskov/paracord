@@ -6,7 +6,7 @@ Implementation notes:
 """
 
 from enum import StrEnum
-from typing import Iterable
+from collections.abc import Iterable
 
 import bcrypt
 

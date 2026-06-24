@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 # Inline marker to suppress a single line (detect-secrets compatible).
