@@ -8,6 +8,10 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added raw TEI storage and citation mention persistence for M2 extraction: migration
+  `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
+  body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of
+  `CitationMention` rows from GROBID TEI.
 - Added external metadata enrichment (arXiv + Crossref): identifier-based connectors in
   `services/metadata_enrichment.py` that record provenance-aware `MetadataAssertion`s and
   promote trusted external fields over GROBID when the work is not user-confirmed;

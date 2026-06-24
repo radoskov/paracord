@@ -2,7 +2,7 @@
 
 from app.models.ai import Summary, TopicAssignment
 from app.models.audit import AuditEvent
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.file import File, FileSegment, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
@@ -22,6 +22,7 @@ __all__ = [
     "MetadataAssertion",
     "Rack",
     "RackShelf",
+    "RawTeiDocument",
     "Reference",
     "Shelf",
     "ShelfWork",

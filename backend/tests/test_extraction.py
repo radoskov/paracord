@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from app.db.base import Base
 from app.models.audit import AuditEvent
-from app.models.citation import Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.source import Source
@@ -32,7 +32,9 @@ def db_session(tmp_path: Path):
             FileWorkLink.__table__,
             Location.__table__,
             Source.__table__,
+            RawTeiDocument.__table__,
             Reference.__table__,
+            CitationMention.__table__,
             MetadataAssertion.__table__,
             AuditEvent.__table__,
         ],
@@ -49,11 +51,20 @@ def test_parse_tei_extracts_title_abstract_doi_authors_references() -> None:
     assert parsed.doi == "10.5555/transformer"
     assert parsed.authors == ["Ashish Vaswani", "Noam Shazeer"]
     assert len(parsed.references) == 2
+    assert len(parsed.citation_mentions) == 2
     first = parsed.references[0]
+    assert first.key == "b0"
     assert first.title.startswith("Neural Machine Translation")
     assert first.doi == "10.5555/nmt"
     assert first.year == 2015
     assert parsed.references[1].raw_citation == "Some Unparsed Reference, 2010."
+    first_mention = parsed.citation_mentions[0]
+    assert first_mention.reference_key == "b0"
+    assert first_mention.marker_text == "[1]"
+    assert first_mention.section_label == "Introduction"
+    assert first_mention.context_before == "Sequence models have long used recurrent layers."
+    assert first_mention.context_sentence.endswith("translation quality [1].")
+    assert first_mention.context_after.endswith("considered [2].")
 
 
 def test_parse_tei_handles_empty_and_invalid() -> None:
@@ -83,6 +94,8 @@ def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) ->
         db_session.scalar(select(Reference).where(Reference.citing_work_id == work.id)) is not None
     )
     assert len(db_session.scalars(select(Reference)).all()) == 2
+    assert summary["citation_mention_count"] == 2
+    assert len(db_session.scalars(select(CitationMention)).all()) == 2
     title_assertion = db_session.scalar(
         select(MetadataAssertion).where(
             MetadataAssertion.field_name == "title", MetadataAssertion.source == "grobid"
@@ -123,6 +136,7 @@ def test_store_parsed_extraction_is_idempotent(db_session) -> None:
     store_parsed_extraction(db_session, work=work, parsed=parse_tei(FIXTURE))
     db_session.commit()
     assert len(db_session.scalars(select(Reference)).all()) == 2  # not duplicated
+    assert len(db_session.scalars(select(CitationMention)).all()) == 2
 
 
 def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path: Path) -> None:
@@ -154,7 +168,15 @@ def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path
 
     assert captured["path"] == tmp_path / "paper.pdf"
     assert summary["reference_count"] == 2
+    assert summary["citation_mention_count"] == 2
+    assert summary["raw_tei_stored"] is True
     assert work.doi == "10.5555/transformer"
+    raw_tei = db_session.scalar(select(RawTeiDocument))
+    assert raw_tei.file_id == file.id
+    assert raw_tei.work_id == work.id
+    assert raw_tei.tei_xml == FIXTURE
+    mention = db_session.scalar(select(CitationMention).where(CitationMention.marker_text == "[1]"))
+    assert mention.source_tei_id == raw_tei.id
     assert db_session.scalars(
         select(AuditEvent).where(AuditEvent.event_type == "extraction.completed")
     ).all()

@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models.citation import Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
@@ -31,6 +31,8 @@ def store_parsed_extraction(
     work: Work,
     parsed: ParsedPaper,
     source: str = "grobid",
+    file: File | None = None,
+    raw_tei_xml: str | None = None,
 ) -> dict[str, Any]:
     """Record assertions, promote safe canonical fields, and (re)create references."""
     promotable = not work.user_confirmed
@@ -77,23 +79,69 @@ def store_parsed_extraction(
 
     work.updated_at = datetime.utcnow()
 
-    # References are owned by the extraction: replace prior extracted references idempotently.
-    db.execute(delete(Reference).where(Reference.citing_work_id == work.id))
-    for reference in parsed.references:
-        db.add(
-            Reference(
-                citing_work_id=work.id,
-                raw_citation=reference.raw_citation,
-                title=reference.title,
-                doi=reference.doi,
-                year=reference.year,
+    source_tei: RawTeiDocument | None = None
+    if file is not None and raw_tei_xml:
+        db.execute(
+            delete(RawTeiDocument).where(
+                RawTeiDocument.file_id == file.id,
+                RawTeiDocument.work_id == work.id,
+                RawTeiDocument.source == source,
             )
         )
+        source_tei = RawTeiDocument(
+            file_id=file.id,
+            work_id=work.id,
+            source=source,
+            tei_xml=raw_tei_xml,
+        )
+        db.add(source_tei)
+        db.flush()
+
+    # References and mentions are owned by the extraction: replace idempotently.
+    db.execute(delete(CitationMention).where(CitationMention.citing_work_id == work.id))
+    db.execute(delete(Reference).where(Reference.citing_work_id == work.id))
+    reference_by_key: dict[str, Reference] = {}
+    for index, reference in enumerate(parsed.references):
+        saved = Reference(
+            citing_work_id=work.id,
+            raw_citation=reference.raw_citation,
+            title=reference.title,
+            doi=reference.doi,
+            year=reference.year,
+            source_tei_id=source_tei.id if source_tei else None,
+        )
+        db.add(saved)
+        db.flush()
+        if reference.key:
+            reference_by_key[reference.key] = saved
+        reference_by_key[f"b{index}"] = saved
+
+    mention_count = 0
+    for mention in parsed.citation_mentions:
+        reference = reference_by_key.get(mention.reference_key)
+        if reference is None:
+            continue
+        db.add(
+            CitationMention(
+                citing_work_id=work.id,
+                reference_id=reference.id,
+                resolved_cited_work_id=reference.resolved_work_id,
+                marker_text=mention.marker_text,
+                section_label=mention.section_label,
+                context_before=mention.context_before,
+                context_sentence=mention.context_sentence,
+                context_after=mention.context_after,
+                source_tei_id=source_tei.id if source_tei else None,
+            )
+        )
+        mention_count += 1
 
     return {
         "promoted": promoted,
         "reference_count": len(parsed.references),
+        "citation_mention_count": mention_count,
         "author_count": len(parsed.authors),
+        "raw_tei_stored": source_tei is not None,
     }
 
 
@@ -123,7 +171,7 @@ def extract_and_store(
 
     tei_xml = fetch_tei(Path(location.internal_uri))
     parsed = parse_tei(tei_xml)
-    summary = store_parsed_extraction(db, work=work, parsed=parsed)
+    summary = store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml)
 
     record_event(
         db,

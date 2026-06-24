@@ -9,8 +9,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > **Current position:** M0 done; **M1 done and validated end-to-end**; **M2 extraction +
 > metadata enrichment are live and validated on real arXiv PDFs** — GROBID via the RQ
 > worker, then arXiv/Crossref enrichment that auto-corrects bad GROBID titles, with a
-> provenance/conflict review surface. Next in M2/M4: citation mentions/contexts, raw-TEI
-> storage, and duplicate/version detection.
+> provenance/conflict review surface. Raw TEI and citation mentions are now persisted.
+> Next in M2/M4: citation-context API/UI surfacing and duplicate/version detection.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -40,8 +40,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - GROBID TEI parser + provenance-aware persistence (assertions, references, canonical-field
   promotion) + migration `0004`. (done)
 - Background RQ worker + enqueue-on-import + live GROBID. (done, validated on real arXiv PDFs)
-- Header, abstract, references parsed. (done) Citation *mentions*/contexts and raw-TEI
-  storage. (next)
+- Header, abstract, references parsed. (done) Raw-TEI storage and citation mention
+  persistence. (done) Citation-context API/UI surfacing. (next)
 - Metadata enrichment connectors: arXiv + Crossref (by identifier) with a provenance/
   conflict review surface and auto-correction of GROBID metadata. (done, validated live)
   OpenAlex/Semantic Scholar and fuzzy title lookup still to do.

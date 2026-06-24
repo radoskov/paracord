@@ -24,6 +24,9 @@ class Reference(Base):
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_tei_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -48,3 +51,20 @@ class CitationMention(Base):
     pdf_y: Mapped[float | None] = mapped_column(Float, nullable=True)
     pdf_width: Mapped[float | None] = mapped_column(Float, nullable=True)
     pdf_height: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_tei_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RawTeiDocument(Base):
+    """Raw TEI XML from an extraction run for future reprocessing."""
+
+    __tablename__ = "raw_tei_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    source: Mapped[str] = mapped_column(String(128), default="grobid", index=True)
+    tei_xml: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

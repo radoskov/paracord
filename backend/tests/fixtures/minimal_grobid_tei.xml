@@ -32,10 +32,20 @@
     </profileDesc>
   </teiHeader>
   <text>
+    <body>
+      <div type="introduction">
+        <head>Introduction</head>
+        <p>
+          <s>Sequence models have long used recurrent layers.</s>
+          <s>Attention models improved translation quality <ref type="bibr" target="#b0">[1]</ref>.</s>
+          <s>Other baselines were also considered <ref type="bibr" target="#b1">[2]</ref>.</s>
+        </p>
+      </div>
+    </body>
     <back>
       <div type="references">
         <listBibl>
-          <biblStruct>
+          <biblStruct xml:id="b0">
             <analytic>
               <title level="a">Neural Machine Translation by Jointly Learning to Align and Translate</title>
               <idno type="DOI">10.5555/nmt</idno>
@@ -47,7 +57,7 @@
             </monogr>
             <note type="raw_reference">Bahdanau et al. Neural Machine Translation. ICLR 2015.</note>
           </biblStruct>
-          <biblStruct>
+          <biblStruct xml:id="b1">
             <note type="raw_reference">Some Unparsed Reference, 2010.</note>
           </biblStruct>
         </listBibl>

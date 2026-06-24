@@ -10,14 +10,26 @@ from dataclasses import dataclass, field
 from lxml import etree
 
 TEI_NS = {"t": "http://www.tei-c.org/ns/1.0"}
+XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 
 
 @dataclass
 class ParsedReference:
+    key: str | None = None
     raw_citation: str | None = None
     title: str | None = None
     doi: str | None = None
     year: int | None = None
+
+
+@dataclass
+class ParsedCitationMention:
+    reference_key: str
+    marker_text: str | None = None
+    section_label: str | None = None
+    context_before: str | None = None
+    context_sentence: str | None = None
+    context_after: str | None = None
 
 
 @dataclass
@@ -27,6 +39,7 @@ class ParsedPaper:
     doi: str | None = None
     authors: list[str] = field(default_factory=list)
     references: list[ParsedReference] = field(default_factory=list)
+    citation_mentions: list[ParsedCitationMention] = field(default_factory=list)
 
 
 def _text(element) -> str | None:
@@ -34,6 +47,7 @@ def _text(element) -> str | None:
     if element is None:
         return None
     text = " ".join(part.strip() for part in element.itertext() if part.strip())
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     return text or None
 
 
@@ -74,8 +88,9 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
         if name:
             paper.authors.append(name)
 
-    for bibl in root.findall(".//t:listBibl/t:biblStruct", TEI_NS):
+    for index, bibl in enumerate(root.findall(".//t:listBibl/t:biblStruct", TEI_NS)):
         reference = ParsedReference(
+            key=bibl.get(XML_ID) or bibl.get("id") or f"b{index}",
             raw_citation=_text(bibl.find('.//t:note[@type="raw_reference"]', TEI_NS)),
             title=_text(
                 _first(
@@ -94,4 +109,57 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
         if reference.raw_citation or reference.title or reference.doi:
             paper.references.append(reference)
 
+    for ref in root.findall('.//t:text//t:body//t:ref[@type="bibr"]', TEI_NS):
+        target = (ref.get("target") or "").strip()
+        reference_key = target.removeprefix("#")
+        if not reference_key:
+            continue
+        mention = ParsedCitationMention(
+            reference_key=reference_key,
+            marker_text=_text(ref),
+            section_label=_section_label(ref),
+            context_before=_neighbor_sentence(ref, previous=True),
+            context_sentence=_context_sentence(ref),
+            context_after=_neighbor_sentence(ref, previous=False),
+        )
+        paper.citation_mentions.append(mention)
+
     return paper
+
+
+def _context_sentence(element) -> str | None:
+    sentence = _ancestor(element, "s")
+    if sentence is not None:
+        return _text(sentence)
+    paragraph = _ancestor(element, "p")
+    return _text(paragraph)
+
+
+def _neighbor_sentence(element, *, previous: bool) -> str | None:
+    sentence = _ancestor(element, "s")
+    if sentence is None:
+        return None
+    sibling = sentence.getprevious() if previous else sentence.getnext()
+    while sibling is not None and not _is_tei_tag(sibling, "s"):
+        sibling = sibling.getprevious() if previous else sibling.getnext()
+    return _text(sibling)
+
+
+def _section_label(element) -> str | None:
+    div = _ancestor(element, "div")
+    if div is None:
+        return None
+    return _text(div.find("t:head", TEI_NS)) or div.get("type")
+
+
+def _ancestor(element, local_name: str):
+    current = element.getparent()
+    while current is not None:
+        if _is_tei_tag(current, local_name):
+            return current
+        current = current.getparent()
+    return None
+
+
+def _is_tei_tag(element, local_name: str) -> bool:
+    return element.tag == f"{{{TEI_NS['t']}}}{local_name}"

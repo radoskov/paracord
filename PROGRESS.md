@@ -44,11 +44,15 @@ What works today (real, tested in-container on Python 3.12):
   auto-corrected GROBID's mis-detected title ("Provided proper attribution…") to
   "Attention Is All You Need" via arXiv, with both values kept as assertions and the
   conflict flagged.
+- **M2 raw TEI + citation mention persistence:** raw TEI blobs are stored in
+  `raw_tei_documents`; TEI body `ref type="bibr"` markers are parsed into
+  `CitationMention` rows with section label and before/current/after sentence contexts,
+  linked back to the extracted `Reference` and raw TEI source.
 
 What still does NOT exist yet:
 
-- Citation *mentions*/contexts and raw-TEI storage are not persisted yet (the parser
-  extracts the reference list, not in-text mentions).
+- Citation context API/UI and graph integration are not implemented yet (mentions are
+  persisted, but not surfaced beyond database rows).
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
 - Duplicate/version detection beyond exact-hash, arXiv/DOI/bibliography *imports* (ingest by
@@ -61,8 +65,9 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. Continue M2/M4:
 
-1. **Citation mentions/contexts**: extend `parse_tei` to emit in-text mentions and persist
-   `CitationMention` rows (the models + `0004` table exist); store the raw TEI blob.
+1. **Citation contexts surface**: expose persisted `CitationMention` rows through
+   `/works/{id}/citation-contexts` or `/citations/contexts`, then wire the frontend reader/
+   reference panel to show them.
 2. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
    (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -117,6 +122,9 @@ deliberately deferred — hardening, not the product.
   only, and rejects file locations outside the configured source root.
 - M1 CRUD gaps narrowed: archive shelves/racks, remove work-from-shelf and shelf-from-rack
   memberships, and remove tag links.
+- Raw TEI storage and citation mention persistence: migration `0005`, `RawTeiDocument`,
+  parser support for body bibliography refs, and idempotent persistence of references and
+  mentions from GROBID TEI.
 
 ## In progress
 
