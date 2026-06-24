@@ -109,6 +109,7 @@ backend/app/utils/__init__.py
 backend/app/utils/normalization.py
 backend/app/workers/__init__.py
 backend/app/workers/jobs.py
+backend/app/workers/queue.py
 backend/docker-entrypoint.sh
 backend/requirements-dev.txt
 backend/requirements.txt
@@ -120,6 +121,7 @@ backend/tests/test_config.py
 backend/tests/test_extraction.py
 backend/tests/test_health.py
 backend/tests/test_m1_core_library.py
+backend/tests/test_queue.py
 backend/tests/test_security.py
 backend/tests/test_user_management.py
 config/agent.example.yaml

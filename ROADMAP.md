@@ -6,10 +6,11 @@ The ordering is value-first: it front-loads the complete single-machine loop
 agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M8).
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
-> **Current position:** M0 done; **M1 done and validated end-to-end** (import → organize →
-> search → stream over the real HTTP API + Postgres, frontend builds); **M2 in progress** —
-> the GROBID TEI parser, provenance-aware extraction persistence, and migration `0004` are
-> done and validated on Postgres, but the background worker and live GROBID are not wired yet.
+> **Current position:** M0 done; **M1 done and validated end-to-end**; **M2 extraction
+> pipeline is live and validated on real arXiv PDFs** — TEI parser, provenance-aware
+> persistence, migration `0004`, RQ worker, enqueue-on-import, and live GROBID (lightweight
+> CRF image) via the `extraction` profile. Next in M2/M4: metadata enrichment connectors,
+> citation mentions/contexts, and duplicate/version detection.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -37,10 +38,11 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 ## M2: PDF extraction and metadata — IN PROGRESS
 
 - GROBID TEI parser + provenance-aware persistence (assertions, references, canonical-field
-  promotion) + migration `0004`. (done, validated on Postgres with a fixture)
-- Background RQ worker + enqueue-on-import + live GROBID call. (wired, not yet run/validated)
-- Header, abstract, references parsed; citation *mentions*/contexts and raw-TEI storage. (next)
-- Deterministic keyword extraction (YAKE/KeyBERT).
+  promotion) + migration `0004`. (done)
+- Background RQ worker + enqueue-on-import + live GROBID. (done, validated on real arXiv PDFs)
+- Header, abstract, references parsed. (done) Citation *mentions*/contexts and raw-TEI
+  storage. (next)
+- Metadata enrichment connectors (Crossref/arXiv/OpenAlex) + conflict review. (next)
 - Deterministic keyword extraction (YAKE/KeyBERT).
 - needs_ocr detection with optional OCRmyPDF fallback.
 - Optional reference-parser fallback (anystyle/refextract).

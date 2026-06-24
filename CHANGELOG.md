@@ -8,6 +8,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Wired the GROBID extraction pipeline into the running system: an RQ queue
+  (`app/workers/queue.py`, best-effort enqueue), a `worker` compose service running
+  `rq worker`, enqueue-on-import, and a `POST /files/{id}/extract` trigger. The
+  `extraction` profile now uses the lightweight `lfoppiano/grobid:0.8.0` CRF image
+  (~0.5 GB) instead of the ~12 GB deep-learning image. Validated end-to-end on real arXiv
+  PDFs (Transformer + ResNet): HTTP import → worker → live GROBID → 90 references and
+  abstracts persisted asynchronously.
 - Started the M2 extraction layer: a real GROBID TEI parser (`services/tei_parser.py` —
   title/abstract/DOI/authors/references via lxml), a provenance-aware persistence service
   (`services/extraction.py`) that records `MetadataAssertion`s and `Reference`s and only

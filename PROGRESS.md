@@ -25,41 +25,44 @@ What works today (real, tested in-container on Python 3.12):
   server-folder source → import PDFs (hash/dedup/PyMuPDF preview) → list/search works →
   add to shelf/rack → stream PDF, with the editor/reader role gate enforced over HTTP and
   re-import dedup confirmed. The Svelte frontend compiles (`vite build`).
-- **M2 extraction core (started, validated on Postgres):** real GROBID TEI parser
+- **M2 GROBID extraction, validated end-to-end on real arXiv papers:** real TEI parser
   (`services/tei_parser.py`), provenance-aware persistence (`services/extraction.py`) that
-  records MetadataAssertions and References and only promotes canonical title/abstract/DOI
-  when the work is not user-confirmed, migration `0004` for references/citation_mentions/
-  metadata_assertions, and the `extract_pdf_job` wiring. Unit-tested with a TEI fixture and
-  verified against real Postgres with a mock fetcher.
+  records MetadataAssertions + References and only promotes canonical title/abstract/DOI
+  when the work is not user-confirmed, migration `0004`, a synchronous GROBID client, an
+  RQ queue (`app/workers/queue.py`), a `worker` compose service, enqueue-on-import plus a
+  `POST /files/{id}/extract` trigger. Verified live: imported the Transformer and ResNet
+  PDFs from arXiv → the worker ran GROBID via the `extraction` profile → 90 references and
+  abstracts/titles persisted asynchronously. Uses the lightweight `lfoppiano/grobid:0.8.0`
+  CRF image (~0.5 GB) rather than the ~12 GB deep-learning image.
 
 What still does NOT exist yet:
 
-- **Live GROBID + background worker:** the GROBID HTTP call and `extract_pdf_job` are wired
-  but only validated via a fixture; the RQ worker is not yet running and nothing enqueues
-  extraction. Citation *mentions*/contexts and raw-TEI storage are not persisted yet.
+- Citation *mentions*/contexts and raw-TEI storage are not persisted yet (the parser
+  extracts the reference list, not in-text mentions).
+- Known GROBID quirk seen in testing: it occasionally mis-detects the title (it grabbed a
+  license footer as the Transformer paper's title). This is what metadata enrichment +
+  the assertion/review model are for — see next steps.
 - Metadata enrichment connectors (Crossref/arXiv/OpenAlex), duplicate/version detection,
   arXiv/DOI/bibliography imports, embedded PDF.js reader, citation graph, export, AI
   summaries, topics.
 
-Component note: **Redis is provisioned but still has no live consumer.** It backs the RQ
-queue whose first consumer is the GROBID extraction worker — wiring that worker is the
-immediate next step.
+Component note: **Redis now has a live consumer** — the `worker` service runs the RQ
+`paperracks` queue and processes GROBID extraction jobs.
 
 ### Start here (next agent)
 
-M1 is done and validated; M2 extraction core is in place. Continue M2 in this order:
+M1 done; M2 extraction pipeline is live and validated. Continue M2/M4 in this order:
 
-1. **Wire the background worker** so extraction actually runs: add `app/workers/queue.py`
-   (an RQ `Queue` from `REDIS_URL`), a `worker` service in `docker-compose.yml`
-   (`rq worker`), and enqueue `extract_pdf_job` for each file created during import.
-2. **Validate live GROBID:** `docker compose --profile extraction up -d grobid`, import a
-   real PDF, run extraction, and confirm the live TEI parses (the parser is fixture-tested).
-3. Persist citation *mentions*/contexts (the parser currently extracts references only) and
-   store the raw TEI blob for reproducibility.
-4. Then: metadata enrichment connectors and duplicate/version detection (M2/M4).
+1. **Metadata enrichment connectors** (`services/metadata_enrichment.py`): query arXiv (by
+   ID) and Crossref (by DOI/title) and store results as MetadataAssertions, so a bad GROBID
+   title can be corrected from a trusted source. Add a conflict/review surface.
+2. **Citation mentions/contexts**: extend `parse_tei` to emit in-text mentions and persist
+   `CitationMention` rows (the models exist); store the raw TEI blob for reproducibility.
+3. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
+   (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
 
 The leftover M0 auth items (login rate limiting, in-app password change) remain
-deliberately deferred — hardening, not the product. See `WORK_SPLIT.md` (Agent E).
+deliberately deferred — hardening, not the product.
 
 ## Completed
 
