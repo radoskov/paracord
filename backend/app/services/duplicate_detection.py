@@ -10,7 +10,9 @@ class DuplicateCandidate:
     confidence: float
 
 
-def find_candidates(*, sha256: str | None = None, doi: str | None = None, arxiv_id: str | None = None) -> list[DuplicateCandidate]:
+def find_candidates(
+    *, sha256: str | None = None, doi: str | None = None, arxiv_id: str | None = None
+) -> list[DuplicateCandidate]:
     """Find duplicate/version candidates.
 
     TODO: Implement DB-backed exact hash, DOI, arXiv, title-author-year, and text-fingerprint checks.

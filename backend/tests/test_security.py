@@ -1,7 +1,6 @@
 """Backend security helper tests."""
 
 import pytest
-
 from app.core.security import assert_no_guest_roles, hash_password, verify_password
 
 

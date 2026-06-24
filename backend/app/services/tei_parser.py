@@ -68,9 +68,7 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
     paper.doi = _text(root.find('.//t:teiHeader//t:idno[@type="DOI"]', TEI_NS))
 
     for pers in root.findall(".//t:teiHeader//t:sourceDesc//t:author/t:persName", TEI_NS):
-        forenames = " ".join(
-            _text(f) or "" for f in pers.findall("t:forename", TEI_NS)
-        ).strip()
+        forenames = " ".join(_text(f) or "" for f in pers.findall("t:forename", TEI_NS)).strip()
         surname = _text(pers.find("t:surname", TEI_NS)) or ""
         name = " ".join(part for part in (forenames, surname) if part).strip()
         if name:

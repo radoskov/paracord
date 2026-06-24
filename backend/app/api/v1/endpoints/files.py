@@ -93,7 +93,9 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
         .order_by(Location.is_primary.desc(), Location.created_at.desc())
     )
     if location is None or location.source_id is None or not location.internal_uri:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found"
+        )
 
     source = db.get(Source, location.source_id)
     if source is None or source.type != "server_folder" or not source.is_active:
@@ -113,7 +115,9 @@ def _validated_server_file_path(source: Source, internal_uri: str) -> Path:
     config = source.config or {}
     raw_root = config.get("root_path")
     if not raw_root:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source root not available")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Source root not available"
+        )
     root = Path(str(raw_root)).expanduser().resolve()
     path = Path(internal_uri).expanduser().resolve()
     try:

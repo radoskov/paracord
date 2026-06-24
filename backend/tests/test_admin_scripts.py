@@ -3,15 +3,15 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.orm import sessionmaker
-
 from app.core.security import Role, verify_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.session import UserSession
 from app.models.user import User
 from app.services.auth import create_user_session
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
+
 from scripts import bootstrap_admin, reset_admin_password
 
 

@@ -5,8 +5,8 @@ This script must run on the server PC or inside the backend container with datab
 """
 
 import getpass
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from sqlalchemy import func, select
 

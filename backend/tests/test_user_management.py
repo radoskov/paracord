@@ -4,16 +4,15 @@ import uuid
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-
 from app.api.deps import require_owner, require_roles
 from app.core.security import Role, hash_password, verify_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.user import User
 from app.services import users as user_service
+from fastapi import HTTPException
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture()
@@ -70,7 +69,9 @@ def test_create_user_persists_and_audits(db_session) -> None:
 
     assert user.role == "editor"
     assert verify_password("pw", user.password_hash)
-    events = db_session.scalars(select(AuditEvent).where(AuditEvent.event_type == "user.created")).all()
+    events = db_session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == "user.created")
+    ).all()
     assert any(e.entity_id == str(user.id) for e in events)
 
 

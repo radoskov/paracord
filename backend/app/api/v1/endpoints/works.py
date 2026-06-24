@@ -91,9 +91,8 @@ def list_works(
     if shelf_id:
         stmt = stmt.where(ShelfWork.shelf_id == shelf_id)
     if rack_id:
-        stmt = (
-            stmt.join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
-            .where(RackShelf.rack_id == rack_id)
+        stmt = stmt.join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id).where(
+            RackShelf.rack_id == rack_id
         )
     if tag_id:
         stmt = stmt.join(

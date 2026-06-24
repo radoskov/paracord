@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from app.core.config import get_settings
 
 # Settings env vars cleared so these tests are hermetic regardless of the ambient

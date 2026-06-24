@@ -5,8 +5,8 @@ Implementation notes:
 - Password reset must be handled by server-console script, not by an unauthenticated web endpoint.
 """
 
-from enum import StrEnum
 from collections.abc import Iterable
+from enum import StrEnum
 
 import bcrypt
 

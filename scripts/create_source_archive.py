@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Create a zip archive of the current source tree."""
 
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT.parent / "paperracks_source_archive.zip"

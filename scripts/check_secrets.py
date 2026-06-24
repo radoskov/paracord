@@ -116,14 +116,20 @@ INDIRECTION_TOKENS = (
 # High-confidence provider/key patterns. A match here is reported regardless of
 # placeholder heuristics (but still honors the inline allowlist marker).
 HIGH_CONFIDENCE = [
-    ("Private key block", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----")),
+    (
+        "Private key block",
+        re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"),
+    ),
     ("AWS access key id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("Slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
     ("Stripe live key", re.compile(r"\b(?:sk|rk)_live_[0-9A-Za-z]{16,}\b")),
     ("OpenAI-style key", re.compile(r"\bsk-(?!test)[A-Za-z0-9]{32,}\b")),
-    ("Generic bearer JWT", re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+    (
+        "Generic bearer JWT",
+        re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
+    ),
 ]
 
 # Generic "secret-like assignment": KEY <sep> VALUE. The value is validated against the

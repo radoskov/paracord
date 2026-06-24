@@ -16,7 +16,9 @@ class Reference(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     citing_work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
-    resolved_work_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    resolved_work_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     raw_citation: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -33,7 +35,9 @@ class CitationMention(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     citing_work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     reference_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
-    resolved_cited_work_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    resolved_cited_work_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     marker_text: Mapped[str | None] = mapped_column(String(128), nullable=True)
     section_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     context_before: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -1,9 +1,9 @@
 # PaperRacks Software Specification
 
-**Project codename:** PaperRacks  
-**Document type:** implementation specification and multi-agent build guide  
-**Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser  
-**Document date:** 2026-06-23  
+**Project codename:** PaperRacks
+**Document type:** implementation specification and multi-agent build guide
+**Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser
+**Document date:** 2026-06-23
 **Status:** v1.0 implementation-ready draft
 
 ## Contents

@@ -10,7 +10,6 @@ from app.models.audit import AuditEvent
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.metadata_enrichment import (
-    ExternalMetadata,
     enrich_work,
     parse_arxiv_atom,
     parse_crossref,
@@ -117,16 +116,22 @@ def test_enrich_work_respects_user_confirmed(db_session) -> None:
     db_session.commit()
 
     result = enrich_work(
-        db_session, work, settings=_settings(), arxiv_fetcher=lambda _id: parse_arxiv_atom(ARXIV_XML)
+        db_session,
+        work,
+        settings=_settings(),
+        arxiv_fetcher=lambda _id: parse_arxiv_atom(ARXIV_XML),
     )
     db_session.commit()
 
     assert result["promoted"] == []
     assert work.canonical_title == "My Curated Title"  # not overwritten
     # Assertions still recorded for review.
-    assert db_session.scalar(
-        select(MetadataAssertion).where(MetadataAssertion.field_name == "title")
-    ).selected_as_canonical is False
+    assert (
+        db_session.scalar(
+            select(MetadataAssertion).where(MetadataAssertion.field_name == "title")
+        ).selected_as_canonical
+        is False
+    )
 
 
 def test_enrich_work_crossref_by_doi(db_session) -> None:

@@ -3,9 +3,6 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
@@ -19,6 +16,8 @@ from app.services.auth import (
     hash_token,
     revoke_token,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture()

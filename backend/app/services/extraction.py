@@ -51,9 +51,7 @@ def store_parsed_extraction(
         )
 
     title_canonical = bool(
-        promotable
-        and parsed.title
-        and work.canonical_metadata_source in (None, "filename")
+        promotable and parsed.title and work.canonical_metadata_source in (None, "filename")
     )
     if title_canonical:
         work.canonical_title = parsed.title

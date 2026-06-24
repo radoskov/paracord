@@ -19,3 +19,37 @@ repos:
     rev: v8.18.4
     hooks:
       - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.18
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+        files: ^(backend|agent|scripts)/.*\.py$
+      - id: ruff-format
+        files: ^(backend|agent|scripts)/.*\.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^docs/.*\.tex$
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: debug-statements
+        files: ^(backend|agent|scripts)/.*\.py$
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        args:
+          - "--ignore-words-list=te,fo,aci"
+        exclude: ^(frontend/package-lock\.json|docs/.*\.tex)$

@@ -3,16 +3,15 @@
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app.api.deps import require_authenticated_user
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.session import UserSession
 from app.models.user import User
 from app.services.auth import create_user_session
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture()

@@ -7,9 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# New-style arXiv id, optionally with a version suffix (e.g. 2106.01345 / 1706.03762v5).
-_ARXIV_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,6 +18,9 @@ from app.models.user import User
 from app.models.work import Work
 from app.services.audit import record_event
 from app.utils.normalization import normalize_title
+
+# New-style arXiv id, optionally with a version suffix (e.g. 2106.01345 / 1706.03762v5).
+_ARXIV_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
 
 
 def file_ids_pending_extraction(db: Session, source_id) -> list:

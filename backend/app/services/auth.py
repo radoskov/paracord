@@ -1,9 +1,9 @@
 """Authentication session service."""
 
-from datetime import datetime, timedelta
 import functools
 import hashlib
 import secrets
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session

@@ -16,7 +16,9 @@ from app.services.tei_parser import parse_tei
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-FIXTURE = (Path(__file__).parent / "fixtures" / "minimal_grobid_tei.xml").read_text(encoding="utf-8")
+FIXTURE = (Path(__file__).parent / "fixtures" / "minimal_grobid_tei.xml").read_text(
+    encoding="utf-8"
+)
 
 
 @pytest.fixture()
@@ -77,7 +79,9 @@ def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) ->
     assert work.canonical_metadata_source == "grobid"
     assert work.abstract.startswith("We propose")
     assert work.doi == "10.5555/transformer"
-    assert db_session.scalar(select(Reference).where(Reference.citing_work_id == work.id)) is not None
+    assert (
+        db_session.scalar(select(Reference).where(Reference.citing_work_id == work.id)) is not None
+    )
     assert len(db_session.scalars(select(Reference)).all()) == 2
     title_assertion = db_session.scalar(
         select(MetadataAssertion).where(

@@ -6,9 +6,9 @@ an unauthenticated web endpoint.
 """
 
 import getpass
+import sys
 from datetime import datetime
 from pathlib import Path
-import sys
 
 from sqlalchemy import select, update
 
