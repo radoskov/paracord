@@ -17,6 +17,8 @@ What works today (real, tested in-container on Python 3.12):
   queue, server-folder import controls, shelf/rack/tag controls, and file preview panel.
 - Works can now be filtered by shelf, rack, tag, reading status, and basic metadata in the
   backend and from the frontend toolbar.
+- Authenticated PDF streaming exists for configured server-folder file locations, including
+  root-escape protection; the frontend file panel can open streamed PDFs in a browser tab.
 
 What still does NOT exist yet:
 
@@ -33,9 +35,9 @@ Build the product, not more foundation. The leftover M0 auth items (login rate l
 in-app password change) are **deliberately deferred** — they are hardening, not the product.
 
 **Next task = continue Milestone 1 (core library), in this order:**
-1. Add PDF streaming from configured locations and wire it into the file/reader view.
-2. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
-3. Add lightweight end-to-end smoke coverage for login → import → organize → view.
+1. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
+2. Add lightweight end-to-end smoke coverage for login → import → organize → view.
+3. Replace the temporary browser-tab PDF opening with the planned embedded PDF.js reader.
 
 See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
@@ -81,6 +83,8 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
   server-folder source/import controls, manual work creation, shelves/racks/tags, and a
   file list with first-page preview text.
 - Work search now supports shelf/rack/tag filters, and the frontend toolbar exposes them.
+- `GET /api/v1/files/{file_id}/stream` streams PDFs from configured server-folder sources
+  only, and rejects file locations outside the configured source root.
 
 ## In progress
 
@@ -94,7 +98,7 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 
 - Login rate limiting / failed-login lockout (role-based authorization is now implemented).
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
-- PDF streaming and PDF.js reader integration.
+- PDF.js reader integration.
 - Agent registration and token rotation implementation.
 - GROBID TEI parser implementation.
 - Duplicate/version detection implementation.

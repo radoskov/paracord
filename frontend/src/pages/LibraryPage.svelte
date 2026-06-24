@@ -258,6 +258,16 @@
     }, 'Tag added');
   }
 
+  async function openSelectedFile(): Promise<void> {
+    if (!selectedFile) return;
+    await run(async () => {
+      const blob = await client.getFileBlob(selectedFile.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    });
+  }
+
   async function selectShelf(shelf: Shelf): Promise<void> {
     selectedShelf = shelf;
     selectedShelfForWork = shelf.id;
@@ -386,6 +396,7 @@
                 <div><dt>Status</dt><dd>{selectedFile.status}</dd></div>
                 <div><dt>SHA-256</dt><dd>{selectedFile.sha256}</dd></div>
               </dl>
+              <button type="button" on:click={openSelectedFile} disabled={loading}>Open PDF</button>
               <pre>{selectedFile.preview_text ?? 'No preview text'}</pre>
             {:else}
               <p class="empty">No files</p>

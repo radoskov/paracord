@@ -194,6 +194,10 @@ export class ApiClient {
     return this.request<FileRecord[]>('/api/v1/files');
   }
 
+  async getFileBlob(fileId: string): Promise<Blob> {
+    return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
   private async request<T>(
     path: string,
     options: { method?: string; body?: unknown; auth?: boolean } = {},
@@ -220,5 +224,13 @@ export class ApiClient {
     }
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
+  }
+
+  private async requestBlob(path: string): Promise<Blob> {
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}${path}`, { headers });
+    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    return response.blob();
   }
 }

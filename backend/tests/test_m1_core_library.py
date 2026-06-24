@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from app.api.v1.endpoints.files import list_files
+from app.api.v1.endpoints.files import list_files, stream_file
 from app.api.v1.endpoints.racks import list_rack_shelves
 from app.api.v1.endpoints.shelves import list_shelf_works
 from app.api.v1.endpoints.works import list_works
@@ -21,6 +21,7 @@ from app.services.storage import (
     create_server_folder_source,
     import_server_folder,
 )
+from fastapi import HTTPException
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -191,3 +192,79 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
     assert filtered_ids(shelf_id=shelf.id) == [included.id]
     assert filtered_ids(rack_id=rack.id) == [included.id]
     assert filtered_ids(tag_id=tag.id) == [included.id]
+
+
+def test_stream_file_uses_configured_server_folder_location(
+    db_session,
+    owner: User,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "papers"
+    root.mkdir()
+    pdf_path = root / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n")
+    source = Source(
+        type="server_folder",
+        name="Papers",
+        owner_user_id=owner.id,
+        path_alias="papers",
+        config={"root_path": str(root)},
+    )
+    file = File(
+        sha256="b" * 64,
+        size_bytes=pdf_path.stat().st_size,
+        mime_type="application/pdf",
+        original_filename="paper.pdf",
+    )
+    db_session.add_all([source, file])
+    db_session.flush()
+    db_session.add(
+        Location(
+            file_id=file.id,
+            source_id=source.id,
+            location_type="server_path",
+            internal_uri=str(pdf_path),
+            is_available=True,
+        )
+    )
+    db_session.commit()
+
+    response = stream_file(file.id, db=db_session)
+
+    assert Path(response.path) == pdf_path
+    assert response.media_type == "application/pdf"
+
+
+def test_stream_file_rejects_location_outside_configured_root(
+    db_session,
+    owner: User,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "papers"
+    root.mkdir()
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.4\n")
+    source = Source(
+        type="server_folder",
+        name="Papers",
+        owner_user_id=owner.id,
+        path_alias="papers",
+        config={"root_path": str(root)},
+    )
+    file = File(sha256="c" * 64, size_bytes=outside.stat().st_size, mime_type="application/pdf")
+    db_session.add_all([source, file])
+    db_session.flush()
+    db_session.add(
+        Location(
+            file_id=file.id,
+            source_id=source.id,
+            location_type="server_path",
+            internal_uri=str(outside),
+            is_available=True,
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        stream_file(file.id, db=db_session)
+    assert exc_info.value.status_code == 403
