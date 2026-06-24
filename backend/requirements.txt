@@ -17,3 +17,4 @@ bibtexparser>=1.4
 pybtex>=0.24
 citeproc-py>=0.8
 PyYAML>=6.0
+PyMuPDF>=1.24

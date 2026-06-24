@@ -1,11 +1,91 @@
 """Rack endpoints."""
 
-from fastapi import APIRouter
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import require_roles
+from app.core.security import Role
+from app.db.session import get_db
+from app.models.organization import Rack, RackShelf, Shelf
+from app.models.user import User
 
 router = APIRouter()
+DB_DEP = Depends(get_db)
+EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 
 
-@router.get("")
-def list_racks() -> dict[str, str]:
+class RackCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class RackRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RackShelfAdd(BaseModel):
+    shelf_id: uuid.UUID
+    position: int | None = None
+
+
+@router.get("", response_model=list[RackRead])
+def list_racks(db: Session = DB_DEP) -> list[Rack]:
     """List racks."""
-    return {"status": "todo"}
+    return list(db.scalars(select(Rack).order_by(Rack.name)).all())
+
+
+@router.post("", response_model=RackRead, status_code=status.HTTP_201_CREATED)
+def create_rack(
+    payload: RackCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> Rack:
+    """Create a rack."""
+    rack = Rack(
+        name=payload.name,
+        description=payload.description,
+        created_by_user_id=actor.id,
+    )
+    db.add(rack)
+    db.commit()
+    db.refresh(rack)
+    return rack
+
+
+@router.post("/{rack_id}/shelves", status_code=status.HTTP_204_NO_CONTENT)
+def add_shelf_to_rack(
+    rack_id: uuid.UUID,
+    payload: RackShelfAdd,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> None:
+    """Add a shelf to a rack."""
+    if db.get(Rack, rack_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack not found")
+    if db.get(Shelf, payload.shelf_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    link = db.get(RackShelf, {"rack_id": rack_id, "shelf_id": payload.shelf_id})
+    if link is None:
+        db.add(
+            RackShelf(
+                rack_id=rack_id,
+                shelf_id=payload.shelf_id,
+                added_by_user_id=actor.id,
+                position=payload.position,
+            )
+        )
+    else:
+        link.position = payload.position
+    db.commit()

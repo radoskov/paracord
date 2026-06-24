@@ -16,6 +16,8 @@ from app.api.v1.endpoints import (
     imports,
     racks,
     shelves,
+    sources,
+    tags,
     works,
 )
 
@@ -33,6 +35,12 @@ api_router.include_router(
     dependencies=auth_required,
 )
 api_router.include_router(
+    sources.router,
+    prefix="/sources",
+    tags=["sources"],
+    dependencies=auth_required,
+)
+api_router.include_router(
     imports.router,
     prefix="/imports",
     tags=["imports"],
@@ -47,6 +55,7 @@ api_router.include_router(
     dependencies=auth_required,
 )
 api_router.include_router(racks.router, prefix="/racks", tags=["racks"], dependencies=auth_required)
+api_router.include_router(tags.router, prefix="/tags", tags=["tags"], dependencies=auth_required)
 api_router.include_router(
     citations.router,
     prefix="/citations",

@@ -26,7 +26,11 @@ storage:
   temp_root: ./storage/tmp
   max_upload_mb: 512
   content_addressed_layout: sha256_prefix
-  server_allowed_roots: []
+  # Server-folder imports can only use these configured aliases; APIs never accept
+  # arbitrary filesystem paths to scan.
+  server_allowed_roots:
+    # - alias: papers
+    #   path: /srv/paperracks/imports/papers
 
 agents:
   registration_enabled: true

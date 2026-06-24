@@ -8,6 +8,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Started the M1 core-library backend slice: added `sources`, `import_batches`,
+  `shelf_works`, `rack_shelves`, and `tag_links` models plus an Alembic migration for the
+  core file/work/source/organization tables.
+- Added alias-only configured server-folder sources and folder imports. Imports scan a
+  configured root, SHA-256 hash PDFs, create File/Location/Work/FileWorkLink rows, extract a
+  PyMuPDF first-page text preview when available, deduplicate by file hash, and audit-log
+  source creation/import completion.
+- Added basic backend endpoints for sources, folder import batches, file metadata, manual
+  work create/edit/search, shelves, racks, memberships, and tags.
+- Added focused M1 service tests for configured-root alias handling, server-folder import
+  persistence, deduplication, and audit logging.
 - Added a containerized development & evaluation stack: `backend/Dockerfile` (api server) and `agent/Dockerfile` (client), `docker compose` services for `postgres`/`redis`/`api`/`agent` (with healthchecks, a smart entrypoint that runs migrations only for the server, and opt-in `extraction`/`ai` profiles for GROBID/Ollama), `backend/requirements-dev.txt`, a `ci` GitHub Actions workflow (lint + test on Python 3.12), `make` targets (`build`/`up`/`down`/`test`/`lint`), and `docs/runbooks/dev_containers.md`. The full test suite (23 tests) and a live auth/role smoke test now pass in-container against real Postgres.
 - Added role-based authorization (`require_roles` / `require_owner` dependencies) and owner-only admin endpoints under `/api/v1/admin`: list/create users, change a user's role, disable a user (with last-active-owner protection), and paginated audit-event access. New `user.created` (admin API), `user.role_changed`, and `user.disabled` audit events.
 - Added an account-enumeration mitigation to login (constant-time bcrypt verification on the unknown/disabled-user path) and a startup assertion that no guest role is present in `security.allowed_roles`.

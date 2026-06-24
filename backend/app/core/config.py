@@ -13,7 +13,6 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 DEFAULT_CONFIG_PATH = Path("config/server.local.yaml")
 
 
@@ -57,6 +56,11 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["grobid_url"] = services["grobid_url"]
     if "ollama_url" in services:
         values["ollama_url"] = services["ollama_url"]
+    storage = data.get("storage") or {}
+    if "managed_library_root" in storage:
+        values["managed_library_root"] = storage["managed_library_root"]
+    if "server_allowed_roots" in storage:
+        values["server_allowed_roots"] = storage["server_allowed_roots"]
     return values
 
 
@@ -84,6 +88,8 @@ class Settings(BaseSettings):
     guest_access_enabled: bool = False
     allowed_roles: list[str] = ["owner", "editor", "reader"]
     session_ttl_minutes: int = Field(default=720, alias="PAPERRACKS_SESSION_TTL_MINUTES")
+    managed_library_root: str = "./storage/library"
+    server_allowed_roots: list[Any] = []
 
 
 def _environment_overrides() -> dict[str, Any]:

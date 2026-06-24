@@ -3,19 +3,21 @@
 ## Current status
 
 **Milestone 0 (foundation) is essentially complete and validated; Milestone 1 (the core
-library — the actual product) has not started.**
+library — the actual product) has started with the backend persistence/import slice.**
 
 What works today (real, tested in-container on Python 3.12):
 
 - Containerized build/test/run stack (`docker compose`), auth (bcrypt), revocable sessions,
   owner/editor/reader role authorization, owner-only admin user management, audit logging,
   server-console bootstrap/password-reset, and Alembic migrations for the auth tables.
+- Initial M1 backend path: configured server-folder sources, folder PDF scanning, SHA-256
+  file registration, File/Location/Work links, import batches, basic work/shelf/rack/tag
+  endpoints, and focused service tests.
 
-What does NOT exist yet (all stubs returning `{"status": "todo"}`):
+What still does NOT exist yet:
 
-- The PDF-organizing product itself: importing folders/PDFs/arXiv links, Work/File records,
-  shelves/racks/tags, search, the file view, GROBID extraction, citation graph, reader,
-  export, AI summaries, topics. Most domain models lack migrations (only auth tables exist).
+- Frontend product views, PDF streaming/reader, arXiv/DOI/bibliography imports, GROBID
+  extraction, citation graph, export, AI summaries, topics.
 
 Component note: **Redis is provisioned but unused** — it backs the RQ background-job queue
 (GROBID extraction, embeddings, summaries, topics). Its first real consumer is the GROBID
@@ -26,14 +28,11 @@ worker in M2.
 Build the product, not more foundation. The leftover M0 auth items (login rate limiting,
 in-app password change) are **deliberately deferred** — they are hardening, not the product.
 
-**Next task = Milestone 1 (core library), in this order:**
-1. Add models + Alembic migrations for the missing M1 entities and join tables: `sources`,
-   `shelf_works`, `rack_shelves`, `tag_links`, `import_batches` (see SPECIFICATION.md §9).
-2. Implement server-folder import (`services/storage.py`, `endpoints/imports.py`,
-   `endpoints/files.py`): scan a configured root, hash files, create File/Work/Location
-   records with a fast PyMuPDF first-page preview. No arbitrary-path endpoint.
-3. Implement shelves/racks/tags CRUD + membership (`endpoints/shelves.py`, `racks.py`) and
-   basic metadata search (`endpoints/works.py`).
+**Next task = continue Milestone 1 (core library), in this order:**
+1. Add frontend library/shelf/rack/file/reading-queue views against the new backend endpoints.
+2. Expand M1 backend search/filtering to include shelves, racks, and tags.
+3. Add PDF streaming from configured locations and a minimal file view.
+4. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
 
 See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
@@ -66,10 +65,17 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 - Role-based authorization: `require_roles`/`require_owner` dependencies and owner-only admin endpoints for user management (list/create/role-change/disable) and audit-event access, with `user.created`/`user.role_changed`/`user.disabled` audit events and last-owner protection.
 - Login account-enumeration mitigation (constant-time dummy verification on the no-user path) and a startup assertion that no guest role is configured.
 - Containerized dev/eval stack (Python 3.12): `backend/Dockerfile` (api server) and `agent/Dockerfile` (client), `docker compose` services for postgres/redis/api/agent with healthchecks and GROBID/Ollama profiles, in-container test/lint, and a CI workflow.
+- M1 backend persistence/import slice: `sources`, `import_batches`, M1 file/work/organization
+  fields, `shelf_works`, `rack_shelves`, and `tag_links` models plus Alembic migration.
+- Configured server-folder sources can be created by alias only; folder import scans a configured
+  root, hashes PDFs, creates File/Location/Work/FileWorkLink rows, extracts a PyMuPDF first-page
+  text preview when available, deduplicates by SHA-256, and audit-logs import activity.
+- Basic backend endpoints exist for sources, folder imports, file metadata, manual work
+  create/edit/list/search, shelves, racks, membership, and tags.
 
 ## In progress
 
-- Backend API design stubs.
+- M1 backend API implementation.
 - Local agent protocol stubs.
 - LaTeX implementation manual draft.
 - Agent task partitioning.
@@ -79,7 +85,7 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 
 - Login rate limiting / failed-login lockout (role-based authorization is now implemented).
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
-- File-root scanner implementation.
+- Frontend M1 library/shelf/rack/file/reading-queue views.
 - Agent registration and token rotation implementation.
 - GROBID TEI parser implementation.
 - Duplicate/version detection implementation.

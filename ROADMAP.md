@@ -6,8 +6,9 @@ The ordering is value-first: it front-loads the complete single-machine loop
 agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M8).
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
-> **Current position:** M0 is essentially complete and validated; **M1 is next and not yet
-> started**. See `PROGRESS.md` → "Start here (next agent)". The two unchecked M0 items
+> **Current position:** M0 is essentially complete and validated; **M1 has started with
+> the backend persistence/import slice**. See `PROGRESS.md` → "Start here (next agent)".
+> The two unchecked M0 items
 > (login rate limiting, in-app password change) are hardening and are deliberately deferred
 > in favour of building the product (M1).
 

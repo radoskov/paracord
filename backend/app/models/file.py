@@ -3,8 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -15,13 +14,18 @@ class File(Base):
 
     __tablename__ = "files"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    text_layer_quality: Mapped[str] = mapped_column(String(32), default="unknown")
+    status: Mapped[str] = mapped_column(String(32), default="available", index=True)
+    preview_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Location(Base):
@@ -29,14 +33,26 @@ class Location(Base):
 
     __tablename__ = "locations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     location_type: Mapped[str] = mapped_column(String(64))
     display_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     internal_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
-    agent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    path_alias: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class FileSegment(Base):
@@ -44,11 +60,15 @@ class FileSegment(Base):
 
     __tablename__ = "file_segments"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    segment_type: Mapped[str] = mapped_column(String(64), default="full_file")
+    created_by: Mapped[str] = mapped_column(String(32), default="system")
+    confidence: Mapped[int] = mapped_column(Integer, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class FileWorkLink(Base):
@@ -56,12 +76,21 @@ class FileWorkLink(Base):
 
     __tablename__ = "file_work_links"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
-    work_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
-    version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    segment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    version_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    segment_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     relationship_type: Mapped[str] = mapped_column(String(64), default="primary")
     confidence: Mapped[int] = mapped_column(Integer, default=100)
     warning_state: Mapped[str] = mapped_column(String(128), default="none")
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

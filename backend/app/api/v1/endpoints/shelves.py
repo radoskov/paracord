@@ -1,11 +1,95 @@
 """Shelf endpoints."""
 
-from fastapi import APIRouter
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import require_roles
+from app.core.security import Role
+from app.db.session import get_db
+from app.models.organization import Shelf, ShelfWork
+from app.models.user import User
+from app.models.work import Work
 
 router = APIRouter()
+DB_DEP = Depends(get_db)
+EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 
 
-@router.get("")
-def list_shelves() -> dict[str, str]:
-    """List shelves."""
-    return {"status": "todo"}
+class ShelfCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class ShelfRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ShelfWorkAdd(BaseModel):
+    work_id: uuid.UUID
+    position: int | None = None
+    note: str | None = None
+
+
+@router.get("", response_model=list[ShelfRead])
+def list_shelves(db: Session = DB_DEP) -> list[Shelf]:
+    """List active shelves."""
+    return list(db.scalars(select(Shelf).order_by(Shelf.name)).all())
+
+
+@router.post("", response_model=ShelfRead, status_code=status.HTTP_201_CREATED)
+def create_shelf(
+    payload: ShelfCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> Shelf:
+    """Create a shelf."""
+    shelf = Shelf(
+        name=payload.name,
+        description=payload.description,
+        created_by_user_id=actor.id,
+    )
+    db.add(shelf)
+    db.commit()
+    db.refresh(shelf)
+    return shelf
+
+
+@router.post("/{shelf_id}/works", status_code=status.HTTP_204_NO_CONTENT)
+def add_work_to_shelf(
+    shelf_id: uuid.UUID,
+    payload: ShelfWorkAdd,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> None:
+    """Add a work to a shelf."""
+    if db.get(Shelf, shelf_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    if db.get(Work, payload.work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": payload.work_id})
+    if link is None:
+        db.add(
+            ShelfWork(
+                shelf_id=shelf_id,
+                work_id=payload.work_id,
+                added_by_user_id=actor.id,
+                position=payload.position,
+                note=payload.note,
+            )
+        )
+    else:
+        link.position = payload.position
+        link.note = payload.note
+    db.commit()
