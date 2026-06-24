@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +19,8 @@ from app.utils.normalization import normalize_title
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+ENTITY_TYPE_QUERY = Query()
+ENTITY_ID_QUERY = Query()
 
 TAGGABLE_MODELS = {
     "work": Work,
@@ -114,3 +116,26 @@ def add_tag_link(
             )
         )
         db.commit()
+
+
+@router.delete("/{tag_id}/links", status_code=status.HTTP_204_NO_CONTENT)
+def remove_tag_link(
+    tag_id: uuid.UUID,
+    entity_type: str = ENTITY_TYPE_QUERY,
+    entity_id: uuid.UUID = ENTITY_ID_QUERY,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> None:
+    """Remove a tag from an entity."""
+    link = db.get(
+        TagLink,
+        {
+            "tag_id": tag_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+        },
+    )
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag link not found")
+    db.delete(link)
+    db.commit()

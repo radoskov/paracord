@@ -24,6 +24,12 @@ class RackCreate(BaseModel):
     description: str | None = None
 
 
+class RackUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    status: str | None = None
+
+
 class RackRead(BaseModel):
     id: uuid.UUID
     name: str
@@ -73,6 +79,26 @@ def create_rack(
     return rack
 
 
+@router.patch("/{rack_id}", response_model=RackRead)
+def update_rack(
+    rack_id: uuid.UUID,
+    payload: RackUpdate,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> Rack:
+    """Edit or archive a rack."""
+    rack = db.get(Rack, rack_id)
+    if rack is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack not found")
+    updates = payload.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(rack, key, value)
+    rack.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(rack)
+    return rack
+
+
 @router.get("/{rack_id}/shelves", response_model=list[RackShelfRead])
 def list_rack_shelves(rack_id: uuid.UUID, db: Session = DB_DEP) -> list[Shelf]:
     """List shelves in a rack."""
@@ -111,4 +137,19 @@ def add_shelf_to_rack(
         )
     else:
         link.position = payload.position
+    db.commit()
+
+
+@router.delete("/{rack_id}/shelves/{shelf_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_shelf_from_rack(
+    rack_id: uuid.UUID,
+    shelf_id: uuid.UUID,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> None:
+    """Remove a shelf from a rack."""
+    link = db.get(RackShelf, {"rack_id": rack_id, "shelf_id": shelf_id})
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack shelf not found")
+    db.delete(link)
     db.commit()

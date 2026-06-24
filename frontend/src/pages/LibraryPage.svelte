@@ -258,6 +258,56 @@
     }, 'Tag added');
   }
 
+  async function removeSelectedTagLink(): Promise<void> {
+    if (!selectedTagId) return;
+    const entityId =
+      tagTargetType === 'work'
+        ? selectedWork?.id
+        : tagTargetType === 'shelf'
+          ? selectedShelf?.id
+          : selectedRack?.id;
+    if (!entityId) return;
+    await run(async () => {
+      await client.removeTagLink(selectedTagId, tagTargetType, entityId);
+    }, 'Tag removed');
+  }
+
+  async function archiveSelectedShelf(): Promise<void> {
+    if (!selectedShelf) return;
+    await run(async () => {
+      await client.updateShelf(selectedShelf.id, { status: 'archived' });
+      selectedShelf = null;
+      shelfWorks = [];
+      await loadShelves();
+    }, 'Shelf archived');
+  }
+
+  async function archiveSelectedRack(): Promise<void> {
+    if (!selectedRack) return;
+    await run(async () => {
+      await client.updateRack(selectedRack.id, { status: 'archived' });
+      selectedRack = null;
+      rackShelves = [];
+      await loadRacks();
+    }, 'Rack archived');
+  }
+
+  async function removeSelectedWorkFromShelf(): Promise<void> {
+    if (!selectedShelf || !selectedWork) return;
+    await run(async () => {
+      await client.removeWorkFromShelf(selectedShelf.id, selectedWork.id);
+      await selectShelf(selectedShelf as Shelf);
+    }, 'Work removed');
+  }
+
+  async function removeSelectedShelfFromRack(): Promise<void> {
+    if (!selectedRack || !selectedShelf) return;
+    await run(async () => {
+      await client.removeShelfFromRack(selectedRack.id, selectedShelf.id);
+      await selectRack(selectedRack as Rack);
+    }, 'Shelf removed');
+  }
+
   async function openSelectedFile(): Promise<void> {
     if (!selectedFile) return;
     await run(async () => {
@@ -460,6 +510,18 @@
           {/each}
         </div>
         <div class="inline-action">
+          <button type="button" on:click={archiveSelectedShelf} disabled={!selectedShelf || loading}>
+            Archive shelf
+          </button>
+          <button
+            type="button"
+            on:click={removeSelectedWorkFromShelf}
+            disabled={!selectedShelf || !selectedWork || loading}
+          >
+            Remove work
+          </button>
+        </div>
+        <div class="inline-action">
           <select bind:value={selectedShelfForWork}>
             <option value="">Shelf</option>
             {#each shelves as shelf}
@@ -520,9 +582,23 @@
         </div>
         <ul class="plain-list">
           {#each rackShelves as shelf}
-            <li>{shelf.name}</li>
+            <li>
+              <button type="button" on:click={() => (selectedShelf = shelf)}>{shelf.name}</button>
+            </li>
           {/each}
         </ul>
+        <div class="inline-action">
+          <button type="button" on:click={archiveSelectedRack} disabled={!selectedRack || loading}>
+            Archive rack
+          </button>
+          <button
+            type="button"
+            on:click={removeSelectedShelfFromRack}
+            disabled={!selectedRack || !selectedShelf || loading}
+          >
+            Remove shelf
+          </button>
+        </div>
       </section>
 
       <section class="surface">
@@ -550,6 +626,9 @@
             Apply
           </button>
         </div>
+        <button type="button" on:click={removeSelectedTagLink} disabled={!selectedTagId || loading}>
+          Remove from target
+        </button>
       </section>
     </aside>
   </section>

@@ -127,6 +127,10 @@ export class ApiClient {
     return this.request<Shelf>('/api/v1/shelves', { method: 'POST', body: payload });
   }
 
+  async updateShelf(id: string, payload: Partial<Shelf>): Promise<Shelf> {
+    return this.request<Shelf>(`/api/v1/shelves/${id}`, { method: 'PATCH', body: payload });
+  }
+
   async listShelfWorks(shelfId: string): Promise<Work[]> {
     return this.request<Work[]>(`/api/v1/shelves/${shelfId}/works`);
   }
@@ -138,12 +142,22 @@ export class ApiClient {
     });
   }
 
+  async removeWorkFromShelf(shelfId: string, workId: string): Promise<void> {
+    await this.request<void>(`/api/v1/shelves/${shelfId}/works/${workId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async listRacks(): Promise<Rack[]> {
     return this.request<Rack[]>('/api/v1/racks');
   }
 
   async createRack(payload: { name: string; description?: string }): Promise<Rack> {
     return this.request<Rack>('/api/v1/racks', { method: 'POST', body: payload });
+  }
+
+  async updateRack(id: string, payload: Partial<Rack>): Promise<Rack> {
+    return this.request<Rack>(`/api/v1/racks/${id}`, { method: 'PATCH', body: payload });
   }
 
   async listRackShelves(rackId: string): Promise<Shelf[]> {
@@ -154,6 +168,12 @@ export class ApiClient {
     await this.request<void>(`/api/v1/racks/${rackId}/shelves`, {
       method: 'POST',
       body: { shelf_id: shelfId },
+    });
+  }
+
+  async removeShelfFromRack(rackId: string, shelfId: string): Promise<void> {
+    await this.request<void>(`/api/v1/racks/${rackId}/shelves/${shelfId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -169,6 +189,13 @@ export class ApiClient {
     await this.request<void>(`/api/v1/tags/${tagId}/links`, {
       method: 'POST',
       body: { entity_type: entityType, entity_id: entityId },
+    });
+  }
+
+  async removeTagLink(tagId: string, entityType: string, entityId: string): Promise<void> {
+    const params = new URLSearchParams({ entity_type: entityType, entity_id: entityId });
+    await this.request<void>(`/api/v1/tags/${tagId}/links?${params.toString()}`, {
+      method: 'DELETE',
     });
   }
 

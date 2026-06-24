@@ -19,6 +19,8 @@ What works today (real, tested in-container on Python 3.12):
   backend and from the frontend toolbar.
 - Authenticated PDF streaming exists for configured server-folder file locations, including
   root-escape protection; the frontend file panel can open streamed PDFs in a browser tab.
+- Shelves and racks can be archived, work/shelf memberships can be removed, and tag links
+  can be removed via backend endpoints and frontend controls.
 
 What still does NOT exist yet:
 
@@ -35,9 +37,9 @@ Build the product, not more foundation. The leftover M0 auth items (login rate l
 in-app password change) are **deliberately deferred** — they are hardening, not the product.
 
 **Next task = continue Milestone 1 (core library), in this order:**
-1. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
-2. Add lightweight end-to-end smoke coverage for login → import → organize → view.
-3. Replace the temporary browser-tab PDF opening with the planned embedded PDF.js reader.
+1. Add lightweight end-to-end smoke coverage for login → import → organize → view.
+2. Replace the temporary browser-tab PDF opening with the planned embedded PDF.js reader.
+3. Polish CRUD ergonomics (edit names/descriptions inline, surface current tag links).
 
 See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
@@ -85,6 +87,8 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 - Work search now supports shelf/rack/tag filters, and the frontend toolbar exposes them.
 - `GET /api/v1/files/{file_id}/stream` streams PDFs from configured server-folder sources
   only, and rejects file locations outside the configured source root.
+- M1 CRUD gaps narrowed: archive shelves/racks, remove work-from-shelf and shelf-from-rack
+  memberships, and remove tag links.
 
 ## In progress
 

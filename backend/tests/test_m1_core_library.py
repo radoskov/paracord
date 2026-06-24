@@ -4,8 +4,19 @@ from pathlib import Path
 
 import pytest
 from app.api.v1.endpoints.files import list_files, stream_file
-from app.api.v1.endpoints.racks import list_rack_shelves
-from app.api.v1.endpoints.shelves import list_shelf_works
+from app.api.v1.endpoints.racks import (
+    RackUpdate,
+    list_rack_shelves,
+    remove_shelf_from_rack,
+    update_rack,
+)
+from app.api.v1.endpoints.shelves import (
+    ShelfUpdate,
+    list_shelf_works,
+    remove_work_from_shelf,
+    update_shelf,
+)
+from app.api.v1.endpoints.tags import remove_tag_link
 from app.api.v1.endpoints.works import list_works
 from app.core.config import Settings
 from app.core.security import hash_password
@@ -268,3 +279,43 @@ def test_stream_file_rejects_location_outside_configured_root(
     with pytest.raises(HTTPException) as exc_info:
         stream_file(file.id, db=db_session)
     assert exc_info.value.status_code == 403
+
+
+def test_m1_archive_and_unlink_endpoints(db_session, owner: User) -> None:
+    work = Work(canonical_title="Paper", normalized_title="paper")
+    shelf = Shelf(name="Shelf", created_by_user_id=owner.id)
+    rack = Rack(name="Rack", created_by_user_id=owner.id)
+    tag = Tag(name="Tag", normalized_name="tag")
+    db_session.add_all([work, shelf, rack, tag])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ShelfWork(shelf_id=shelf.id, work_id=work.id, added_by_user_id=owner.id),
+            RackShelf(rack_id=rack.id, shelf_id=shelf.id, added_by_user_id=owner.id),
+            TagLink(
+                tag_id=tag.id,
+                entity_type="work",
+                entity_id=work.id,
+                created_by_user_id=owner.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    update_shelf(shelf.id, ShelfUpdate(status="archived"), db=db_session, _=owner)
+    update_rack(rack.id, RackUpdate(status="archived"), db=db_session, _=owner)
+    remove_work_from_shelf(shelf.id, work.id, db=db_session, _=owner)
+    remove_shelf_from_rack(rack.id, shelf.id, db=db_session, _=owner)
+    remove_tag_link(tag.id, "work", work.id, db=db_session, _=owner)
+
+    assert db_session.get(Shelf, shelf.id).status == "archived"
+    assert db_session.get(Rack, rack.id).status == "archived"
+    assert db_session.get(ShelfWork, {"shelf_id": shelf.id, "work_id": work.id}) is None
+    assert db_session.get(RackShelf, {"rack_id": rack.id, "shelf_id": shelf.id}) is None
+    assert (
+        db_session.get(
+            TagLink,
+            {"tag_id": tag.id, "entity_type": "work", "entity_id": work.id},
+        )
+        is None
+    )

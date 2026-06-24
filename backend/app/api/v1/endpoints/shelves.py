@@ -25,6 +25,12 @@ class ShelfCreate(BaseModel):
     description: str | None = None
 
 
+class ShelfUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    status: str | None = None
+
+
 class ShelfRead(BaseModel):
     id: uuid.UUID
     name: str
@@ -78,6 +84,26 @@ def create_shelf(
     return shelf
 
 
+@router.patch("/{shelf_id}", response_model=ShelfRead)
+def update_shelf(
+    shelf_id: uuid.UUID,
+    payload: ShelfUpdate,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> Shelf:
+    """Edit or archive a shelf."""
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    updates = payload.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(shelf, key, value)
+    shelf.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(shelf)
+    return shelf
+
+
 @router.get("/{shelf_id}/works", response_model=list[ShelfWorkRead])
 def list_shelf_works(shelf_id: uuid.UUID, db: Session = DB_DEP) -> list[Work]:
     """List works in a shelf."""
@@ -118,4 +144,19 @@ def add_work_to_shelf(
     else:
         link.position = payload.position
         link.note = payload.note
+    db.commit()
+
+
+@router.delete("/{shelf_id}/works/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_work_from_shelf(
+    shelf_id: uuid.UUID,
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> None:
+    """Remove a work from a shelf."""
+    link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": work_id})
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")
+    db.delete(link)
     db.commit()
