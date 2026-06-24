@@ -1,68 +1,337 @@
-# PaperRacks
+# PaRacORD / PaperRacks
 
-PaperRacks is a local-first, self-hostable scientific-paper library and literature-graph system for Linux. It is designed around a central server, one or more local workstation agents, GROBID-based extraction, shelves/racks/tags organization, citation-context graphs, citation export, local summaries, and topic modeling.
+**PaRacORD** — **Pa**per **Rac**ks for **O**rganization, **R**etrieval, and **D**iscovery — is a local-first, self-hostable scientific-paper library and literature-graph system for Linux.
 
-This repository is an implementation scaffold. It contains the intended project structure, core interfaces, placeholder services, documentation sources, and agent-oriented work packages. It is not yet a production application.
+It is designed around:
+
+* a central server that can run on the local machine or another PC on the local network;
+* one or more local workstation agents;
+* GROBID-based PDF extraction;
+* original-folder PDF references plus optional “teleport” into a managed server library;
+* shelves, racks, tags, citation contexts, citation graphs, and scoped citation summaries;
+* citation export;
+* local summaries, topic modeling, keyword suggestions, and semantic search.
+
+This repository is currently an implementation scaffold. It contains the intended project structure, core interfaces, placeholder services, documentation sources, runbooks, and agent-oriented work packages. It is not yet a production application.
 
 ## Core goals
 
-- Keep PDFs in their original folders by default.
-- Allow selected PDFs to be teleported to a managed server-side library store.
-- Support an external server on the local network plus an on-PC local agent.
-- Prevent arbitrary filesystem browsing from the browser or server.
-- Extract metadata, full text, references, citation mentions, citation contexts, and PDF coordinates.
-- Organize works into shelves and shelves into racks, with many-to-many membership.
-- Provide local citation graphs and citation summaries scoped to the full library, rack, shelf, or search result.
-- Export citations for papers, shelves, racks, and selections in BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, and free-text bibliography formats.
-- Provide local AI summaries, user/external summaries, keyword suggestions, topic modeling, and semantic search.
-- Require authenticated access. There is intentionally no guest/read-only anonymous mode.
-- Provide server-local credential recovery through a command-line tool, not through an unauthenticated web endpoint.
+* Keep PDFs in their original folders by default.
+* Allow selected PDFs to be teleported to a managed server-side library store.
+* Support an external server on the local network plus an on-PC local agent.
+* Prevent arbitrary filesystem browsing from the browser or server.
+* Extract metadata, full text, references, citation mentions, citation contexts, and PDF coordinates.
+* Organize works into shelves and shelves into racks, with many-to-many membership.
+* Provide local citation graphs and citation summaries scoped to the full library, rack, shelf, search result, or selected papers.
+* Export citations for papers, shelves, racks, and selections in BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, and free-text bibliography formats.
+* Provide local AI summaries, user/external summaries, keyword suggestions, topic modeling, and semantic search.
+* Require authenticated access. There is intentionally no guest/read-only anonymous mode.
+* Provide server-local credential recovery through a command-line tool, not through an unauthenticated web endpoint.
 
 ## Repository layout
 
 ```text
-backend/                 FastAPI backend scaffold
-agent/                   Local workstation agent scaffold
-frontend/                Web UI scaffold
-config/                  Example server and agent configuration
-docs/                    Markdown docs, LaTeX manual sources, runbooks, diagrams
-scripts/                 Operational helper scripts
-SPECIFICATION.md         Full implementation specification
-CHANGELOG.md             Project changelog
-PROGRESS.md              Current build status and next steps
-AGENTS.md                Coding-agent coordination guide
-WORK_SPLIT.md            Suggested work packages for parallel agents
-HINTS_FOR_AGENTS.md      Practical implementation hints and constraints
+backend/             FastAPI backend scaffold
+agent/               Local workstation agent scaffold
+frontend/            Web UI scaffold
+config/              Example server and agent configuration
+docs/                Markdown docs, LaTeX manual sources, runbooks, diagrams
+scripts/             Operational helper scripts
+SPECIFICATION.md     Full implementation specification
+CHANGELOG.md         Project changelog
+PROGRESS.md          Current build status and next steps
+AGENTS.md            Coding-agent coordination guide
+WORK_SPLIT.md        Suggested work packages for parallel agents
+HINTS_FOR_AGENTS.md  Practical implementation hints and constraints
 ```
 
-## Suggested first run for developers
+## Development philosophy
 
-The project is built and evaluated in containers (server + client) via Docker Compose,
-targeting Python 3.12. See `docs/runbooks/dev_containers.md` for details.
+Docker Compose is the source of truth for runtime, migrations, tests, and deployment-like verification.
+
+Host-local tools are allowed for fast source hygiene only:
+
+* Ruff auto-fixing and formatting;
+* pre-commit hooks;
+* docs compilation;
+* source archive creation.
+
+The intended workflow is:
 
 ```bash
-cp .env.example .env                 # required: provides Postgres credentials
-docker compose up -d --build         # postgres, redis, api (server), agent (client)
-docker compose run --rm api pytest   # run the test suite in the api container
-curl -fsS http://127.0.0.1:8000/api/v1/health
+# Fast local source hygiene
+make fix
+pre-commit run --all-files
+
+# Docker-based verification
+make check
+
+# Or the full local readiness flow
+make ready
 ```
 
-Equivalent Make targets: `make up`, `make test`, `make down`. For host-based development
-without containers you can instead run `make dev-up` (Postgres + Redis only) and
-`make backend-dev`, which requires a local Python 3.12 environment with
-`backend/requirements-dev.txt` installed.
+CI should check formatting/linting and run tests, but auto-fixes should happen locally before commit.
 
-The current scaffold will not implement all endpoints yet. The goal of the first milestone is to make `GET /api/v1/health` work, initialize the database, create an admin user, register a local agent, scan a folder, and import one PDF into the processing queue.
+## First run
 
-## Important security assumption
+Create local environment values:
 
-The server and web browser must never receive arbitrary local filesystem access. Files are accessed only through configured roots, managed library objects, or local-agent file IDs. The agent refuses raw path requests and exposes only files that it has indexed from its configured roots.
+```bash
+make init
+```
 
-No real credentials, secrets, or personal data may be committed. Light config (URLs, IPs, ports) goes through `.env`/`config/*.local.yaml`, serious secrets are read from the environment, and user passwords are bcrypt-hashed. The policy in `docs/runbooks/secrets_management.md` is enforced by `scripts/check_secrets.py` via a pre-commit hook and CI. Install the hook once with `bash scripts/install_git_hooks.sh`.
+This copies `.env.example` to `.env` if `.env` does not already exist.
+
+Build and start the development stack:
+
+```bash
+make up
+```
+
+This starts the default Docker Compose services:
+
+* `postgres`
+* `redis`
+* `api`
+* `worker`
+* `agent`
+* `frontend`
+
+Check service state:
+
+```bash
+make ps
+```
+
+Follow logs:
+
+```bash
+make logs
+```
+
+Apply migrations manually, if needed:
+
+```bash
+make migrate
+```
+
+The API container also applies migrations on normal server startup.
+
+Run the Docker-based verification pipeline:
+
+```bash
+make check
+```
+
+This runs:
+
+```bash
+make lint-docker
+make test-docker
+```
+
+Stop containers while keeping database volumes:
+
+```bash
+make down
+```
+
+Remove containers and named volumes/data:
+
+```bash
+make clean
+```
+
+Use `make clean` carefully. It is destructive.
+
+## Common Make targets
+
+Run:
+
+```bash
+make help
+```
+
+Important targets:
+
+```text
+make init                  Create .env from .env.example if missing
+make build                 Build Docker Compose images
+make up                    Build and start the full development stack
+make up-api                Start Postgres, Redis, and API
+make up-infra              Start only Postgres and Redis
+make ps                    Show service status
+make logs                  Follow all logs
+make down                  Stop containers but keep volumes/data
+make clean                 Stop containers and remove named volumes/data
+
+make migrate               Apply Alembic migrations inside the API container
+make migration MSG="..."   Create an autogenerated Alembic revision
+make db-current            Show current Alembic revision
+make db-history            Show Alembic migration history
+make db-shell              Open psql in the Postgres container
+
+make fix                   Auto-fix Ruff lint/formatting on the host
+make fix-docker            Auto-fix Ruff lint/formatting inside the API container
+make lint                  Run Docker lint checks
+make lint-local            Run host lint checks
+make precommit             Run all pre-commit hooks on all files
+make test                  Run Docker tests
+make test-local            Run host tests
+make check                 Run Docker lint and tests
+make ready                 Auto-fix, run pre-commit, then Docker lint/tests
+make ci                    Approximate CI checks locally
+
+make bootstrap-admin       Create the initial owner account
+make reset-admin-password  Reset an owner/admin password from the server console
+make docs                  Compile LaTeX documentation
+make source-archive        Create a source archive
+```
+
+## Pre-commit hooks
+
+Install once:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Run manually over the full repository:
+
+```bash
+pre-commit run --all-files
+```
+
+When a hook modifies files, `pre-commit` reports failure and stops. This is expected. Review the changes, stage them, and run the command again:
+
+```bash
+git status
+git diff
+git add .
+pre-commit run --all-files
+```
+
+## Linting and formatting
+
+Preferred local autofix:
+
+```bash
+make fix
+```
+
+Preferred Docker verification:
+
+```bash
+make lint
+```
+
+Equivalent explicit commands:
+
+```bash
+ruff check backend agent scripts --fix
+ruff format backend agent scripts
+
+docker compose run --rm --no-deps api ruff check backend agent scripts
+docker compose run --rm --no-deps api ruff format --check backend agent scripts
+```
+
+## Testing
+
+The default project test command runs in Docker:
+
+```bash
+make test
+```
+
+Host-local tests are available for quick iteration when the host environment has the required Python dependencies installed:
+
+```bash
+make test-local
+```
+
+Use Docker-based tests before pushing.
+
+## Database migrations
+
+Create a migration:
+
+```bash
+make migration MSG="create works table"
+```
+
+Apply migrations:
+
+```bash
+make migrate
+```
+
+Show current revision:
+
+```bash
+make db-current
+```
+
+Open a database shell:
+
+```bash
+make db-shell
+```
+
+Migrations should be generated and applied inside Docker unless there is a specific reason to use a host-local environment.
+
+## Server-local credential recovery
+
+Credential recovery is intentionally not exposed through an unauthenticated web route.
+
+Create the first owner:
+
+```bash
+make bootstrap-admin
+```
+
+Reset an owner/admin password from the server console:
+
+```bash
+make reset-admin-password
+```
+
+See `docs/runbooks/credential_recovery.md`.
+
+## Security assumptions
+
+The server and web browser must never receive arbitrary local filesystem access.
+
+Files are accessed only through:
+
+* configured server-side roots;
+* managed library objects;
+* local-agent file IDs;
+* explicit teleport/upload flows.
+
+The agent refuses raw path requests and exposes only files that it has indexed from its configured roots.
+
+No real credentials, secrets, or personal data may be committed.
+
+Light configuration such as URLs, IPs, ports, feature flags, and model names goes through `.env` or `config/*.local.yaml`.
+
+Serious secrets are read from environment variables and never hardcoded.
+
+User passwords are bcrypt-hashed.
+
+See `docs/runbooks/secrets_management.md`.
 
 ## Documentation
 
-The implementation manual source lives in `docs/latex/`. To compile it:
+The implementation manual source lives in `docs/latex/`.
+
+Compile it with:
+
+```bash
+make docs
+```
+
+or directly:
 
 ```bash
 cd docs

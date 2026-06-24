@@ -1,72 +1,250 @@
-.PHONY: help build up down dev-up dev-down backend-dev agent-dev frontend-dev frontend-build migrate test test-local docker-test lint docker-lint check-secrets docs zip
+# PaRacORD / PaperRacks developer Makefile
+#
+# Philosophy:
+# - Docker Compose is the source of truth for runtime, migrations, and tests.
+# - Host-local tools are allowed only for fast source hygiene: Ruff, pre-commit,
+#   docs, and archive generation.
+# - CI should use check-only commands; local developer commands may auto-fix.
 
-help:
-	@echo "PaperRacks developer commands"
-	@echo "  make build        Build the api/agent container images"
-	@echo "  make up           Build and start the full stack (postgres, redis, api, agent)"
-	@echo "  make down         Stop the stack and remove volumes"
-	@echo "  make dev-up       Start only local infrastructure (postgres, redis)"
-	@echo "  make dev-down     Stop infrastructure"
-	@echo "  make backend-dev  Run backend dev server on the host"
-	@echo "  make agent-dev    Run agent CLI help on the host"
-	@echo "  make frontend-dev Start the Svelte frontend in Docker"
-	@echo "  make frontend-build Build the Svelte frontend in Docker"
-	@echo "  make migrate      Apply backend database migrations"
-	@echo "  make test         Run the test suite in the api container (Python 3.12)"
-	@echo "  make test-local   Run the test suite on the host interpreter"
-	@echo "  make lint         Run lint checks in the api container"
-	@echo "  make check-secrets Scan tracked files for committed secrets"
-	@echo "  make docs         Compile LaTeX docs"
-	@echo "  make zip          Create source archive"
+SHELL := /usr/bin/env bash
+.DEFAULT_GOAL := help
 
-build:
-	docker compose build
+COMPOSE ?= docker compose
+API_SERVICE ?= api
+AGENT_SERVICE ?= agent
+FRONTEND_SERVICE ?= frontend
 
-up:
-	docker compose up -d --build
+PY_PATHS := backend agent scripts
+PYTEST_PATHS := backend/tests agent/tests
 
-down:
-	docker compose down -v
+ALEMBIC := alembic -c backend/alembic.ini
+API_RUN := $(COMPOSE) run --rm $(API_SERVICE)
+API_RUN_NODEPS := $(COMPOSE) run --rm --no-deps $(API_SERVICE)
+AGENT_RUN := $(COMPOSE) run --rm --no-deps $(AGENT_SERVICE)
+FRONTEND_RUN := $(COMPOSE) run --rm --no-deps $(FRONTEND_SERVICE)
 
-dev-up:
-	docker compose up -d postgres redis
+.PHONY: help
+help: ## Show this help.
+	@echo "PaRacORD developer commands"
+	@echo
+	@echo "Setup:"
+	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-24s %s\n", $$1, $$2}'
 
-dev-down:
-	docker compose down
+# ---------------------------------------------------------------------------
+# Setup / lifecycle
+# ---------------------------------------------------------------------------
 
-backend-dev:
-	cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.PHONY: init
+init: ## Create .env from .env.example if missing.
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "Created .env from .env.example"; \
+	else \
+		echo ".env already exists"; \
+	fi
 
-agent-dev:
-	cd agent && python -m paperracks_agent.cli --help
+.PHONY: build
+build: ## Build all Docker Compose images.
+	$(COMPOSE) build
 
-frontend-dev:
-	docker compose up frontend
+.PHONY: up
+up: init ## Build and start the full development stack.
+	$(COMPOSE) up -d --build
 
-frontend-build:
-	docker compose run --rm --no-deps frontend npm run build
+.PHONY: up-api
+up-api: init ## Start only runtime services needed by the API.
+	$(COMPOSE) up -d --build postgres redis api
 
-migrate:
-	alembic -c backend/alembic.ini upgrade head
+.PHONY: up-infra
+up-infra: init ## Start only infrastructure services: Postgres and Redis.
+	$(COMPOSE) up -d postgres redis
 
-# Default test target runs in the container so it does not depend on the host
-# interpreter/deps. Tests use SQLite, so no database service is required.
-test: docker-test
+.PHONY: up-frontend
+up-frontend: init ## Start the frontend service.
+	$(COMPOSE) up frontend
 
-docker-test:
-	docker compose run --rm --no-deps api pytest
+.PHONY: ps
+ps: ## Show Docker Compose service status.
+	$(COMPOSE) ps
 
-test-local:
-	pytest backend/tests agent/tests
+.PHONY: logs
+logs: ## Follow logs for all services.
+	$(COMPOSE) logs -f
 
-lint:
-	docker compose run --rm --no-deps api ruff check backend agent scripts
+.PHONY: logs-api
+logs-api: ## Follow API logs.
+	$(COMPOSE) logs -f api
 
-check-secrets:
+.PHONY: logs-worker
+logs-worker: ## Follow worker logs.
+	$(COMPOSE) logs -f worker
+
+.PHONY: logs-agent
+logs-agent: ## Follow agent logs.
+	$(COMPOSE) logs -f agent
+
+.PHONY: down
+down: ## Stop containers but keep named volumes/data.
+	$(COMPOSE) down
+
+.PHONY: clean
+clean: ## Stop containers and remove named volumes/data. Destructive.
+	$(COMPOSE) down -v
+
+.PHONY: rebuild
+rebuild: ## Rebuild images from scratch.
+	$(COMPOSE) build --no-cache
+
+# ---------------------------------------------------------------------------
+# Database / migrations
+# ---------------------------------------------------------------------------
+
+.PHONY: migrate
+migrate: init ## Apply backend database migrations inside the API container.
+	$(API_RUN) $(ALEMBIC) upgrade head
+
+.PHONY: migration
+migration: init ## Create a new Alembic revision. Usage: make migration MSG="message"
+	@if [ -z "$(MSG)" ]; then \
+		echo 'Usage: make migration MSG="describe change"'; \
+		exit 2; \
+	fi
+	$(API_RUN) $(ALEMBIC) revision --autogenerate -m "$(MSG)"
+
+.PHONY: db-current
+db-current: init ## Show current Alembic revision.
+	$(API_RUN) $(ALEMBIC) current
+
+.PHONY: db-history
+db-history: init ## Show Alembic migration history.
+	$(API_RUN) $(ALEMBIC) history --verbose
+
+.PHONY: db-shell
+db-shell: init ## Open psql inside the Postgres container.
+	$(COMPOSE) exec postgres psql -U "$${POSTGRES_USER:-paperracks}" -d "$${POSTGRES_DB:-paperracks}"
+
+# ---------------------------------------------------------------------------
+# Tests and checks
+# ---------------------------------------------------------------------------
+
+.PHONY: test
+test: test-docker ## Run tests in Docker Compose.
+
+.PHONY: test-docker
+test-docker: init ## Run backend and agent tests inside the API container.
+	$(API_RUN_NODEPS) pytest $(PYTEST_PATHS)
+
+.PHONY: test-api
+test-api: init ## Run backend tests inside the API container.
+	$(API_RUN_NODEPS) pytest backend/tests
+
+.PHONY: test-agent
+test-agent: init ## Run agent tests inside the API container.
+	$(API_RUN_NODEPS) pytest agent/tests
+
+.PHONY: test-local
+test-local: ## Run tests on the host interpreter.
+	pytest $(PYTEST_PATHS)
+
+.PHONY: lint
+lint: lint-docker ## Run lint checks in Docker Compose.
+
+.PHONY: lint-docker
+lint-docker: init ## Run Ruff lint and format checks inside the API container.
+	$(API_RUN_NODEPS) ruff check $(PY_PATHS)
+	$(API_RUN_NODEPS) ruff format --check $(PY_PATHS)
+
+.PHONY: lint-local
+lint-local: ## Run Ruff lint and format checks on the host.
+	ruff check $(PY_PATHS)
+	ruff format --check $(PY_PATHS)
+
+.PHONY: fix
+fix: ## Auto-fix Ruff lint and formatting on the host.
+	ruff check $(PY_PATHS) --fix
+	ruff format $(PY_PATHS)
+
+.PHONY: fix-docker
+fix-docker: init ## Auto-fix Ruff lint and formatting inside the API container.
+	$(API_RUN_NODEPS) ruff check $(PY_PATHS) --fix
+	$(API_RUN_NODEPS) ruff format $(PY_PATHS)
+
+.PHONY: precommit
+precommit: ## Run all pre-commit hooks on all files.
+	pre-commit run --all-files
+
+.PHONY: check-secrets
+check-secrets: ## Run the repository secret scanner.
 	python scripts/check_secrets.py --all
 
-docs:
-	cd docs && ./compile_docs.sh
+.PHONY: check
+check: lint-docker test-docker ## Run the standard Docker verification pipeline.
 
-zip:
+.PHONY: ready
+ready: fix precommit check ## Auto-fix locally, run pre-commit, then Docker lint/tests.
+
+.PHONY: ci
+ci: lint-docker test-docker check-secrets ## Approximate the CI checks locally.
+
+# ---------------------------------------------------------------------------
+# Application commands
+# ---------------------------------------------------------------------------
+
+.PHONY: shell-api
+shell-api: init ## Open a shell inside the API container.
+	$(API_RUN) bash
+
+.PHONY: shell-agent
+shell-agent: init ## Open a shell inside the agent container.
+	$(AGENT_RUN) bash
+
+.PHONY: backend-dev
+backend-dev: ## Run backend dev server on the host.
+	cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+.PHONY: agent-help
+agent-help: init ## Show agent CLI help in Docker.
+	$(AGENT_RUN) python -m paperracks_agent.cli --help
+
+.PHONY: agent-dev
+agent-dev: agent-help ## Alias for agent-help.
+
+.PHONY: frontend-dev
+frontend-dev: init ## Start the frontend dev server in Docker.
+	$(COMPOSE) up frontend
+
+.PHONY: frontend-build
+frontend-build: init ## Build the frontend in Docker.
+	$(FRONTEND_RUN) npm run build
+
+.PHONY: health
+health: ## Check local API health endpoint.
+	curl -fsS http://127.0.0.1:8000/api/v1/health
+
+# ---------------------------------------------------------------------------
+# Admin / operations
+# ---------------------------------------------------------------------------
+
+.PHONY: bootstrap-admin
+bootstrap-admin: init ## Create the initial owner account inside the API container.
+	$(API_RUN) python scripts/bootstrap_admin.py
+
+.PHONY: reset-admin-password
+reset-admin-password: init ## Reset an owner/admin password from the server console.
+	$(API_RUN) python scripts/reset_admin_password.py
+
+.PHONY: source-archive
+source-archive: ## Create a source archive.
 	python scripts/create_source_archive.py
+
+.PHONY: zip
+zip: source-archive ## Alias for source-archive.
+
+# ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+
+.PHONY: docs
+docs: ## Compile LaTeX documentation.
+	cd docs && ./compile_docs.sh

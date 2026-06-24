@@ -25,9 +25,9 @@ repos:
     hooks:
       - id: ruff-check
         args: ["--fix"]
-        files: ^(backend|agent|scripts)/.*\.py$
+        files: ^(backend|agent|scripts|frontend)/.*\.py$
       - id: ruff-format
-        files: ^(backend|agent|scripts)/.*\.py$
+        files: ^(backend|agent|scripts|frontend)/.*\.py$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
