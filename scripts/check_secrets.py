@@ -67,6 +67,9 @@ SKIP_SUFFIXES = (
 )
 SKIP_NAMES = {"package-lock.json", "yarn.lock", "poetry.lock", "pdm.lock"}
 
+# Config-style files where an unquoted value (KEY=value) is a real literal secret.
+CONFIG_SUFFIXES = (".env", ".yaml", ".yml", ".ini", ".toml", ".cfg", ".conf", ".properties")
+
 # A file is treated as an example/template if its name contains one of these.
 EXAMPLE_MARKERS = (".example", ".sample", ".template", "example.")
 
@@ -130,8 +133,11 @@ KEY_NAMES = (
     r"pass(?:wd|word)?|secret|api[_-]?key|access[_-]?key|secret[_-]?key|"
     r"auth[_-]?token|client[_-]?secret|private[_-]?key|bearer"
 )
+# An optional snake_case prefix lets `DB_PASSWORD`, `access_token`, `aws_secret_key`,
+# etc. match (the key core must still be immediately followed by `:`/`=`, so
+# `password_hash =` / `tokenizer =` do NOT match).
 ASSIGNMENT_RE = re.compile(
-    rf"(?i)\b({KEY_NAMES})\s*[:=]\s*"
+    rf"(?i)\b(?:[a-z0-9]+_)*({KEY_NAMES})\s*[:=]\s*"
     r"""(?P<q>['"]?)(?P<val>[^'"\s,;)#]{6,})(?P=q)"""
 )
 
@@ -180,6 +186,11 @@ def scan_file(path: Path) -> list[tuple[int, str, str]]:
         return []
 
     example = is_example_file(path)
+    # In config files (env/yaml/ini/...), unquoted literal values are real secrets.
+    # In source files, a hardcoded secret is a *quoted* string literal; an unquoted
+    # value (e.g. `password=payload.password`, `token=os.environ[...]`) is a code
+    # reference, not a literal — so only flag quoted values there.
+    is_config = path.suffix.lower() in CONFIG_SUFFIXES or path.name.startswith(".env")
     findings: list[tuple[int, str, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         if ALLOWLIST_MARKER in line:
@@ -193,6 +204,9 @@ def scan_file(path: Path) -> list[tuple[int, str, str]]:
                 continue
             # In example/template files, unquoted simple values are expected placeholders.
             if example:
+                continue
+            # Source files: only a quoted string literal can be a hardcoded secret.
+            if not is_config and not m.group("q"):
                 continue
             findings.append((lineno, f"hardcoded {m.group(1).lower()}", line.strip()[:160]))
     return findings

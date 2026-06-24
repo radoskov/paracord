@@ -15,4 +15,7 @@ ignore = []
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests", "agent/tests"]
-pythonpath = ["backend", "agent"]
+pythonpath = ["backend", "agent", "."]
+# importlib mode lets the two test_security.py modules (backend + agent) coexist
+# without an import-file-mismatch; "." on pythonpath makes `scripts` importable.
+addopts = "--import-mode=importlib"

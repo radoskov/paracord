@@ -30,6 +30,8 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Auth service tests cover credential validation, token hashing, session revocation, and audit persistence.
 - API dependency tests cover valid, missing, and invalid bearer tokens.
 - Secrets-handling policy documented and enforced via a secret scanner, pre-commit hook, and CI workflow; hardcoded Postgres dev password removed from compose in favor of `.env`.
+- Role-based authorization: `require_roles`/`require_owner` dependencies and owner-only admin endpoints for user management (list/create/role-change/disable) and audit-event access, with `user.created`/`user.role_changed`/`user.disabled` audit events and last-owner protection.
+- Login account-enumeration mitigation (constant-time dummy verification on the no-user path) and a startup assertion that no guest role is configured.
 
 ## In progress
 
@@ -41,7 +43,8 @@ The project is at scaffold stage. The repository contains the planned module lay
 
 ## Not started
 
-- Role-based authorization policies and login rate limiting.
+- Login rate limiting / failed-login lockout (role-based authorization is now implemented).
+- In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - File-root scanner implementation.
 - Agent registration and token rotation implementation.
 - GROBID TEI parser implementation.
@@ -53,6 +56,18 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Local LLM summarization pipeline.
 - Audit-log storage and admin views.
 - End-to-end tests.
+
+## Tech debt and cleanups
+
+Low-severity items found during the audit, not tied to a feature milestone. Address opportunistically.
+
+- Remove or fully wire the dead `guest_access_enabled` setting (`backend/app/core/config.py`). A startup `assert_no_guest_roles` check now enforces that no guest role is present in `security.allowed_roles`.
+- Migrate deprecated `datetime.utcnow()` to `datetime.now(timezone.utc)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`.
+- Guard bcrypt's silent 72-byte password truncation in `core/security.py` (length check or SHA-256 pre-hash).
+- Add symlink-escape and `../` traversal test cases to `agent/tests/test_security.py` (the primitive is correct but currently untested).
+- Remove or wire the unused agent config flags `follow_symlinks` / `teleport_enabled`.
+- Note in `docs/architecture/api_surface.md` and `data_model.md` that they reflect current stubs and defer to `SPECIFICATION.md` §10 / §9.
+- Relabel the `SPECIFICATION.md` front-matter Contents as a thematic overview (its numbers do not match the section numbers).
 
 ## Next milestone: M0 developer skeleton
 

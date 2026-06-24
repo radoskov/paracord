@@ -8,6 +8,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added role-based authorization (`require_roles` / `require_owner` dependencies) and owner-only admin endpoints under `/api/v1/admin`: list/create users, change a user's role, disable a user (with last-active-owner protection), and paginated audit-event access. New `user.created` (admin API), `user.role_changed`, and `user.disabled` audit events.
+- Added an account-enumeration mitigation to login (constant-time bcrypt verification on the unknown/disabled-user path) and a startup assertion that no guest role is present in `security.allowed_roles`.
 - Added a reusable FastAPI current-user dependency for bearer-token authentication.
 - Protected all non-health, non-login API routers with the authentication dependency.
 - Added API dependency tests for valid, missing, and invalid bearer tokens.
@@ -31,6 +33,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 - Integrated supporting open-source tools into the spec: PyMuPDF (fast preview), YAKE/KeyBERT (keywords), OCRmyPDF/Tesseract (OCR fallback), anystyle/refextract (reference fallback), biblio-glutton (local consolidation), Nougat/Marker (optional ML extraction), and Zotero translation-server (URL metadata).
 - Added usability features to the spec: reading queue, related-papers suggestions, live shelf/rack bibliography, and annotation/note full-text search.
 - Made topic modeling and body summaries tiered (lightweight default, heavier opt-in): BERTopic is now optional and off by default with lightweight keyword extraction as the default; paper body summaries are Tier 0 abstract → Tier 1 extractive Method/Experiment/Results (sumy/TextRank, no LLM) → Tier 2 opt-in local-LLM abstractive (Ollama). Reflected in `config/server.example.yaml`.
+
+### Fixed
+
+- Registered the `app.models.ai` models (`Summary`, `TopicAssignment`) in `models/__init__.py` so the `summaries`/`topic_assignments` tables are no longer silently omitted from `Base.metadata` (Alembic autogenerate and `create_all`).
+- Fixed `make test` collection: switched pytest to `--import-mode=importlib` and added the repo root to `pythonpath` so the two `test_security.py` modules (backend + agent) coexist and `scripts` is importable; added `scripts/__init__.py`.
+- Made the `docker-compose.yml` Postgres credentials fail fast with a clear message (`${VAR:?…}`) when `.env` is missing, instead of silently breaking `make dev-up`.
+- Refreshed `FILE_TREE.md` (secrets-policy files, CI workflow, new scripts) and annotated the not-yet-created owned paths in `WORK_SPLIT.md`.
+- Improved `scripts/check_secrets.py`: in source files only quoted string literals are flagged (unquoted code references like `password=payload.password` no longer false-positive), config-style files still flag unquoted values, and prefixed key names (`DB_PASSWORD`, `access_token`, …) are now detected.
 
 ### Security
 

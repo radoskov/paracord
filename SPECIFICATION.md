@@ -323,6 +323,7 @@ auth.password_reset_cli
 auth.session_revoked
 user.created
 user.role_changed
+user.disabled
 source.created
 source.folder_added
 source.agent_enrolled
