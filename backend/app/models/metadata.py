@@ -3,8 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Float, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -15,9 +14,9 @@ class MetadataAssertion(Base):
 
     __tablename__ = "metadata_assertions"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[str] = mapped_column(String(64), index=True)
-    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     field_name: Mapped[str] = mapped_column(String(128), index=True)
     value: Mapped[str] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(128), index=True)
