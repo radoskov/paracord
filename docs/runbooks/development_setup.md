@@ -33,7 +33,7 @@ make up                   # start the stack if it is not already running
 
 make fix                  # fast host-local Ruff autofix and formatting
 pre-commit run --all-files # run all pre-commit hooks manually
-make check                # Docker lint + Docker tests
+make check                # host-local lint + Docker tests
 
 git status
 git add .
@@ -59,6 +59,8 @@ make build                # build Docker Compose images
 make up                   # start the full development stack
 make up-api               # start postgres, redis, and api
 make up-infra             # start only postgres and redis
+make up-extraction        # start the stack plus GROBID (extraction profile)
+make up-ai                # start the stack plus Ollama (ai profile)
 make ps                   # show container status
 make logs                 # follow logs for all services
 make logs-api             # follow API logs
@@ -76,18 +78,16 @@ make db-history           # show migration history
 make db-shell             # open psql in the postgres container
 
 make fix                  # host-local Ruff autofix and format
-make fix-docker           # same, but inside the API container
-make lint                 # Docker Ruff check + format check
-make lint-local           # host-local Ruff check + format check
+make lint                 # host-local Ruff check + format check
 make precommit            # run all pre-commit hooks on all files
 
-make test                 # run tests in Docker
-make test-api             # run backend tests in Docker
-make test-agent           # run agent tests in Docker
+make test                 # backend (api container) + agent (agent container) tests
+make test-api             # run backend tests in the API container
+make test-agent           # run agent tests in the agent container
 make test-local           # run tests on the host, only if dependencies are installed
 
-make check                # Docker lint + Docker tests
-make ready                # make fix + pre-commit + Docker lint/tests
+make check                # host-local lint + Docker tests
+make ready                # make fix + pre-commit + lint + tests
 make ci                   # approximate CI locally
 
 make bootstrap-admin      # create first owner account
@@ -204,7 +204,7 @@ git commit -m "..."
 git push
 ```
 
-Use `make check` before pushing. It runs linting and tests in Docker, which is the authoritative environment.
+Use `make check` before pushing. It runs host-local Ruff lint and Docker-based tests; Docker is the authoritative environment for tests (runtime + database), while Ruff is pure static analysis and runs on the host.
 
 ## Database schema-change workflow
 
@@ -273,13 +273,16 @@ If a contributor intentionally chooses host-local frontend tooling, they may use
 
 ## Lint and formatting workflow
 
-Fast local autofix:
+Ruff is pure static analysis (no runtime, database, or services), so lint and format run
+host-local. Versions are pinned via `.pre-commit-config.yaml` / `requirements-dev.txt`.
+
+Auto-fix:
 
 ```bash
 make fix
 ```
 
-Docker lint check:
+Check (no changes):
 
 ```bash
 make lint
@@ -288,11 +291,11 @@ make lint
 Manual equivalent:
 
 ```bash
-ruff check backend agent scripts --fix
+ruff check backend agent scripts --fix    # fix
 ruff format backend agent scripts
 
-docker compose run --rm --no-deps api ruff check backend agent scripts
-docker compose run --rm --no-deps api ruff format --check backend agent scripts
+ruff check backend agent scripts          # check-only
+ruff format --check backend agent scripts
 ```
 
 CI should use check-only commands, not auto-fix commands.

@@ -31,14 +31,13 @@ make up-infra             # start postgres and redis only
 make frontend-dev         # start the Svelte/frontend dev server
 make frontend-build       # build the frontend in Docker
 
-make test                 # run backend/agent tests in Docker
-make test-api             # run backend tests in Docker
-make test-agent           # run agent tests in Docker
-make lint                 # run Ruff check + Ruff format check in Docker
+make test                 # backend tests (api container) + agent tests (agent container)
+make test-api             # run backend tests in the API container
+make test-agent           # run agent tests in the agent container
+make lint                 # host-local Ruff check + format check
 make fix                  # host-local Ruff autofix and formatting
-make fix-docker           # Docker-based Ruff autofix and formatting
-make check                # Docker lint + Docker tests
-make ready                # local autofix + pre-commit + Docker checks
+make check                # host-local lint + Docker tests
+make ready                # local autofix + pre-commit + lint + tests
 
 make migrate              # apply migrations in Docker
 make migration MSG="..."  # generate a new Alembic migration in Docker
@@ -73,12 +72,13 @@ docker compose up frontend
 docker compose run --rm --no-deps frontend npm run build
 # build the frontend
 
-docker compose run --rm --no-deps api ruff check backend agent scripts
-docker compose run --rm --no-deps api ruff format --check backend agent scripts
-# run lint checks inside the API container
+ruff check backend agent scripts
+ruff format --check backend agent scripts
+# lint checks run host-local (Ruff needs no runtime/services)
 
-docker compose run --rm api pytest backend/tests agent/tests
-# run the Python test suite inside Docker
+docker compose run --rm --no-deps api pytest backend/tests
+docker compose run --rm --no-deps agent pytest agent/tests
+# backend tests run in the API container; agent tests in the agent container
 
 docker compose run --rm api alembic -c backend/alembic.ini upgrade head
 # apply database migrations inside Docker
@@ -115,8 +115,8 @@ docker compose down -v
 | `worker` | background job worker | `make up` |
 | `agent` | local workstation agent scaffold | `make up` |
 | `frontend` | web UI development server | `make up`, `make frontend-dev` |
-| `grobid` | optional PDF extraction service | `docker compose --profile extraction up -d grobid` |
-| `ollama` | optional local AI service | `docker compose --profile ai up -d ollama` |
+| `grobid` | optional PDF extraction service | `make up-extraction` (profile `extraction`) |
+| `ollama` | optional local AI service | `make up-ai` (profile `ai`) |
 
 ## What should run in Docker?
 
@@ -136,7 +136,7 @@ These may run on the host for speed:
 
 ```bash
 make fix                  # Ruff autofix
-make lint-local           # Ruff check
+make lint                 # Ruff check + format check
 make precommit            # pre-commit hooks
 make docs                 # documentation compilation
 make source-archive       # create source archive
@@ -216,20 +216,22 @@ make db-shell             # psql shell
 
 ## Optional GROBID service
 
-Start GROBID only when working on extraction:
+Start GROBID only when working on extraction (brings up the stack plus GROBID):
 
 ```bash
-docker compose --profile extraction up -d grobid
+make up-extraction
+# equivalent: docker compose --profile extraction up -d
 ```
 
 GROBID should be internal to the Docker network or backend. Do not expose it directly to the LAN.
 
 ## Optional Ollama service
 
-Start Ollama only when working on local AI:
+Start Ollama only when working on local AI (brings up the stack plus Ollama):
 
 ```bash
-docker compose --profile ai up -d ollama
+make up-ai
+# equivalent: docker compose --profile ai up -d
 ```
 
 Local AI features should be optional and should not block core library functionality.

@@ -74,6 +74,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed
 
+- Restructured the Makefile and runbooks for clearer test/lint/format workflows: tests run per component (`test-api` in the api container, `test-agent` in the agent container, `test` runs both) rather than forcing agent code into the server image; lint/format are host-local (`lint`/`fix`) since Ruff is pure static analysis; added `up-extraction`/`up-ai` profile targets for GROBID/Ollama; fixed `make db-shell` to expand `$POSTGRES_USER`/`$POSTGRES_DB` inside the Postgres container; added `agent/pyproject.toml` so the agent's pytest is properly configured. Updated `README.md`, `docs/runbooks/development_setup.md`, and `docs/runbooks/dev_containers.md` to match.
 - Bumped the target runtime to Python 3.12 (`pyproject.toml`, Dockerfiles, CI) and the Postgres image to `pgvector/pgvector:pg17`. `make test` now runs in the api container by default (`make test-local` runs on the host).
 - Reconciled `SPECIFICATION.md` with the implemented scaffold: roles are `owner | editor | reader` (was `owner | member`), the repository-layout and per-agent work split now defer to `WORK_SPLIT.md` (A–J) and the actual `backend/ frontend/ agent/` layout, config examples use port 8000 and bcrypt, and the milestone plan was re-ordered to front-load the single-machine loop (the local agent moved to M5).
 - Rewrote `ROADMAP.md` as a condensed mirror of the canonical `SPECIFICATION.md` §20 milestones and updated `PROGRESS.md`'s next-milestone section accordingly.
@@ -83,6 +84,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Fixed
 
+- Agent tests now actually run in Docker. They were silently skipped (the `agent/` tree isn't in the api container), and the explicit-path Make target failed outright; agent tests now run in the agent container, so `make test` exercises both backend (48) and agent (2) suites.
 - Made the `citation`/`metadata`/`ai` models use the generic `sqlalchemy.Uuid` instead of `postgresql.UUID`, matching the rest of the models so their tables can be created under SQLite (tests) as well as Postgres.
 - Fixed invalid `docker-compose.yml` YAML (the `${VAR:?…}` default messages contained an unquoted colon — "mapping value is not allowed in this context"); the guarded values are now quoted.
 - Replaced unmaintained `passlib` with the maintained `bcrypt` library in `core/security.py` — `passlib` 1.7.x raised `AttributeError: module 'bcrypt' has no attribute '__about__'` against modern bcrypt, breaking all password hashing. Added an explicit 72-byte length guard.

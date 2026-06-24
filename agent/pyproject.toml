@@ -1,0 +1,11 @@
+# Pytest configuration for the standalone agent component.
+#
+# The agent ships as its own image/deployable, so its tests run in the agent container
+# (not the server image). Lint/format for the whole repo is configured by the root
+# pyproject.toml and run host-local; this file intentionally contains no [tool.ruff]
+# section so Ruff keeps using the repo-root configuration for agent sources.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"

@@ -27,7 +27,7 @@ FRONTEND_RUN := $(COMPOSE) run --rm --no-deps $(FRONTEND_SERVICE)
 help: ## Show this help.
 	@echo "PaRacORD developer commands"
 	@echo
-	@echo "Setup:"
+	@echo "Available commands:"
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-24s %s\n", $$1, $$2}'
 
@@ -63,6 +63,14 @@ up-infra: init ## Start only infrastructure services: Postgres and Redis.
 .PHONY: up-frontend
 up-frontend: init ## Start the frontend service.
 	$(COMPOSE) up frontend
+
+.PHONY: up-extraction
+up-extraction: init ## Start the stack plus GROBID (extraction profile).
+	$(COMPOSE) --profile extraction up -d --build
+
+.PHONY: up-ai
+up-ai: init ## Start the stack plus Ollama (ai profile).
+	$(COMPOSE) --profile ai up -d --build
 
 .PHONY: ps
 ps: ## Show Docker Compose service status.
@@ -122,41 +130,31 @@ db-history: init ## Show Alembic migration history.
 
 .PHONY: db-shell
 db-shell: init ## Open psql inside the Postgres container.
-	$(COMPOSE) exec postgres psql -U "$${POSTGRES_USER:-paperracks}" -d "$${POSTGRES_DB:-paperracks}"
+	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 # ---------------------------------------------------------------------------
 # Tests and checks
 # ---------------------------------------------------------------------------
 
 .PHONY: test
-test: test-docker ## Run tests in Docker Compose.
-
-.PHONY: test-docker
-test-docker: init ## Run backend and agent tests inside the API container.
-	$(API_RUN_NODEPS) pytest $(PYTEST_PATHS)
+test: test-api test-agent ## Run backend and agent tests, each in its own container.
 
 .PHONY: test-api
 test-api: init ## Run backend tests inside the API container.
 	$(API_RUN_NODEPS) pytest backend/tests
 
 .PHONY: test-agent
-test-agent: init ## Run agent tests inside the API container.
-	$(API_RUN_NODEPS) pytest agent/tests
+test-agent: init ## Run agent tests inside the agent container.
+	$(AGENT_RUN) pytest agent/tests
 
 .PHONY: test-local
 test-local: ## Run tests on the host interpreter.
 	pytest $(PYTEST_PATHS)
 
+# Ruff is pure static analysis (no runtime/services needed), so lint/format are
+# host-local. Versions are pinned via .pre-commit-config.yaml and requirements-dev.txt.
 .PHONY: lint
-lint: lint-docker ## Run lint checks in Docker Compose.
-
-.PHONY: lint-docker
-lint-docker: init ## Run Ruff lint and format checks inside the API container.
-	$(API_RUN_NODEPS) ruff check $(PY_PATHS)
-	$(API_RUN_NODEPS) ruff format --check $(PY_PATHS)
-
-.PHONY: lint-local
-lint-local: ## Run Ruff lint and format checks on the host.
+lint: ## Run Ruff lint and format checks on the host.
 	ruff check $(PY_PATHS)
 	ruff format --check $(PY_PATHS)
 
@@ -164,11 +162,6 @@ lint-local: ## Run Ruff lint and format checks on the host.
 fix: ## Auto-fix Ruff lint and formatting on the host.
 	ruff check $(PY_PATHS) --fix
 	ruff format $(PY_PATHS)
-
-.PHONY: fix-docker
-fix-docker: init ## Auto-fix Ruff lint and formatting inside the API container.
-	$(API_RUN_NODEPS) ruff check $(PY_PATHS) --fix
-	$(API_RUN_NODEPS) ruff format $(PY_PATHS)
 
 .PHONY: precommit
 precommit: ## Run all pre-commit hooks on all files.
@@ -179,13 +172,13 @@ check-secrets: ## Run the repository secret scanner.
 	python scripts/check_secrets.py --all
 
 .PHONY: check
-check: lint-docker test-docker ## Run the standard Docker verification pipeline.
+check: lint test ## Host-local lint plus Docker tests.
 
 .PHONY: ready
-ready: fix precommit check ## Auto-fix locally, run pre-commit, then Docker lint/tests.
+ready: fix precommit check ## Auto-fix locally, run pre-commit, then lint + tests.
 
 .PHONY: ci
-ci: lint-docker test-docker check-secrets ## Approximate the CI checks locally.
+ci: lint test check-secrets ## Approximate the CI checks locally.
 
 # ---------------------------------------------------------------------------
 # Application commands

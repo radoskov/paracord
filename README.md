@@ -117,7 +117,7 @@ make migrate
 
 The API container also applies migrations on normal server startup.
 
-Run the Docker-based verification pipeline:
+Run the verification pipeline (host-local lint + Docker tests):
 
 ```bash
 make check
@@ -126,8 +126,8 @@ make check
 This runs:
 
 ```bash
-make lint-docker
-make test-docker
+make lint    # host-local Ruff check + format check
+make test    # backend tests (api container) + agent tests (agent container)
 ```
 
 Stop containers while keeping database volumes:
@@ -172,14 +172,14 @@ make db-history            Show Alembic migration history
 make db-shell              Open psql in the Postgres container
 
 make fix                   Auto-fix Ruff lint/formatting on the host
-make fix-docker            Auto-fix Ruff lint/formatting inside the API container
-make lint                  Run Docker lint checks
-make lint-local            Run host lint checks
+make lint                  Run Ruff lint + format checks on the host
 make precommit             Run all pre-commit hooks on all files
-make test                  Run Docker tests
+make test                  Run backend (api container) + agent (agent container) tests
+make test-api              Run backend tests in the API container
+make test-agent            Run agent tests in the agent container
 make test-local            Run host tests
-make check                 Run Docker lint and tests
-make ready                 Auto-fix, run pre-commit, then Docker lint/tests
+make check                 Host-local lint + Docker tests
+make ready                 Auto-fix, run pre-commit, then lint + tests
 make ci                    Approximate CI checks locally
 
 make bootstrap-admin       Create the initial owner account
@@ -220,20 +220,19 @@ Preferred local autofix:
 make fix
 ```
 
-Preferred Docker verification:
+Lint/format runs host-local — Ruff is pure static analysis and needs no runtime or
+services (versions are pinned via `.pre-commit-config.yaml` / `requirements-dev.txt`):
 
 ```bash
-make lint
+make lint   # ruff check + ruff format --check
+make fix     # auto-fix: ruff check --fix + ruff format
 ```
 
 Equivalent explicit commands:
 
 ```bash
-ruff check backend agent scripts --fix
-ruff format backend agent scripts
-
-docker compose run --rm --no-deps api ruff check backend agent scripts
-docker compose run --rm --no-deps api ruff format --check backend agent scripts
+ruff check backend agent scripts
+ruff format --check backend agent scripts
 ```
 
 ## Testing
