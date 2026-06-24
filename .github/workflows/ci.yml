@@ -1,0 +1,24 @@
+name: ci
+
+# Lint and test the backend/agent on the supported Python version.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-dev.txt -r agent/requirements.txt
+      - name: Lint
+        run: ruff check backend agent scripts
+      - name: Test
+        run: pytest

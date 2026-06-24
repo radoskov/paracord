@@ -2,13 +2,16 @@
 
 ```text
 .env.example
+.github/workflows/ci.yml
 .github/workflows/secret-scan.yml
 .gitignore
 .pre-commit-config.yaml
 AGENTS.md
 CHANGELOG.md
 CONTRIBUTING.md
+FILE_TREE.md
 HINTS_FOR_AGENTS.md
+LICENSE
 Makefile
 PROGRESS.md
 README.md
@@ -16,6 +19,7 @@ ROADMAP.md
 SECURITY.md
 SPECIFICATION.md
 WORK_SPLIT.md
+agent/Dockerfile
 agent/README.md
 agent/paperracks_agent/__init__.py
 agent/paperracks_agent/cli.py
@@ -28,6 +32,7 @@ agent/paperracks_agent/watcher.py
 agent/requirements.txt
 agent/systemd/paperracks-agent.service.example
 agent/tests/test_security.py
+backend/Dockerfile
 backend/README.md
 backend/alembic.ini
 backend/alembic/README.md
@@ -36,10 +41,11 @@ backend/alembic/script.py.mako
 backend/alembic/versions/0001_create_users_and_audit_events.py
 backend/alembic/versions/0002_create_user_sessions.py
 backend/app/__init__.py
-backend/app/api/deps.py
 backend/app/api/__init__.py
+backend/app/api/deps.py
 backend/app/api/v1/__init__.py
 backend/app/api/v1/endpoints/__init__.py
+backend/app/api/v1/endpoints/admin.py
 backend/app/api/v1/endpoints/agents.py
 backend/app/api/v1/endpoints/ai.py
 backend/app/api/v1/endpoints/auth.py
@@ -75,6 +81,7 @@ backend/app/schemas/agent.py
 backend/app/schemas/auth.py
 backend/app/schemas/common.py
 backend/app/schemas/export.py
+backend/app/schemas/user.py
 backend/app/schemas/work.py
 backend/app/services/__init__.py
 backend/app/services/agent_protocol.py
@@ -90,10 +97,13 @@ backend/app/services/storage.py
 backend/app/services/summarization.py
 backend/app/services/tei_parser.py
 backend/app/services/topic_modeling.py
+backend/app/services/users.py
 backend/app/utils/__init__.py
 backend/app/utils/normalization.py
 backend/app/workers/__init__.py
 backend/app/workers/jobs.py
+backend/docker-entrypoint.sh
+backend/requirements-dev.txt
 backend/requirements.txt
 backend/tests/test_admin_scripts.py
 backend/tests/test_api_deps.py
@@ -101,6 +111,7 @@ backend/tests/test_auth_service.py
 backend/tests/test_config.py
 backend/tests/test_health.py
 backend/tests/test_security.py
+backend/tests/test_user_management.py
 config/agent.example.yaml
 config/server.example.yaml
 docker-compose.yml
@@ -130,6 +141,7 @@ docs/latex/chapters/b_glossary.tex
 docs/latex/main.tex
 docs/latex/references.bib
 docs/runbooks/credential_recovery.md
+docs/runbooks/dev_containers.md
 docs/runbooks/development_setup.md
 docs/runbooks/local_agent.md
 docs/runbooks/secrets_management.md

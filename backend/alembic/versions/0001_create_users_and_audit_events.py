@@ -1,6 +1,6 @@
 """create users and audit events
 
-Revision ID: 0001_create_users_and_audit_events
+Revision ID: 0001_users_audit
 Revises: None
 Create Date: 2026-06-23
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision: str = "0001_create_users_and_audit_events"
+revision: str = "0001_users_audit"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

@@ -1,0 +1,5 @@
+# Development/test-only dependencies (installed into the api image for in-container
+# testing and linting). Runtime deps live in requirements.txt.
+-r requirements.txt
+pytest>=8.2
+ruff>=0.5

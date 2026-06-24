@@ -2,7 +2,40 @@
 
 ## Current status
 
-The project is at scaffold stage. The repository contains the planned module layout, design documentation, API surface placeholders, background worker placeholders, configuration examples, and agent work packages.
+**Milestone 0 (foundation) is essentially complete and validated; Milestone 1 (the core
+library — the actual product) has not started.**
+
+What works today (real, tested in-container on Python 3.12):
+
+- Containerized build/test/run stack (`docker compose`), auth (bcrypt), revocable sessions,
+  owner/editor/reader role authorization, owner-only admin user management, audit logging,
+  server-console bootstrap/password-reset, and Alembic migrations for the auth tables.
+
+What does NOT exist yet (all stubs returning `{"status": "todo"}`):
+
+- The PDF-organizing product itself: importing folders/PDFs/arXiv links, Work/File records,
+  shelves/racks/tags, search, the file view, GROBID extraction, citation graph, reader,
+  export, AI summaries, topics. Most domain models lack migrations (only auth tables exist).
+
+Component note: **Redis is provisioned but unused** — it backs the RQ background-job queue
+(GROBID extraction, embeddings, summaries, topics). Its first real consumer is the GROBID
+worker in M2.
+
+### Start here (next agent)
+
+Build the product, not more foundation. The leftover M0 auth items (login rate limiting,
+in-app password change) are **deliberately deferred** — they are hardening, not the product.
+
+**Next task = Milestone 1 (core library), in this order:**
+1. Add models + Alembic migrations for the missing M1 entities and join tables: `sources`,
+   `shelf_works`, `rack_shelves`, `tag_links`, `import_batches` (see SPECIFICATION.md §9).
+2. Implement server-folder import (`services/storage.py`, `endpoints/imports.py`,
+   `endpoints/files.py`): scan a configured root, hash files, create File/Work/Location
+   records with a fast PyMuPDF first-page preview. No arbitrary-path endpoint.
+3. Implement shelves/racks/tags CRUD + membership (`endpoints/shelves.py`, `racks.py`) and
+   basic metadata search (`endpoints/works.py`).
+
+See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
 ## Completed
 
@@ -32,6 +65,7 @@ The project is at scaffold stage. The repository contains the planned module lay
 - Secrets-handling policy documented and enforced via a secret scanner, pre-commit hook, and CI workflow; hardcoded Postgres dev password removed from compose in favor of `.env`.
 - Role-based authorization: `require_roles`/`require_owner` dependencies and owner-only admin endpoints for user management (list/create/role-change/disable) and audit-event access, with `user.created`/`user.role_changed`/`user.disabled` audit events and last-owner protection.
 - Login account-enumeration mitigation (constant-time dummy verification on the no-user path) and a startup assertion that no guest role is configured.
+- Containerized dev/eval stack (Python 3.12): `backend/Dockerfile` (api server) and `agent/Dockerfile` (client), `docker compose` services for postgres/redis/api/agent with healthchecks and GROBID/Ollama profiles, in-container test/lint, and a CI workflow.
 
 ## In progress
 
@@ -62,8 +96,7 @@ The project is at scaffold stage. The repository contains the planned module lay
 Low-severity items found during the audit, not tied to a feature milestone. Address opportunistically.
 
 - Remove or fully wire the dead `guest_access_enabled` setting (`backend/app/core/config.py`). A startup `assert_no_guest_roles` check now enforces that no guest role is present in `security.allowed_roles`.
-- Migrate deprecated `datetime.utcnow()` to `datetime.now(timezone.utc)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`.
-- Guard bcrypt's silent 72-byte password truncation in `core/security.py` (length check or SHA-256 pre-hash).
+- Migrate deprecated `datetime.utcnow()` to timezone-aware `datetime.now(timezone.utc)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`. Note: do this together with switching the model `DateTime` columns to `DateTime(timezone=True)` (plus a migration), otherwise naive/aware comparisons in session checks will break.
 - Add symlink-escape and `../` traversal test cases to `agent/tests/test_security.py` (the primitive is correct but currently untested).
 - Remove or wire the unused agent config flags `follow_symlinks` / `teleport_enabled`.
 - Note in `docs/architecture/api_surface.md` and `data_model.md` that they reflect current stubs and defer to `SPECIFICATION.md` §10 / §9.
@@ -73,10 +106,10 @@ Low-severity items found during the audit, not tied to a feature milestone. Addr
 
 Acceptance criteria:
 
-1. `docker compose up` starts PostgreSQL, Redis, GROBID, and the backend service.
+1. `docker compose up -d --build` starts PostgreSQL, Redis, the api server, and the agent client (GROBID/Ollama are opt-in profiles).
 2. Backend serves `GET /api/v1/health`.
 3. Server can create the first admin account through a server-console command.
-4. The project can run tests with `make test`.
+4. The project can run tests with `make test` (in the api container, Python 3.12).
 5. LaTeX docs compile with `docs/compile_docs.sh` on a machine with TeX installed.
 
 Progress notes:
@@ -84,9 +117,8 @@ Progress notes:
 - `GET /api/v1/health` exists and has a test.
 - Server-console admin scripts are DB-backed for users/audit events and password reset revokes active sessions.
 - Alembic is initialized for the first security tables and sessions; broader domain models still need migrations.
-- `python -m compileall backend/app backend/alembic scripts` passes in the current environment.
-- `make test` is currently blocked locally because the active interpreter is Python 3.9.18 while the project requires Python 3.11+, and backend dependencies such as FastAPI and pydantic-settings are not installed.
-- `ruff check backend agent scripts` is currently blocked locally because Ruff is not installed.
+- Build/test now run in containers (Python 3.12). Validated end to end: `docker compose up -d --build` brings the api healthy after migrations, the full suite passes via `docker compose run --rm api pytest` (23 passed), and a live smoke test (bootstrap owner → login → owner `GET /admin/users` 200 → editor `GET /admin/users` 403 → bad login 401 → audit events) succeeds against real Postgres.
+- Replaced unmaintained `passlib` with the `bcrypt` library directly (passlib was incompatible with modern bcrypt); fixed Alembic revision ids that exceeded the 32-char `alembic_version` column.
 
 ## Next milestone: M1 core library, organization, and files
 

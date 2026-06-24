@@ -37,13 +37,20 @@ HINTS_FOR_AGENTS.md      Practical implementation hints and constraints
 
 ## Suggested first run for developers
 
+The project is built and evaluated in containers (server + client) via Docker Compose,
+targeting Python 3.12. See `docs/runbooks/dev_containers.md` for details.
+
 ```bash
-cp config/server.example.yaml config/server.local.yaml
-cp config/agent.example.yaml config/agent.local.yaml
-cp .env.example .env
-make dev-up
-make backend-dev
+cp .env.example .env                 # required: provides Postgres credentials
+docker compose up -d --build         # postgres, redis, api (server), agent (client)
+docker compose run --rm api pytest   # run the test suite in the api container
+curl -fsS http://127.0.0.1:8000/api/v1/health
 ```
+
+Equivalent Make targets: `make up`, `make test`, `make down`. For host-based development
+without containers you can instead run `make dev-up` (Postgres + Redis only) and
+`make backend-dev`, which requires a local Python 3.12 environment with
+`backend/requirements-dev.txt` installed.
 
 The current scaffold will not implement all endpoints yet. The goal of the first milestone is to make `GET /api/v1/health` work, initialize the database, create an admin user, register a local agent, scan a folder, and import one PDF into the processing queue.
 

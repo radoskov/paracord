@@ -8,6 +8,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added a containerized development & evaluation stack: `backend/Dockerfile` (api server) and `agent/Dockerfile` (client), `docker compose` services for `postgres`/`redis`/`api`/`agent` (with healthchecks, a smart entrypoint that runs migrations only for the server, and opt-in `extraction`/`ai` profiles for GROBID/Ollama), `backend/requirements-dev.txt`, a `ci` GitHub Actions workflow (lint + test on Python 3.12), `make` targets (`build`/`up`/`down`/`test`/`lint`), and `docs/runbooks/dev_containers.md`. The full test suite (23 tests) and a live auth/role smoke test now pass in-container against real Postgres.
 - Added role-based authorization (`require_roles` / `require_owner` dependencies) and owner-only admin endpoints under `/api/v1/admin`: list/create users, change a user's role, disable a user (with last-active-owner protection), and paginated audit-event access. New `user.created` (admin API), `user.role_changed`, and `user.disabled` audit events.
 - Added an account-enumeration mitigation to login (constant-time bcrypt verification on the unknown/disabled-user path) and a startup assertion that no guest role is present in `security.allowed_roles`.
 - Added a reusable FastAPI current-user dependency for bearer-token authentication.
@@ -28,6 +29,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed
 
+- Bumped the target runtime to Python 3.12 (`pyproject.toml`, Dockerfiles, CI) and the Postgres image to `pgvector/pgvector:pg17`. `make test` now runs in the api container by default (`make test-local` runs on the host).
 - Reconciled `SPECIFICATION.md` with the implemented scaffold: roles are `owner | editor | reader` (was `owner | member`), the repository-layout and per-agent work split now defer to `WORK_SPLIT.md` (A–J) and the actual `backend/ frontend/ agent/` layout, config examples use port 8000 and bcrypt, and the milestone plan was re-ordered to front-load the single-machine loop (the local agent moved to M5).
 - Rewrote `ROADMAP.md` as a condensed mirror of the canonical `SPECIFICATION.md` §20 milestones and updated `PROGRESS.md`'s next-milestone section accordingly.
 - Integrated supporting open-source tools into the spec: PyMuPDF (fast preview), YAKE/KeyBERT (keywords), OCRmyPDF/Tesseract (OCR fallback), anystyle/refextract (reference fallback), biblio-glutton (local consolidation), Nougat/Marker (optional ML extraction), and Zotero translation-server (URL metadata).
@@ -36,6 +38,10 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Fixed
 
+- Fixed invalid `docker-compose.yml` YAML (the `${VAR:?…}` default messages contained an unquoted colon — "mapping value is not allowed in this context"); the guarded values are now quoted.
+- Replaced unmaintained `passlib` with the maintained `bcrypt` library in `core/security.py` — `passlib` 1.7.x raised `AttributeError: module 'bcrypt' has no attribute '__about__'` against modern bcrypt, breaking all password hashing. Added an explicit 72-byte length guard.
+- Fixed Alembic revision ids that exceeded the 32-char `alembic_version` column (migrations failed with `value too long for type character varying(32)` on a real Postgres).
+- Made `test_config` hermetic (it now clears ambient settings env vars, so it passes inside the api container where `DATABASE_URL` is set).
 - Registered the `app.models.ai` models (`Summary`, `TopicAssignment`) in `models/__init__.py` so the `summaries`/`topic_assignments` tables are no longer silently omitted from `Base.metadata` (Alembic autogenerate and `create_all`).
 - Fixed `make test` collection: switched pytest to `--import-mode=importlib` and added the repo root to `pythonpath` so the two `test_security.py` modules (backend + agent) coexist and `scripts` is importable; added `scripts/__init__.py`.
 - Made the `docker-compose.yml` Postgres credentials fail fast with a clear message (`${VAR:?…}`) when `.env` is missing, instead of silently breaking `make dev-up`.

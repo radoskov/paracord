@@ -6,20 +6,23 @@ The ordering is value-first: it front-loads the complete single-machine loop
 agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M8).
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
-## M0: Foundation (developer skeleton)
+> **Current position:** M0 is essentially complete and validated; **M1 is next and not yet
+> started**. See `PROGRESS.md` → "Start here (next agent)". The two unchecked M0 items
+> (login rate limiting, in-app password change) are hardening and are deliberately deferred
+> in favour of building the product (M1).
 
-- Docker Compose starts infrastructure.
-- Backend health endpoint works. (started)
-- Backend settings load from YAML plus environment overrides. (started)
-- Initial database migration creates users and audit events. (started)
-- First admin can be bootstrapped from the server console. (started)
-- Login/logout creates and revokes server-side sessions. (started)
-- Roles: owner, editor, reader. (started)
-- Non-health API stubs require bearer-token authentication. (started)
-- Server-console credential recovery exists without a web reset endpoint. (started)
-- Tests run through `make test`. Docs compile.
+## M0: Foundation (developer skeleton) — DONE (auth hardening deferred)
 
-## M1: Core library, organization, and files
+- Docker Compose builds and starts the stack (postgres, redis, api, agent). (done)
+- Backend health endpoint, YAML+env settings, auth tables migration. (done)
+- Server-console admin bootstrap and password reset; revocable sessions. (done)
+- Roles owner/editor/reader with owner-only admin user management and audit log. (done)
+- Bearer-token auth on non-health routes. (done)
+- `make test` runs in the api container (Python 3.12). (done)
+- Deferred (hardening, not blocking): login rate limiting / failed-login lockout;
+  in-app `change-password` endpoint with session revocation.
+
+## M1: Core library, organization, and files — NEXT
 
 - Sources, files, locations, works, versions.
 - Shelves/racks/tags CRUD; a work can be in multiple shelves, a shelf in multiple racks.

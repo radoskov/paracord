@@ -6,10 +6,28 @@ import pytest
 
 from app.core.config import get_settings
 
+# Settings env vars cleared so these tests are hermetic regardless of the ambient
+# environment (e.g. DATABASE_URL is set inside the api container).
+_CONFIG_ENV_VARS = [
+    "PAPERRACKS_ENV",
+    "PAPERRACKS_BIND_HOST",
+    "PAPERRACKS_BIND_PORT",
+    "PAPERRACKS_LAN_MODE",
+    "PAPERRACKS_PUBLIC_BASE_URL",
+    "PAPERRACKS_SESSION_TTL_MINUTES",
+    "PAPERRACKS_SERVER_CONFIG",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "GROBID_URL",
+    "OLLAMA_URL",
+]
+
 
 @pytest.fixture(autouse=True)
-def clear_settings_cache():
-    """Keep cached settings from leaking across tests."""
+def clear_settings_cache(monkeypatch):
+    """Isolate ambient settings env vars and keep cached settings from leaking."""
+    for var in _CONFIG_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

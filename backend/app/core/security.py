@@ -8,10 +8,10 @@ Implementation notes:
 from enum import StrEnum
 from typing import Iterable
 
-from passlib.context import CryptContext
+import bcrypt
 
-
-password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt's algorithm only considers the first 72 bytes of the password.
+_BCRYPT_MAX_BYTES = 72
 
 
 class Role(StrEnum):
@@ -31,14 +31,24 @@ def assert_no_guest_roles(roles: Iterable[str]) -> None:
 
 
 def hash_password(password: str) -> str:
-    """Hash a password for storage."""
+    """Hash a password for storage using bcrypt.
+
+    Uses the maintained ``bcrypt`` library directly (passlib is unmaintained and
+    incompatible with modern bcrypt releases).
+    """
     if not password:
         raise ValueError("Password must not be empty")
-    return password_context.hash(password)
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > _BCRYPT_MAX_BYTES:
+        raise ValueError("Password must not exceed 72 bytes")
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify a password against a stored hash."""
+    """Verify a password against a stored bcrypt hash."""
     if not password or not password_hash:
         return False
-    return password_context.verify(password, password_hash)
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False

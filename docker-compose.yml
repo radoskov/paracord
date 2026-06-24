@@ -1,24 +1,89 @@
+# PaperRacks development & evaluation stack.
+#
+# First run:  cp .env.example .env  &&  docker compose up -d --build
+# Run tests:  docker compose run --rm api pytest
+#
+# Credentials come from the local .env file (gitignored). Never hardcode real
+# credentials here — see docs/runbooks/secrets_management.md.
 services:
   postgres:
-    image: pgvector/pgvector:pg16
-    # Credentials are read from the local .env file (see .env.example). Never hardcode
-    # real credentials here — see docs/runbooks/secrets_management.md.
+    image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      # Quoted so the ":?" default messages (which contain ":") stay valid YAML.
+      POSTGRES_USER: "${POSTGRES_USER:?set POSTGRES_USER in .env (cp .env.example .env)}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (cp .env.example .env)}"
+      POSTGRES_DB: "${POSTGRES_DB:?set POSTGRES_DB in .env (cp .env.example .env)}"
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - paperracks_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
+  # PaperRacks server (FastAPI). Runs DB migrations on start, then serves the API.
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment:
+      PAPERRACKS_ENV: development
+      PAPERRACKS_BIND_HOST: "0.0.0.0"
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379/0"
+      GROBID_URL: "http://grobid:8070"
+      OLLAMA_URL: "http://ollama:11434"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - ./pyproject.toml:/app/pyproject.toml
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PaperRacks local workstation agent (client). Idles by default; drive it with
+  #   docker compose exec agent python -m paperracks_agent.cli --help
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    environment:
+      PAPERRACKS_SERVER_URL: "http://api:8000"
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./agent:/app/agent
+    command: ["sleep", "infinity"]
+
+  # Heavy extraction service — only started with the "extraction" profile:
+  #   docker compose --profile extraction up -d grobid
   grobid:
-    image: grobid/grobid:0.9.0-crf
+    image: grobid/grobid:0.8.1
+    profiles: ["extraction"]
     ports:
       - "127.0.0.1:8070:8070"
     healthcheck:
@@ -27,13 +92,14 @@ services:
       timeout: 10s
       retries: 5
 
-  # Optional local LLM service. Uncomment when desired.
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   ports:
-  #     - "127.0.0.1:11434:11434"
-  #   volumes:
-  #     - paperracks_ollama:/root/.ollama
+  # Optional local LLM service — only with the "ai" profile.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - paperracks_ollama:/root/.ollama
 
 volumes:
   paperracks_postgres:
