@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work
 from app.utils.normalization import normalize_title
@@ -59,11 +60,14 @@ class WorkRead(BaseModel):
 def list_works(
     q: str | None = Query(default=None),
     reading_status: str | None = Query(default=None),
+    shelf_id: uuid.UUID | None = Query(default=None),
+    rack_id: uuid.UUID | None = Query(default=None),
+    tag_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
 ) -> list[Work]:
     """List/search works by basic metadata."""
-    stmt = select(Work).order_by(Work.updated_at.desc()).limit(limit)
+    stmt = select(Work)
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(
@@ -76,6 +80,21 @@ def list_works(
         )
     if reading_status:
         stmt = stmt.where(Work.reading_status == reading_status)
+    if shelf_id or rack_id:
+        stmt = stmt.join(ShelfWork, ShelfWork.work_id == Work.id)
+    if shelf_id:
+        stmt = stmt.where(ShelfWork.shelf_id == shelf_id)
+    if rack_id:
+        stmt = (
+            stmt.join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+            .where(RackShelf.rack_id == rack_id)
+        )
+    if tag_id:
+        stmt = stmt.join(
+            TagLink,
+            (TagLink.entity_id == Work.id) & (TagLink.entity_type == "work"),
+        ).where(TagLink.tag_id == tag_id)
+    stmt = stmt.distinct().order_by(Work.updated_at.desc()).limit(limit)
     return list(db.scalars(stmt).all())
 
 

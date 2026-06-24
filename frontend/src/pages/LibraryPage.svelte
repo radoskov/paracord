@@ -23,6 +23,9 @@
   let loading = false;
   let search = '';
   let statusFilter = '';
+  let shelfFilter = '';
+  let rackFilter = '';
+  let tagFilter = '';
 
   let works: Work[] = [];
   let shelves: Shelf[] = [];
@@ -113,7 +116,13 @@
   }
 
   async function loadWorks(): Promise<void> {
-    works = await client.listWorks({ q: search, readingStatus: statusFilter });
+    works = await client.listWorks({
+      q: search,
+      readingStatus: statusFilter,
+      shelfId: shelfFilter,
+      rackId: rackFilter,
+      tagId: tagFilter,
+    });
     if (selectedWork) selectedWork = works.find((work) => work.id === selectedWork?.id) ?? null;
   }
 
@@ -295,6 +304,24 @@
         <option value="read">read</option>
         <option value="important">important</option>
         <option value="revisit">revisit</option>
+      </select>
+      <select bind:value={shelfFilter}>
+        <option value="">Any shelf</option>
+        {#each shelves as shelf}
+          <option value={shelf.id}>{shelf.name}</option>
+        {/each}
+      </select>
+      <select bind:value={rackFilter}>
+        <option value="">Any rack</option>
+        {#each racks as rack}
+          <option value={rack.id}>{rack.name}</option>
+        {/each}
+      </select>
+      <select bind:value={tagFilter}>
+        <option value="">Any tag</option>
+        {#each tags as tag}
+          <option value={tag.id}>{tag.name}</option>
+        {/each}
       </select>
       <button type="submit" disabled={loading}>Search</button>
     </form>
@@ -545,7 +572,7 @@
     display: grid;
     flex: 1;
     gap: 0.5rem;
-    grid-template-columns: minmax(12rem, 1fr) 10rem auto;
+    grid-template-columns: minmax(12rem, 1fr) repeat(4, minmax(8rem, 10rem)) auto;
   }
 
   .workspace {

@@ -15,6 +15,8 @@ What works today (real, tested in-container on Python 3.12):
   endpoints, and focused service tests.
 - Initial M1 frontend path: Dockerized Vite/Svelte service, login, library table, reading
   queue, server-folder import controls, shelf/rack/tag controls, and file preview panel.
+- Works can now be filtered by shelf, rack, tag, reading status, and basic metadata in the
+  backend and from the frontend toolbar.
 
 What still does NOT exist yet:
 
@@ -31,10 +33,9 @@ Build the product, not more foundation. The leftover M0 auth items (login rate l
 in-app password change) are **deliberately deferred** — they are hardening, not the product.
 
 **Next task = continue Milestone 1 (core library), in this order:**
-1. Expand M1 backend search/filtering to include shelves, racks, and tags.
-2. Add PDF streaming from configured locations and wire it into the file/reader view.
-3. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
-4. Add lightweight end-to-end smoke coverage for login → import → organize → view.
+1. Add PDF streaming from configured locations and wire it into the file/reader view.
+2. Fill remaining CRUD gaps (delete/archive, remove memberships/tags) and API tests.
+3. Add lightweight end-to-end smoke coverage for login → import → organize → view.
 
 See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
 
@@ -79,6 +80,7 @@ See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria
 - M1 frontend workspace renders login, library search/status filters, reading queue,
   server-folder source/import controls, manual work creation, shelves/racks/tags, and a
   file list with first-page preview text.
+- Work search now supports shelf/rack/tag filters, and the frontend toolbar exposes them.
 
 ## In progress
 

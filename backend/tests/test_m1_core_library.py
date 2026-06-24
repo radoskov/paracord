@@ -6,12 +6,13 @@ import pytest
 from app.api.v1.endpoints.files import list_files
 from app.api.v1.endpoints.racks import list_rack_shelves
 from app.api.v1.endpoints.shelves import list_shelf_works
+from app.api.v1.endpoints.works import list_works
 from app.core.config import Settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.file import File, FileWorkLink, Location
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
+from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.work import Work
@@ -42,6 +43,8 @@ def db_session(tmp_path: Path):
             Rack.__table__,
             ShelfWork.__table__,
             RackShelf.__table__,
+            Tag.__table__,
+            TagLink.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -147,3 +150,44 @@ def test_m1_read_endpoints_return_file_shelf_and_rack_memberships(db_session, ow
     assert list_files(limit=100, db=db_session)[0].id == file.id
     assert list_shelf_works(shelf.id, db=db_session)[0].id == work.id
     assert list_rack_shelves(rack.id, db=db_session)[0].id == shelf.id
+
+
+def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> None:
+    included = Work(canonical_title="Included", normalized_title="included")
+    excluded = Work(canonical_title="Excluded", normalized_title="excluded")
+    shelf = Shelf(name="Important", created_by_user_id=owner.id)
+    rack = Rack(name="Thesis", created_by_user_id=owner.id)
+    tag = Tag(name="Methods", normalized_name="methods")
+    db_session.add_all([included, excluded, shelf, rack, tag])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ShelfWork(shelf_id=shelf.id, work_id=included.id, added_by_user_id=owner.id),
+            RackShelf(rack_id=rack.id, shelf_id=shelf.id, added_by_user_id=owner.id),
+            TagLink(
+                tag_id=tag.id,
+                entity_type="work",
+                entity_id=included.id,
+                created_by_user_id=owner.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    def filtered_ids(**filters) -> list:
+        return [
+            work.id
+            for work in list_works(
+                q=None,
+                reading_status=None,
+                shelf_id=filters.get("shelf_id"),
+                rack_id=filters.get("rack_id"),
+                tag_id=filters.get("tag_id"),
+                limit=100,
+                db=db_session,
+            )
+        ]
+
+    assert filtered_ids(shelf_id=shelf.id) == [included.id]
+    assert filtered_ids(rack_id=rack.id) == [included.id]
+    assert filtered_ids(tag_id=tag.id) == [included.id]

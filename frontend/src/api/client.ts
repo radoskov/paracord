@@ -76,6 +76,9 @@ export interface ImportBatch {
 export interface WorkQuery {
   q?: string;
   readingStatus?: string;
+  shelfId?: string;
+  rackId?: string;
+  tagId?: string;
 }
 
 export class ApiClient {
@@ -101,6 +104,9 @@ export class ApiClient {
     const params = new URLSearchParams();
     if (query.q) params.set('q', query.q);
     if (query.readingStatus) params.set('reading_status', query.readingStatus);
+    if (query.shelfId) params.set('shelf_id', query.shelfId);
+    if (query.rackId) params.set('rack_id', query.rackId);
+    if (query.tagId) params.set('tag_id', query.tagId);
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return this.request<Work[]>(`/api/v1/works${suffix}`);
   }

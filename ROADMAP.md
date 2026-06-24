@@ -7,7 +7,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
 > **Current position:** M0 is essentially complete and validated; **M1 is in progress with
-> backend persistence/import and initial frontend views**. See `PROGRESS.md` → "Start here (next agent)".
+> backend persistence/import, shelf/rack/tag work filters, and initial frontend views**.
+> See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items
 > (login rate limiting, in-app password change) are hardening and are deliberately deferred
 > in favour of building the product (M1).
