@@ -1,10 +1,14 @@
 """Managed library storage and server-folder import service."""
 
 import hashlib
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+# New-style arXiv id, optionally with a version suffix (e.g. 2106.01345 / 1706.03762v5).
+_ARXIV_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -216,10 +220,12 @@ def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str
 
     created_work = False
     if created_file:
+        title = _title_from_filename(pdf_path)
         work = Work(
-            canonical_title=_title_from_filename(pdf_path),
-            normalized_title=normalize_title(_title_from_filename(pdf_path)),
+            canonical_title=title,
+            normalized_title=normalize_title(title),
             canonical_metadata_source="filename",
+            arxiv_id=_arxiv_id_from_filename(pdf_path),
         )
         db.add(work)
         db.flush()
@@ -274,3 +280,9 @@ def _extract_pdf_preview(path: Path) -> dict[str, Any]:
 
 def _title_from_filename(path: Path) -> str:
     return path.stem.replace("_", " ").replace("-", " ").strip() or path.name
+
+
+def _arxiv_id_from_filename(path: Path) -> str | None:
+    """Return the arXiv id if the filename is an arXiv id (e.g. 1706.03762.pdf)."""
+    match = _ARXIV_ID_RE.match(path.stem.strip())
+    return match.group(1) if match else None

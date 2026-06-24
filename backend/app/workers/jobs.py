@@ -6,21 +6,47 @@ canonical records without review.
 
 
 def extract_pdf_job(file_id: str) -> None:
-    """Run GROBID extraction for a PDF file and persist metadata/references."""
+    """Run GROBID extraction for a PDF file, persist metadata/references, then enrich."""
     import uuid
+
+    from sqlalchemy import select
 
     from app.core.config import get_settings
     from app.db.session import SessionLocal
-    from app.models.file import File
+    from app.models.file import File, FileWorkLink
     from app.services.extraction import extract_and_store
     from app.services.grobid_client import GrobidClient
+    from app.workers.queue import enqueue_enrichment
 
     client = GrobidClient(get_settings().grobid_url)
+    work_id = None
     with SessionLocal() as db:
         file = db.get(File, uuid.UUID(str(file_id)))
         if file is None:
             return
         extract_and_store(db, file=file, fetch_tei=client.process_fulltext_document_sync)
+        link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
+        work_id = str(link.work_id) if link else None
+        db.commit()
+    # Chain external enrichment (best-effort; no-op when the work has no DOI/arXiv id).
+    if work_id:
+        enqueue_enrichment(work_id)
+
+
+def enrich_work_job(work_id: str) -> None:
+    """Enrich a work from external metadata sources (arXiv/Crossref)."""
+    import uuid
+
+    from app.core.config import get_settings
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+    from app.services.metadata_enrichment import enrich_work
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None:
+            return
+        enrich_work(db, work, settings=get_settings())
         db.commit()
 
 

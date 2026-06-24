@@ -5,20 +5,25 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work
 from app.utils.normalization import normalize_title
+from app.workers.queue import enqueue_enrichment
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+
+# Work columns a metadata assertion can be promoted into (mirrors the enrichment service).
+_PROMOTABLE_FIELDS = {"title", "abstract", "year", "venue", "doi"}
 
 
 class WorkCreate(BaseModel):
@@ -50,6 +55,7 @@ class WorkRead(BaseModel):
     venue: str | None = None
     year: int | None = None
     reading_status: str
+    canonical_metadata_source: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -150,6 +156,128 @@ def update_work(
         work.normalized_title = normalize_title(work.canonical_title or "")
     work.updated_at = datetime.utcnow()
     work.user_confirmed = True
+    db.commit()
+    db.refresh(work)
+    return work
+
+
+class MetadataAssertionRead(BaseModel):
+    id: uuid.UUID
+    field_name: str
+    value: str
+    source: str
+    confidence: float | None = None
+    selected_as_canonical: bool
+
+    model_config = {"from_attributes": True}
+
+
+class FieldReview(BaseModel):
+    field_name: str
+    canonical_value: str | None
+    has_conflict: bool
+    assertions: list[MetadataAssertionRead]
+
+
+class SelectAssertion(BaseModel):
+    assertion_id: uuid.UUID
+
+
+def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:
+    if field_name == "title":
+        work.canonical_title = value
+        work.normalized_title = normalize_title(value)
+        work.canonical_metadata_source = source
+    elif field_name == "abstract":
+        work.abstract = value
+    elif field_name == "year":
+        work.year = int(value) if value.isdigit() else work.year
+    elif field_name == "venue":
+        work.venue = value
+    elif field_name == "doi":
+        work.doi = value
+
+
+@router.get("/{work_id}/metadata", response_model=list[FieldReview])
+def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldReview]:
+    """Return metadata assertions for a work, grouped by field, flagging conflicts."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    rows = db.scalars(
+        select(MetadataAssertion)
+        .where(MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work_id)
+        .order_by(MetadataAssertion.field_name, MetadataAssertion.retrieved_at)
+    ).all()
+    by_field: dict[str, list[MetadataAssertion]] = {}
+    for assertion in rows:
+        by_field.setdefault(assertion.field_name, []).append(assertion)
+    reviews: list[FieldReview] = []
+    for field_name, assertions in sorted(by_field.items()):
+        canonical = next((a.value for a in assertions if a.selected_as_canonical), None)
+        reviews.append(
+            FieldReview(
+                field_name=field_name,
+                canonical_value=canonical,
+                has_conflict=len({a.value for a in assertions}) > 1,
+                assertions=assertions,
+            )
+        )
+    return reviews
+
+
+@router.post("/{work_id}/enrich", status_code=status.HTTP_202_ACCEPTED)
+def enrich_work_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> dict[str, str | None]:
+    """Queue external metadata enrichment for a work (needs a DOI or arXiv id)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    if not work.doi and not work.arxiv_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Work has no DOI or arXiv id to enrich from",
+        )
+    job_id = enqueue_enrichment(work_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Enrichment queue unavailable",
+        )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/{work_id}/metadata/select", response_model=WorkRead)
+def select_metadata_assertion(
+    work_id: uuid.UUID,
+    payload: SelectAssertion,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> Work:
+    """Choose an assertion as the canonical value for its field (a review action)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    assertion = db.get(MetadataAssertion, payload.assertion_id)
+    if assertion is None or assertion.entity_type != "work" or assertion.entity_id != work_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assertion not found")
+
+    db.execute(
+        update(MetadataAssertion)
+        .where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.entity_id == work_id,
+            MetadataAssertion.field_name == assertion.field_name,
+        )
+        .values(selected_as_canonical=False)
+    )
+    assertion.selected_as_canonical = True
+    if assertion.field_name in _PROMOTABLE_FIELDS:
+        _apply_assertion_to_work(work, assertion.field_name, assertion.value, assertion.source)
+    work.user_confirmed = True
+    work.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(work)
     return work

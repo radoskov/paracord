@@ -61,6 +61,16 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["managed_library_root"] = storage["managed_library_root"]
     if "server_allowed_roots" in storage:
         values["server_allowed_roots"] = storage["server_allowed_roots"]
+    enrichment = data.get("metadata_enrichment") or {}
+    if "enabled" in enrichment:
+        values["enrichment_enabled"] = enrichment["enabled"]
+    sources = enrichment.get("sources") or {}
+    if "arxiv" in sources:
+        values["enrichment_arxiv"] = sources["arxiv"]
+    if "crossref" in sources:
+        values["enrichment_crossref"] = sources["crossref"]
+    if "crossref_mailto" in enrichment:
+        values["crossref_mailto"] = enrichment["crossref_mailto"]
     return values
 
 
@@ -90,6 +100,10 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = Field(default=720, alias="PAPERRACKS_SESSION_TTL_MINUTES")
     managed_library_root: str = "./storage/library"
     server_allowed_roots: list[Any] = []
+    enrichment_enabled: bool = True
+    enrichment_arxiv: bool = True
+    enrichment_crossref: bool = True
+    crossref_mailto: str | None = None
 
 
 def _environment_overrides() -> dict[str, Any]:
