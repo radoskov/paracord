@@ -2,7 +2,9 @@
 
 ```text
 .env.example
+.github/workflows/secret-scan.yml
 .gitignore
+.pre-commit-config.yaml
 AGENTS.md
 CHANGELOG.md
 CONTRIBUTING.md
@@ -107,6 +109,7 @@ docs/agent_handoffs/2026-06-23-m0-alembic-admin-tests.md
 docs/agent_handoffs/2026-06-23-m0-auth-sessions.md
 docs/agent_handoffs/2026-06-23-m0-config-security.md
 docs/agent_handoffs/2026-06-23-m0-protect-api-stubs.md
+docs/agent_handoffs/2026-06-23-secrets-policy.md
 docs/agent_handoffs/README.md
 docs/architecture/api_surface.md
 docs/architecture/architecture.md
@@ -129,6 +132,7 @@ docs/latex/references.bib
 docs/runbooks/credential_recovery.md
 docs/runbooks/development_setup.md
 docs/runbooks/local_agent.md
+docs/runbooks/secrets_management.md
 docs/runbooks/teleport.md
 frontend/README.md
 frontend/index.html
@@ -144,8 +148,11 @@ frontend/src/pages/LibraryPage.svelte
 frontend/tsconfig.json
 frontend/vite.config.ts
 pyproject.toml
+scripts/__init__.py
 scripts/bootstrap_admin.py
+scripts/check_secrets.py
 scripts/create_source_archive.py
 scripts/dev_server.sh
+scripts/install_git_hooks.sh
 scripts/reset_admin_password.py
 ```

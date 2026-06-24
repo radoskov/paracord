@@ -1,0 +1,114 @@
+"""Owner-only admin endpoints: user management and audit-log access (SPEC 10.2)."""
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.api.deps import require_owner
+from app.db.session import get_db
+from app.models.audit import AuditEvent
+from app.models.user import User
+from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
+from app.services import users as user_service
+
+router = APIRouter()
+
+
+@router.get("/users", response_model=list[UserOut])
+def list_users(
+    db: Session = Depends(get_db),
+    _owner: User = Depends(require_owner),
+) -> list[User]:
+    """List all user accounts (owner only)."""
+    return user_service.list_users(db)
+
+
+@router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> User:
+    """Create a user account (owner only)."""
+    try:
+        user = user_service.create_user(
+            db,
+            username=payload.username,
+            password=payload.password,
+            role=payload.role,
+            actor_user_id=owner.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.patch("/users/{user_id}", response_model=UserOut)
+def update_user_role(
+    user_id: uuid.UUID,
+    payload: UserRoleUpdate,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> User:
+    """Change a user's role (owner only)."""
+    try:
+        user = user_service.set_user_role(
+            db, user_id=user_id, role=payload.role, actor_user_id=owner.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/users/{user_id}/disable", response_model=UserOut)
+def disable_user(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> User:
+    """Disable a user account (owner only)."""
+    try:
+        user = user_service.disable_user(db, user_id=user_id, actor_user_id=owner.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.get("/audit-events")
+def list_audit_events(
+    db: Session = Depends(get_db),
+    _owner: User = Depends(require_owner),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    """Return a paginated, newest-first view of audit events (owner only)."""
+    total = db.scalar(select(func.count()).select_from(AuditEvent)) or 0
+    events = db.scalars(
+        select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(limit).offset(offset)
+    ).all()
+    items = [
+        {
+            "id": str(event.id),
+            "event_type": event.event_type,
+            "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
+            "entity_type": event.entity_type,
+            "entity_id": event.entity_id,
+            "ip_address": event.ip_address,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+            "details": event.details,
+        }
+        for event in events
+    ]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}

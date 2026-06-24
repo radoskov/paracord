@@ -98,10 +98,10 @@ Owns:
 ```text
 backend/app/services/storage.py
 backend/app/services/duplicate_detection.py
-backend/app/services/import_pipeline.py
+backend/app/services/import_pipeline.py   # to be created (M1)
 backend/app/models/file.py
 backend/app/models/work.py
-backend/app/models/imports.py
+backend/app/models/imports.py             # to be created (M1; ImportBatch/DuplicateCandidate)
 backend/app/api/v1/endpoints/imports.py
 backend/app/api/v1/endpoints/files.py
 ```
@@ -147,7 +147,7 @@ backend/app/services/citation_graph.py
 backend/app/api/v1/endpoints/citations.py
 backend/app/api/v1/endpoints/graph.py
 backend/app/models/citation.py
-backend/app/schemas/citation.py
+backend/app/schemas/citation.py           # to be created (citation schemas currently in schemas/work.py)
 ```
 
 Initial tasks:

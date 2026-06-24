@@ -1,13 +1,14 @@
 """Authentication session service."""
 
 from datetime import datetime, timedelta
+import functools
 import hashlib
 import secrets
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import verify_password
+from app.core.security import hash_password, verify_password
 from app.models.session import UserSession
 from app.models.user import User
 
@@ -17,10 +18,22 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+@functools.lru_cache(maxsize=1)
+def _timing_equalizer_hash() -> str:
+    """Throwaway bcrypt hash used to equalize timing on the no-user path."""
+    return hash_password("paperracks-no-such-account")  # pragma: allowlist secret
+
+
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
-    """Return an active user when credentials are valid."""
+    """Return an active user when credentials are valid.
+
+    On the unknown/disabled-user path we still run a bcrypt verification against a
+    dummy hash so response time does not reveal whether the account exists
+    (account-enumeration mitigation, SPECIFICATION.md 7.2.5).
+    """
     user = db.scalar(select(User).where(User.username == username))
     if user is None or user.disabled_at is not None:
+        verify_password(password, _timing_equalizer_hash())
         return None
     if not verify_password(password, user.password_hash):
         return None

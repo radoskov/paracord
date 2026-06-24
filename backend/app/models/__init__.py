@@ -1,5 +1,6 @@
 """ORM model exports."""
 
+from app.models.ai import Summary, TopicAssignment
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, Reference
 from app.models.file import File, FileSegment, FileWorkLink, Location
@@ -20,7 +21,9 @@ __all__ = [
     "Rack",
     "Reference",
     "Shelf",
+    "Summary",
     "Tag",
+    "TopicAssignment",
     "User",
     "UserSession",
     "Work",

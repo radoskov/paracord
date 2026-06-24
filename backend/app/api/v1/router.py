@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import require_authenticated_user
 from app.api.v1.endpoints import (
+    admin,
     agents,
     ai,
     auth,
@@ -23,6 +24,8 @@ auth_required = [Depends(require_authenticated_user)]
 
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+# Admin routes enforce owner role per-endpoint via require_owner.
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(
     agents.router,
     prefix="/agents",

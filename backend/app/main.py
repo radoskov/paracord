@@ -5,11 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.core.security import assert_no_guest_roles
 
 
 def create_app() -> FastAPI:
     """Create and configure the PaperRacks API application."""
     settings = get_settings()
+    # Fail fast if a guest/anonymous role was configured — there is no guest access.
+    assert_no_guest_roles(settings.allowed_roles)
     app = FastAPI(
         title="PaperRacks API",
         version="0.0.0",
