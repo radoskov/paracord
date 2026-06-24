@@ -6,13 +6,13 @@ The ordering is value-first: it front-loads the complete single-machine loop
 agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M8).
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
-> **Current position:** M0 is essentially complete and validated; **M1 is in progress with
-> backend persistence/import, shelf/rack/tag work filters, PDF streaming, CRUD unlink/archive
-> operations, and initial frontend views**.
+> **Current position:** M0 done; **M1 done and validated end-to-end** (import → organize →
+> search → stream over the real HTTP API + Postgres, frontend builds); **M2 in progress** —
+> the GROBID TEI parser, provenance-aware extraction persistence, and migration `0004` are
+> done and validated on Postgres, but the background worker and live GROBID are not wired yet.
 > See `PROGRESS.md` → "Start here (next agent)".
-> The two unchecked M0 items
-> (login rate limiting, in-app password change) are hardening and are deliberately deferred
-> in favour of building the product (M1).
+> The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
+> are deliberately deferred in favour of building the product.
 
 ## M0: Foundation (developer skeleton) — DONE (auth hardening deferred)
 
@@ -25,7 +25,7 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Deferred (hardening, not blocking): login rate limiting / failed-login lockout;
   in-app `change-password` endpoint with session revocation.
 
-## M1: Core library, organization, and files — IN PROGRESS
+## M1: Core library, organization, and files — DONE (validated end-to-end)
 
 - Sources, files, locations, works, versions.
 - Shelves/racks/tags CRUD; a work can be in multiple shelves, a shelf in multiple racks.
@@ -34,10 +34,13 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Basic metadata search and filters.
 - Library table, shelf view, rack view, file view, reading queue.
 
-## M2: PDF extraction and metadata
+## M2: PDF extraction and metadata — IN PROGRESS
 
-- GROBID full-text extraction in background; raw TEI stored.
-- Header, abstract, references, and citation mentions parsed.
+- GROBID TEI parser + provenance-aware persistence (assertions, references, canonical-field
+  promotion) + migration `0004`. (done, validated on Postgres with a fixture)
+- Background RQ worker + enqueue-on-import + live GROBID call. (wired, not yet run/validated)
+- Header, abstract, references parsed; citation *mentions*/contexts and raw-TEI storage. (next)
+- Deterministic keyword extraction (YAKE/KeyBERT).
 - Deterministic keyword extraction (YAKE/KeyBERT).
 - needs_ocr detection with optional OCRmyPDF fallback.
 - Optional reference-parser fallback (anystyle/refextract).

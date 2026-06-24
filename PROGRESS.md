@@ -21,27 +21,45 @@ What works today (real, tested in-container on Python 3.12):
   root-escape protection; the frontend file panel can open streamed PDFs in a browser tab.
 - Shelves and racks can be archived, work/shelf memberships can be removed, and tag links
   can be removed via backend endpoints and frontend controls.
+- **M1 validated end-to-end** (real HTTP API + Postgres + frontend build): login → create
+  server-folder source → import PDFs (hash/dedup/PyMuPDF preview) → list/search works →
+  add to shelf/rack → stream PDF, with the editor/reader role gate enforced over HTTP and
+  re-import dedup confirmed. The Svelte frontend compiles (`vite build`).
+- **M2 extraction core (started, validated on Postgres):** real GROBID TEI parser
+  (`services/tei_parser.py`), provenance-aware persistence (`services/extraction.py`) that
+  records MetadataAssertions and References and only promotes canonical title/abstract/DOI
+  when the work is not user-confirmed, migration `0004` for references/citation_mentions/
+  metadata_assertions, and the `extract_pdf_job` wiring. Unit-tested with a TEI fixture and
+  verified against real Postgres with a mock fetcher.
 
 What still does NOT exist yet:
 
-- PDF streaming/reader, arXiv/DOI/bibliography imports, expanded shelf/rack/tag filtering,
-  GROBID extraction, citation graph, export, AI summaries, topics.
+- **Live GROBID + background worker:** the GROBID HTTP call and `extract_pdf_job` are wired
+  but only validated via a fixture; the RQ worker is not yet running and nothing enqueues
+  extraction. Citation *mentions*/contexts and raw-TEI storage are not persisted yet.
+- Metadata enrichment connectors (Crossref/arXiv/OpenAlex), duplicate/version detection,
+  arXiv/DOI/bibliography imports, embedded PDF.js reader, citation graph, export, AI
+  summaries, topics.
 
-Component note: **Redis is provisioned but unused** — it backs the RQ background-job queue
-(GROBID extraction, embeddings, summaries, topics). Its first real consumer is the GROBID
-worker in M2.
+Component note: **Redis is provisioned but still has no live consumer.** It backs the RQ
+queue whose first consumer is the GROBID extraction worker — wiring that worker is the
+immediate next step.
 
 ### Start here (next agent)
 
-Build the product, not more foundation. The leftover M0 auth items (login rate limiting,
-in-app password change) are **deliberately deferred** — they are hardening, not the product.
+M1 is done and validated; M2 extraction core is in place. Continue M2 in this order:
 
-**Next task = continue Milestone 1 (core library), in this order:**
-1. Add lightweight end-to-end smoke coverage for login → import → organize → view.
-2. Replace the temporary browser-tab PDF opening with the planned embedded PDF.js reader.
-3. Polish CRUD ergonomics (edit names/descriptions inline, surface current tag links).
+1. **Wire the background worker** so extraction actually runs: add `app/workers/queue.py`
+   (an RQ `Queue` from `REDIS_URL`), a `worker` service in `docker-compose.yml`
+   (`rq worker`), and enqueue `extract_pdf_job` for each file created during import.
+2. **Validate live GROBID:** `docker compose --profile extraction up -d grobid`, import a
+   real PDF, run extraction, and confirm the live TEI parses (the parser is fixture-tested).
+3. Persist citation *mentions*/contexts (the parser currently extracts references only) and
+   store the raw TEI blob for reproducibility.
+4. Then: metadata enrichment connectors and duplicate/version detection (M2/M4).
 
-See `WORK_SPLIT.md` (Agent A/D) and the "Next milestone: M1" acceptance criteria below.
+The leftover M0 auth items (login rate limiting, in-app password change) remain
+deliberately deferred — hardening, not the product. See `WORK_SPLIT.md` (Agent E).
 
 ## Completed
 

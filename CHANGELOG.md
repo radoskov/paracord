@@ -8,6 +8,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Started the M2 extraction layer: a real GROBID TEI parser (`services/tei_parser.py` —
+  title/abstract/DOI/authors/references via lxml), a provenance-aware persistence service
+  (`services/extraction.py`) that records `MetadataAssertion`s and `Reference`s and only
+  promotes canonical title/abstract/DOI when the work is not user-confirmed, Alembic
+  migration `0004` for `references`/`citation_mentions`/`metadata_assertions`, a synchronous
+  GROBID client method, and the wired `extract_pdf_job`. Covered by a TEI fixture and tests,
+  and validated against real Postgres (import → extract → assertions/references).
 - Started the M1 core-library backend slice: added `sources`, `import_batches`,
   `shelf_works`, `rack_shelves`, and `tag_links` models plus an Alembic migration for the
   core file/work/source/organization tables.
@@ -61,6 +68,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Fixed
 
+- Made the `citation`/`metadata`/`ai` models use the generic `sqlalchemy.Uuid` instead of `postgresql.UUID`, matching the rest of the models so their tables can be created under SQLite (tests) as well as Postgres.
 - Fixed invalid `docker-compose.yml` YAML (the `${VAR:?…}` default messages contained an unquoted colon — "mapping value is not allowed in this context"); the guarded values are now quoted.
 - Replaced unmaintained `passlib` with the maintained `bcrypt` library in `core/security.py` — `passlib` 1.7.x raised `AttributeError: module 'bcrypt' has no attribute '__about__'` against modern bcrypt, breaking all password hashing. Added an explicit 72-byte length guard.
 - Fixed Alembic revision ids that exceeded the 32-char `alembic_version` column (migrations failed with `value too long for type character varying(32)` on a real Postgres).

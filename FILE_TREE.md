@@ -1,6 +1,7 @@
 # File Tree
 
 ```text
+.dockerignore
 .env.example
 .github/workflows/ci.yml
 .github/workflows/secret-scan.yml
@@ -40,6 +41,8 @@ backend/alembic/env.py
 backend/alembic/script.py.mako
 backend/alembic/versions/0001_create_users_and_audit_events.py
 backend/alembic/versions/0002_create_user_sessions.py
+backend/alembic/versions/0003_create_m1_core_library.py
+backend/alembic/versions/0004_create_extraction_tables.py
 backend/app/__init__.py
 backend/app/api/__init__.py
 backend/app/api/deps.py
@@ -57,6 +60,8 @@ backend/app/api/v1/endpoints/health.py
 backend/app/api/v1/endpoints/imports.py
 backend/app/api/v1/endpoints/racks.py
 backend/app/api/v1/endpoints/shelves.py
+backend/app/api/v1/endpoints/sources.py
+backend/app/api/v1/endpoints/tags.py
 backend/app/api/v1/endpoints/works.py
 backend/app/api/v1/router.py
 backend/app/core/__init__.py
@@ -74,6 +79,7 @@ backend/app/models/file.py
 backend/app/models/metadata.py
 backend/app/models/organization.py
 backend/app/models/session.py
+backend/app/models/source.py
 backend/app/models/user.py
 backend/app/models/work.py
 backend/app/schemas/__init__.py
@@ -91,6 +97,7 @@ backend/app/services/citation_graph.py
 backend/app/services/duplicate_detection.py
 backend/app/services/embeddings.py
 backend/app/services/export_service.py
+backend/app/services/extraction.py
 backend/app/services/grobid_client.py
 backend/app/services/metadata_enrichment.py
 backend/app/services/storage.py
@@ -105,11 +112,14 @@ backend/app/workers/jobs.py
 backend/docker-entrypoint.sh
 backend/requirements-dev.txt
 backend/requirements.txt
+backend/tests/fixtures/minimal_grobid_tei.xml
 backend/tests/test_admin_scripts.py
 backend/tests/test_api_deps.py
 backend/tests/test_auth_service.py
 backend/tests/test_config.py
+backend/tests/test_extraction.py
 backend/tests/test_health.py
+backend/tests/test_m1_core_library.py
 backend/tests/test_security.py
 backend/tests/test_user_management.py
 config/agent.example.yaml
@@ -146,7 +156,11 @@ docs/runbooks/development_setup.md
 docs/runbooks/local_agent.md
 docs/runbooks/secrets_management.md
 docs/runbooks/teleport.md
+frontend/Dockerfile
 frontend/README.md
+frontend/dist/assets/index-1s4aX-Zg.css
+frontend/dist/assets/index-DnSfyB9p.js
+frontend/dist/index.html
 frontend/index.html
 frontend/package.json
 frontend/src/App.svelte
