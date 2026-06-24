@@ -10,8 +10,10 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > metadata enrichment are live and validated on real arXiv PDFs** — GROBID via the RQ
 > worker, then arXiv/Crossref enrichment that auto-corrects bad GROBID titles, with a
 > provenance/conflict review surface. Raw TEI and citation mentions are now persisted.
-> Next in M4: duplicate/version detection. Citation contexts are persisted, exposed through
-> the API, and visible in the initial frontend workspace; full reader/graph integration
+> M4 duplicate/version detection has started: the review-queue table and scanner now generate
+> DOI/arXiv/fuzzy-title/text-fingerprint/exact-file candidates idempotently. Next in M4:
+> expose the review API/actions, then the review UI. Citation contexts are persisted, exposed
+> through the API, and visible in the initial frontend workspace; full reader/graph integration
 > remains later M3/M6 work.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
@@ -63,7 +65,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 
 ## M4: Duplicate, version, and multi-work review
 
-- Exact, DOI/arXiv, fuzzy, and text-fingerprint duplicate detection.
+- Exact, DOI/arXiv, fuzzy, and text-fingerprint duplicate detection. (backend scanner
+  started; API/UI pending)
 - Version linking; multi-paper file links and segments.
 - Review UI (merge / link as version / split / keep separate / ignore).
 

@@ -2,8 +2,9 @@
 
 ## Current status
 
-**Milestone 0 (foundation) is essentially complete and validated; Milestone 1 (the core
-library — the actual product) is in progress across the backend and frontend.**
+**Milestone 0 (foundation) and Milestone 1 (core library) are complete enough for the
+single-machine loop; Milestone 2 extraction/enrichment is live; Milestone 4 duplicate review
+has started in the backend.**
 
 What works today (real, tested in-container on Python 3.12):
 
@@ -53,6 +54,10 @@ What works today (real, tested in-container on Python 3.12):
 - **M2 citation context frontend surface:** selecting a work in the Svelte library loads and
   displays extracted citation contexts with marker, section, sentence context, and reference
   metadata.
+- **M4 duplicate/version scanner foundation:** `duplicate_candidates` now exists with an
+  Alembic migration and ORM model; `services/duplicate_detection.py` generates idempotent
+  review candidates for same DOI, same arXiv base ID/version mismatch, fuzzy normalized-title
+  matches, exact file hash, and matching text fingerprints.
 
 What still does NOT exist yet:
 
@@ -60,18 +65,19 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- Duplicate/version detection beyond exact-hash, arXiv/DOI/bibliography *imports* (ingest by
-  link), embedded PDF.js reader, citation graph, export, AI summaries, topics.
+- Duplicate review API/actions/UI, version-linking actions, multiwork split workflow,
+  embedded PDF.js reader, citation graph, export, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
 
 ### Start here (next agent)
 
-M1 done; M2 extraction + enrichment pipeline is live and validated. Continue M2/M4:
+M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
+the queue table and scanner. Continue M2/M4:
 
-1. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
-   (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
+1. **Duplicate/version review API/actions**: expose `duplicate_candidates`, scan triggers, and
+   status transitions (`accepted`/`rejected`/`ignored`) before building the review UI.
 2. **Reader context integration**: move the lightweight citation-context panel into the
    eventual PDF.js reader/reference tab.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -132,6 +138,9 @@ deliberately deferred — hardening, not the product.
 - Work-scoped citation context API returns persisted `CitationMention` rows joined to their
   extracted references.
 - The frontend library workspace displays citation contexts for the selected work.
+- Duplicate candidate storage and scanner foundation: migration `0006`, `DuplicateCandidate`,
+  and idempotent candidate generation for DOI/arXiv/fuzzy-title/exact-file/text-fingerprint
+  signals.
 
 ## In progress
 
@@ -147,7 +156,7 @@ deliberately deferred — hardening, not the product.
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- Duplicate/version detection implementation.
+- Duplicate review API/actions and UI (scanner exists; merge/link/ignore workflows do not).
 - Citation graph materialization implementation.
 - Export renderer.
 - BERTopic and embedding pipeline.
@@ -169,12 +178,13 @@ Low-severity items found during the audit, not tied to a feature milestone. Addr
 ### Data-model divergences from SPECIFICATION.md §9.3 (fix before they are built on)
 
 These cost a migration + re-extraction if M4 (duplicates) / M6 (citation graph) / M7 (topics)
-are built on the current shapes, so address the first two before M4:
+are built on the current shapes, so address the first two before the M4 review workflows harden:
 
 - **Split `works.arxiv_id` into `arxiv_base_id`** (strip the `vN` suffix) and add a **UNIQUE**
   constraint on `doi` and the arXiv base id. §8.4 version-dedup and §6 version-collapsing key
-  on the *base* id, and §9.2 expects uniqueness; today both are plain indexes, so duplicate
-  works by DOI are not prevented and arXiv-version detection will be wrong.
+  on the *base* id, and §9.2 expects uniqueness; today both are plain indexes. The current
+  duplicate scanner derives arXiv bases at runtime, but the physical schema still needs cleanup
+  before version-linking and collapse modes depend on it.
 - **`Reference` is missing `resolution_status` / `resolution_confidence`** (and `parsed_authors`/
   `parsed_venue`). The M6 graph pipeline (§12.5) marks edges by `resolution_status`
   (unresolved / local_match / external_match); building the graph without it means another

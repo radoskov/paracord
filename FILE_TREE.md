@@ -45,6 +45,7 @@ backend/alembic/versions/0002_create_user_sessions.py
 backend/alembic/versions/0003_create_m1_core_library.py
 backend/alembic/versions/0004_create_extraction_tables.py
 backend/alembic/versions/0005_raw_tei_and_mentions.py
+backend/alembic/versions/0006_dupe_candidates.py
 backend/app/__init__.py
 backend/app/api/__init__.py
 backend/app/api/deps.py
@@ -77,6 +78,7 @@ backend/app/models/__init__.py
 backend/app/models/ai.py
 backend/app/models/audit.py
 backend/app/models/citation.py
+backend/app/models/duplicate.py
 backend/app/models/file.py
 backend/app/models/metadata.py
 backend/app/models/organization.py
@@ -122,6 +124,7 @@ backend/tests/test_admin_scripts.py
 backend/tests/test_api_deps.py
 backend/tests/test_auth_service.py
 backend/tests/test_config.py
+backend/tests/test_duplicate_detection.py
 backend/tests/test_enrichment.py
 backend/tests/test_extraction.py
 backend/tests/test_health.py

@@ -8,6 +8,9 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added the M4 duplicate/version review queue foundation: `duplicate_candidates` model and
+  migration `0006_dupe_candidates`, plus a DB-backed scanner for same-DOI, same-arXiv-base,
+  fuzzy-title, text-fingerprint, and exact-file candidates with idempotent candidate upserts.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of
