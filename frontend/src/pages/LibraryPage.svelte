@@ -3,6 +3,7 @@
 
   import {
     ApiClient,
+    type CitationContext,
     type FileRecord,
     type Rack,
     type ReadingStatus,
@@ -40,6 +41,7 @@
   let selectedFile: FileRecord | null = null;
   let shelfWorks: Work[] = [];
   let rackShelves: Shelf[] = [];
+  let citationContexts: CitationContext[] = [];
 
   let newWorkTitle = '';
   let newWorkYear = '';
@@ -100,6 +102,7 @@
     selectedFile = null;
     shelfWorks = [];
     rackShelves = [];
+    citationContexts = [];
   }
 
   async function refreshAll(): Promise<void> {
@@ -124,6 +127,7 @@
       tagId: tagFilter,
     });
     if (selectedWork) selectedWork = works.find((work) => work.id === selectedWork?.id) ?? null;
+    if (!selectedWork) citationContexts = [];
   }
 
   async function loadShelves(): Promise<void> {
@@ -175,6 +179,11 @@
       await loadWorks();
       if (selectedShelf) await selectShelf(selectedShelf);
     });
+  }
+
+  async function selectWork(work: Work): Promise<void> {
+    selectedWork = work;
+    citationContexts = await client.listCitationContexts(work.id);
   }
 
   async function createShelf(): Promise<void> {
@@ -401,9 +410,36 @@
         <PaperTable
           {works}
           selectedWorkId={selectedWork?.id ?? null}
-          onSelect={(work) => (selectedWork = work)}
+          onSelect={selectWork}
           onStatusChange={updateStatus}
         />
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2>Citation Contexts</h2>
+          <span>{citationContexts.length}</span>
+        </div>
+        {#if !selectedWork}
+          <p class="empty">Select a work</p>
+        {:else if citationContexts.length === 0}
+          <p class="empty">No citation contexts extracted</p>
+        {:else}
+          <div class="context-list">
+            {#each citationContexts as context}
+              <article>
+                <header>
+                  <strong>{context.marker_text ?? 'citation'}</strong>
+                  <span>{context.section_label ?? 'section unknown'}</span>
+                </header>
+                <p>{context.context_sentence ?? 'No sentence context'}</p>
+                <small>
+                  {context.reference_title ?? context.reference_raw_citation ?? 'Unparsed reference'}
+                </small>
+              </article>
+            {/each}
+          </div>
+        {/if}
       </section>
 
       <section class="surface">
@@ -415,7 +451,7 @@
           works={readingQueue}
           selectedWorkId={selectedWork?.id ?? null}
           compact
-          onSelect={(work) => (selectedWork = work)}
+          onSelect={selectWork}
           onStatusChange={updateStatus}
         />
       </section>
@@ -540,7 +576,7 @@
           works={shelfWorks}
           compact
           selectedWorkId={selectedWork?.id ?? null}
-          onSelect={(work) => (selectedWork = work)}
+          onSelect={selectWork}
           onStatusChange={updateStatus}
         />
       </section>
@@ -778,6 +814,41 @@
   .file-list button.selected {
     background: #dfece3;
     border-color: #8eb39a;
+  }
+
+  .context-list {
+    display: grid;
+    gap: 0.65rem;
+    max-height: 18rem;
+    overflow: auto;
+  }
+
+  .context-list article {
+    background: #eef2f6;
+    border: 1px solid #d8dee6;
+    border-radius: 6px;
+    padding: 0.7rem;
+  }
+
+  .context-list header {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    margin-bottom: 0.35rem;
+  }
+
+  .context-list p,
+  .context-list small {
+    overflow-wrap: anywhere;
+  }
+
+  .context-list p {
+    margin: 0 0 0.35rem;
+  }
+
+  .context-list small {
+    color: #667381;
   }
 
   .files-grid {

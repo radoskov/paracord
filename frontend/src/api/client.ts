@@ -73,6 +73,22 @@ export interface ImportBatch {
   finished_at: string | null;
 }
 
+export interface CitationContext {
+  id: string;
+  reference_id: string;
+  resolved_cited_work_id: string | null;
+  reference_title: string | null;
+  reference_raw_citation: string | null;
+  reference_doi: string | null;
+  marker_text: string | null;
+  section_label: string | null;
+  context_before: string | null;
+  context_sentence: string | null;
+  context_after: string | null;
+  page: number | null;
+  source_tei_id: string | null;
+}
+
 export interface WorkQuery {
   q?: string;
   readingStatus?: string;
@@ -117,6 +133,10 @@ export class ApiClient {
 
   async updateWork(id: string, payload: Partial<Work>): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${id}`, { method: 'PATCH', body: payload });
+  }
+
+  async listCitationContexts(workId: string): Promise<CitationContext[]> {
+    return this.request<CitationContext[]>(`/api/v1/works/${workId}/citation-contexts`);
   }
 
   async listShelves(): Promise<Shelf[]> {

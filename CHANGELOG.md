@@ -14,6 +14,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   `CitationMention` rows from GROBID TEI.
 - Added `GET /api/v1/works/{work_id}/citation-contexts` to expose persisted citation
   mentions with their extracted reference metadata.
+- Added an initial frontend citation-context panel for the selected work in the Svelte
+  library workspace.
 - Added external metadata enrichment (arXiv + Crossref): identifier-based connectors in
   `services/metadata_enrichment.py` that record provenance-aware `MetadataAssertion`s and
   promote trusted external fields over GROBID when the work is not user-confirmed;

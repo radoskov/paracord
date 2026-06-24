@@ -50,11 +50,14 @@ What works today (real, tested in-container on Python 3.12):
   linked back to the extracted `Reference` and raw TEI source.
 - **M2 citation context API:** `GET /works/{work_id}/citation-contexts` returns persisted
   in-text citation contexts with reference metadata.
+- **M2 citation context frontend surface:** selecting a work in the Svelte library loads and
+  displays extracted citation contexts with marker, section, sentence context, and reference
+  metadata.
 
 What still does NOT exist yet:
 
-- Citation context frontend/reader and graph integration are not implemented yet (the
-  work-scoped API exists).
+- Citation context graph integration is not implemented yet; the lightweight library panel
+  exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
 - Duplicate/version detection beyond exact-hash, arXiv/DOI/bibliography *imports* (ingest by
@@ -67,10 +70,10 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. Continue M2/M4:
 
-1. **Citation contexts UI**: wire `GET /works/{id}/citation-contexts` into the frontend
-   reader/reference panel so users can inspect contexts.
-2. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
+1. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
    (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
+2. **Reader context integration**: move the lightweight citation-context panel into the
+   eventual PDF.js reader/reference tab.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
    normalized-title similarity guard before promoting), and arXiv/DOI link *ingestion*.
 
@@ -128,6 +131,7 @@ deliberately deferred — hardening, not the product.
   mentions from GROBID TEI.
 - Work-scoped citation context API returns persisted `CitationMention` rows joined to their
   extracted references.
+- The frontend library workspace displays citation contexts for the selected work.
 
 ## In progress
 

@@ -5,7 +5,7 @@
   export let selectedWorkId: string | null = null;
   export let compact = false;
 
-  export let onSelect: (work: Work) => void = () => {};
+  export let onSelect: (work: Work) => void | Promise<void> = () => {};
   export let onStatusChange: (work: Work, status: ReadingStatus) => void = () => {};
 
   const readingStatuses: ReadingStatus[] = [

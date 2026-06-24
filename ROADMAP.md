@@ -10,7 +10,9 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > metadata enrichment are live and validated on real arXiv PDFs** — GROBID via the RQ
 > worker, then arXiv/Crossref enrichment that auto-corrects bad GROBID titles, with a
 > provenance/conflict review surface. Raw TEI and citation mentions are now persisted.
-> Next in M2/M4: citation-context frontend surfacing and duplicate/version detection.
+> Next in M4: duplicate/version detection. Citation contexts are persisted, exposed through
+> the API, and visible in the initial frontend workspace; full reader/graph integration
+> remains later M3/M6 work.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -41,7 +43,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
   promotion) + migration `0004`. (done)
 - Background RQ worker + enqueue-on-import + live GROBID. (done, validated on real arXiv PDFs)
 - Header, abstract, references parsed. (done) Raw-TEI storage and citation mention
-  persistence. (done) Work-scoped citation-context API. (done) Frontend surfacing. (next)
+  persistence. (done) Work-scoped citation-context API. (done) Initial frontend surfacing.
+  (done)
 - Metadata enrichment connectors: arXiv + Crossref (by identifier) with a provenance/
   conflict review surface and auto-correction of GROBID metadata. (done, validated live)
   OpenAlex/Semantic Scholar and fuzzy title lookup still to do.
