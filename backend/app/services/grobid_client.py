@@ -17,6 +17,15 @@ class GrobidClient:
             response = await client.get(f"{self.base_url}/api/isalive")
             return response.status_code == 200
 
+    @staticmethod
+    def _options() -> dict[str, str]:
+        return {
+            "consolidateHeader": "1",
+            "consolidateCitations": "1",
+            "includeRawCitations": "1",
+            "segmentSentences": "1",
+        }
+
     async def process_fulltext_document(self, pdf_path: Path) -> str:
         """Extract TEI XML from a PDF.
 
@@ -25,16 +34,22 @@ class GrobidClient:
         async with httpx.AsyncClient(timeout=120) as client:
             with pdf_path.open("rb") as handle:
                 files = {"input": (pdf_path.name, handle, "application/pdf")}
-                data = {
-                    "consolidateHeader": "1",
-                    "consolidateCitations": "1",
-                    "includeRawCitations": "1",
-                    "segmentSentences": "1",
-                }
                 response = await client.post(
                     f"{self.base_url}/api/processFulltextDocument",
                     files=files,
-                    data=data,
+                    data=self._options(),
                 )
             response.raise_for_status()
             return response.text
+
+    def process_fulltext_document_sync(self, pdf_path: Path) -> str:
+        """Synchronous TEI extraction for use inside RQ workers."""
+        with httpx.Client(timeout=120) as client, pdf_path.open("rb") as handle:
+            files = {"input": (pdf_path.name, handle, "application/pdf")}
+            response = client.post(
+                f"{self.base_url}/api/processFulltextDocument",
+                files=files,
+                data=self._options(),
+            )
+        response.raise_for_status()
+        return response.text

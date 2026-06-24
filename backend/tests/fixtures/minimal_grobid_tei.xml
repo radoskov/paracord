@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title level="a" type="main">Attention Is All You Need</title>
+      </titleStmt>
+      <sourceDesc>
+        <biblStruct>
+          <analytic>
+            <author>
+              <persName>
+                <forename type="first">Ashish</forename>
+                <surname>Vaswani</surname>
+              </persName>
+            </author>
+            <author>
+              <persName>
+                <forename type="first">Noam</forename>
+                <surname>Shazeer</surname>
+              </persName>
+            </author>
+            <idno type="DOI">10.5555/transformer</idno>
+          </analytic>
+        </biblStruct>
+      </sourceDesc>
+    </fileDesc>
+    <profileDesc>
+      <abstract>
+        <div><p>We propose the Transformer, a model architecture based solely on attention.</p></div>
+      </abstract>
+    </profileDesc>
+  </teiHeader>
+  <text>
+    <back>
+      <div type="references">
+        <listBibl>
+          <biblStruct>
+            <analytic>
+              <title level="a">Neural Machine Translation by Jointly Learning to Align and Translate</title>
+              <idno type="DOI">10.5555/nmt</idno>
+            </analytic>
+            <monogr>
+              <imprint>
+                <date type="published" when="2015">2015</date>
+              </imprint>
+            </monogr>
+            <note type="raw_reference">Bahdanau et al. Neural Machine Translation. ICLR 2015.</note>
+          </biblStruct>
+          <biblStruct>
+            <note type="raw_reference">Some Unparsed Reference, 2010.</note>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>
