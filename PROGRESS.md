@@ -71,8 +71,8 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- Duplicate review API/actions/UI, version-linking actions, multiwork split workflow,
-  embedded PDF.js reader, citation graph, export, AI summaries, topics.
+- Real duplicate merge/link/split actions, multiwork split workflow, embedded PDF.js reader,
+  citation graph, export, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
