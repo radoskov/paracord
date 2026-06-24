@@ -58,6 +58,9 @@ What works today (real, tested in-container on Python 3.12):
   Alembic migration and ORM model; `services/duplicate_detection.py` generates idempotent
   review candidates for same DOI, same arXiv base ID/version mismatch, fuzzy normalized-title
   matches, exact file hash, and matching text fingerprints.
+- **M4 duplicate review API foundation:** `/api/v1/duplicates` lists candidates, triggers a
+  scan across all or selected work/file identities, and updates candidate review status
+  (`open`/`accepted`/`rejected`/`ignored`) with resolver metadata.
 
 What still does NOT exist yet:
 
@@ -74,10 +77,11 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 ### Start here (next agent)
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
-the queue table and scanner. Continue M2/M4:
+the queue table, scanner, and basic review-status API. Continue M2/M4:
 
-1. **Duplicate/version review API/actions**: expose `duplicate_candidates`, scan triggers, and
-   status transitions (`accepted`/`rejected`/`ignored`) before building the review UI.
+1. **Duplicate/version review UI and real actions**: build a frontend review surface over
+   `/duplicates`; then implement merge/link-as-version/keep-separate semantics behind the
+   existing status endpoint instead of only marking status.
 2. **Reader context integration**: move the lightweight citation-context panel into the
    eventual PDF.js reader/reference tab.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -141,6 +145,7 @@ deliberately deferred — hardening, not the product.
 - Duplicate candidate storage and scanner foundation: migration `0006`, `DuplicateCandidate`,
   and idempotent candidate generation for DOI/arXiv/fuzzy-title/exact-file/text-fingerprint
   signals.
+- Duplicate review API foundation: list/scan/status endpoints under `/api/v1/duplicates`.
 
 ## In progress
 
@@ -156,7 +161,7 @@ deliberately deferred — hardening, not the product.
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- Duplicate review API/actions and UI (scanner exists; merge/link/ignore workflows do not).
+- Duplicate review UI and real merge/link/ignore workflows (scanner + status API exist).
 - Citation graph materialization implementation.
 - Export renderer.
 - BERTopic and embedding pipeline.

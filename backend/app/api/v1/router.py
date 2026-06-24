@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     ai,
     auth,
     citations,
+    duplicates,
     exports,
     files,
     graph,
@@ -60,6 +61,12 @@ api_router.include_router(
     citations.router,
     prefix="/citations",
     tags=["citations"],
+    dependencies=auth_required,
+)
+api_router.include_router(
+    duplicates.router,
+    prefix="/duplicates",
+    tags=["duplicates"],
     dependencies=auth_required,
 )
 api_router.include_router(graph.router, prefix="/graph", tags=["graph"], dependencies=auth_required)

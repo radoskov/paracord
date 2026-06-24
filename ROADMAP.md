@@ -11,10 +11,11 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > worker, then arXiv/Crossref enrichment that auto-corrects bad GROBID titles, with a
 > provenance/conflict review surface. Raw TEI and citation mentions are now persisted.
 > M4 duplicate/version detection has started: the review-queue table and scanner now generate
-> DOI/arXiv/fuzzy-title/text-fingerprint/exact-file candidates idempotently. Next in M4:
-> expose the review API/actions, then the review UI. Citation contexts are persisted, exposed
-> through the API, and visible in the initial frontend workspace; full reader/graph integration
-> remains later M3/M6 work.
+> DOI/arXiv/fuzzy-title/text-fingerprint/exact-file candidates idempotently, and
+> `/api/v1/duplicates` can list, scan, and mark review status. Next in M4: review UI plus
+> real merge/link/split actions. Citation contexts are persisted, exposed through the API, and
+> visible in the initial frontend workspace; full reader/graph integration remains later
+> M3/M6 work.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -65,10 +66,10 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 
 ## M4: Duplicate, version, and multi-work review
 
-- Exact, DOI/arXiv, fuzzy, and text-fingerprint duplicate detection. (backend scanner
-  started; API/UI pending)
-- Version linking; multi-paper file links and segments.
-- Review UI (merge / link as version / split / keep separate / ignore).
+- Exact, DOI/arXiv, fuzzy, and text-fingerprint duplicate detection. (backend scanner/API
+  started; UI pending)
+- Version linking; multi-paper file links and segments. (pending)
+- Review UI (merge / link as version / split / keep separate / ignore). (pending)
 
 ## M5: Local agent and teleport (remote machines)
 

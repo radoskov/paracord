@@ -56,6 +56,7 @@ backend/app/api/v1/endpoints/agents.py
 backend/app/api/v1/endpoints/ai.py
 backend/app/api/v1/endpoints/auth.py
 backend/app/api/v1/endpoints/citations.py
+backend/app/api/v1/endpoints/duplicates.py
 backend/app/api/v1/endpoints/exports.py
 backend/app/api/v1/endpoints/files.py
 backend/app/api/v1/endpoints/graph.py
@@ -125,6 +126,7 @@ backend/tests/test_api_deps.py
 backend/tests/test_auth_service.py
 backend/tests/test_config.py
 backend/tests/test_duplicate_detection.py
+backend/tests/test_duplicates_api.py
 backend/tests/test_enrichment.py
 backend/tests/test_extraction.py
 backend/tests/test_health.py
