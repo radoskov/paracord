@@ -64,6 +64,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # RQ background worker — runs GROBID extraction (and later summaries/topics) jobs.
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      REDIS_URL: "redis://redis:6379/0"
+      GROBID_URL: "http://grobid:8070"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - ./pyproject.toml:/app/pyproject.toml
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "paperracks"]
+
   # PaperRacks local workstation agent (client). Idles by default; drive it with
   #   docker compose exec agent python -m paperracks_agent.cli --help
   agent:
@@ -96,18 +118,18 @@ services:
       - ./frontend:/app/frontend
       - paperracks_frontend_node_modules:/app/frontend/node_modules
 
-  # Heavy extraction service — only started with the "extraction" profile:
+  # GROBID extraction service — only started with the "extraction" profile:
   #   docker compose --profile extraction up -d grobid
+  # Uses the lightweight CRF-only image (~0.5 GB, CPU, no GPU) instead of the full
+  # deep-learning image (~12 GB). It exposes the same REST API on :8070.
   grobid:
-    image: grobid/grobid:0.8.1
+    image: lfoppiano/grobid:0.8.0
     profiles: ["extraction"]
     ports:
       - "127.0.0.1:8070:8070"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    # No container healthcheck: the CRF image ships without curl/wget. The app and
+    # worker check GROBID liveness at call time (GrobidClient.is_alive / the job),
+    # and nothing in this stack gates on grobid being "healthy".
 
   # Optional local LLM service — only with the "ai" profile.
   ollama:

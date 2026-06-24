@@ -10,12 +10,17 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_roles
+from app.core.security import Role
 from app.db.session import get_db
 from app.models.file import File, Location
 from app.models.source import Source
+from app.models.user import User
+from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
+EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 
 
 class FileRead(BaseModel):
@@ -50,6 +55,25 @@ def get_file(file_id: uuid.UUID, db: Session = DB_DEP) -> File:
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return file
+
+
+@router.post("/{file_id}/extract", status_code=status.HTTP_202_ACCEPTED)
+def extract_file(
+    file_id: uuid.UUID,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> dict[str, str | None]:
+    """Queue GROBID extraction for a file (runs in the background worker)."""
+    file = db.get(File, file_id)
+    if file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    job_id = enqueue_extraction(file_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Extraction queue unavailable",
+        )
+    return {"job_id": job_id, "status": "queued"}
 
 
 @router.get("/{file_id}/stream")

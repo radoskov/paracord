@@ -11,6 +11,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.source import Source
 from app.models.work import Work
 from app.services.extraction import extract_and_store, store_parsed_extraction
+from app.services.storage import file_ids_pending_extraction
 from app.services.tei_parser import parse_tei
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -165,3 +166,30 @@ def test_extract_and_store_requires_server_location(db_session) -> None:
 
     with pytest.raises(ValueError, match="No server-path location"):
         extract_and_store(db_session, file=file, fetch_tei=lambda _p: "")
+
+
+def test_file_ids_pending_extraction(db_session) -> None:
+    from app.models.metadata import MetadataAssertion
+
+    source = Source(type="server_folder", name="S", path_alias="s", config={"root_path": "/x"})
+    work = Work(canonical_title="w", normalized_title="w")
+    file = File(sha256="d" * 64, size_bytes=1, mime_type="application/pdf")
+    db_session.add_all([source, work, file])
+    db_session.flush()
+    db_session.add_all(
+        [
+            FileWorkLink(file_id=file.id, work_id=work.id),
+            Location(file_id=file.id, source_id=source.id, location_type="server_path"),
+        ]
+    )
+    db_session.commit()
+
+    assert file_ids_pending_extraction(db_session, source.id) == [file.id]
+
+    db_session.add(
+        MetadataAssertion(
+            entity_type="work", entity_id=work.id, field_name="title", value="t", source="grobid"
+        )
+    )
+    db_session.commit()
+    assert file_ids_pending_extraction(db_session, source.id) == []

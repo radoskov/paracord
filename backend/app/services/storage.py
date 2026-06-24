@@ -11,11 +11,28 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.file import File, FileWorkLink, Location
+from app.models.metadata import MetadataAssertion
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.work import Work
 from app.services.audit import record_event
 from app.utils.normalization import normalize_title
+
+
+def file_ids_pending_extraction(db: Session, source_id) -> list:
+    """Return file IDs for a source whose linked work has no GROBID extraction yet."""
+    extracted_works = select(MetadataAssertion.entity_id).where(
+        MetadataAssertion.entity_type == "work",
+        MetadataAssertion.source == "grobid",
+    )
+    stmt = (
+        select(File.id)
+        .join(Location, Location.file_id == File.id)
+        .join(FileWorkLink, FileWorkLink.file_id == File.id)
+        .where(Location.source_id == source_id, FileWorkLink.work_id.notin_(extracted_works))
+        .distinct()
+    )
+    return list(db.scalars(stmt).all())
 
 
 def content_addressed_path(root: Path, sha256: str) -> Path:

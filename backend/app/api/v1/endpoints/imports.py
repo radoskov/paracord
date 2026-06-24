@@ -12,7 +12,8 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.source import ImportBatch, Source
 from app.models.user import User
-from app.services.storage import import_server_folder
+from app.services.storage import file_ids_pending_extraction, import_server_folder
+from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -58,6 +59,9 @@ def import_folder(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     db.refresh(batch)
+    # Best-effort: queue GROBID extraction for newly imported files (no-op if Redis is down).
+    for file_id in file_ids_pending_extraction(db, source.id):
+        enqueue_extraction(file_id)
     return batch
 
 
