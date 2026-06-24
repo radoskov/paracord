@@ -145,16 +145,14 @@ deliberately deferred — hardening, not the product.
 
 - Login rate limiting / failed-login lockout (role-based authorization is now implemented).
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
-- PDF.js reader integration.
+- Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- GROBID TEI parser implementation.
 - Duplicate/version detection implementation.
 - Citation graph materialization implementation.
-- PDF.js integration.
 - Export renderer.
 - BERTopic and embedding pipeline.
 - Local LLM summarization pipeline.
-- Audit-log storage and admin views.
+- Audit-log admin views (and read/export audit *events* — see tech debt).
 - End-to-end tests.
 
 ## Tech debt and cleanups
@@ -167,6 +165,43 @@ Low-severity items found during the audit, not tied to a feature milestone. Addr
 - Remove or wire the unused agent config flags `follow_symlinks` / `teleport_enabled`.
 - Note in `docs/architecture/api_surface.md` and `data_model.md` that they reflect current stubs and defer to `SPECIFICATION.md` §10 / §9.
 - Relabel the `SPECIFICATION.md` front-matter Contents as a thematic overview (its numbers do not match the section numbers).
+
+### Data-model divergences from SPECIFICATION.md §9.3 (fix before they are built on)
+
+These cost a migration + re-extraction if M4 (duplicates) / M6 (citation graph) / M7 (topics)
+are built on the current shapes, so address the first two before M4:
+
+- **Split `works.arxiv_id` into `arxiv_base_id`** (strip the `vN` suffix) and add a **UNIQUE**
+  constraint on `doi` and the arXiv base id. §8.4 version-dedup and §6 version-collapsing key
+  on the *base* id, and §9.2 expects uniqueness; today both are plain indexes, so duplicate
+  works by DOI are not prevented and arXiv-version detection will be wrong.
+- **`Reference` is missing `resolution_status` / `resolution_confidence`** (and `parsed_authors`/
+  `parsed_venue`). The M6 graph pipeline (§12.5) marks edges by `resolution_status`
+  (unresolved / local_match / external_match); building the graph without it means another
+  migration + reparse.
+- **`CitationMention` is missing `extraction_confidence`** and stores coordinates as four float
+  columns instead of §9.3's `pdf_coordinates` jsonb (the PDF.js reader contract for M3).
+- **Topic modeling is collapsed** into a single `topic_assignments` table instead of §9.3's
+  `topic_models` / `topics` / `work_topics` (loses model version/params/keywords needed by
+  §8.15 model-freezing). M7.
+- UUIDv7/ULID sortable PKs (§9.2) vs the current random UUID4 — minor, but migration cost grows.
+
+### Behavioral / security gaps found in the alignment audit
+
+- **`user_confirmed` is a global enrichment lock.** `create_work`/`update_work` set
+  `user_confirmed=True` on any manual edit, and promotion keys off `not user_confirmed`, so a
+  single edit permanently freezes *all* fields against future enrichment. §8.12 wants
+  per-field user locks ("user edits highest priority, conflicts surfaced as warnings"). Move to
+  per-field locking before users edit metadata heavily.
+- **Read/export audit events are not emitted (§7.6).** `record_event` fires only for auth and
+  service mutations; `file.viewed` / `file.downloaded` / `paper.exported` are never written on
+  the stream/works/exports endpoints. Add them.
+- **No SSRF guard in the enrichment HTTP clients.** Only fixed arXiv/Crossref hosts are hit
+  today, but §7.7 requires the future `/sources/url` importer to block private IP ranges — it
+  must not be built on the current unguarded `httpx` clients.
+- **Duplicate citation-contexts surface.** `endpoints/citations.py` `/contexts` is still a stub
+  while `works.py` `/works/{id}/citation-contexts` is the real one; remove/redirect the stub so
+  a dead endpoint does not ship in the OpenAPI schema.
 
 ## Next milestone: M0 developer skeleton
 
