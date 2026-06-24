@@ -34,32 +34,39 @@ What works today (real, tested in-container on Python 3.12):
   PDFs from arXiv → the worker ran GROBID via the `extraction` profile → 90 references and
   abstracts/titles persisted asynchronously. Uses the lightweight `lfoppiano/grobid:0.8.0`
   CRF image (~0.5 GB) rather than the ~12 GB deep-learning image.
+- **M2 metadata enrichment (arXiv + Crossref), validated live end-to-end:** identifier-based
+  connectors (`services/metadata_enrichment.py`) that record provenance-aware
+  MetadataAssertions and promote trusted external fields over GROBID when the work is not
+  user-confirmed; arXiv-id-from-filename detection at import; an automatic chain
+  (import → GROBID extract → arXiv/Crossref enrich) plus a `POST /works/{id}/enrich`
+  trigger; and a review/conflict surface (`GET /works/{id}/metadata`,
+  `POST /works/{id}/metadata/select`). Verified live: importing `1706.03762.pdf`
+  auto-corrected GROBID's mis-detected title ("Provided proper attribution…") to
+  "Attention Is All You Need" via arXiv, with both values kept as assertions and the
+  conflict flagged.
 
 What still does NOT exist yet:
 
 - Citation *mentions*/contexts and raw-TEI storage are not persisted yet (the parser
   extracts the reference list, not in-text mentions).
-- Known GROBID quirk seen in testing: it occasionally mis-detects the title (it grabbed a
-  license footer as the Transformer paper's title). This is what metadata enrichment +
-  the assertion/review model are for — see next steps.
-- Metadata enrichment connectors (Crossref/arXiv/OpenAlex), duplicate/version detection,
-  arXiv/DOI/bibliography imports, embedded PDF.js reader, citation graph, export, AI
-  summaries, topics.
+- OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
+  exact-identifier enrichment is implemented so far.
+- Duplicate/version detection beyond exact-hash, arXiv/DOI/bibliography *imports* (ingest by
+  link), embedded PDF.js reader, citation graph, export, AI summaries, topics.
 
-Component note: **Redis now has a live consumer** — the `worker` service runs the RQ
-`paperracks` queue and processes GROBID extraction jobs.
+Component note: **Redis has a live consumer** — the `worker` service runs the RQ
+`paperracks` queue and processes both GROBID extraction and enrichment jobs.
 
 ### Start here (next agent)
 
-M1 done; M2 extraction pipeline is live and validated. Continue M2/M4 in this order:
+M1 done; M2 extraction + enrichment pipeline is live and validated. Continue M2/M4:
 
-1. **Metadata enrichment connectors** (`services/metadata_enrichment.py`): query arXiv (by
-   ID) and Crossref (by DOI/title) and store results as MetadataAssertions, so a bad GROBID
-   title can be corrected from a trusted source. Add a conflict/review surface.
-2. **Citation mentions/contexts**: extend `parse_tei` to emit in-text mentions and persist
-   `CitationMention` rows (the models exist); store the raw TEI blob for reproducibility.
-3. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
+1. **Citation mentions/contexts**: extend `parse_tei` to emit in-text mentions and persist
+   `CitationMention` rows (the models + `0004` table exist); store the raw TEI blob.
+2. **Duplicate/version detection** (`services/duplicate_detection.py`) + a review queue
    (exact hash done at import; add DOI/arXiv/fuzzy-title candidates) — this is M4.
+3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
+   normalized-title similarity guard before promoting), and arXiv/DOI link *ingestion*.
 
 The leftover M0 auth items (login rate limiting, in-app password change) remain
 deliberately deferred — hardening, not the product.

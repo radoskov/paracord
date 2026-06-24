@@ -8,6 +8,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added external metadata enrichment (arXiv + Crossref): identifier-based connectors in
+  `services/metadata_enrichment.py` that record provenance-aware `MetadataAssertion`s and
+  promote trusted external fields over GROBID when the work is not user-confirmed;
+  arXiv-id-from-filename detection at import; an automatic import → extract → enrich chain
+  plus a `POST /works/{id}/enrich` trigger and an `enrich_work_job` worker job; a
+  review/conflict surface (`GET /works/{id}/metadata`, `POST /works/{id}/metadata/select`);
+  and enrichment config loading. Validated live: arXiv auto-corrected GROBID's mis-detected
+  title for 1706.03762 to "Attention Is All You Need", with the conflict surfaced.
 - Wired the GROBID extraction pipeline into the running system: an RQ queue
   (`app/workers/queue.py`, best-effort enqueue), a `worker` compose service running
   `rq worker`, enqueue-on-import, and a `POST /files/{id}/extract` trigger. The

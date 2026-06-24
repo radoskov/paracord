@@ -113,11 +113,14 @@ backend/app/workers/queue.py
 backend/docker-entrypoint.sh
 backend/requirements-dev.txt
 backend/requirements.txt
+backend/tests/fixtures/arxiv_response.xml
+backend/tests/fixtures/crossref_response.json
 backend/tests/fixtures/minimal_grobid_tei.xml
 backend/tests/test_admin_scripts.py
 backend/tests/test_api_deps.py
 backend/tests/test_auth_service.py
 backend/tests/test_config.py
+backend/tests/test_enrichment.py
 backend/tests/test_extraction.py
 backend/tests/test_health.py
 backend/tests/test_m1_core_library.py
