@@ -112,8 +112,12 @@ The suite has three layers (run with `make test`):
   M3+ contracts and are `@pytest.mark.skip`-ped. **When you implement a milestone, enabling its
   test is part of the Definition of Done:** search `test_future_milestones.py` for the matching
   `ENABLE WHEN` note, remove the skip, and make it green.
+- **Frontend component tests** — `frontend/src/*.test.ts` (Vitest + jsdom, run with
+  `make frontend-test`). These execute the real Svelte mount in a DOM, so they catch
+  client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
+  Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 77 passing + 6 skipped backend, 2 passing agent.
+Current count: 77 passing + 6 skipped backend, 2 passing agent, 2 passing frontend.
 
 ### Start here (next agent)
 

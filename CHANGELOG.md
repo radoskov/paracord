@@ -8,6 +8,11 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added frontend component tests (Vitest + jsdom + Testing Library, `vitest.config.ts`,
+  `make frontend-test`, and a CI `frontend` job): `main.test.ts` executes the entrypoint in
+  a DOM and asserts the app mounts into `#app` (regression guard for the Svelte-5 mount bug),
+  and `App.test.ts` checks the sign-in view renders. These run the real Svelte mount, so they
+  catch client-render failures a raw-HTML fetch cannot.
 - Expanded the test suite with high-level coverage: a shared `conftest.py` harness
   (FastAPI `TestClient` over in-memory SQLite) and three layers — service/unit tests,
   user-oriented API flow tests (`test_api_flows.py`: import → organize → search → read,
@@ -115,6 +120,10 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed
 
+- Pinned frontend dependencies in `frontend/package.json` (svelte `^5.56.4`, vite `^8.1.0`,
+  `@sveltejs/vite-plugin-svelte` `^7.1.2`, typescript `^6.0.3`, pdfjs-dist `^6.0.227`,
+  cytoscape `^3.34.0`) instead of `latest`, so a future major bump can't silently reintroduce
+  a framework mismatch (the cause of the blank-page bug).
 - Restructured the Makefile and runbooks for clearer test/lint/format workflows: tests run per component (`test-api` in the api container, `test-agent` in the agent container, `test` runs both) rather than forcing agent code into the server image; lint/format are host-local (`lint`/`fix`) since Ruff is pure static analysis; added `up-extraction`/`up-ai` profile targets for GROBID/Ollama; fixed `make db-shell` to expand `$POSTGRES_USER`/`$POSTGRES_DB` inside the Postgres container; added `agent/pyproject.toml` so the agent's pytest is properly configured. Updated `README.md`, `docs/runbooks/development_setup.md`, and `docs/runbooks/dev_containers.md` to match.
 - Bumped the target runtime to Python 3.12 (`pyproject.toml`, Dockerfiles, CI) and the Postgres image to `pgvector/pgvector:pg17`. `make test` now runs in the api container by default (`make test-local` runs on the host).
 - Reconciled `SPECIFICATION.md` with the implemented scaffold: roles are `owner | editor | reader` (was `owner | member`), the repository-layout and per-agent work split now defer to `WORK_SPLIT.md` (A–J) and the actual `backend/ frontend/ agent/` layout, config examples use port 8000 and bcrypt, and the milestone plan was re-ordered to front-load the single-machine loop (the local agent moved to M5).

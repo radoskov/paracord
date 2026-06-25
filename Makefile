@@ -178,7 +178,7 @@ check: lint test ## Host-local lint plus Docker tests.
 ready: fix precommit check ## Auto-fix locally, run pre-commit, then lint + tests.
 
 .PHONY: ci
-ci: lint test check-secrets ## Approximate the CI checks locally.
+ci: lint test frontend-test check-secrets ## Approximate the CI checks locally.
 
 # ---------------------------------------------------------------------------
 # Application commands
@@ -210,6 +210,10 @@ frontend-dev: init ## Start the frontend dev server in Docker.
 .PHONY: frontend-build
 frontend-build: init ## Build the frontend in Docker.
 	$(FRONTEND_RUN) npm run build
+
+.PHONY: frontend-test
+frontend-test: init ## Run frontend component tests (Vitest + jsdom) in Docker.
+	$(FRONTEND_RUN) npm run test
 
 .PHONY: health
 health: ## Check local API health endpoint.

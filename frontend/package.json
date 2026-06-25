@@ -6,16 +6,20 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@sveltejs/vite-plugin-svelte": "latest",
-    "vite": "latest",
-    "svelte": "latest",
-    "pdfjs-dist": "latest",
-    "cytoscape": "latest"
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "vite": "^8.1.0",
+    "svelte": "^5.56.4",
+    "pdfjs-dist": "^6.0.227",
+    "cytoscape": "^3.34.0"
   },
   "devDependencies": {
-    "typescript": "latest"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "jsdom": "^29.1.1",
+    "@testing-library/svelte": "^5.4.2"
   }
 }
