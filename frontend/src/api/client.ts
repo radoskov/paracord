@@ -90,6 +90,12 @@ export interface CitationContext {
 }
 
 export type DuplicateCandidateStatus = 'open' | 'accepted' | 'rejected' | 'ignored';
+export type DuplicateCandidateAction =
+  | 'merge_works'
+  | 'link_as_version'
+  | 'mark_duplicate_file'
+  | 'keep_separate'
+  | 'ignore';
 
 export interface DuplicateCandidate {
   id: string;
@@ -172,7 +178,9 @@ export class ApiClient {
     return this.request<DuplicateCandidate[]>(`/api/v1/duplicates${suffix}`);
   }
 
-  async scanDuplicateCandidates(payload: { work_id?: string; file_id?: string } = {}): Promise<DuplicateScanResult> {
+  async scanDuplicateCandidates(
+    payload: { work_id?: string; file_id?: string } = {},
+  ): Promise<DuplicateScanResult> {
     return this.request<DuplicateScanResult>('/api/v1/duplicates/scan', {
       method: 'POST',
       body: payload,
@@ -186,6 +194,17 @@ export class ApiClient {
     return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
       method: 'PATCH',
       body: { status },
+    });
+  }
+
+  async applyDuplicateCandidateAction(
+    id: string,
+    action: DuplicateCandidateAction,
+    targetWorkId?: string,
+  ): Promise<DuplicateCandidate> {
+    return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
+      method: 'PATCH',
+      body: { action, target_work_id: targetWorkId },
     });
   }
 

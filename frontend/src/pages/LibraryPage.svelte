@@ -4,6 +4,7 @@
   import {
     ApiClient,
     type CitationContext,
+    type DuplicateCandidateAction,
     type DuplicateCandidate,
     type DuplicateCandidateStatus,
     type FileRecord,
@@ -355,6 +356,20 @@
     }, `Candidate marked ${status}`);
   }
 
+  async function applyDuplicateAction(
+    candidate: DuplicateCandidate,
+    action: DuplicateCandidateAction,
+  ): Promise<void> {
+    await run(async () => {
+      await client.applyDuplicateCandidateAction(
+        candidate.id,
+        action,
+        candidate.entity_a_type === 'work' ? candidate.entity_a_id : undefined,
+      );
+      await Promise.all([loadWorks(), loadShelves(), loadRacks(), loadDuplicateCandidates()]);
+    }, `Applied ${candidateLabel(action)}`);
+  }
+
   async function selectShelf(shelf: Shelf): Promise<void> {
     selectedShelf = shelf;
     selectedShelfForWork = shelf.id;
@@ -388,6 +403,14 @@
       .slice(0, 4)
       .map(([key, value]) => `${candidateLabel(key)}: ${String(value)}`)
       .join(' · ');
+  }
+
+  function canResolveAsWork(candidate: DuplicateCandidate): boolean {
+    return candidate.entity_a_type === 'work' && candidate.entity_b_type === 'work';
+  }
+
+  function canResolveAsFile(candidate: DuplicateCandidate): boolean {
+    return candidate.entity_a_type === 'file' && candidate.entity_b_type === 'file';
   }
 </script>
 
@@ -519,27 +542,54 @@
                 </header>
                 <p>{candidateSignals(candidate)}</p>
                 <div class="candidate-actions">
+                  {#if canResolveAsWork(candidate)}
+                    <button
+                      type="button"
+                      on:click={() => applyDuplicateAction(candidate, 'merge_works')}
+                      disabled={loading || candidate.status !== 'open'}
+                    >
+                      Merge
+                    </button>
+                    <button
+                      type="button"
+                      on:click={() => applyDuplicateAction(candidate, 'link_as_version')}
+                      disabled={loading || candidate.status !== 'open'}
+                    >
+                      Link version
+                    </button>
+                  {/if}
+                  {#if canResolveAsFile(candidate)}
+                    <button
+                      type="button"
+                      on:click={() => applyDuplicateAction(candidate, 'mark_duplicate_file')}
+                      disabled={loading || candidate.status !== 'open'}
+                    >
+                      Mark duplicate
+                    </button>
+                  {/if}
                   <button
                     type="button"
-                    on:click={() => updateDuplicateStatus(candidate, 'accepted')}
-                    disabled={loading || candidate.status === 'accepted'}
+                    on:click={() => applyDuplicateAction(candidate, 'keep_separate')}
+                    disabled={loading || candidate.status !== 'open'}
                   >
-                    Accept
+                    Keep separate
                   </button>
                   <button
                     type="button"
-                    on:click={() => updateDuplicateStatus(candidate, 'rejected')}
-                    disabled={loading || candidate.status === 'rejected'}
-                  >
-                    Reject
-                  </button>
-                  <button
-                    type="button"
-                    on:click={() => updateDuplicateStatus(candidate, 'ignored')}
-                    disabled={loading || candidate.status === 'ignored'}
+                    on:click={() => applyDuplicateAction(candidate, 'ignore')}
+                    disabled={loading || candidate.status !== 'open'}
                   >
                     Ignore
                   </button>
+                  {#if candidate.status !== 'open'}
+                    <button
+                      type="button"
+                      on:click={() => updateDuplicateStatus(candidate, 'open')}
+                      disabled={loading}
+                    >
+                      Reopen
+                    </button>
+                  {/if}
                 </div>
               </article>
             {/each}

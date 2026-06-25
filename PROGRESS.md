@@ -67,6 +67,9 @@ What works today (real, tested in-container on Python 3.12):
 - **M4 duplicate review backend actions:** review decisions can now merge work candidates
   without deleting source works, link a source work as a `WorkVersion`, mark a file candidate
   as a duplicate copy, keep candidates separate, or ignore them. Resolutions write audit events.
+- **M4 duplicate review frontend actions:** the review panel now calls explicit merge,
+  link-as-version, mark-duplicate-file, keep-separate, ignore, and reopen flows instead of only
+  toggling generic status.
 
 What still does NOT exist yet:
 
@@ -74,8 +77,7 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- Frontend wiring for the new duplicate action names, multiwork split workflow, embedded PDF.js
-  reader, citation graph, export, AI summaries, topics.
+- Multiwork split workflow, embedded PDF.js reader, citation graph, export, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
@@ -83,12 +85,11 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 ### Start here (next agent)
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
-the queue table, scanner, basic review-status API, backend action semantics, and initial
-frontend panel. Continue M2/M4:
+the queue table, scanner, review API, backend action semantics, and frontend action panel.
+Continue M2/M4:
 
-1. **Duplicate/version frontend action wiring**: change the review panel from generic
-   accept/reject buttons to explicit merge/link-as-version/duplicate-file/keep-separate/ignore
-   actions, then add multiwork split candidates.
+1. **Multiwork split candidates**: detect likely multi-paper files and expose split-file review
+   candidates/actions.
 2. **Reader context integration**: move the lightweight citation-context panel into the
    eventual PDF.js reader/reference tab.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -157,6 +158,7 @@ deliberately deferred — hardening, not the product.
   accept/reject/ignore controls.
 - Backend duplicate review actions for merge-work, link-as-version, duplicate-file,
   keep-separate, and ignore decisions.
+- Frontend duplicate review actions wired to the backend action API.
 
 ## In progress
 
@@ -172,7 +174,7 @@ deliberately deferred — hardening, not the product.
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- Frontend wiring for real duplicate merge/link/ignore actions; multiwork split workflow.
+- Multiwork split workflow and split-file review action.
 - Citation graph materialization implementation.
 - Export renderer.
 - BERTopic and embedding pipeline.

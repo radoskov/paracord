@@ -15,9 +15,10 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > `/api/v1/duplicates` can list, scan, and mark review status. The initial Svelte review panel
 > can trigger scans and mark candidates accepted/rejected/ignored. Backend review actions now
 > apply merge-work, link-as-version, duplicate-file, keep-separate, and ignore decisions without
-> deleting files/works. Next in M4: wire those actions into the frontend and add multiwork split
-> candidates. Citation contexts are persisted, exposed through the API, and visible in the
-> initial frontend workspace; full reader/graph integration remains later M3/M6 work.
+> deleting files/works, and the Svelte review panel now calls those explicit actions. Next in
+> M4: add multiwork split candidates. Citation contexts are persisted, exposed through the API,
+> and visible in the initial frontend workspace; full reader/graph integration remains later
+> M3/M6 work.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -72,8 +73,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
   status UI started)
 - Version linking; multi-paper file links and segments. (backend version-link action started;
   multi-paper pending)
-- Review UI (merge / link as version / split / keep separate / ignore). (initial status UI
-  exists; backend real actions started)
+- Review UI (merge / link as version / split / keep separate / ignore). (initial real-action UI
+  exists; split pending)
 
 ## M5: Local agent and teleport (remote machines)
 

@@ -18,6 +18,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
 - Added backend duplicate-review actions: merge work candidates without deleting source works,
   link a candidate as a `WorkVersion`, mark file candidates as duplicate copies, keep separate,
   and ignore, with audit events and focused tests.
+- Updated the Svelte duplicate-review panel to call explicit backend actions (merge, link
+  version, mark duplicate, keep separate, ignore) and reopen resolved candidates.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of
