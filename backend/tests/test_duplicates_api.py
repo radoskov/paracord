@@ -14,7 +14,7 @@ from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import File, FileWorkLink
+from app.models.file import File, FileSegment, FileWorkLink
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
@@ -33,6 +33,7 @@ def db_session(tmp_path: Path):
             Work.__table__,
             WorkVersion.__table__,
             File.__table__,
+            FileSegment.__table__,
             FileWorkLink.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
@@ -252,3 +253,43 @@ def test_mark_duplicate_file_marks_file_links(db_session, editor: User) -> None:
     assert duplicate_link.relationship_type == "duplicate_copy"
     assert duplicate_link.warning_state == "work_has_multiple_files"
     assert duplicate_link.user_confirmed is True
+
+
+def test_split_file_creates_segments_works_and_links(db_session, editor: User) -> None:
+    file = File(sha256="e" * 64, size_bytes=100, page_count=12)
+    db_session.add(file)
+    db_session.flush()
+    candidate = DuplicateCandidate(
+        candidate_type="multiwork_file",
+        entity_a_type="file",
+        entity_a_id=file.id,
+        entity_b_type="file",
+        entity_b_id=file.id,
+        score=0.78,
+        signals={},
+    )
+    db_session.add(candidate)
+    db_session.commit()
+
+    updated = update_duplicate_candidate(
+        candidate.id,
+        DuplicateCandidateUpdate(
+            action="split_file",
+            split_segments=[
+                {"title": "First Paper", "page_start": 1, "page_end": 6},
+                {"title": "Second Paper", "page_start": 7, "page_end": 12},
+            ],
+        ),
+        db=db_session,
+        actor=editor,
+    )
+
+    assert updated.status == "accepted"
+    assert updated.signals["split_segment_count"] == 2
+    works = db_session.scalars(select(Work).order_by(Work.canonical_title)).all()
+    assert [work.canonical_title for work in works] == ["First Paper", "Second Paper"]
+    segments = db_session.scalars(select(FileSegment).order_by(FileSegment.page_start)).all()
+    assert [(segment.page_start, segment.page_end) for segment in segments] == [(1, 6), (7, 12)]
+    links = db_session.scalars(select(FileWorkLink).order_by(FileWorkLink.created_at)).all()
+    assert {link.relationship_type for link in links} == {"contains"}
+    assert {link.warning_state for link in links} == {"file_contains_multiple_works"}

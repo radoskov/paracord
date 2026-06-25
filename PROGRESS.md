@@ -72,6 +72,9 @@ What works today (real, tested in-container on Python 3.12):
   toggling generic status.
 - **M4 multiwork candidate detection:** files with repeated abstract/reference markers or
   long proceedings-like previews are queued as `multiwork_file` candidates for review.
+- **M4 multiwork split backend action:** `split_file` accepts user-provided segment ranges and
+  creates `FileSegment`, `Work`, and `FileWorkLink` rows with `file_contains_multiple_works`
+  warning state.
 
 What still does NOT exist yet:
 
@@ -79,8 +82,8 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- Multiwork split action/segmented work creation, embedded PDF.js reader, citation graph,
-  export, AI summaries, topics.
+- Frontend controls for multiwork split ranges, embedded PDF.js reader, citation graph, export,
+  AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
@@ -89,10 +92,10 @@ Component note: **Redis has a live consumer** — the `worker` service runs the 
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
 the queue table, scanner, review API, backend action semantics, frontend action panel, and
-multiwork candidate detection. Continue M2/M4:
+multiwork candidate detection plus backend split action. Continue M2/M4:
 
-1. **Multiwork split action**: turn `multiwork_file` review decisions into `FileSegment` rows
-   and multiple `FileWorkLink` associations.
+1. **Multiwork split frontend controls**: collect segment titles/page ranges for `multiwork_file`
+   candidates and call the existing `split_file` action.
 2. **Reader context integration**: move the lightweight citation-context panel into the
    eventual PDF.js reader/reference tab.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -163,6 +166,7 @@ deliberately deferred — hardening, not the product.
   keep-separate, and ignore decisions.
 - Frontend duplicate review actions wired to the backend action API.
 - Conservative multiwork-file candidate detection in the duplicate scanner.
+- Backend `split_file` action creates segments, works, and contains-links from reviewed ranges.
 
 ## In progress
 
@@ -178,7 +182,7 @@ deliberately deferred — hardening, not the product.
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- Multiwork split action and segmented work creation.
+- Frontend controls for multiwork split ranges.
 - Citation graph materialization implementation.
 - Export renderer.
 - BERTopic and embedding pipeline.

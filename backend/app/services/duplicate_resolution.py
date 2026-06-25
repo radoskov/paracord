@@ -19,6 +19,7 @@ DuplicateAction = Literal[
     "merge_works",
     "link_as_version",
     "mark_duplicate_file",
+    "split_file",
     "keep_separate",
     "ignore",
 ]
@@ -42,6 +43,8 @@ def apply_duplicate_action(
     elif action == "mark_duplicate_file":
         _mark_duplicate_file_candidate(db, candidate)
         _resolve(candidate, actor, "accepted", action)
+    elif action == "split_file":
+        raise ValueError("split_file requires explicit split segments")
     elif action == "keep_separate":
         _resolve(candidate, actor, "rejected", action)
     elif action == "ignore":
@@ -60,6 +63,78 @@ def apply_duplicate_action(
             "status": candidate.status,
             "candidate_type": candidate.candidate_type,
             "target_work_id": str(target_work_id) if target_work_id else None,
+        },
+    )
+    return candidate
+
+
+def split_multiwork_file(
+    db: Session,
+    *,
+    candidate: DuplicateCandidate,
+    actor: User,
+    segments: list[dict[str, Any]],
+) -> DuplicateCandidate:
+    """Create work/file-segment links for a reviewed multi-paper file."""
+    if candidate.candidate_type != "multiwork_file" or candidate.entity_a_type != "file":
+        raise ValueError("split_file requires a multiwork file candidate")
+    if not segments:
+        raise ValueError("split_file requires at least one segment")
+
+    from app.models.file import FileSegment
+    from app.utils.normalization import normalize_title
+
+    file_id = candidate.entity_a_id
+    created_work_ids: list[str] = []
+    for index, segment_payload in enumerate(segments, start=1):
+        label = str(segment_payload.get("label") or segment_payload.get("title") or "").strip()
+        title = str(segment_payload.get("title") or label or f"Segment {index}").strip()
+        segment = FileSegment(
+            file_id=file_id,
+            page_start=segment_payload.get("page_start"),
+            page_end=segment_payload.get("page_end"),
+            label=label or title,
+            segment_type="paper",
+            created_by="user",
+            confidence=100,
+        )
+        work = Work(
+            canonical_title=title,
+            normalized_title=normalize_title(title),
+            canonical_metadata_source="multiwork_split",
+            user_confirmed=True,
+        )
+        db.add_all([segment, work])
+        db.flush()
+        db.add(
+            FileWorkLink(
+                file_id=file_id,
+                work_id=work.id,
+                segment_id=segment.id,
+                relationship_type="contains",
+                warning_state="file_contains_multiple_works",
+                user_confirmed=True,
+            )
+        )
+        created_work_ids.append(str(work.id))
+
+    _resolve(candidate, actor, "accepted", "split_file")
+    candidate.signals = {
+        **(candidate.signals or {}),
+        "split_segment_count": len(segments),
+        "created_work_ids": created_work_ids,
+    }
+    record_event(
+        db,
+        "duplicate_candidate.resolved",
+        actor_user_id=actor.id,
+        entity_type="duplicate_candidate",
+        entity_id=str(candidate.id),
+        details={
+            "action": "split_file",
+            "status": candidate.status,
+            "candidate_type": candidate.candidate_type,
+            "segment_count": len(segments),
         },
     )
     return candidate

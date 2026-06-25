@@ -17,7 +17,11 @@ from app.models.file import File
 from app.models.user import User
 from app.models.work import Work
 from app.services.duplicate_detection import scan_duplicate_candidates
-from app.services.duplicate_resolution import apply_duplicate_action, reopen_duplicate_candidate
+from app.services.duplicate_resolution import (
+    apply_duplicate_action,
+    reopen_duplicate_candidate,
+    split_multiwork_file,
+)
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -28,6 +32,7 @@ DuplicateAction = Literal[
     "merge_works",
     "link_as_version",
     "mark_duplicate_file",
+    "split_file",
     "keep_separate",
     "ignore",
 ]
@@ -62,10 +67,18 @@ class DuplicateScanResult(BaseModel):
     candidates: list[DuplicateCandidateRead]
 
 
+class FileSplitSegment(BaseModel):
+    title: str
+    page_start: int | None = None
+    page_end: int | None = None
+    label: str | None = None
+
+
 class DuplicateCandidateUpdate(BaseModel):
     status: CandidateStatus | None = None
     action: DuplicateAction | None = None
     target_work_id: uuid.UUID | None = None
+    split_segments: list[FileSplitSegment] | None = None
 
 
 @router.get("", response_model=list[DuplicateCandidateRead])
@@ -131,13 +144,24 @@ def update_duplicate_candidate(
         )
     try:
         if payload.action:
-            apply_duplicate_action(
-                db,
-                candidate=candidate,
-                action=payload.action,
-                actor=actor,
-                target_work_id=payload.target_work_id,
-            )
+            if payload.action == "split_file":
+                split_multiwork_file(
+                    db,
+                    candidate=candidate,
+                    actor=actor,
+                    segments=[
+                        segment.model_dump(exclude_none=True)
+                        for segment in payload.split_segments or []
+                    ],
+                )
+            else:
+                apply_duplicate_action(
+                    db,
+                    candidate=candidate,
+                    action=payload.action,
+                    actor=actor,
+                    target_work_id=payload.target_work_id,
+                )
         elif payload.status == "open":
             reopen_duplicate_candidate(candidate)
         elif payload.status:
