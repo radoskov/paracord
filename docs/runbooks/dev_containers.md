@@ -193,7 +193,22 @@ The agent must access local files only through configured roots and known file I
 ```bash
 make frontend-dev         # start dev server
 make frontend-build       # production build
+make frontend-test        # component tests (Vitest + jsdom)
 ```
+
+> **Gotcha — root-owned files from in-container `npm install`.** The `frontend` container runs
+> as root, so running `npm install` (or anything that writes `frontend/package-lock.json` /
+> `node_modules`) *inside* the container creates **root-owned** files on the host bind mount.
+> That breaks host-side tooling — e.g. the pre-commit `end-of-file-fixer` hook fails with
+> `PermissionError` and the commit is rejected.
+>
+> When you change frontend dependencies, prefer one of:
+> - run `npm install` **on the host** (if Node is available), so the lockfile is host-owned; or
+> - after a containerized install, fix ownership: `sudo chown "$USER" frontend/package-lock.json`
+>   (or re-create it host-owned: `cp f /tmp/x && rm f && mv /tmp/x f`).
+>
+> Node dependencies themselves live in the `paperracks_frontend_node_modules` volume (not the
+> host), so only the lockfile is affected.
 
 ## Migration workflow
 
