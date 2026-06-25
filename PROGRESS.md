@@ -113,11 +113,12 @@ The suite has three layers (run with `make test`):
   test is part of the Definition of Done:** search `test_future_milestones.py` for the matching
   `ENABLE WHEN` note, remove the skip, and make it green.
 
-Current count: ~75 passing + 8 skipped (forward-looking) backend, 2 agent.
+Current count: 77 passing + 6 skipped backend, 2 passing agent.
 
 ### Start here (next agent)
 
-M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
+M1 done; M2 extraction + enrichment pipeline is live and validated. M3 reader/annotations/export
+has started. M4 duplicate detection has
 the queue table, scanner, review API, backend action semantics, frontend action panel, multiwork
 candidate detection, and split-file UI. Continue M2/M4:
 
