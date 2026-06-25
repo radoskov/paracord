@@ -37,6 +37,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   includes a References tab backed by extracted citation contexts.
 - Added separate reader annotation storage: `annotations` model/migration and
   `GET`/`POST /api/v1/works/{work_id}/annotations`; enabled the M3 annotation acceptance test.
+- Added reader annotation UI: the embedded reader now has a Notes tab that lists annotations
+  and creates note/highlight/page-anchor/citation-note rows through the work annotation API.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of

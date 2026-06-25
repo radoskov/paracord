@@ -21,8 +21,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > segment ranges. The Svelte review panel can submit those split ranges. Reader/reference
 > integration has started with an embedded authenticated PDF surface and References tab powered
 > by extracted citation contexts. Separate annotation storage and work-scoped create/list
-> endpoints are now in place. Next: wire annotations into the frontend reader and harden toward
-> PDF.js anchors/overlays.
+> endpoints are now in place, and the embedded reader Notes tab can create/list annotations.
+> Next: harden toward PDF.js anchors/overlays and annotation search/export.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -66,7 +66,7 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 ## M3: Reader, annotations, and exports
 
 - PDF.js reader; separate annotation storage; annotation/note search. (embedded PDF surface and
-  backend annotation storage started; frontend annotation UI/search pending)
+  annotation create/list UI started; search pending)
 - References / citation-context tabs. (initial References tab started)
 - BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, plain-text exports.
 - Import from BibTeX/RIS/CSL JSON; Zotero-compatible interchange documented.

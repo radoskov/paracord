@@ -89,6 +89,31 @@ export interface CitationContext {
   source_tei_id: string | null;
 }
 
+export interface Annotation {
+  id: string;
+  work_id: string;
+  file_id: string | null;
+  version_id: string | null;
+  page: number | null;
+  coordinates: Record<string, unknown> | null;
+  selected_text: string | null;
+  annotation_type: string;
+  content_markdown: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnnotationCreate {
+  annotation_type: string;
+  file_id?: string | null;
+  version_id?: string | null;
+  page?: number | null;
+  coordinates?: Record<string, unknown> | null;
+  selected_text?: string | null;
+  content_markdown?: string | null;
+}
+
 export type DuplicateCandidateStatus = 'open' | 'accepted' | 'rejected' | 'ignored';
 export type DuplicateCandidateAction =
   | 'merge_works'
@@ -174,6 +199,17 @@ export class ApiClient {
 
   async listCitationContexts(workId: string): Promise<CitationContext[]> {
     return this.request<CitationContext[]>(`/api/v1/works/${workId}/citation-contexts`);
+  }
+
+  async listAnnotations(workId: string): Promise<Annotation[]> {
+    return this.request<Annotation[]>(`/api/v1/works/${workId}/annotations`);
+  }
+
+  async createAnnotation(workId: string, payload: AnnotationCreate): Promise<Annotation> {
+    return this.request<Annotation>(`/api/v1/works/${workId}/annotations`, {
+      method: 'POST',
+      body: payload,
+    });
   }
 
   async listDuplicateCandidates(

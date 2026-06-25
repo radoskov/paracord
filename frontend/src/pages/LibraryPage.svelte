@@ -3,6 +3,8 @@
 
   import {
     ApiClient,
+    type Annotation,
+    type AnnotationCreate,
     type CitationContext,
     type DuplicateCandidateAction,
     type DuplicateCandidate,
@@ -52,6 +54,7 @@
   let shelfWorks: Work[] = [];
   let rackShelves: Shelf[] = [];
   let citationContexts: CitationContext[] = [];
+  let annotations: Annotation[] = [];
 
   let newWorkTitle = '';
   let newWorkYear = '';
@@ -118,6 +121,7 @@
     shelfWorks = [];
     rackShelves = [];
     citationContexts = [];
+    annotations = [];
   }
 
   async function refreshAll(): Promise<void> {
@@ -143,7 +147,10 @@
       tagId: tagFilter,
     });
     if (selectedWork) selectedWork = works.find((work) => work.id === selectedWork?.id) ?? null;
-    if (!selectedWork) citationContexts = [];
+    if (!selectedWork) {
+      citationContexts = [];
+      annotations = [];
+    }
   }
 
   async function loadShelves(): Promise<void> {
@@ -203,7 +210,10 @@
 
   async function selectWork(work: Work): Promise<void> {
     selectedWork = work;
-    citationContexts = await client.listCitationContexts(work.id);
+    [citationContexts, annotations] = await Promise.all([
+      client.listCitationContexts(work.id),
+      client.listAnnotations(work.id),
+    ]);
   }
 
   async function createShelf(): Promise<void> {
@@ -360,6 +370,17 @@
   function clearReaderUrl(): void {
     if (readerUrl) URL.revokeObjectURL(readerUrl);
     readerUrl = null;
+  }
+
+  async function createReaderAnnotation(payload: AnnotationCreate): Promise<void> {
+    if (!selectedWork) throw new Error('Select a work before adding annotations');
+    await run(async () => {
+      await client.createAnnotation(selectedWork.id, {
+        ...payload,
+        file_id: readerFile?.id ?? selectedFile?.id ?? null,
+      });
+      annotations = await client.listAnnotations(selectedWork.id);
+    }, 'Annotation added');
   }
 
   async function scanDuplicateCandidates(): Promise<void> {
@@ -734,6 +755,8 @@
           fileName={readerFile?.original_filename ?? selectedFile?.original_filename ?? 'PDF reader'}
           fileUrl={readerUrl}
           contexts={citationContexts}
+          {annotations}
+          onCreateAnnotation={selectedWork ? createReaderAnnotation : null}
         />
       </section>
     </div>

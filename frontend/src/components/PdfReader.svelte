@@ -1,12 +1,37 @@
 <script lang="ts">
-  import type { CitationContext } from '../api/client';
+  import type { Annotation, CitationContext } from '../api/client';
 
   export let fileId: string;
   export let fileName: string;
   export let fileUrl: string | null = null;
   export let contexts: CitationContext[] = [];
+  export let annotations: Annotation[] = [];
+  export let onCreateAnnotation:
+    | ((payload: {
+        annotation_type: string;
+        page: number | null;
+        selected_text: string | null;
+        content_markdown: string | null;
+      }) => Promise<void>)
+    | null = null;
 
-  let tab: 'pdf' | 'contexts' = 'pdf';
+  let tab: 'pdf' | 'contexts' | 'annotations' = 'pdf';
+  let annotationType = 'note';
+  let annotationPage = '';
+  let selectedText = '';
+  let annotationContent = '';
+
+  async function createAnnotation(): Promise<void> {
+    if (!onCreateAnnotation) return;
+    await onCreateAnnotation({
+      annotation_type: annotationType,
+      page: annotationPage ? Number(annotationPage) : null,
+      selected_text: selectedText || null,
+      content_markdown: annotationContent || null,
+    });
+    selectedText = '';
+    annotationContent = '';
+  }
 </script>
 
 <section class="reader">
@@ -24,6 +49,13 @@
       >
         References
       </button>
+      <button
+        type="button"
+        class:active={tab === 'annotations'}
+        on:click={() => (tab = 'annotations')}
+      >
+        Notes
+      </button>
     </nav>
   </header>
 
@@ -33,7 +65,7 @@
     {:else}
       <p class="empty">Open a PDF in the reader</p>
     {/if}
-  {:else}
+  {:else if tab === 'contexts'}
     {#if contexts.length === 0}
       <p class="empty">No citation contexts extracted</p>
     {:else}
@@ -48,6 +80,38 @@
             <small>
               {context.reference_title ?? context.reference_raw_citation ?? 'Unparsed reference'}
             </small>
+          </article>
+        {/each}
+      </div>
+    {/if}
+  {:else}
+    <form class="annotation-form" on:submit|preventDefault={createAnnotation}>
+      <select bind:value={annotationType} disabled={!onCreateAnnotation}>
+        <option value="note">Note</option>
+        <option value="highlight">Highlight</option>
+        <option value="page_anchor">Page anchor</option>
+        <option value="citation_note">Citation note</option>
+      </select>
+      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" />
+      <input bind:value={selectedText} placeholder="Selected text" />
+      <textarea bind:value={annotationContent} placeholder="Note"></textarea>
+      <button type="submit" disabled={!onCreateAnnotation || (!selectedText && !annotationContent)}>
+        Add
+      </button>
+    </form>
+
+    {#if annotations.length === 0}
+      <p class="empty">No annotations</p>
+    {:else}
+      <div class="annotation-list">
+        {#each annotations as annotation}
+          <article>
+            <header>
+              <strong>{annotation.annotation_type.replaceAll('_', ' ')}</strong>
+              <span>page {annotation.page ?? '-'}</span>
+            </header>
+            {#if annotation.selected_text}<p>{annotation.selected_text}</p>{/if}
+            {#if annotation.content_markdown}<small>{annotation.content_markdown}</small>{/if}
           </article>
         {/each}
       </div>
@@ -109,6 +173,21 @@
     padding: 0.3rem 0.55rem;
   }
 
+  input,
+  select,
+  textarea {
+    border: 1px solid #bcc7d2;
+    border-radius: 6px;
+    font: inherit;
+    min-height: 2.2rem;
+    padding: 0.35rem 0.5rem;
+  }
+
+  textarea {
+    min-height: 4.5rem;
+    resize: vertical;
+  }
+
   button.active {
     background: #203142;
     color: white;
@@ -122,30 +201,52 @@
     width: 100%;
   }
 
-  .context-list {
+  .annotation-form {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(8rem, 10rem) minmax(5rem, 7rem) minmax(0, 1fr) auto;
+  }
+
+  .annotation-form textarea {
+    grid-column: 1 / -1;
+  }
+
+  .context-list,
+  .annotation-list {
     display: grid;
     gap: 0.65rem;
     max-height: min(72vh, 48rem);
     overflow: auto;
   }
 
-  .context-list article {
+  .context-list article,
+  .annotation-list article {
     background: #eef2f6;
     border: 1px solid #d8dee6;
     border-radius: 6px;
     padding: 0.7rem;
   }
 
-  .context-list article header {
+  .context-list article header,
+  .annotation-list article header {
     margin-bottom: 0.35rem;
   }
 
   .context-list p,
-  .context-list small {
+  .context-list small,
+  .annotation-list p,
+  .annotation-list small {
     overflow-wrap: anywhere;
   }
 
-  .context-list p {
+  .context-list p,
+  .annotation-list p {
     margin: 0 0 0.35rem;
+  }
+
+  @media (max-width: 760px) {
+    .annotation-form {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
