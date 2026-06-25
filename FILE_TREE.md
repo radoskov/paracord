@@ -100,6 +100,7 @@ backend/app/services/audit.py
 backend/app/services/auth.py
 backend/app/services/citation_graph.py
 backend/app/services/duplicate_detection.py
+backend/app/services/duplicate_resolution.py
 backend/app/services/embeddings.py
 backend/app/services/export_service.py
 backend/app/services/extraction.py

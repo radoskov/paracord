@@ -15,6 +15,9 @@ The format follows Keep a Changelog style conventions, but the project is curren
   scans, and mark candidates `accepted`, `rejected`, `ignored`, or back to `open`.
 - Added an initial Svelte duplicate-review panel: list/open-status filter, scan trigger, signal
   display, and accept/reject/ignore status controls backed by `/api/v1/duplicates`.
+- Added backend duplicate-review actions: merge work candidates without deleting source works,
+  link a candidate as a `WorkVersion`, mark file candidates as duplicate copies, keep separate,
+  and ignore, with audit events and focused tests.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of

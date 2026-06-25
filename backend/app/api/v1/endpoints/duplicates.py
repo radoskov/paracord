@@ -17,12 +17,20 @@ from app.models.file import File
 from app.models.user import User
 from app.models.work import Work
 from app.services.duplicate_detection import scan_duplicate_candidates
+from app.services.duplicate_resolution import apply_duplicate_action, reopen_duplicate_candidate
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 
 CandidateStatus = Literal["open", "accepted", "rejected", "ignored"]
+DuplicateAction = Literal[
+    "merge_works",
+    "link_as_version",
+    "mark_duplicate_file",
+    "keep_separate",
+    "ignore",
+]
 
 
 class DuplicateCandidateRead(BaseModel):
@@ -55,7 +63,9 @@ class DuplicateScanResult(BaseModel):
 
 
 class DuplicateCandidateUpdate(BaseModel):
-    status: CandidateStatus
+    status: CandidateStatus | None = None
+    action: DuplicateAction | None = None
+    target_work_id: uuid.UUID | None = None
 
 
 @router.get("", response_model=list[DuplicateCandidateRead])
@@ -109,18 +119,38 @@ def update_duplicate_candidate(
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> DuplicateCandidate:
-    """Update review status for a duplicate/version candidate."""
+    """Update review status or apply a duplicate/version review action."""
     candidate = db.get(DuplicateCandidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
-    candidate.status = payload.status
-    if payload.status == "open":
-        candidate.resolved_by_user_id = None
-        candidate.resolved_at = None
-    else:
-        candidate.resolved_by_user_id = actor.id
-        candidate.resolved_at = datetime.utcnow()
+    if payload.action and payload.status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Send either action or status, not both",
+        )
+    try:
+        if payload.action:
+            apply_duplicate_action(
+                db,
+                candidate=candidate,
+                action=payload.action,
+                actor=actor,
+                target_work_id=payload.target_work_id,
+            )
+        elif payload.status == "open":
+            reopen_duplicate_candidate(candidate)
+        elif payload.status:
+            candidate.status = payload.status
+            candidate.resolved_by_user_id = actor.id
+            candidate.resolved_at = datetime.utcnow()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either action or status is required",
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     db.refresh(candidate)
     return candidate
