@@ -18,10 +18,10 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > deleting files/works, and the Svelte review panel now calls those explicit actions.
 > Multiwork-file candidates are now generated from conservative proceedings/repeated-section
 > heuristics, and `split_file` creates file segments, works, and contains links from supplied
-> segment ranges. The Svelte review panel can submit those split ranges. Next in M4: harden
-> duplicate/version UX and continue into reader/reference integration. Citation contexts are
-> persisted, exposed through the API, and visible in the initial frontend workspace; full
-> reader/graph integration remains later M3/M6 work.
+> segment ranges. The Svelte review panel can submit those split ranges. Reader/reference
+> integration has started with an embedded authenticated PDF surface and References tab powered
+> by extracted citation contexts. Next: harden the reader toward PDF.js annotations/anchors and
+> continue duplicate UX refinements.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -64,8 +64,9 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 
 ## M3: Reader, annotations, and exports
 
-- PDF.js reader; separate annotation storage; annotation/note search.
-- References / citation-context tabs.
+- PDF.js reader; separate annotation storage; annotation/note search. (embedded PDF surface
+  started; annotations pending)
+- References / citation-context tabs. (initial References tab started)
 - BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, plain-text exports.
 - Import from BibTeX/RIS/CSL JSON; Zotero-compatible interchange documented.
 - Citation key management; live always-current shelf/rack bibliography.

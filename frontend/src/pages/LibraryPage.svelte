@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
 
   import {
     ApiClient,
@@ -17,6 +17,7 @@
     type Work,
   } from '../api/client';
   import PaperTable from '../components/PaperTable.svelte';
+  import PdfReader from '../components/PdfReader.svelte';
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
   const readingQueueStatuses = new Set(['reading', 'important', 'revisit']);
@@ -46,6 +47,8 @@
   let selectedShelf: Shelf | null = null;
   let selectedRack: Rack | null = null;
   let selectedFile: FileRecord | null = null;
+  let readerFile: FileRecord | null = null;
+  let readerUrl: string | null = null;
   let shelfWorks: Work[] = [];
   let rackShelves: Shelf[] = [];
   let citationContexts: CitationContext[] = [];
@@ -71,6 +74,8 @@
     token = window.localStorage.getItem('paperracks_token') ?? '';
     if (token) refreshAll();
   });
+
+  onDestroy(clearReaderUrl);
 
   async function run(action: () => Promise<void>, success?: string): Promise<void> {
     loading = true;
@@ -108,6 +113,8 @@
     selectedShelf = null;
     selectedRack = null;
     selectedFile = null;
+    readerFile = null;
+    clearReaderUrl();
     shelfWorks = [];
     rackShelves = [];
     citationContexts = [];
@@ -338,6 +345,21 @@
       window.open(url, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     });
+  }
+
+  async function openSelectedFileInReader(): Promise<void> {
+    if (!selectedFile) return;
+    await run(async () => {
+      const blob = await client.getFileBlob(selectedFile.id);
+      clearReaderUrl();
+      readerUrl = URL.createObjectURL(blob);
+      readerFile = selectedFile;
+    });
+  }
+
+  function clearReaderUrl(): void {
+    if (readerUrl) URL.revokeObjectURL(readerUrl);
+    readerUrl = null;
   }
 
   async function scanDuplicateCandidates(): Promise<void> {
@@ -695,12 +717,24 @@
                 <div><dt>SHA-256</dt><dd>{selectedFile.sha256}</dd></div>
               </dl>
               <button type="button" on:click={openSelectedFile} disabled={loading}>Open PDF</button>
+              <button type="button" on:click={openSelectedFileInReader} disabled={loading}>
+                Read
+              </button>
               <pre>{selectedFile.preview_text ?? 'No preview text'}</pre>
             {:else}
               <p class="empty">No files</p>
             {/if}
           </article>
         </div>
+      </section>
+
+      <section class="surface">
+        <PdfReader
+          fileId={readerFile?.id ?? selectedFile?.id ?? ''}
+          fileName={readerFile?.original_filename ?? selectedFile?.original_filename ?? 'PDF reader'}
+          fileUrl={readerUrl}
+          contexts={citationContexts}
+        />
       </section>
     </div>
 

@@ -33,6 +33,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   segments create `FileSegment`, `Work`, and `FileWorkLink` rows with multiwork warning state.
 - Added frontend split-file controls for `multiwork_file` candidates using line-based
   `Title | start page | end page` segment entry.
+- Added an embedded reader surface that loads authenticated PDF streams as object URLs and
+  includes a References tab backed by extracted citation contexts.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of
