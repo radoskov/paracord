@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import httpx
+import httpx2 as httpx
 
 
 class GrobidClient:

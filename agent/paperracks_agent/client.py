@@ -1,6 +1,6 @@
 """HTTP client for server communication."""
 
-import httpx
+import httpx2 as httpx
 
 
 class PaRacORDServerClient:

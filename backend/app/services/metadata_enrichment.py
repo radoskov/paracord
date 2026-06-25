@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-import httpx
+import httpx2 as httpx
 from lxml import etree
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
