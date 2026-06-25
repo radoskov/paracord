@@ -1,7 +1,7 @@
 """Duplicate/version review endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -167,7 +167,7 @@ def update_duplicate_candidate(
         elif payload.status:
             candidate.status = payload.status
             candidate.resolved_by_user_id = actor.id
-            candidate.resolved_at = datetime.utcnow()
+            candidate.resolved_at = datetime.now(UTC)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

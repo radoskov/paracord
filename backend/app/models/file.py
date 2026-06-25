@@ -1,7 +1,7 @@
 """Physical file, location, and file-to-work mapping models."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,8 +24,10 @@ class File(Base):
     status: Mapped[str] = mapped_column(String(32), default="available", index=True)
     preview_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Location(Base):
@@ -51,8 +53,12 @@ class Location(Base):
     )
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class FileSegment(Base):
@@ -68,7 +74,9 @@ class FileSegment(Base):
     segment_type: Mapped[str] = mapped_column(String(64), default="full_file")
     created_by: Mapped[str] = mapped_column(String(32), default="system")
     confidence: Mapped[int] = mapped_column(Integer, default=100)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class FileWorkLink(Base):
@@ -93,4 +101,6 @@ class FileWorkLink(Base):
     confidence: Mapped[int] = mapped_column(Integer, default=100)
     warning_state: Mapped[str] = mapped_column(String(128), default="none")
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )

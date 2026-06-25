@@ -1,7 +1,7 @@
 """Apply reviewed duplicate/version candidate decisions."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -152,8 +152,8 @@ def _merge_work_candidate(
     _move_work_tags(db, source_work=source, target_work=target)
     source.work_type = "merged"
     source.canonical_metadata_source = "merged"
-    source.updated_at = datetime.utcnow()
-    target.updated_at = datetime.utcnow()
+    source.updated_at = datetime.now(UTC)
+    target.updated_at = datetime.now(UTC)
 
 
 def _link_work_candidate_as_version(
@@ -177,8 +177,8 @@ def _link_work_candidate_as_version(
     _move_file_links_to_work(db, source_work=source, target_work=target, version=version)
     source.work_type = "version"
     source.canonical_metadata_source = "linked_as_version"
-    source.updated_at = datetime.utcnow()
-    target.updated_at = datetime.utcnow()
+    source.updated_at = datetime.now(UTC)
+    target.updated_at = datetime.now(UTC)
 
 
 def _mark_duplicate_file_candidate(db: Session, candidate: DuplicateCandidate) -> None:
@@ -280,7 +280,7 @@ def _resolve(
 ) -> None:
     candidate.status = status
     candidate.resolved_by_user_id = actor.id
-    candidate.resolved_at = datetime.utcnow()
+    candidate.resolved_at = datetime.now(UTC)
     candidate.signals = {**(candidate.signals or {}), "review_action": action}
 
 

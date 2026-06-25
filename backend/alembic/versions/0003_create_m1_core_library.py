@@ -29,7 +29,12 @@ def upgrade() -> None:
         sa.Column("path_alias", sa.Text(), nullable=True),
         sa.Column("canonical_root_hash", sa.String(length=128), nullable=True),
         sa.Column("config", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
     )
     op.create_index("ix_sources_agent_id", "sources", ["agent_id"])
@@ -54,7 +59,12 @@ def upgrade() -> None:
         sa.Column("canonical_metadata_source", sa.String(length=128), nullable=True),
         sa.Column("reading_status", sa.String(length=64), server_default="unread", nullable=False),
         sa.Column("user_confirmed", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
     )
     op.create_index("ix_works_arxiv_id", "works", ["arxiv_id"])
@@ -82,7 +92,12 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=32), server_default="available", nullable=False),
         sa.Column("preview_text", sa.Text(), nullable=True),
         sa.Column("text_fingerprint", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("last_seen_at", sa.DateTime(), nullable=True),
     )
     op.create_index("ix_files_sha256", "files", ["sha256"], unique=True)
@@ -101,7 +116,12 @@ def upgrade() -> None:
         sa.Column("agent_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("is_available", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("is_primary", sa.Boolean(), server_default=sa.text("true"), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("last_verified_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["source_id"], ["sources.id"], ondelete="SET NULL"),
@@ -120,7 +140,12 @@ def upgrade() -> None:
         sa.Column("version_type", sa.String(length=64), server_default="unknown", nullable=False),
         sa.Column("arxiv_version", sa.String(length=32), nullable=True),
         sa.Column("doi", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["work_id"], ["works.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_work_versions_doi", "work_versions", ["doi"])
@@ -136,7 +161,12 @@ def upgrade() -> None:
         sa.Column("segment_type", sa.String(length=64), server_default="full_file", nullable=False),
         sa.Column("created_by", sa.String(length=32), server_default="system", nullable=False),
         sa.Column("confidence", sa.Integer(), server_default="100", nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_file_segments_file_id", "file_segments", ["file_id"])
@@ -157,7 +187,12 @@ def upgrade() -> None:
         sa.Column("confidence", sa.Integer(), server_default="100", nullable=False),
         sa.Column("warning_state", sa.String(length=128), server_default="none", nullable=False),
         sa.Column("user_confirmed", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["segment_id"], ["file_segments.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["version_id"], ["work_versions.id"], ondelete="SET NULL"),
@@ -175,7 +210,12 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=32), server_default="active", nullable=False),
         sa.Column("created_by_user_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
     )
     op.create_index("ix_shelves_created_by_user_id", "shelves", ["created_by_user_id"])
@@ -189,7 +229,12 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=32), server_default="active", nullable=False),
         sa.Column("created_by_user_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
     )
     op.create_index("ix_racks_created_by_user_id", "racks", ["created_by_user_id"])
@@ -204,7 +249,12 @@ def upgrade() -> None:
         sa.Column("color", sa.String(length=32), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("parent_tag_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
     )
     op.create_index("ix_tags_name", "tags", ["name"], unique=True)
     op.create_index("ix_tags_normalized_name", "tags", ["normalized_name"], unique=True)
@@ -242,7 +292,12 @@ def upgrade() -> None:
         sa.Column("entity_type", sa.String(length=64), nullable=False),
         sa.Column("entity_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("created_by_user_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["tag_id"], ["tags.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("tag_id", "entity_type", "entity_id"),
     )
@@ -258,7 +313,12 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=64), server_default="queued", nullable=False),
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("stats", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["source_id"], ["sources.id"], ondelete="SET NULL"),

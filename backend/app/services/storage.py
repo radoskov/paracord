@@ -3,7 +3,7 @@
 import hashlib
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +114,7 @@ def import_server_folder(
         raise ValueError("Source is not an active server folder")
 
     root = _source_root(source)
-    started_at = datetime.utcnow()
+    started_at = datetime.now(UTC)
     batch = ImportBatch(
         created_by_user_id=actor.id,
         source_id=source.id,
@@ -142,11 +142,11 @@ def import_server_folder(
         batch.status = "completed"
     except Exception:
         batch.status = "failed"
-        batch.finished_at = datetime.utcnow()
+        batch.finished_at = datetime.now(UTC)
         batch.stats = stats
         raise
 
-    batch.finished_at = datetime.utcnow()
+    batch.finished_at = datetime.now(UTC)
     batch.stats = stats
     record_event(
         db,
@@ -179,7 +179,7 @@ def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str
     file = db.scalar(select(File).where(File.sha256 == sha256))
     created_file = file is None
     preview = _extract_pdf_preview(pdf_path)
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     if file is None:
         file = File(

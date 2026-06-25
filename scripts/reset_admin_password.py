@@ -7,7 +7,7 @@ an unauthenticated web endpoint.
 
 import getpass
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select, update
@@ -37,7 +37,7 @@ def reset_password(username: str, password: str) -> User:
         revoked = session.execute(
             update(UserSession)
             .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
-            .values(revoked_at=datetime.utcnow())
+            .values(revoked_at=datetime.now(UTC))
         )
         session.add(
             AuditEvent(

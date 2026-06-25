@@ -232,7 +232,7 @@ deliberately deferred — hardening, not the product.
 Low-severity items found during the audit, not tied to a feature milestone. Address opportunistically.
 
 - Remove or fully wire the dead `guest_access_enabled` setting (`backend/app/core/config.py`). A startup `assert_no_guest_roles` check now enforces that no guest role is present in `security.allowed_roles`.
-- Migrate deprecated `datetime.utcnow()` to timezone-aware `datetime.now(timezone.utc)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`. Note: do this together with switching the model `DateTime` columns to `DateTime(timezone=True)` (plus a migration), otherwise naive/aware comparisons in session checks will break.
+- ~~Migrate deprecated `datetime.utcnow()` to timezone-aware `datetime.now(UTC)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`, together with switching the model `DateTime` columns to `DateTime(timezone=True)` (plus a migration).~~ **Done.** All write/default sites use `datetime.now(UTC)`; all model `DateTime` columns are `timezone=True`; migration `6a310e33c3d6` converts the existing Postgres columns to `timestamptz` (interpreting stored values as UTC, no-op on SQLite). `auth.py` normalizes session timestamps via `_as_utc()` so the comparison is robust even where a backend round-trips naive datetimes (SQLite, or a not-yet-migrated column).
 - Add symlink-escape and `../` traversal test cases to `agent/tests/test_security.py` (the primitive is correct but currently untested).
 - Remove or wire the unused agent config flags `follow_symlinks` / `teleport_enabled`.
 - Note in `docs/architecture/api_surface.md` and `data_model.md` that they reflect current stubs and defer to `SPECIFICATION.md` §10 / §9.
@@ -271,7 +271,7 @@ are built on the current shapes, so address the first two before the M4 review w
   the stream/works/exports endpoints. Add them.
 - **No SSRF guard in the enrichment HTTP clients.** Only fixed arXiv/Crossref hosts are hit
   today, but §7.7 requires the future `/sources/url` importer to block private IP ranges — it
-  must not be built on the current unguarded `httpx` clients.
+  must not be built on the current unguarded `httpx2` clients.
 - **Duplicate citation-contexts surface.** `endpoints/citations.py` `/contexts` is still a stub
   while `works.py` `/works/{id}/citation-contexts` is the real one; remove/redirect the stub so
   a dead endpoint does not ship in the OpenAPI schema.

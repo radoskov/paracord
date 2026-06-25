@@ -5,7 +5,7 @@ owner-only admin API and write audit events for every change.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -106,7 +106,7 @@ def disable_user(
         raise ValueError("Cannot disable the last active owner")
 
     if user.disabled_at is None:
-        user.disabled_at = datetime.utcnow()
+        user.disabled_at = datetime.now(UTC)
         db.flush()
         record_event(
             db,

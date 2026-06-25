@@ -1,7 +1,7 @@
 """AI summaries, embeddings, and topic-model provenance."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Float, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,7 +21,9 @@ class Summary(Base):
     text: Mapped[str] = mapped_column(Text)
     model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class TopicAssignment(Base):

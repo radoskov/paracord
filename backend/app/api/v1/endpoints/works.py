@@ -1,7 +1,7 @@
 """Work endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -155,7 +155,7 @@ def update_work(
         setattr(work, key, value)
     if "canonical_title" in updates:
         work.normalized_title = normalize_title(work.canonical_title or "")
-    work.updated_at = datetime.utcnow()
+    work.updated_at = datetime.now(UTC)
     work.user_confirmed = True
     db.commit()
     db.refresh(work)
@@ -403,7 +403,7 @@ def select_metadata_assertion(
     if assertion.field_name in _PROMOTABLE_FIELDS:
         _apply_assertion_to_work(work, assertion.field_name, assertion.value, assertion.source)
     work.user_confirmed = True
-    work.updated_at = datetime.utcnow()
+    work.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(work)
     return work

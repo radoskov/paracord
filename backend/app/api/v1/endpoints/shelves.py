@@ -1,7 +1,7 @@
 """Shelf endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -98,7 +98,7 @@ def update_shelf(
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(shelf, key, value)
-    shelf.updated_at = datetime.utcnow()
+    shelf.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(shelf)
     return shelf

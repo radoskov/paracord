@@ -6,7 +6,7 @@ the work has not been user-confirmed and the field is empty or filename-derived.
 """
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +77,7 @@ def store_parsed_extraction(
     if parsed.authors:
         assert_field("authors", "; ".join(parsed.authors), canonical=False)
 
-    work.updated_at = datetime.utcnow()
+    work.updated_at = datetime.now(UTC)
 
     source_tei: RawTeiDocument | None = None
     if file is not None and raw_tei_xml:

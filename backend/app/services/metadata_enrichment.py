@@ -9,7 +9,7 @@ user-confirmed. Outbound requests carry only bibliographic identifiers (see SECU
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 import httpx2 as httpx
 from lxml import etree
@@ -235,5 +235,5 @@ def enrich_work(
             details={"source": meta.source, "identifier": work.doi or work.arxiv_id},
         )
     if sources:
-        work.updated_at = datetime.utcnow()
+        work.updated_at = datetime.now(UTC)
     return {"sources": sources, "promoted": promoted}

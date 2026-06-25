@@ -1,7 +1,7 @@
 """Work and version models."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,8 +26,14 @@ class Work(Base):
     canonical_metadata_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reading_status: Mapped[str] = mapped_column(String(64), default="unread", index=True)
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
 
 class WorkVersion(Base):
@@ -43,4 +49,6 @@ class WorkVersion(Base):
     version_type: Mapped[str] = mapped_column(String(64), default="unknown")
     arxiv_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )

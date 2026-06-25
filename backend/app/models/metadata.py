@@ -1,7 +1,7 @@
 """Metadata provenance models."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Float, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,4 +22,6 @@ class MetadataAssertion(Base):
     source: Mapped[str] = mapped_column(String(128), index=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     selected_as_canonical: Mapped[bool] = mapped_column(Boolean, default=False)
-    retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    retrieved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )

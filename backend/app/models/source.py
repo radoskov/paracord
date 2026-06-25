@@ -1,7 +1,7 @@
 """Configured import sources and import batch tracking."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, DateTime, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,7 +30,9 @@ class Source(Base):
     path_alias: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     canonical_root_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
@@ -59,6 +61,8 @@ class ImportBatch(Base):
     status: Mapped[str] = mapped_column(String(64), default="queued", index=True)
     settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

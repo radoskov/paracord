@@ -25,7 +25,12 @@ def upgrade() -> None:
         sa.Column("username", sa.String(length=128), nullable=False),
         sa.Column("password_hash", sa.String(length=512), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("disabled_at", sa.DateTime(), nullable=True),
     )
     op.create_index("ix_users_username", "users", ["username"], unique=True)
@@ -41,7 +46,12 @@ def upgrade() -> None:
         sa.Column("ip_address", sa.String(length=128), nullable=True),
         sa.Column("user_agent", sa.Text(), nullable=True),
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
     )
     op.create_index("ix_audit_events_actor_agent_id", "audit_events", ["actor_agent_id"])
     op.create_index("ix_audit_events_actor_user_id", "audit_events", ["actor_user_id"])

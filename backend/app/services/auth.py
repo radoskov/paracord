@@ -3,7 +3,7 @@
 import functools
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +16,16 @@ from app.models.user import User
 def hash_token(token: str) -> str:
     """Hash a bearer token before storage or lookup."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize a datetime to aware UTC.
+
+    Datetimes round-tripped through SQLite (and plain ``timestamp`` Postgres columns) come
+    back naive even when the column is declared ``timezone=True``; treat those stored values
+    as UTC so comparisons against ``datetime.now(UTC)`` never mix naive and aware datetimes.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 @functools.lru_cache(maxsize=1)
@@ -46,7 +56,7 @@ def create_user_session(db: Session, user: User, *, ttl_minutes: int) -> tuple[s
     session = UserSession(
         user_id=user.id,
         token_hash=hash_token(token),
-        expires_at=datetime.utcnow() + timedelta(minutes=ttl_minutes),
+        expires_at=datetime.now(UTC) + timedelta(minutes=ttl_minutes),
     )
     db.add(session)
     db.flush()
@@ -58,7 +68,7 @@ def get_active_session(db: Session, token: str) -> UserSession | None:
     session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_token(token)))
     if session is None or session.revoked_at is not None:
         return None
-    if session.expires_at <= datetime.utcnow():
+    if _as_utc(session.expires_at) <= datetime.now(UTC):
         return None
     return session
 
@@ -68,6 +78,6 @@ def revoke_token(db: Session, token: str) -> UserSession | None:
     session = get_active_session(db, token)
     if session is None:
         return None
-    session.revoked_at = datetime.utcnow()
+    session.revoked_at = datetime.now(UTC)
     db.flush()
     return session
