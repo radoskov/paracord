@@ -7,6 +7,7 @@
     type DuplicateCandidateAction,
     type DuplicateCandidate,
     type DuplicateCandidateStatus,
+    type DuplicateSplitSegment,
     type FileRecord,
     type Rack,
     type ReadingStatus,
@@ -39,6 +40,7 @@
   let files: FileRecord[] = [];
   let duplicateCandidates: DuplicateCandidate[] = [];
   let duplicateStatusFilter: DuplicateCandidateStatus | '' = 'open';
+  let splitDrafts: Record<string, string> = {};
 
   let selectedWork: Work | null = null;
   let selectedShelf: Shelf | null = null;
@@ -364,10 +366,23 @@
       await client.applyDuplicateCandidateAction(
         candidate.id,
         action,
-        candidate.entity_a_type === 'work' ? candidate.entity_a_id : undefined,
+        { targetWorkId: candidate.entity_a_type === 'work' ? candidate.entity_a_id : undefined },
       );
       await Promise.all([loadWorks(), loadShelves(), loadRacks(), loadDuplicateCandidates()]);
     }, `Applied ${candidateLabel(action)}`);
+  }
+
+  async function splitMultiworkCandidate(candidate: DuplicateCandidate): Promise<void> {
+    await run(async () => {
+      const splitSegments = parseSplitDraft(splitDrafts[candidate.id] ?? '');
+      await client.applyDuplicateCandidateAction(candidate.id, 'split_file', { splitSegments });
+      splitDrafts = { ...splitDrafts, [candidate.id]: '' };
+      await Promise.all([loadWorks(), loadFiles(), loadDuplicateCandidates()]);
+    }, 'File split recorded');
+  }
+
+  function setSplitDraft(candidateId: string, value: string): void {
+    splitDrafts = { ...splitDrafts, [candidateId]: value };
   }
 
   async function selectShelf(shelf: Shelf): Promise<void> {
@@ -410,7 +425,33 @@
   }
 
   function canResolveAsFile(candidate: DuplicateCandidate): boolean {
-    return candidate.entity_a_type === 'file' && candidate.entity_b_type === 'file';
+    return (
+      candidate.candidate_type !== 'multiwork_file' &&
+      candidate.entity_a_type === 'file' &&
+      candidate.entity_b_type === 'file'
+    );
+  }
+
+  function canSplitMultiwork(candidate: DuplicateCandidate): boolean {
+    return candidate.candidate_type === 'multiwork_file';
+  }
+
+  function parseSplitDraft(value: string): DuplicateSplitSegment[] {
+    const segments = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [title, start, end] = line.split('|').map((part) => part.trim());
+        return {
+          title,
+          page_start: start ? Number(start) : undefined,
+          page_end: end ? Number(end) : undefined,
+        };
+      })
+      .filter((segment) => segment.title);
+    if (!segments.length) throw new Error('Enter at least one segment as Title | start | end');
+    return segments;
   }
 </script>
 
@@ -565,6 +606,22 @@
                       disabled={loading || candidate.status !== 'open'}
                     >
                       Mark duplicate
+                    </button>
+                  {/if}
+                  {#if canSplitMultiwork(candidate)}
+                    <textarea
+                      value={splitDrafts[candidate.id] ?? ''}
+                      on:input={(event) =>
+                        setSplitDraft(candidate.id, event.currentTarget.value)}
+                      placeholder="Title | start page | end page"
+                      disabled={loading || candidate.status !== 'open'}
+                    ></textarea>
+                    <button
+                      type="button"
+                      on:click={() => splitMultiworkCandidate(candidate)}
+                      disabled={loading || candidate.status !== 'open'}
+                    >
+                      Split file
                     </button>
                   {/if}
                   <button
@@ -925,6 +982,7 @@
 
   input,
   select,
+  textarea,
   button {
     border: 1px solid #bcc7d2;
     border-radius: 6px;
@@ -934,9 +992,15 @@
   }
 
   input,
-  select {
+  select,
+  textarea {
     background: white;
     min-width: 0;
+  }
+
+  textarea {
+    min-height: 4.8rem;
+    resize: vertical;
   }
 
   button {
@@ -1019,11 +1083,17 @@
 
   .candidate-actions {
     justify-content: start;
+    flex-wrap: wrap;
   }
 
   .candidate-actions button {
     min-height: 2rem;
     padding: 0.3rem 0.5rem;
+  }
+
+  .candidate-actions textarea {
+    flex: 1 1 16rem;
+    width: 100%;
   }
 
   .review-actions {

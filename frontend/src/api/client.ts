@@ -119,6 +119,13 @@ export interface DuplicateScanResult {
   candidates: DuplicateCandidate[];
 }
 
+export interface DuplicateSplitSegment {
+  title: string;
+  page_start?: number;
+  page_end?: number;
+  label?: string;
+}
+
 export interface WorkQuery {
   q?: string;
   readingStatus?: string;
@@ -200,11 +207,15 @@ export class ApiClient {
   async applyDuplicateCandidateAction(
     id: string,
     action: DuplicateCandidateAction,
-    targetWorkId?: string,
+    options: { targetWorkId?: string; splitSegments?: DuplicateSplitSegment[] } = {},
   ): Promise<DuplicateCandidate> {
     return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
       method: 'PATCH',
-      body: { action, target_work_id: targetWorkId },
+      body: {
+        action,
+        target_work_id: options.targetWorkId,
+        split_segments: options.splitSegments,
+      },
     });
   }
 

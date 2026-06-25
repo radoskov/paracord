@@ -17,10 +17,11 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > apply merge-work, link-as-version, duplicate-file, keep-separate, and ignore decisions without
 > deleting files/works, and the Svelte review panel now calls those explicit actions.
 > Multiwork-file candidates are now generated from conservative proceedings/repeated-section
-> heuristics, and the backend `split_file` action creates file segments, works, and contains
-> links from supplied segment ranges. Next in M4: wire split-file controls into the frontend.
-> Citation contexts are persisted, exposed through the API, and visible in the initial frontend
-> workspace; full reader/graph integration remains later M3/M6 work.
+> heuristics, and `split_file` creates file segments, works, and contains links from supplied
+> segment ranges. The Svelte review panel can submit those split ranges. Next in M4: harden
+> duplicate/version UX and continue into reader/reference integration. Citation contexts are
+> persisted, exposed through the API, and visible in the initial frontend workspace; full
+> reader/graph integration remains later M3/M6 work.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -76,7 +77,7 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Version linking; multi-paper file links and segments. (backend version-link action and
   multiwork split action started)
 - Review UI (merge / link as version / split / keep separate / ignore). (initial real-action UI
-  exists; split controls pending)
+  exists, including split controls)
 
 ## M5: Local agent and teleport (remote machines)
 
