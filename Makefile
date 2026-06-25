@@ -23,6 +23,8 @@ API_RUN_NODEPS := $(COMPOSE) run --rm --no-deps $(API_SERVICE)
 AGENT_RUN := $(COMPOSE) run --rm --no-deps $(AGENT_SERVICE)
 FRONTEND_RUN := $(COMPOSE) run --rm --no-deps $(FRONTEND_SERVICE)
 
+NODE_IMAGE ?= node:24-bookworm-slim
+
 .PHONY: help
 help: ## Show this help.
 	@echo "PaRacORD developer commands"
@@ -240,6 +242,29 @@ frontend-build: init ## Build the frontend in Docker.
 .PHONY: frontend-test
 frontend-test: init ## Run frontend component tests (Vitest + jsdom) in Docker.
 	$(FRONTEND_RUN) npm run test
+
+.PHONY: frontend-install
+frontend-install: init ## Install frontend dependencies in Docker from package-lock.json.
+	$(FRONTEND_RUN) npm ci
+
+.PHONY: frontend-lock-check
+frontend-lock-check: ## Verify frontend package.json and package-lock.json are in sync using Docker Node.
+	docker run --rm \
+		-v "$(CURDIR)/frontend:/app/frontend" \
+		-w /app/frontend \
+		$(NODE_IMAGE) \
+		npm ci --ignore-scripts --dry-run
+
+.PHONY: frontend-lock
+frontend-lock: ## Repair/refresh frontend/package-lock.json using Docker Node, without host npm.
+	docker run --rm \
+		-v "$(CURDIR)/frontend:/app/frontend" \
+		-w /app/frontend \
+		$(NODE_IMAGE) \
+		npm install
+
+.PHONY: frontend-check
+frontend-check: frontend-install frontend-test frontend-build ## Run frontend install, tests, and build in Docker.
 
 .PHONY: health
 health: ## Check local API health endpoint.

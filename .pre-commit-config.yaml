@@ -53,3 +53,12 @@ repos:
         args:
           - "--ignore-words-list=te,fo,aci"
         exclude: ^(frontend/package-lock\.json|docs/.*\.tex)$
+
+  - repo: local
+    hooks:
+      - id: frontend-lock-check
+        name: Check frontend package-lock sync
+        entry: bash -c 'docker run --rm -v "$PWD/frontend:/app/frontend" -w /app/frontend node:24-bookworm-slim npm ci --ignore-scripts --dry-run'
+        language: system
+        pass_filenames: false
+        files: ^frontend/(package\.json|package-lock\.json)$

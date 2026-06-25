@@ -1,12 +1,13 @@
 # PaperRacks frontend (Vite + Svelte) image. Keeps Node dependencies in Docker.
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY frontend ./
 
 EXPOSE 5173
+
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
