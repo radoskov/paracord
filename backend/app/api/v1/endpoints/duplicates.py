@@ -19,6 +19,7 @@ from app.models.work import Work
 from app.services.duplicate_detection import scan_duplicate_candidates
 from app.services.duplicate_resolution import (
     apply_duplicate_action,
+    describe_candidate,
     reopen_duplicate_candidate,
     split_multiwork_file,
 )
@@ -51,8 +52,20 @@ class DuplicateCandidateRead(BaseModel):
     created_at: datetime
     resolved_by_user_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
+    # Enrichment (computed; see describe_candidate) — never read off the ORM row.
+    entity_a_label: str | None = None
+    entity_b_label: str | None = None
+    suggested_target_work_id: uuid.UUID | None = None
+    summary: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+def _candidate_view(db: Session, candidate: DuplicateCandidate) -> DuplicateCandidateRead:
+    """Serialize a candidate with human-readable labels and a suggested merge target."""
+    return DuplicateCandidateRead.model_validate(candidate).model_copy(
+        update=describe_candidate(db, candidate)
+    )
 
 
 class DuplicateScanRequest(BaseModel):
@@ -87,7 +100,7 @@ def list_duplicate_candidates(
     candidate_type: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
-) -> list[DuplicateCandidate]:
+) -> list[DuplicateCandidateRead]:
     """List duplicate/version candidates for review."""
     stmt = select(DuplicateCandidate)
     if status_filter:
@@ -95,7 +108,7 @@ def list_duplicate_candidates(
     if candidate_type:
         stmt = stmt.where(DuplicateCandidate.candidate_type == candidate_type)
     stmt = stmt.order_by(DuplicateCandidate.created_at.desc()).limit(limit)
-    return list(db.scalars(stmt).all())
+    return [_candidate_view(db, candidate) for candidate in db.scalars(stmt).all()]
 
 
 @router.post("/scan", response_model=DuplicateScanResult, status_code=status.HTTP_201_CREATED)
@@ -121,7 +134,7 @@ def scan_duplicates(
         scanned_works=len(works),
         scanned_files=len(files),
         candidate_count=len(candidates),
-        candidates=[DuplicateCandidateRead.model_validate(candidate) for candidate in candidates],
+        candidates=[_candidate_view(db, candidate) for candidate in candidates],
     )
 
 
@@ -131,7 +144,7 @@ def update_duplicate_candidate(
     payload: DuplicateCandidateUpdate,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
-) -> DuplicateCandidate:
+) -> DuplicateCandidateRead:
     """Update review status or apply a duplicate/version review action."""
     candidate = db.get(DuplicateCandidate, candidate_id)
     if candidate is None:
@@ -177,7 +190,7 @@ def update_duplicate_candidate(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     db.refresh(candidate)
-    return candidate
+    return _candidate_view(db, candidate)
 
 
 def _selected_works(db: Session, work_id: uuid.UUID | None) -> list[Work]:

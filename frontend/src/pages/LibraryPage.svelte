@@ -429,11 +429,11 @@
     action: DuplicateCandidateAction,
   ): Promise<void> {
     await run(async () => {
-      await client.applyDuplicateCandidateAction(
-        candidate.id,
-        action,
-        { targetWorkId: candidate.entity_a_type === 'work' ? candidate.entity_a_id : undefined },
-      );
+      await client.applyDuplicateCandidateAction(candidate.id, action, {
+        targetWorkId: canResolveAsWork(candidate)
+          ? (candidate.suggested_target_work_id ?? candidate.entity_a_id)
+          : undefined,
+      });
       await Promise.all([loadWorks(), loadShelves(), loadRacks(), loadDuplicateCandidates()]);
     }, `Applied ${candidateLabel(action)}`);
   }
@@ -474,7 +474,13 @@
   }
 
   function candidateEntities(candidate: DuplicateCandidate): string {
-    return `${candidate.entity_a_type}:${candidate.entity_a_id.slice(0, 8)} -> ${candidate.entity_b_type}:${candidate.entity_b_id.slice(0, 8)}`;
+    const a =
+      candidate.entity_a_label ??
+      `${candidate.entity_a_type}:${candidate.entity_a_id.slice(0, 8)}`;
+    const b =
+      candidate.entity_b_label ??
+      `${candidate.entity_b_type}:${candidate.entity_b_id.slice(0, 8)}`;
+    return a === b ? a : `${a} ↔ ${b}`;
   }
 
   function candidateSignals(candidate: DuplicateCandidate): string {

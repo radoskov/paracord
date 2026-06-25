@@ -67,6 +67,12 @@ What works today (real, tested in-container on Python 3.12):
 - **M4 duplicate review backend actions:** review decisions can now merge work candidates
   without deleting source works, link a source work as a `WorkVersion`, mark a file candidate
   as a duplicate copy, keep candidates separate, or ignore them. Resolutions write audit events.
+- **M4 duplicate review hardening:** when no explicit target is given, the surviving canonical
+  work is chosen by heuristic (user-confirmed → latest arXiv version → metadata completeness)
+  instead of arbitrary id order; candidate API responses carry human-readable entity labels, a
+  summary, and a suggested target; and actions are refused on already-resolved candidates, with
+  an extra guard preventing the same file from being split twice. The Svelte review panel shows
+  the labels/summary and uses the suggested target for merge/version.
 - **M4 duplicate review frontend actions:** the review panel now calls explicit merge,
   link-as-version, mark-duplicate-file, keep-separate, ignore, and reopen flows instead of only
   toggling generic status.
@@ -122,7 +128,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 85 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
+Current count: 89 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
 
 ### Start here (next agent)
 
@@ -134,8 +140,11 @@ candidate detection, and split-file UI. Continue M2/M4:
 1. ~~**Export expansion**: add Markdown/CSL JSON/RIS exports and audit `paper.exported`.~~
    **Done** — BibTeX/BibLaTeX/RIS/CSL-JSON/Markdown/HTML/text, authors + `authorYEAR` keys,
    `paper.exported` audit, and a frontend shelf/rack export control.
-2. **Duplicate/version hardening**: add better target-work selection for merge/version actions,
-   richer candidate labels, and safeguards around repeated split actions.
+2. ~~**Duplicate/version hardening**: add better target-work selection for merge/version actions,
+   richer candidate labels, and safeguards around repeated split actions.~~ **Done** — heuristic
+   default target (user-confirmed → latest arXiv version → metadata completeness), candidate
+   responses now carry entity labels + a human summary + a suggested target, and actions are
+   refused on already-resolved candidates (with an extra guard against re-splitting a file).
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
    normalized-title similarity guard before promoting), and arXiv/DOI link *ingestion*.
 

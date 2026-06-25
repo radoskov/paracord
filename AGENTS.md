@@ -28,7 +28,8 @@ Before working on any larger feature, read SPECIFICATION.md and make sure you un
 ## After finishing a logical chunk of code
 
 Update the progress tracking documents.
-Add add relevant files to staging and create a commit with descriptive message.
+Add add relevant files to staging and create a commit with descriptive message (but not too long).
+Don't put your credentials in the commit message.
 
 ## Branch naming convention
 

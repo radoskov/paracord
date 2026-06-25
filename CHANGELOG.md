@@ -8,6 +8,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Hardened the M4 duplicate/version review: duplicate-candidate API responses now include
+  human-readable entity labels, a summary string, and a `suggested_target_work_id`. When a
+  merge/link action is applied without an explicit target, the surviving canonical work is now
+  chosen by heuristic (user-confirmed → latest arXiv version → metadata completeness) instead
+  of arbitrary id order. Actions are refused on already-resolved candidates, with an extra
+  guard that prevents the same file from being split twice (which would create duplicate
+  works). The Svelte review panel surfaces the labels/summary and uses the suggested target.
+  Covered by new cases in `test_duplicates_api.py`.
 - Expanded citation export to all planned formats: `/api/v1/exports` now renders BibTeX,
   BibLaTeX, RIS, CSL JSON, Markdown, HTML, and plain text (previously only BibTeX/text).
   Exports include authors (resolved from the best metadata assertion), use `authorYEAR`

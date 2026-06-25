@@ -18,6 +18,7 @@ from app.models.file import File, FileSegment, FileWorkLink
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
+from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -293,3 +294,123 @@ def test_split_file_creates_segments_works_and_links(db_session, editor: User) -
     links = db_session.scalars(select(FileWorkLink).order_by(FileWorkLink.created_at)).all()
     assert {link.relationship_type for link in links} == {"contains"}
     assert {link.warning_state for link in links} == {"file_contains_multiple_works"}
+
+
+def _work_pair_candidate(db_session, work_a: Work, work_b: Work, **kwargs) -> DuplicateCandidate:
+    candidate = DuplicateCandidate(
+        candidate_type=kwargs.pop("candidate_type", "fuzzy_title"),
+        entity_a_type="work",
+        entity_a_id=work_a.id,
+        entity_b_type="work",
+        entity_b_id=work_b.id,
+        score=kwargs.pop("score", 0.95),
+        signals=kwargs.pop("signals", {}),
+    )
+    db_session.add(candidate)
+    db_session.commit()
+    return candidate
+
+
+def test_applying_action_to_resolved_candidate_is_rejected(db_session, editor: User) -> None:
+    target = Work(canonical_title="Keep", normalized_title="keep")
+    source = Work(canonical_title="Drop", normalized_title="drop")
+    db_session.add_all([target, source])
+    db_session.flush()
+    candidate = _work_pair_candidate(db_session, target, source, candidate_type="same_doi")
+
+    update_duplicate_candidate(
+        candidate.id,
+        DuplicateCandidateUpdate(action="merge_works", target_work_id=target.id),
+        db=db_session,
+        actor=editor,
+    )
+    # A second merge (e.g. a double-click) must be refused, not silently re-applied.
+    with pytest.raises(HTTPException) as exc:
+        update_duplicate_candidate(
+            candidate.id,
+            DuplicateCandidateUpdate(action="merge_works", target_work_id=target.id),
+            db=db_session,
+            actor=editor,
+        )
+    assert exc.value.status_code == 400
+    assert "already been resolved" in exc.value.detail
+
+
+def test_splitting_same_file_twice_is_rejected(db_session, editor: User) -> None:
+    file = File(sha256="f" * 64, size_bytes=100, page_count=10)
+    db_session.add(file)
+    db_session.flush()
+    candidate = DuplicateCandidate(
+        candidate_type="multiwork_file",
+        entity_a_type="file",
+        entity_a_id=file.id,
+        entity_b_type="file",
+        entity_b_id=file.id,
+        score=0.78,
+        signals={},
+    )
+    db_session.add(candidate)
+    db_session.commit()
+
+    segments = [{"title": "One", "page_start": 1, "page_end": 5}]
+    update_duplicate_candidate(
+        candidate.id,
+        DuplicateCandidateUpdate(action="split_file", split_segments=segments),
+        db=db_session,
+        actor=editor,
+    )
+    # Reopening clears the status but not the created works, so a re-split is still refused.
+    update_duplicate_candidate(
+        candidate.id, DuplicateCandidateUpdate(status="open"), db=db_session, actor=editor
+    )
+    with pytest.raises(HTTPException) as exc:
+        update_duplicate_candidate(
+            candidate.id,
+            DuplicateCandidateUpdate(action="split_file", split_segments=segments),
+            db=db_session,
+            actor=editor,
+        )
+    assert exc.value.status_code == 400
+    assert "already been split" in exc.value.detail
+    assert len(db_session.scalars(select(Work)).all()) == 1
+
+
+def test_auto_target_prefers_confirmed_then_latest_arxiv(db_session, editor: User) -> None:
+    # No explicit target_work_id: the user-confirmed work should survive as canonical.
+    plain = Work(canonical_title="Draft", normalized_title="draft")
+    confirmed = Work(canonical_title="Final", normalized_title="final", user_confirmed=True)
+    db_session.add_all([plain, confirmed])
+    db_session.flush()
+    candidate = _work_pair_candidate(db_session, plain, confirmed, candidate_type="same_doi")
+
+    update_duplicate_candidate(
+        candidate.id,
+        DuplicateCandidateUpdate(action="merge_works"),
+        db=db_session,
+        actor=editor,
+    )
+    assert db_session.get(Work, plain.id).work_type == "merged"
+    assert db_session.get(Work, confirmed.id).work_type != "merged"
+
+
+def test_candidate_view_includes_labels_and_suggested_target(db_session, editor: User) -> None:
+    v1 = Work(
+        canonical_title="Attention v1", normalized_title="attention v1", arxiv_id="1706.03762v1"
+    )
+    v2 = Work(
+        canonical_title="Attention v2", normalized_title="attention v2", arxiv_id="1706.03762v2"
+    )
+    db_session.add_all([v1, v2])
+    db_session.flush()
+    candidate = _work_pair_candidate(
+        db_session, v1, v2, candidate_type="same_arxiv", signals={"version_mismatch": True}
+    )
+
+    [view] = list_duplicate_candidates(
+        status_filter="open", candidate_type=None, limit=100, db=db_session
+    )
+    assert view.id == candidate.id
+    assert {view.entity_a_label, view.entity_b_label} == {"Attention v1", "Attention v2"}
+    assert "Same arXiv ID (version mismatch)" in view.summary
+    # The later arXiv version is the suggested canonical target.
+    assert view.suggested_target_work_id == v2.id

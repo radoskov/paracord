@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import FileWorkLink
+from app.models.file import File, FileWorkLink
 from app.models.organization import ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
@@ -34,6 +34,10 @@ def apply_duplicate_action(
     target_work_id: uuid.UUID | None = None,
 ) -> DuplicateCandidate:
     """Apply a review decision without deleting works or files."""
+    if candidate.status != "open":
+        raise ValueError(
+            "Candidate has already been resolved; reopen it before applying another action"
+        )
     if action == "merge_works":
         _merge_work_candidate(db, candidate, target_work_id=target_work_id)
         _resolve(candidate, actor, "accepted", action)
@@ -80,6 +84,14 @@ def split_multiwork_file(
         raise ValueError("split_file requires a multiwork file candidate")
     if not segments:
         raise ValueError("split_file requires at least one segment")
+    if candidate.status != "open":
+        raise ValueError(
+            "Candidate has already been resolved; reopen it before applying another action"
+        )
+    # Reopening does not undo a prior split, so refuse to split the same file twice and
+    # create a second set of duplicate works.
+    if (candidate.signals or {}).get("created_work_ids"):
+        raise ValueError("This file has already been split; remove the created works to redo it")
 
     from app.models.file import FileSegment
     from app.utils.normalization import normalize_title
@@ -203,11 +215,36 @@ def _work_pair(
     work_b = db.get(Work, candidate.entity_b_id)
     if work_a is None or work_b is None:
         raise ValueError("Candidate references a missing work")
-    if target_work_id is None or target_work_id == work_a.id:
+    if target_work_id is None:
+        target = choose_target_work(work_a, work_b)
+        return (target, work_b) if target is work_a else (target, work_a)
+    if target_work_id == work_a.id:
         return work_a, work_b
     if target_work_id == work_b.id:
         return work_b, work_a
     raise ValueError("target_work_id must be one of the candidate works")
+
+
+def choose_target_work(work_a: Work, work_b: Work) -> Work:
+    """Pick the work that should survive as canonical when the user gives no explicit target.
+
+    Prefers a user-confirmed work, then the later arXiv version (version collapse keeps the
+    newest as canonical), then the more complete metadata record. Ties keep ``work_a`` so the
+    choice is stable.
+    """
+    return work_a if _target_rank(work_a) >= _target_rank(work_b) else work_b
+
+
+def _target_rank(work: Work) -> tuple[int, int, int]:
+    confirmed = 1 if work.user_confirmed else 0
+    version = split_arxiv_id(work.arxiv_id)["version"]
+    version_number = int(version[1:]) if version else 0
+    completeness = sum(
+        1
+        for value in (work.doi, work.abstract, work.venue, work.year, work.canonical_title)
+        if value
+    )
+    return (confirmed, version_number, completeness)
 
 
 def _move_file_links_to_work(
@@ -282,6 +319,68 @@ def _resolve(
     candidate.resolved_by_user_id = actor.id
     candidate.resolved_at = datetime.now(UTC)
     candidate.signals = {**(candidate.signals or {}), "review_action": action}
+
+
+_CANDIDATE_TYPE_LABELS = {
+    "same_doi": "Same DOI",
+    "same_arxiv": "Same arXiv ID",
+    "fuzzy_title": "Similar title",
+    "exact_file": "Identical file (SHA-256)",
+    "text_fingerprint": "Same text fingerprint",
+    "multiwork_file": "File may contain multiple papers",
+}
+
+
+def describe_candidate(db: Session, candidate: DuplicateCandidate) -> dict[str, Any]:
+    """Build human-readable labels + a suggested merge target for a candidate.
+
+    Returned as plain data so the API layer can attach it to the response without the ORM
+    needing relationships it does not declare.
+    """
+    a_label = _entity_label(db, candidate.entity_a_type, candidate.entity_a_id)
+    b_label = _entity_label(db, candidate.entity_b_type, candidate.entity_b_id)
+
+    suggested_target_work_id: uuid.UUID | None = None
+    if (
+        candidate.entity_a_type == "work"
+        and candidate.entity_b_type == "work"
+        and candidate.entity_a_id != candidate.entity_b_id
+    ):
+        work_a = db.get(Work, candidate.entity_a_id)
+        work_b = db.get(Work, candidate.entity_b_id)
+        if work_a is not None and work_b is not None:
+            suggested_target_work_id = choose_target_work(work_a, work_b).id
+
+    return {
+        "entity_a_label": a_label,
+        "entity_b_label": b_label,
+        "suggested_target_work_id": suggested_target_work_id,
+        "summary": _summarize(candidate, a_label, b_label),
+    }
+
+
+def _entity_label(db: Session, entity_type: str, entity_id: uuid.UUID) -> str:
+    if entity_type == "work":
+        work = db.get(Work, entity_id)
+        if work is not None:
+            return work.canonical_title or f"Untitled work ({str(work.id)[:8]})"
+    elif entity_type == "file":
+        file = db.get(File, entity_id)
+        if file is not None:
+            return file.original_filename or f"file {file.sha256[:12]}"
+    return f"{entity_type} {str(entity_id)[:8]}"
+
+
+def _summarize(candidate: DuplicateCandidate, a_label: str, b_label: str) -> str:
+    kind = _CANDIDATE_TYPE_LABELS.get(candidate.candidate_type, candidate.candidate_type)
+    signals = candidate.signals or {}
+    if candidate.candidate_type == "multiwork_file":
+        return f"{kind}: {a_label}"
+    if candidate.candidate_type == "fuzzy_title":
+        kind = f"{kind} ({round(candidate.score * 100)}%)"
+    elif candidate.candidate_type == "same_arxiv" and signals.get("version_mismatch"):
+        kind = f"{kind} (version mismatch)"
+    return f"{kind}: “{a_label}” ↔ “{b_label}”"
 
 
 def reopen_duplicate_candidate(candidate: DuplicateCandidate) -> DuplicateCandidate:

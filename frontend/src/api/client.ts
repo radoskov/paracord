@@ -154,6 +154,10 @@ export interface DuplicateCandidate {
   created_at: string;
   resolved_by_user_id: string | null;
   resolved_at: string | null;
+  entity_a_label: string | null;
+  entity_b_label: string | null;
+  suggested_target_work_id: string | null;
+  summary: string | null;
 }
 
 export interface DuplicateScanResult {
