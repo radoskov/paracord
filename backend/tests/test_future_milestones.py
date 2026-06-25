@@ -113,9 +113,6 @@ def test_shelf_citation_graph_is_scoped(client, auth_headers, db):
 # --- M7: local AI summaries + topics (SPEC §8.14, §8.15) -------------------
 
 
-@pytest.mark.skip(
-    reason="M7 summaries: ENABLE WHEN local summary pipeline stores provenance (SPEC §8.14)"
-)
 def test_local_summary_records_provenance(client, auth_headers, db):
     from app.models.work import Work
 

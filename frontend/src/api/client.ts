@@ -13,6 +13,19 @@ export interface Work {
   updated_at: string;
 }
 
+export type SummaryType = 'abstract' | 'extractive';
+
+export interface Summary {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  summary_type: string;
+  text: string;
+  model_name: string | null;
+  prompt_version: string | null;
+  created_at: string;
+}
+
 export type GraphScopeType = 'library' | 'shelf' | 'rack';
 export type GraphNodeMode = 'local_only' | 'include_external';
 
@@ -407,6 +420,17 @@ export class ApiClient {
 
   async getFileBlob(fileId: string): Promise<Blob> {
     return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
+  async listSummaries(workId: string): Promise<Summary[]> {
+    return this.request<Summary[]>(`/api/v1/works/${workId}/summaries`);
+  }
+
+  async createSummary(workId: string, summaryType: SummaryType): Promise<Summary> {
+    return this.request<Summary>(`/api/v1/works/${workId}/summaries`, {
+      method: 'POST',
+      body: { summary_type: summaryType },
+    });
   }
 
   async citationGraph(payload: {

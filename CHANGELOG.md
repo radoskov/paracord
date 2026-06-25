@@ -8,6 +8,15 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added M7 local paper summaries (tiers 0 and 1, no LLM, no network):
+  `POST /api/v1/works/{id}/summaries` and `GET` (`services/summarization.py`). Tier 0
+  (`abstract`) stores the work's abstract verbatim; Tier 1 (`extractive`) runs a dependency-free
+  frequency-based extractive summarizer over the abstract plus extracted GROBID body text
+  (`tei_parser.extract_body_text`). Summaries are stored with provenance (`model_name` +
+  `prompt_version`) and replace any prior summary of the same type (idempotent re-runs). The
+  Svelte library gained an Abstract/Extractive summary panel for the selected work. Covered by
+  `test_summarization.py` and the enabled forward-looking `test_local_summary_records_provenance`.
+  Tier 2 (local-LLM abstractive via Ollama) is intentionally left for later.
 - Added the M6 scoped citation graph: `POST /api/v1/graphs/citation` builds a node/edge graph
   for a library/shelf/rack scope (`services/citation_graph.py`). Edges are derived from
   extracted `Reference` rows resolved to local works (persisted `resolved_work_id`, else an

@@ -112,6 +112,14 @@ What works today (real, tested in-container on Python 3.12):
   edge list, scoped to the selected shelf/rack or whole library. Covered by
   `test_citation_graph.py`, `CitationGraph.test.ts`, and the now-enabled forward-looking
   `test_shelf_citation_graph_is_scoped`.
+- **M7 local summaries (tiers 0 & 1, no LLM):** `POST /api/v1/works/{id}/summaries` +
+  `GET` (`services/summarization.py`). Tier 0 (`abstract`) stores the abstract verbatim; Tier 1
+  (`extractive`) runs a dependency-free frequency-based extractive summarizer over the abstract
+  plus GROBID body text (`tei_parser.extract_body_text`). Summaries are stored with provenance
+  (`model_name` + `prompt_version`) and are idempotent per (work, type). The Svelte library has
+  an Abstract/Extractive summary panel for the selected work. Covered by `test_summarization.py`
+  and the now-enabled forward-looking `test_local_summary_records_provenance`. Tier 2
+  (local-LLM abstractive via Ollama) is deliberately not implemented.
 
 What still does NOT exist yet:
 
@@ -124,7 +132,8 @@ What still does NOT exist yet:
   exact-identifier enrichment is implemented so far (arXiv, Crossref, OpenAlex, Semantic
   Scholar).
 - Annotation search/export, PDF.js-specific rendering/anchors,
-  hardened duplicate/version UX, citation graph, AI summaries, topics.
+  hardened duplicate/version UX, interactive citation graph, Tier-2 (local-LLM) summaries,
+  topics, semantic search.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paracord` queue and processes both GROBID extraction and enrichment jobs.
@@ -148,7 +157,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 100 passing + 5 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 111 passing + 4 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 

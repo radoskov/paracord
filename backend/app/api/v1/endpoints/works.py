@@ -17,6 +17,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work
+from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_title
 from app.workers.queue import enqueue_enrichment
 
@@ -227,6 +228,24 @@ class AnnotationRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SummaryCreate(BaseModel):
+    summary_type: str = "extractive"
+    max_sentences: int = 5
+
+
+class SummaryRead(BaseModel):
+    id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    summary_type: str
+    text: str
+    model_name: str | None = None
+    prompt_version: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
 def get_work_citation_contexts(
     work_id: uuid.UUID,
@@ -307,6 +326,43 @@ def create_work_annotation(
     db.commit()
     db.refresh(annotation)
     return annotation
+
+
+@router.get("/{work_id}/summaries", response_model=list[SummaryRead])
+def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP) -> list:
+    """List stored summaries for a work (newest first)."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    return list_work_summaries(db, work_id)
+
+
+@router.post(
+    "/{work_id}/summaries",
+    response_model=SummaryRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_summary(
+    work_id: uuid.UUID,
+    payload: SummaryCreate,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> object:
+    """Generate a local (no-LLM) summary for a work and store it with provenance."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    try:
+        summary = summarize_work(
+            db,
+            work,
+            summary_type=payload.summary_type,
+            max_sentences=payload.max_sentences,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(summary)
+    return summary
 
 
 def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:

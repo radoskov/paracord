@@ -51,6 +51,17 @@ def _text(element) -> str | None:
     return text or None
 
 
+def extract_body_text(tei_xml: str) -> str | None:
+    """Return the concatenated body paragraph text from a GROBID TEI document."""
+    try:
+        root = etree.fromstring(tei_xml.encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return None
+    paragraphs = [_text(p) for p in root.findall(".//t:text/t:body//t:p", TEI_NS)]
+    joined = " ".join(p for p in paragraphs if p)
+    return joined or None
+
+
 def _first(*elements):
     """Return the first element that is not None (avoids lxml truthiness pitfalls)."""
     for element in elements:

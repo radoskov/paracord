@@ -19,6 +19,8 @@
     type ReadingStatus,
     type Shelf,
     type Source,
+    type Summary,
+    type SummaryType,
     type Tag,
     type Work,
   } from '../api/client';
@@ -61,6 +63,7 @@
   let rackShelves: Shelf[] = [];
   let citationContexts: CitationContext[] = [];
   let annotations: Annotation[] = [];
+  let summaries: Summary[] = [];
 
   let newWorkTitle = '';
   let newWorkYear = '';
@@ -216,10 +219,20 @@
 
   async function selectWork(work: Work): Promise<void> {
     selectedWork = work;
-    [citationContexts, annotations] = await Promise.all([
+    [citationContexts, annotations, summaries] = await Promise.all([
       client.listCitationContexts(work.id),
       client.listAnnotations(work.id),
+      client.listSummaries(work.id),
     ]);
+  }
+
+  async function summarizeSelectedWork(summaryType: SummaryType): Promise<void> {
+    if (!selectedWork) return;
+    const work = selectedWork;
+    await run(async () => {
+      await client.createSummary(work.id, summaryType);
+      summaries = await client.listSummaries(work.id);
+    }, 'Summary generated');
   }
 
   async function createShelf(): Promise<void> {
@@ -633,6 +646,48 @@
               </article>
             {/each}
           </div>
+        {/if}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2>Summaries</h2>
+          <span>{summaries.length}</span>
+        </div>
+        {#if !selectedWork}
+          <p class="empty">Select a work</p>
+        {:else}
+          <div class="inline-action">
+            <button
+              type="button"
+              on:click={() => summarizeSelectedWork('abstract')}
+              disabled={loading}
+            >
+              Abstract
+            </button>
+            <button
+              type="button"
+              on:click={() => summarizeSelectedWork('extractive')}
+              disabled={loading}
+            >
+              Extractive
+            </button>
+          </div>
+          {#if summaries.length === 0}
+            <p class="empty">No summaries yet</p>
+          {:else}
+            <div class="context-list">
+              {#each summaries as summary}
+                <article>
+                  <header>
+                    <strong>{summary.summary_type}</strong>
+                    <span>{summary.model_name ?? ''}</span>
+                  </header>
+                  <p>{summary.text}</p>
+                </article>
+              {/each}
+            </div>
+          {/if}
         {/if}
       </section>
 
