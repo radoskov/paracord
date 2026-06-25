@@ -430,6 +430,13 @@ export class ApiClient {
     });
   }
 
+  async importBibtex(content: string): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/bibtex', {
+      method: 'POST',
+      body: { content },
+    });
+  }
+
   async listFiles(): Promise<FileRecord[]> {
     return this.request<FileRecord[]>('/api/v1/files');
   }

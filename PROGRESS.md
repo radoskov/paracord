@@ -103,6 +103,13 @@ What works today (real, tested in-container on Python 3.12):
   (SPEC §7.6/§8.13). The Svelte library exposes a working export control (format picker +
   download) for the selected shelf or rack. Covered by `test_export_formats.py` and
   `ExportDialog.test.ts`.
+- **M3 BibTeX import:** `POST /api/v1/imports/bibtex` ingests pasted/uploaded BibTeX
+  (`services/bibtex.py`, a dependency-free balanced-brace parser) into Works, recording authors
+  as a `bibtex`-sourced MetadataAssertion and an `ImportBatch` + `import.bibtex` audit event.
+  Entries are de-duplicated against the library by normalized DOI and title, so re-importing the
+  same file is a no-op. Imported works stay `user_confirmed=False` so enrichment can still fill
+  gaps. The Svelte library has a paste-BibTeX import box. Covered by `test_bibtex_import.py` and
+  the now-enabled forward-looking `test_import_bibtex_creates_works`.
 - **M6 scoped citation graph:** `POST /api/v1/graphs/citation` builds a node/edge graph for a
   library/shelf/rack scope (`services/citation_graph.py`). Edges come from extracted
   `Reference` rows resolved to local works by a persisted `resolved_work_id` or an exact
@@ -166,7 +173,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 119 passing + 3 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 129 passing + 2 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 

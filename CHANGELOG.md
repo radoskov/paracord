@@ -8,6 +8,15 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added M3 BibTeX import: `POST /api/v1/imports/bibtex` ingests pasted/uploaded BibTeX into
+  works (`services/bibtex.py` — a small dependency-free balanced-brace parser handling
+  `{…}`/`"…"`/bare values, nested braces, and `@comment`/`@string`/`@preamble`). Authors are
+  recorded as a `bibtex`-sourced MetadataAssertion, venue/year/DOI/arXiv (from
+  `archiveprefix`+`eprint`) are mapped onto the work, and an `ImportBatch` + `import.bibtex`
+  audit event capture the run. Entries are de-duplicated against the library by normalized DOI
+  and title (re-import is a no-op); imported works are left `user_confirmed=False` so enrichment
+  can still fill gaps. The Svelte library gained a paste-BibTeX import box. Covered by
+  `test_bibtex_import.py` and the enabled forward-looking `test_import_bibtex_creates_works`.
 - Added M7 semantic search: `POST /api/v1/search/semantic` ranks works by cosine similarity to
   a free-text query (`services/semantic_search.py`). The default embedder is a deterministic,
   dependency-free feature-hashing bag-of-words model (`services/embeddings.py`) — fully local

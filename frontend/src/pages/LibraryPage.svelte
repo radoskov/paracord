@@ -77,6 +77,7 @@
   let newSourceName = '';
   let newSourceAlias = '';
   let selectedSourceId = '';
+  let bibtexContent = '';
   let selectedShelfForWork = '';
   let selectedRackForShelf = '';
   let selectedTagId = '';
@@ -303,6 +304,16 @@
       const batch = await client.importFolder(selectedSourceId);
       await Promise.all([loadWorks(), loadFiles()]);
       message = `Import ${batch.status}: ${batch.stats?.seen ?? 0} PDFs scanned`;
+    });
+  }
+
+  async function importBibtex(): Promise<void> {
+    if (!bibtexContent.trim()) return;
+    await run(async () => {
+      const batch = await client.importBibtex(bibtexContent);
+      bibtexContent = '';
+      await loadWorks();
+      message = `BibTeX import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
   }
 
@@ -948,6 +959,14 @@
             Import
           </button>
         </div>
+        <form on:submit|preventDefault={importBibtex} class="stack">
+          <textarea
+            bind:value={bibtexContent}
+            placeholder="Paste BibTeX entries…"
+            rows="4"
+          ></textarea>
+          <button type="submit" disabled={!bibtexContent.trim() || loading}>Import BibTeX</button>
+        </form>
       </section>
 
       <section class="surface">

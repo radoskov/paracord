@@ -61,9 +61,6 @@ def test_create_and_list_annotation(client, auth_headers, db):
     assert any(a["selected_text"] == "key claim" for a in listed)
 
 
-@pytest.mark.skip(
-    reason="M3 import: ENABLE WHEN POST /imports/bibtex ingests BibTeX (SPEC §8.1/§10.4)"
-)
 def test_import_bibtex_creates_works(client, auth_headers):
     h = auth_headers("editor")
     bibtex = "@article{vaswani2017, title={Attention Is All You Need}, year={2017}}"

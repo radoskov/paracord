@@ -12,6 +12,7 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.source import ImportBatch, Source
 from app.models.user import User
+from app.services.bibtex import import_bibtex
 from app.services.storage import file_ids_pending_extraction, import_server_folder
 from app.workers.queue import enqueue_extraction
 
@@ -23,6 +24,10 @@ EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 class FolderImportCreate(BaseModel):
     source_id: uuid.UUID
     recursive: bool = True
+
+
+class BibtexImportCreate(BaseModel):
+    content: str
 
 
 class ImportBatchRead(BaseModel):
@@ -62,6 +67,21 @@ def import_folder(
     # Best-effort: queue GROBID extraction for newly imported files (no-op if Redis is down).
     for file_id in file_ids_pending_extraction(db, source.id):
         enqueue_extraction(file_id)
+    return batch
+
+
+@router.post("/bibtex", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
+def import_bibtex_entries(
+    payload: BibtexImportCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ImportBatch:
+    """Create works from pasted/uploaded BibTeX content."""
+    if not payload.content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty BibTeX content")
+    batch = import_bibtex(db, payload.content, actor=actor)
+    db.commit()
+    db.refresh(batch)
     return batch
 
 
