@@ -73,9 +73,6 @@ def test_import_bibtex_creates_works(client, auth_headers):
 # --- M5: local agent enrollment (SPEC §11) ---------------------------------
 
 
-@pytest.mark.skip(
-    reason="M5 agent: ENABLE WHEN agent enrollment is implemented (SPEC §11.2, owner approval)"
-)
 def test_agent_enrollment_requires_owner_approval(client, auth_headers):
     owner = auth_headers("owner")
     # Owner mints an enrollment token, agent enrolls, owner approves, scoped token issued.

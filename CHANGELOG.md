@@ -8,6 +8,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added M5 local-agent enrollment (owner-gated, SPEC §11.2): an owner mints a single-use,
+  expiring enrollment token (`POST /api/v1/admin/agents/enroll-token`); the agent presents it
+  unauthenticated (`POST /api/v1/agents/enroll-request`, returns 202 with a pending agent); an
+  owner approves it (`POST /api/v1/admin/agents/{id}/approve`), which mints the agent's scoped
+  access token (returned once). New `agents` and `agent_enrollment_tokens` tables (migration
+  `0009_agents`); all tokens are stored hashed (sha256) and every step writes an audit event
+  (`agent.enroll_token_issued` / `agent.enroll_requested` / `agent.approved`). The `/agents`
+  router is no longer behind the user-session dependency since agents authenticate with their
+  own token; the legacy `/agents/register` stub now points at the new flow. Covered by
+  `test_agents.py` and the enabled forward-looking `test_agent_enrollment_requires_owner_approval`.
 - Added M3 BibTeX import: `POST /api/v1/imports/bibtex` ingests pasted/uploaded BibTeX into
   works (`services/bibtex.py` — a small dependency-free balanced-brace parser handling
   `{…}`/`"…"`/bare values, nested braces, and `@comment`/`@string`/`@preamble`). Authors are

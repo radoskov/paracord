@@ -1,0 +1,126 @@
+"""Agent enrollment tests (M5)."""
+
+from pathlib import Path
+
+import pytest
+from app.core.security import hash_password
+from app.db.base import Base
+from app.models.agent import Agent, AgentEnrollmentToken
+from app.models.audit import AuditEvent
+from app.models.user import User
+from app.services.agents import approve_agent, enroll_agent, mint_enrollment_token
+from app.services.auth import hash_token
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+
+@pytest.fixture()
+def db_session(tmp_path: Path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'agents.db'}")
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            User.__table__,
+            Agent.__table__,
+            AgentEnrollmentToken.__table__,
+            AuditEvent.__table__,
+        ],
+    )
+    session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    with session_local() as session:
+        yield session
+
+
+@pytest.fixture()
+def owner(db_session) -> User:
+    user = User(username="owner", password_hash=hash_password("secret"), role="owner")
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+# --- service ----------------------------------------------------------------
+
+
+def test_enroll_then_approve_flow(db_session, owner: User) -> None:
+    raw, token = mint_enrollment_token(db_session, owner=owner)
+    db_session.commit()
+    assert token.token_hash == hash_token(raw)  # stored hashed, not plaintext
+
+    agent = enroll_agent(db_session, token=raw, name="laptop")
+    db_session.commit()
+    assert agent.status == "pending"
+    assert agent.token_hash is None  # no access token until approved
+    assert db_session.get(AgentEnrollmentToken, token.id).used_by_agent_id == agent.id
+
+    agent_token, approved = approve_agent(db_session, agent_id=agent.id, owner=owner)
+    db_session.commit()
+    assert approved.status == "approved"
+    assert approved.token_hash == hash_token(agent_token)
+    assert approved.approved_by_user_id == owner.id
+
+    events = {e.event_type for e in db_session.scalars(select(AuditEvent)).all()}
+    assert {"agent.enroll_token_issued", "agent.enroll_requested", "agent.approved"} <= events
+
+
+def test_enrollment_token_is_single_use(db_session, owner: User) -> None:
+    raw, _ = mint_enrollment_token(db_session, owner=owner)
+    db_session.commit()
+    enroll_agent(db_session, token=raw, name="first")
+    db_session.commit()
+    with pytest.raises(ValueError, match="already been used"):
+        enroll_agent(db_session, token=raw, name="second")
+
+
+def test_invalid_token_is_rejected(db_session, owner: User) -> None:
+    with pytest.raises(ValueError, match="Invalid enrollment token"):
+        enroll_agent(db_session, token="not-a-real-token", name="laptop")
+
+
+def test_expired_token_is_rejected(db_session, owner: User) -> None:
+    raw, _ = mint_enrollment_token(db_session, owner=owner, ttl_minutes=-1)  # already expired
+    db_session.commit()
+    with pytest.raises(ValueError, match="expired"):
+        enroll_agent(db_session, token=raw, name="laptop")
+
+
+def test_approving_non_pending_agent_is_rejected(db_session, owner: User) -> None:
+    raw, _ = mint_enrollment_token(db_session, owner=owner)
+    db_session.commit()
+    agent = enroll_agent(db_session, token=raw, name="laptop")
+    db_session.commit()
+    approve_agent(db_session, agent_id=agent.id, owner=owner)
+    db_session.commit()
+    with pytest.raises(ValueError, match="not pending"):
+        approve_agent(db_session, agent_id=agent.id, owner=owner)
+
+
+# --- API --------------------------------------------------------------------
+
+
+def test_agent_enrollment_api_flow(client, auth_headers) -> None:
+    owner = auth_headers("owner")
+    token = client.post("/api/v1/admin/agents/enroll-token", headers=owner).json()["token"]
+
+    # enroll-request is unauthenticated (agent has no user session).
+    enrolled = client.post("/api/v1/agents/enroll-request", json={"token": token, "name": "laptop"})
+    assert enrolled.status_code == 202
+    agent_id = enrolled.json()["agent_id"]
+    assert enrolled.json()["status"] == "pending"
+
+    approved = client.post(f"/api/v1/admin/agents/{agent_id}/approve", headers=owner)
+    assert approved.status_code == 200
+    assert approved.json()["agent_token"]
+    assert approved.json()["status"] == "approved"
+
+
+def test_enroll_token_requires_owner(client, auth_headers) -> None:
+    assert (
+        client.post("/api/v1/admin/agents/enroll-token", headers=auth_headers("editor")).status_code
+        == 403
+    )
+
+
+def test_enroll_request_rejects_bad_token(client) -> None:
+    r = client.post("/api/v1/agents/enroll-request", json={"token": "nope", "name": "x"})
+    assert r.status_code == 400

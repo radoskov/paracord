@@ -110,6 +110,14 @@ What works today (real, tested in-container on Python 3.12):
   same file is a no-op. Imported works stay `user_confirmed=False` so enrichment can still fill
   gaps. The Svelte library has a paste-BibTeX import box. Covered by `test_bibtex_import.py` and
   the now-enabled forward-looking `test_import_bibtex_creates_works`.
+- **M5 agent enrollment (owner-gated):** owner mints a single-use, expiring enrollment token
+  (`POST /api/v1/admin/agents/enroll-token`); the agent presents it unauthenticated
+  (`POST /api/v1/agents/enroll-request` → 202, pending); the owner approves
+  (`POST /api/v1/admin/agents/{id}/approve`) which mints the agent's scoped access token, returned
+  once. New `agents` / `agent_enrollment_tokens` tables (migration `0009_agents`), all tokens
+  stored hashed, every step audit-logged (`services/agents.py`). Manifest/teleport remain stubs.
+  Covered by `test_agents.py` and the now-enabled forward-looking
+  `test_agent_enrollment_requires_owner_approval`.
 - **M6 scoped citation graph:** `POST /api/v1/graphs/citation` builds a node/edge graph for a
   library/shelf/rack scope (`services/citation_graph.py`). Edges come from extracted
   `Reference` rows resolved to local works by a persisted `resolved_work_id` or an exact
@@ -173,7 +181,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 129 passing + 2 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 138 passing + 1 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 

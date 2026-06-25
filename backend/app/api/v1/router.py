@@ -30,11 +30,12 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 # Admin routes enforce owner role per-endpoint via require_owner.
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+# Agent routes authenticate via the enrollment/agent token, not a user session, so the
+# router is not behind the user-session dependency.
 api_router.include_router(
     agents.router,
     prefix="/agents",
     tags=["agents"],
-    dependencies=auth_required,
 )
 api_router.include_router(
     sources.router,

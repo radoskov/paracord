@@ -3,6 +3,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -11,9 +12,29 @@ from app.db.session import get_db
 from app.models.audit import AuditEvent
 from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
+from app.services import agents as agent_service
 from app.services import users as user_service
 
 router = APIRouter()
+
+
+class EnrollTokenOut(BaseModel):
+    token: str
+    expires_at: str
+
+
+class AgentOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class AgentApprovedOut(BaseModel):
+    agent_id: uuid.UUID
+    status: str
+    agent_token: str
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -112,3 +133,42 @@ def list_audit_events(
         for event in events
     ]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post(
+    "/agents/enroll-token", response_model=EnrollTokenOut, status_code=status.HTTP_201_CREATED
+)
+def issue_agent_enroll_token(
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> EnrollTokenOut:
+    """Mint a single-use agent enrollment token (owner only)."""
+    raw_token, token = agent_service.mint_enrollment_token(db, owner=owner)
+    db.commit()
+    return EnrollTokenOut(token=raw_token, expires_at=token.expires_at.isoformat())
+
+
+@router.get("/agents", response_model=list[AgentOut])
+def list_agents(
+    db: Session = Depends(get_db),
+    _owner: User = Depends(require_owner),
+) -> list:
+    """List enrolled/pending agents (owner only)."""
+    return agent_service.list_agents(db)
+
+
+@router.post("/agents/{agent_id}/approve", response_model=AgentApprovedOut)
+def approve_agent(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> AgentApprovedOut:
+    """Approve a pending agent and return its scoped access token once (owner only)."""
+    try:
+        raw_token, agent = agent_service.approve_agent(db, agent_id=agent_id, owner=owner)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    return AgentApprovedOut(agent_id=agent.id, status=agent.status, agent_token=raw_token)
