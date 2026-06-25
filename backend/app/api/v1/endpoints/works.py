@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.annotation import Annotation
 from app.models.citation import CitationMention, Reference
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
@@ -199,6 +200,33 @@ class CitationContextRead(BaseModel):
     source_tei_id: uuid.UUID | None = None
 
 
+class AnnotationCreate(BaseModel):
+    annotation_type: str
+    file_id: uuid.UUID | None = None
+    version_id: uuid.UUID | None = None
+    page: int | None = None
+    coordinates: dict | None = None
+    selected_text: str | None = None
+    content_markdown: str | None = None
+
+
+class AnnotationRead(BaseModel):
+    id: uuid.UUID
+    work_id: uuid.UUID
+    file_id: uuid.UUID | None = None
+    version_id: uuid.UUID | None = None
+    page: int | None = None
+    coordinates: dict | None = None
+    selected_text: str | None = None
+    annotation_type: str
+    content_markdown: str | None = None
+    created_by_user_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
 def get_work_citation_contexts(
     work_id: uuid.UUID,
@@ -231,6 +259,54 @@ def get_work_citation_contexts(
         )
         for mention, reference in rows
     ]
+
+
+@router.get("/{work_id}/annotations", response_model=list[AnnotationRead])
+def list_work_annotations(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+) -> list[Annotation]:
+    """List annotations stored separately from a work's PDFs."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    return list(
+        db.scalars(
+            select(Annotation)
+            .where(Annotation.work_id == work_id)
+            .order_by(Annotation.page, Annotation.created_at)
+        ).all()
+    )
+
+
+@router.post(
+    "/{work_id}/annotations",
+    response_model=AnnotationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_work_annotation(
+    work_id: uuid.UUID,
+    payload: AnnotationCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> Annotation:
+    """Create a reader annotation without modifying the source PDF."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    annotation = Annotation(
+        work_id=work_id,
+        file_id=payload.file_id,
+        version_id=payload.version_id,
+        page=payload.page,
+        coordinates=payload.coordinates,
+        selected_text=payload.selected_text,
+        annotation_type=payload.annotation_type,
+        content_markdown=payload.content_markdown,
+        created_by_user_id=actor.id,
+    )
+    db.add(annotation)
+    db.commit()
+    db.refresh(annotation)
+    return annotation
 
 
 def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:

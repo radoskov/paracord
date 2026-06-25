@@ -35,6 +35,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   `Title | start page | end page` segment entry.
 - Added an embedded reader surface that loads authenticated PDF streams as object URLs and
   includes a References tab backed by extracted citation contexts.
+- Added separate reader annotation storage: `annotations` model/migration and
+  `GET`/`POST /api/v1/works/{work_id}/annotations`; enabled the M3 annotation acceptance test.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of

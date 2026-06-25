@@ -46,6 +46,7 @@ backend/alembic/versions/0003_create_m1_core_library.py
 backend/alembic/versions/0004_create_extraction_tables.py
 backend/alembic/versions/0005_raw_tei_and_mentions.py
 backend/alembic/versions/0006_dupe_candidates.py
+backend/alembic/versions/0007_create_annotations.py
 backend/app/__init__.py
 backend/app/api/__init__.py
 backend/app/api/deps.py
@@ -77,6 +78,7 @@ backend/app/db/session.py
 backend/app/main.py
 backend/app/models/__init__.py
 backend/app/models/ai.py
+backend/app/models/annotation.py
 backend/app/models/audit.py
 backend/app/models/citation.py
 backend/app/models/duplicate.py

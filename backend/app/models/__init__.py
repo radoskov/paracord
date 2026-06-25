@@ -1,6 +1,7 @@
 """ORM model exports."""
 
 from app.models.ai import Summary, TopicAssignment
+from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
@@ -14,6 +15,7 @@ from app.models.work import Work, WorkVersion
 
 __all__ = [
     "AuditEvent",
+    "Annotation",
     "CitationMention",
     "DuplicateCandidate",
     "File",

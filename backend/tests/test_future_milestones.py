@@ -46,9 +46,6 @@ def test_export_shelf_as_bibtex(client, auth_headers, db):
     assert "A Paper" in body["content"]
 
 
-@pytest.mark.skip(
-    reason="M3 annotations: ENABLE WHEN annotation create/list endpoints exist (SPEC §8.8)"
-)
 def test_create_and_list_annotation(client, auth_headers, db):
     from app.models.work import Work
 

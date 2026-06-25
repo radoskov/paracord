@@ -79,6 +79,8 @@ What works today (real, tested in-container on Python 3.12):
   `Title | start page | end page` segment ranges to the backend split action.
 - **M3 reader/reference integration started:** the frontend now has an embedded reader surface
   that loads authenticated PDF blobs and shows extracted citation contexts in a References tab.
+- **M3 annotation storage started:** `annotations` has an Alembic migration and
+  work-scoped create/list endpoints; the forward-looking annotation acceptance test is enabled.
 
 What still does NOT exist yet:
 
@@ -86,8 +88,8 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- PDF.js-specific rendering/anchors, annotation storage, hardened duplicate/version UX, citation
-  graph, export, AI summaries, topics.
+- Frontend annotation UI/search, PDF.js-specific rendering/anchors, hardened duplicate/version UX,
+  citation graph, export, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
@@ -115,8 +117,8 @@ M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate
 the queue table, scanner, review API, backend action semantics, frontend action panel, multiwork
 candidate detection, and split-file UI. Continue M2/M4:
 
-1. **Reader hardening**: replace the object-URL iframe with deeper PDF.js controls/anchors and
-   add annotation storage.
+1. **Reader annotation UI**: add note/highlight entry and annotation list to the embedded reader
+   using `/works/{id}/annotations`.
 2. **Duplicate/version hardening**: add better target-work selection for merge/version actions,
    richer candidate labels, and safeguards around repeated split actions.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
@@ -190,6 +192,7 @@ deliberately deferred — hardening, not the product.
 - Backend `split_file` action creates segments, works, and contains-links from reviewed ranges.
 - Frontend split controls submit segment ranges for `multiwork_file` candidates.
 - Embedded reader surface with References tab backed by citation contexts.
+- Backend annotation storage and work-scoped create/list API.
 
 ## In progress
 
@@ -205,7 +208,7 @@ deliberately deferred — hardening, not the product.
 - In-app password-change endpoint (server-console reset exists; web change-password + its session revocation still pending).
 - Embedded PDF.js reader integration (a lightweight citation-context panel exists; the full reader/reference-tab does not).
 - Agent registration and token rotation implementation.
-- PDF.js-specific reader controls/anchors and annotation storage; duplicate UX hardening.
+- Frontend annotation UI/search; PDF.js-specific reader controls/anchors; duplicate UX hardening.
 - Citation graph materialization implementation.
 - Export renderer.
 - BERTopic and embedding pipeline.
