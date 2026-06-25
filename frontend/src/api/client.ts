@@ -13,6 +13,25 @@ export interface Work {
   updated_at: string;
 }
 
+export type ExportScopeType = 'work' | 'shelf' | 'rack';
+export type ExportFormat = 'bibtex' | 'biblatex' | 'ris' | 'csl-json' | 'markdown' | 'html' | 'text';
+
+export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
+  { value: 'bibtex', label: 'BibTeX' },
+  { value: 'biblatex', label: 'BibLaTeX' },
+  { value: 'ris', label: 'RIS' },
+  { value: 'csl-json', label: 'CSL JSON' },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'html', label: 'HTML' },
+  { value: 'text', label: 'Plain text' },
+];
+
+export interface ExportResponse {
+  filename: string;
+  content_type: string;
+  content: string;
+}
+
 export interface Shelf {
   id: string;
   name: string;
@@ -359,6 +378,14 @@ export class ApiClient {
 
   async getFileBlob(fileId: string): Promise<Blob> {
     return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
+  async exportCitations(payload: {
+    scope_type: ExportScopeType;
+    scope_id: string;
+    format: ExportFormat;
+  }): Promise<ExportResponse> {
+    return this.request<ExportResponse>('/api/v1/exports', { method: 'POST', body: payload });
   }
 
   private async request<T>(

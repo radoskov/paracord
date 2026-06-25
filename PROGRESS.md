@@ -83,8 +83,13 @@ What works today (real, tested in-container on Python 3.12):
   work-scoped create/list endpoints; the forward-looking annotation acceptance test is enabled.
 - **M3 reader annotation UI started:** the embedded reader Notes tab lists annotations and can
   create note/highlight/page-anchor/citation-note records for the selected work/file.
-- **M3 export started:** `/api/v1/exports` resolves work/shelf/rack scopes and renders BibTeX
-  for those works; the forward-looking shelf BibTeX acceptance test is enabled.
+- **M3 export (multi-format):** `/api/v1/exports` resolves work/shelf/rack scopes and renders
+  BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, and plain text. Authors are pulled from the
+  best metadata assertion, citation keys follow the `authorYEAR` convention, each format
+  returns its correct filename/content-type, and a `paper.exported` audit event is recorded
+  (SPEC §7.6/§8.13). The Svelte library exposes a working export control (format picker +
+  download) for the selected shelf or rack. Covered by `test_export_formats.py` and
+  `ExportDialog.test.ts`.
 
 What still does NOT exist yet:
 
@@ -92,7 +97,7 @@ What still does NOT exist yet:
   exists, but the full PDF.js reader/reference-panel integration is still pending.
 - OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
   exact-identifier enrichment is implemented so far.
-- Annotation search/export, additional export formats, PDF.js-specific rendering/anchors,
+- Annotation search/export, PDF.js-specific rendering/anchors,
   hardened duplicate/version UX, citation graph, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
@@ -117,7 +122,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 77 passing + 6 skipped backend, 2 passing agent, 2 passing frontend.
+Current count: 85 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
 
 ### Start here (next agent)
 
@@ -126,7 +131,9 @@ has started. M4 duplicate detection has
 the queue table, scanner, review API, backend action semantics, frontend action panel, multiwork
 candidate detection, and split-file UI. Continue M2/M4:
 
-1. **Export expansion**: add Markdown/CSL JSON/RIS exports and audit `paper.exported`.
+1. ~~**Export expansion**: add Markdown/CSL JSON/RIS exports and audit `paper.exported`.~~
+   **Done** — BibTeX/BibLaTeX/RIS/CSL-JSON/Markdown/HTML/text, authors + `authorYEAR` keys,
+   `paper.exported` audit, and a frontend shelf/rack export control.
 2. **Duplicate/version hardening**: add better target-work selection for merge/version actions,
    richer candidate labels, and safeguards around repeated split actions.
 3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the

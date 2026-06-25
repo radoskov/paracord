@@ -10,6 +10,8 @@
     type DuplicateCandidate,
     type DuplicateCandidateStatus,
     type DuplicateSplitSegment,
+    type ExportFormat,
+    type ExportScopeType,
     type FileRecord,
     type Rack,
     type ReadingStatus,
@@ -18,6 +20,7 @@
     type Tag,
     type Work,
   } from '../api/client';
+  import ExportDialog from '../components/ExportDialog.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import PdfReader from '../components/PdfReader.svelte';
 
@@ -355,6 +358,26 @@
       window.open(url, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     });
+  }
+
+  async function exportScope(
+    scopeType: ExportScopeType,
+    scopeId: string,
+    format: ExportFormat,
+  ): Promise<void> {
+    await run(async () => {
+      const result = await client.exportCitations({
+        scope_type: scopeType,
+        scope_id: scopeId,
+        format,
+      });
+      const url = URL.createObjectURL(new Blob([result.content], { type: result.content_type }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }, 'Export downloaded');
   }
 
   async function openSelectedFileInReader(): Promise<void> {
@@ -826,6 +849,13 @@
             Remove work
           </button>
         </div>
+        {#if selectedShelf}
+          <ExportDialog
+            label={`shelf "${selectedShelf.name}"`}
+            disabled={loading}
+            onExport={(format) => exportScope('shelf', selectedShelf!.id, format)}
+          />
+        {/if}
         <div class="inline-action">
           <select bind:value={selectedShelfForWork}>
             <option value="">Shelf</option>
@@ -904,6 +934,13 @@
             Remove shelf
           </button>
         </div>
+        {#if selectedRack}
+          <ExportDialog
+            label={`rack "${selectedRack.name}"`}
+            disabled={loading}
+            onExport={(format) => exportScope('rack', selectedRack!.id, format)}
+          />
+        {/if}
       </section>
 
       <section class="surface">

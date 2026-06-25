@@ -8,6 +8,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Expanded citation export to all planned formats: `/api/v1/exports` now renders BibTeX,
+  BibLaTeX, RIS, CSL JSON, Markdown, HTML, and plain text (previously only BibTeX/text).
+  Exports include authors (resolved from the best metadata assertion), use `authorYEAR`
+  citation keys, and return a per-format filename + content type. A `paper.exported` audit
+  event is now recorded for every export (SPEC §7.6/§8.13). The Svelte library gained a
+  working export control (format picker + file download) for the selected shelf or rack,
+  replacing the placeholder `ExportDialog`. Covered by `test_export_formats.py` (8 cases) and
+  `ExportDialog.test.ts`.
 - Added frontend component tests (Vitest + jsdom + Testing Library, `vitest.config.ts`,
   `make frontend-test`, and a CI `frontend` job): `main.test.ts` executes the entrypoint in
   a DOM and asserts the app mounts into `#app` (regression guard for the Svelte-5 mount bug),
