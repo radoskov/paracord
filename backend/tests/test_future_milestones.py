@@ -93,7 +93,6 @@ def test_agent_enrollment_requires_owner_approval(client, auth_headers):
 # --- M6: citation graph + summaries (SPEC §8.9, §8.11, §10.7) --------------
 
 
-@pytest.mark.skip(reason="M6 graph: ENABLE WHEN scoped citation graph is built (SPEC §8.9/§12.5)")
 def test_shelf_citation_graph_is_scoped(client, auth_headers, db):
     from app.models.organization import Shelf
 

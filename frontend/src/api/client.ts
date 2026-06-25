@@ -13,6 +13,31 @@ export interface Work {
   updated_at: string;
 }
 
+export type GraphScopeType = 'library' | 'shelf' | 'rack';
+export type GraphNodeMode = 'local_only' | 'include_external';
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: 'local' | 'external';
+  work_id: string | null;
+  year: number | null;
+  doi: string | null;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  weight: number;
+  resolution: string;
+}
+
+export interface CitationGraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  summary: Record<string, number>;
+}
+
 export type ExportScopeType = 'work' | 'shelf' | 'rack';
 export type ExportFormat = 'bibtex' | 'biblatex' | 'ris' | 'csl-json' | 'markdown' | 'html' | 'text';
 
@@ -382,6 +407,20 @@ export class ApiClient {
 
   async getFileBlob(fileId: string): Promise<Blob> {
     return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
+  async citationGraph(payload: {
+    scopeType: GraphScopeType;
+    scopeId?: string | null;
+    nodeMode: GraphNodeMode;
+  }): Promise<CitationGraphResponse> {
+    return this.request<CitationGraphResponse>('/api/v1/graphs/citation', {
+      method: 'POST',
+      body: {
+        scope: { type: payload.scopeType, id: payload.scopeId ?? null },
+        node_mode: payload.nodeMode,
+      },
+    });
   }
 
   async exportCitations(payload: {

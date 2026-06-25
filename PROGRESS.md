@@ -103,11 +103,23 @@ What works today (real, tested in-container on Python 3.12):
   (SPEC §7.6/§8.13). The Svelte library exposes a working export control (format picker +
   download) for the selected shelf or rack. Covered by `test_export_formats.py` and
   `ExportDialog.test.ts`.
+- **M6 scoped citation graph:** `POST /api/v1/graphs/citation` builds a node/edge graph for a
+  library/shelf/rack scope (`services/citation_graph.py`). Edges come from extracted
+  `Reference` rows resolved to local works by a persisted `resolved_work_id` or an exact
+  DOI/arXiv-base match; `node_mode=local_only` keeps in-scope edges while `include_external`
+  also surfaces cited works not yet in the library, with a summary (node/edge/external/
+  unresolved counts). The Svelte library has a working (lightweight) graph panel — summary +
+  edge list, scoped to the selected shelf/rack or whole library. Covered by
+  `test_citation_graph.py`, `CitationGraph.test.ts`, and the now-enabled forward-looking
+  `test_shelf_citation_graph_is_scoped`.
 
 What still does NOT exist yet:
 
-- Citation context graph integration is not implemented yet; the lightweight library panel
-  exists, but the full PDF.js reader/reference-panel integration is still pending.
+- Rich citation-graph rendering (Cytoscape interactive canvas) — the scoped graph API and a
+  lightweight summary/edge-list panel exist, but the full interactive graph view and the
+  PDF.js reader/reference-panel integration are still pending. Reference resolution is
+  identifier-only so far (no fuzzy-title edge resolution, and `resolved_work_id` is not yet
+  persisted by a background pass).
 - Crossref/arXiv title-based (fuzzy) lookup and arXiv/DOI link ingestion — only
   exact-identifier enrichment is implemented so far (arXiv, Crossref, OpenAlex, Semantic
   Scholar).
@@ -136,7 +148,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 95 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
+Current count: 100 passing + 5 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 

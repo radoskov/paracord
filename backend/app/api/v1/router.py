@@ -69,7 +69,9 @@ api_router.include_router(
     tags=["duplicates"],
     dependencies=auth_required,
 )
-api_router.include_router(graph.router, prefix="/graph", tags=["graph"], dependencies=auth_required)
+api_router.include_router(
+    graph.router, prefix="/graphs", tags=["graph"], dependencies=auth_required
+)
 api_router.include_router(
     exports.router,
     prefix="/exports",

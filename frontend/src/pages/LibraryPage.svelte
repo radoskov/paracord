@@ -8,11 +8,13 @@
     type CitationContext,
     type DuplicateCandidateAction,
     type DuplicateCandidate,
+    type CitationGraphResponse,
     type DuplicateCandidateStatus,
     type DuplicateSplitSegment,
     type ExportFormat,
     type ExportScopeType,
     type FileRecord,
+    type GraphNodeMode,
     type Rack,
     type ReadingStatus,
     type Shelf,
@@ -20,6 +22,7 @@
     type Tag,
     type Work,
   } from '../api/client';
+  import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import PdfReader from '../components/PdfReader.svelte';
@@ -380,6 +383,16 @@
     }, 'Export downloaded');
   }
 
+  async function loadCitationGraph(nodeMode: GraphNodeMode): Promise<CitationGraphResponse> {
+    // Scope to the selected shelf/rack when one is chosen, otherwise the whole library.
+    const scope = selectedShelf
+      ? { scopeType: 'shelf' as const, scopeId: selectedShelf.id }
+      : selectedRack
+        ? { scopeType: 'rack' as const, scopeId: selectedRack.id }
+        : { scopeType: 'library' as const, scopeId: null };
+    return client.citationGraph({ ...scope, nodeMode });
+  }
+
   async function openSelectedFileInReader(): Promise<void> {
     if (!selectedFile) return;
     await run(async () => {
@@ -724,6 +737,18 @@
             {/each}
           </div>
         {/if}
+      </section>
+
+      <section class="surface">
+        <CitationGraph
+          label={selectedShelf
+            ? `· shelf "${selectedShelf.name}"`
+            : selectedRack
+              ? `· rack "${selectedRack.name}"`
+              : '· whole library'}
+          disabled={loading}
+          load={loadCitationGraph}
+        />
       </section>
 
       <section class="surface">

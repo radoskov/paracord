@@ -8,6 +8,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added the M6 scoped citation graph: `POST /api/v1/graphs/citation` builds a node/edge graph
+  for a library/shelf/rack scope (`services/citation_graph.py`). Edges are derived from
+  extracted `Reference` rows resolved to local works (persisted `resolved_work_id`, else an
+  exact DOI/arXiv-base match); `node_mode=local_only` keeps in-scope edges while
+  `include_external` also surfaces cited works not yet in the library, plus a summary
+  (node/edge/external/unresolved counts). Self-citations are dropped and repeated citations
+  raise the edge weight. The Svelte library gained a lightweight graph panel (summary + edge
+  list, scoped to the selected shelf/rack or whole library), replacing the placeholder. The
+  previously-stub `GET /graph` endpoint is now `POST /graphs/citation`. Covered by
+  `test_citation_graph.py`, `CitationGraph.test.ts`, and the enabled forward-looking
+  `test_shelf_citation_graph_is_scoped`.
 - Added OpenAlex and Semantic Scholar metadata-enrichment connectors (identifier-based, like
   the existing arXiv/Crossref ones): OpenAlex is queried by DOI (reconstructing its
   inverted-index abstract) and Semantic Scholar by arXiv id or DOI. Both are wired into
