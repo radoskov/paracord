@@ -120,6 +120,14 @@ What works today (real, tested in-container on Python 3.12):
   an Abstract/Extractive summary panel for the selected work. Covered by `test_summarization.py`
   and the now-enabled forward-looking `test_local_summary_records_provenance`. Tier 2
   (local-LLM abstractive via Ollama) is deliberately not implemented.
+- **M7 semantic search:** `POST /api/v1/search/semantic` ranks works by cosine similarity to a
+  free-text query (`services/semantic_search.py`). The default embedder is a deterministic,
+  dependency-free feature-hashing bag-of-words model (`services/embeddings.py`) — fully local
+  (no egress) and stable across processes. Embeddings (title + abstract) are cached in the new
+  `embeddings` table (JSON vectors + Python cosine, so the same path works on SQLite and
+  Postgres) and computed lazily on first search. Migration `0008_embeddings`. The Svelte
+  library has a semantic search box that opens the matched work. Covered by
+  `test_semantic_search.py` and the enabled forward-looking `test_semantic_search_returns_neighbours`.
 
 What still does NOT exist yet:
 
@@ -133,7 +141,8 @@ What still does NOT exist yet:
   Scholar).
 - Annotation search/export, PDF.js-specific rendering/anchors,
   hardened duplicate/version UX, interactive citation graph, Tier-2 (local-LLM) summaries,
-  topics, semantic search.
+  topics. Semantic search uses a local hashing embedder; a real embedding model
+  (sentence-transformers / Ollama) and a pgvector index are future opt-in upgrades.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paracord` queue and processes both GROBID extraction and enrichment jobs.
@@ -157,7 +166,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 111 passing + 4 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 119 passing + 3 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 

@@ -146,9 +146,6 @@ def test_topic_model_on_shelf_suggests_tags(client, auth_headers, db):
     assert r.status_code in (200, 202)
 
 
-@pytest.mark.skip(
-    reason="M7 semantic search: ENABLE WHEN pgvector embeddings + /search/semantic exist (SPEC §8.15)"
-)
 def test_semantic_search_returns_neighbours(client, auth_headers):
     h = auth_headers("reader")
     r = client.post("/api/v1/search/semantic", headers=h, json={"q": "attention mechanism"})

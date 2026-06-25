@@ -13,6 +13,18 @@ export interface Work {
   updated_at: string;
 }
 
+export interface SemanticSearchItem {
+  work_id: string;
+  title: string | null;
+  year: number | null;
+  score: number;
+}
+
+export interface SemanticSearchResponse {
+  query: string;
+  items: SemanticSearchItem[];
+}
+
 export type SummaryType = 'abstract' | 'extractive';
 
 export interface Summary {
@@ -250,6 +262,10 @@ export class ApiClient {
     return this.request<Work[]>(`/api/v1/works${suffix}`);
   }
 
+  async getWork(workId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}`);
+  }
+
   async createWork(payload: Partial<Work>): Promise<Work> {
     return this.request<Work>('/api/v1/works', { method: 'POST', body: payload });
   }
@@ -420,6 +436,13 @@ export class ApiClient {
 
   async getFileBlob(fileId: string): Promise<Blob> {
     return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
+  async semanticSearch(q: string, limit = 10): Promise<SemanticSearchResponse> {
+    return this.request<SemanticSearchResponse>('/api/v1/search/semantic', {
+      method: 'POST',
+      body: { q, limit },
+    });
   }
 
   async listSummaries(workId: string): Promise<Summary[]> {

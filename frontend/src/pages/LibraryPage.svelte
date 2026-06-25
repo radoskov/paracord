@@ -17,6 +17,7 @@
     type GraphNodeMode,
     type Rack,
     type ReadingStatus,
+    type SemanticSearchItem,
     type Shelf,
     type Source,
     type Summary,
@@ -64,6 +65,8 @@
   let citationContexts: CitationContext[] = [];
   let annotations: Annotation[] = [];
   let summaries: Summary[] = [];
+  let semanticQuery = '';
+  let semanticResults: SemanticSearchItem[] = [];
 
   let newWorkTitle = '';
   let newWorkYear = '';
@@ -224,6 +227,25 @@
       client.listAnnotations(work.id),
       client.listSummaries(work.id),
     ]);
+  }
+
+  async function selectWorkById(workId: string): Promise<void> {
+    const known = works.find((work) => work.id === workId);
+    if (known) {
+      await selectWork(known);
+      return;
+    }
+    await run(async () => {
+      await selectWork(await client.getWork(workId));
+    });
+  }
+
+  async function runSemanticSearch(): Promise<void> {
+    if (!semanticQuery.trim()) return;
+    await run(async () => {
+      const response = await client.semanticSearch(semanticQuery, 10);
+      semanticResults = response.items;
+    }, 'Semantic search complete');
   }
 
   async function summarizeSelectedWork(summaryType: SummaryType): Promise<void> {
@@ -646,6 +668,31 @@
               </article>
             {/each}
           </div>
+        {/if}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2>Semantic Search</h2>
+          <span>{semanticResults.length}</span>
+        </div>
+        <form on:submit|preventDefault={runSemanticSearch} class="inline-action">
+          <input bind:value={semanticQuery} placeholder="Search by meaning…" />
+          <button type="submit" disabled={!semanticQuery.trim() || loading}>Search</button>
+        </form>
+        {#if semanticResults.length === 0}
+          <p class="empty">No semantic results yet</p>
+        {:else}
+          <ul class="plain-list">
+            {#each semanticResults as hit (hit.work_id)}
+              <li>
+                <button type="button" on:click={() => selectWorkById(hit.work_id)}>
+                  {hit.title ?? 'Untitled work'}
+                </button>
+                <small>{(hit.score * 100).toFixed(0)}%{hit.year ? ` · ${hit.year}` : ''}</small>
+              </li>
+            {/each}
+          </ul>
         {/if}
       </section>
 

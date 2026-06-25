@@ -1,6 +1,6 @@
 """ORM model exports."""
 
-from app.models.ai import Summary, TopicAssignment
+from app.models.ai import Embedding, Summary, TopicAssignment
 from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference
@@ -18,6 +18,7 @@ __all__ = [
     "Annotation",
     "CitationMention",
     "DuplicateCandidate",
+    "Embedding",
     "File",
     "FileSegment",
     "FileWorkLink",

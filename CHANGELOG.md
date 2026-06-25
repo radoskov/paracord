@@ -8,6 +8,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added M7 semantic search: `POST /api/v1/search/semantic` ranks works by cosine similarity to
+  a free-text query (`services/semantic_search.py`). The default embedder is a deterministic,
+  dependency-free feature-hashing bag-of-words model (`services/embeddings.py`) — fully local
+  (no network/egress) and stable across processes; a real local model
+  (sentence-transformers / Ollama) can later be plugged in behind the same interface.
+  Embeddings of each work's title + abstract are cached in a new `embeddings` table (vectors
+  stored as JSON and ranked with Python cosine, so the same code path works on SQLite and
+  Postgres — a pgvector index is a future scaling step) and computed lazily on the first search.
+  Migration `0008_embeddings`. The Svelte library gained a semantic search box that opens the
+  matched work. Covered by `test_semantic_search.py` and the enabled forward-looking
+  `test_semantic_search_returns_neighbours`.
 - Added M7 local paper summaries (tiers 0 and 1, no LLM, no network):
   `POST /api/v1/works/{id}/summaries` and `GET` (`services/summarization.py`). Tier 0
   (`abstract`) stores the work's abstract verbatim; Tier 1 (`extractive`) runs a dependency-free

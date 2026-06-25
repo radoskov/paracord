@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     health,
     imports,
     racks,
+    search,
     shelves,
     sources,
     tags,
@@ -79,3 +80,6 @@ api_router.include_router(
     dependencies=auth_required,
 )
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"], dependencies=auth_required)
+api_router.include_router(
+    search.router, prefix="/search", tags=["search"], dependencies=auth_required
+)
