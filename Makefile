@@ -65,12 +65,22 @@ up-frontend: init ## Start the frontend service.
 	$(COMPOSE) up frontend
 
 .PHONY: up-extraction
-up-extraction: init ## Start the stack plus GROBID (extraction profile).
-	$(COMPOSE) --profile extraction up -d --build
+up-extraction: init ## Start GROBID extraction profile.
+	$(COMPOSE) --profile extraction up -d grobid
+
+.PHONY: down-extraction
+down-extraction: ## Stop GROBID extraction profile.
+	$(COMPOSE) --profile extraction stop grobid
+	$(COMPOSE) --profile extraction rm -f grobid
 
 .PHONY: up-ai
-up-ai: init ## Start the stack plus Ollama (ai profile).
-	$(COMPOSE) --profile ai up -d --build
+up-ai: init ## Start Ollama AI profile.
+	$(COMPOSE) --profile ai up -d ollama
+
+.PHONY: down-ai
+down-ai: ## Stop Ollama AI profile.
+	$(COMPOSE) --profile ai stop ollama
+	$(COMPOSE) --profile ai rm -f ollama
 
 .PHONY: ps
 ps: ## Show Docker Compose service status.
@@ -96,6 +106,10 @@ logs-agent: ## Follow agent logs.
 down: ## Stop containers but keep named volumes/data.
 	$(COMPOSE) down
 
+.PHONY: hard-down
+hard-down: ## Stop containers but keep named volumes/data.
+	$(COMPOSE) --profile '*' down
+
 .PHONY: clean
 clean: ## Stop containers and remove named volumes/data. Destructive.
 	$(COMPOSE) down -v
@@ -104,6 +118,18 @@ clean: ## Stop containers and remove named volumes/data. Destructive.
 rebuild: ## Rebuild images from scratch.
 	$(COMPOSE) build --no-cache
 
+# Docker orphaned containers
+.PHONY: docker-orphans
+docker-orphans: ## Show containers still attached to the Compose default network.
+	@docker ps -a --filter network=$(COMPOSE_PROJECT_NAME)_default
+
+.PHONY: down-orphans
+down-orphans: ## Stop stack and remove orphan containers.
+	$(COMPOSE) down --remove-orphans
+
+.PHONY: clean-orphans
+clean-orphans: ## Stop stack, remove orphan containers, and remove volumes. Destructive.
+	$(COMPOSE) down --remove-orphans -v
 # ---------------------------------------------------------------------------
 # Database / migrations
 # ---------------------------------------------------------------------------
