@@ -23,6 +23,7 @@
     type Summary,
     type SummaryType,
     type Tag,
+    type Topic,
     type Work,
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
@@ -67,6 +68,7 @@
   let summaries: Summary[] = [];
   let semanticQuery = '';
   let semanticResults: SemanticSearchItem[] = [];
+  let topics: Topic[] = [];
 
   let newWorkTitle = '';
   let newWorkYear = '';
@@ -238,6 +240,19 @@
     }
     await run(async () => {
       await selectWork(await client.getWork(workId));
+    });
+  }
+
+  async function runTopicModel(): Promise<void> {
+    const scope = selectedShelf
+      ? { scopeType: 'shelf' as const, scopeId: selectedShelf.id }
+      : selectedRack
+        ? { scopeType: 'rack' as const, scopeId: selectedRack.id }
+        : { scopeType: 'library' as const, scopeId: null };
+    await run(async () => {
+      const response = await client.modelTopics({ ...scope, maxTopics: 6 });
+      topics = response.topics;
+      message = `Topics: ${response.topics.length} over ${response.work_count} works`;
     });
   }
 
@@ -862,6 +877,34 @@
           disabled={loading}
           load={loadCitationGraph}
         />
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2>Topics</h2>
+          <span>{topics.length}</span>
+        </div>
+        <div class="inline-action">
+          <button type="button" on:click={runTopicModel} disabled={loading}>
+            Model topics ({selectedShelf
+              ? `shelf "${selectedShelf.name}"`
+              : selectedRack
+                ? `rack "${selectedRack.name}"`
+                : 'library'})
+          </button>
+        </div>
+        {#if topics.length === 0}
+          <p class="empty">No topics modeled yet</p>
+        {:else}
+          <ul class="plain-list">
+            {#each topics as topic (topic.topic_id)}
+              <li>
+                <strong>{topic.keywords.join(', ')}</strong>
+                <small>{topic.work_count} works</small>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </section>
 
       <section class="surface">

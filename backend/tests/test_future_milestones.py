@@ -15,8 +15,6 @@ HOW TO ENABLE (for the agent implementing the milestone)
 These use the shared API fixtures from conftest.py (client, auth_headers, db, ...).
 """
 
-import pytest
-
 # --- M3: reader, annotations, exports (SPEC §8.8, §8.13, §10.8) -------------
 
 
@@ -124,9 +122,6 @@ def test_local_summary_records_provenance(client, auth_headers, db):
     assert summaries and summaries[0]["summary_type"]  # provenance fields populated
 
 
-@pytest.mark.skip(
-    reason="M7 topics: ENABLE WHEN BERTopic runs on a shelf scope (SPEC §8.15, off by default)"
-)
 def test_topic_model_on_shelf_suggests_tags(client, auth_headers, db):
     from app.models.organization import Shelf
 

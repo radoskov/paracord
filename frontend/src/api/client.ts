@@ -38,6 +38,20 @@ export interface Summary {
   created_at: string;
 }
 
+export interface Topic {
+  topic_id: number;
+  keywords: string[];
+  work_count: number;
+}
+
+export interface TopicModelResponse {
+  model_id: string;
+  scope_type: string;
+  scope_id: string | null;
+  work_count: number;
+  topics: Topic[];
+}
+
 export type GraphScopeType = 'library' | 'shelf' | 'rack';
 export type GraphNodeMode = 'local_only' | 'include_external';
 
@@ -460,6 +474,21 @@ export class ApiClient {
     return this.request<Summary>(`/api/v1/works/${workId}/summaries`, {
       method: 'POST',
       body: { summary_type: summaryType },
+    });
+  }
+
+  async modelTopics(payload: {
+    scopeType: GraphScopeType;
+    scopeId?: string | null;
+    maxTopics?: number;
+  }): Promise<TopicModelResponse> {
+    return this.request<TopicModelResponse>('/api/v1/ai/topics', {
+      method: 'POST',
+      body: {
+        scope_type: payload.scopeType,
+        scope_id: payload.scopeId ?? null,
+        max_topics: payload.maxTopics ?? 5,
+      },
     });
   }
 

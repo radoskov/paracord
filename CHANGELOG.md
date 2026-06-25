@@ -8,6 +8,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added M7 lightweight topic modeling (no ML dependency): `POST /api/v1/ai/topics` clusters a
+  library/shelf/rack scope's works into keyword-labelled topics (`services/topic_modeling.py` —
+  TF-IDF + a small deterministic k-means, fully local/no-egress, deterministic for a given input
+  order) and persists `TopicAssignment` rows stamped with a `topic_model_id` (re-running a scope
+  replaces them). Returns each topic's keyword label and work count. The default tier
+  deliberately avoids BERTopic/sentence-transformers (a real embedding/BERTopic backend can
+  replace `model_topics` later). The Svelte library gained a "Model topics" panel for the current
+  scope. Covered by `test_topic_modeling.py` and the enabled forward-looking
+  `test_topic_model_on_shelf_suggests_tags`. With this, all `test_future_milestones.py`
+  acceptance contracts are enabled (no skipped tests remain).
 - Added M5 local-agent enrollment (owner-gated, SPEC §11.2): an owner mints a single-use,
   expiring enrollment token (`POST /api/v1/admin/agents/enroll-token`); the agent presents it
   unauthenticated (`POST /api/v1/agents/enroll-request`, returns 202 with a pending agent); an

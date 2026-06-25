@@ -118,6 +118,12 @@ What works today (real, tested in-container on Python 3.12):
   stored hashed, every step audit-logged (`services/agents.py`). Manifest/teleport remain stubs.
   Covered by `test_agents.py` and the now-enabled forward-looking
   `test_agent_enrollment_requires_owner_approval`.
+- **M7 topic modeling (lightweight, no ML dep):** `POST /api/v1/ai/topics` clusters a
+  library/shelf/rack scope's works into keyword-labelled topics (`services/topic_modeling.py`,
+  TF-IDF + a small deterministic k-means, fully local) and persists `TopicAssignment` rows
+  stamped with a `topic_model_id` (re-running replaces them). Returns topics with keyword labels
+  + work counts. The Svelte library has a "Model topics" panel for the current scope. Covered by
+  `test_topic_modeling.py` and the now-enabled forward-looking `test_topic_model_on_shelf_suggests_tags`.
 - **M6 scoped citation graph:** `POST /api/v1/graphs/citation` builds a node/edge graph for a
   library/shelf/rack scope (`services/citation_graph.py`). Edges come from extracted
   `Reference` rows resolved to local works by a persisted `resolved_work_id` or an exact
@@ -155,9 +161,10 @@ What still does NOT exist yet:
   exact-identifier enrichment is implemented so far (arXiv, Crossref, OpenAlex, Semantic
   Scholar).
 - Annotation search/export, PDF.js-specific rendering/anchors,
-  hardened duplicate/version UX, interactive citation graph, Tier-2 (local-LLM) summaries,
-  topics. Semantic search uses a local hashing embedder; a real embedding model
-  (sentence-transformers / Ollama) and a pgvector index are future opt-in upgrades.
+  hardened duplicate/version UX, interactive citation graph, Tier-2 (local-LLM) summaries.
+  Semantic search and topic modeling use a local hashing/TF-IDF approach; a real embedding model
+  (sentence-transformers / Ollama / BERTopic) and a pgvector index are future opt-in upgrades.
+  Agent manifest ingestion and teleport remain stubs.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paracord` queue and processes both GROBID extraction and enrichment jobs.
@@ -172,16 +179,15 @@ The suite has three layers (run with `make test`):
   read; metadata review; citation contexts), `test_api_security.py` (RBAC matrix, no-guest,
   auth-required, account-enumeration, audit, path-escape), `test_api_smoke.py`. These run the
   real app via `TestClient` against in-memory SQLite (shared harness in `conftest.py`).
-- **Forward-looking tests (skipped) — `test_future_milestones.py`.** These encode the intended
-  M3+ contracts and are `@pytest.mark.skip`-ped. **When you implement a milestone, enabling its
-  test is part of the Definition of Done:** search `test_future_milestones.py` for the matching
-  `ENABLE WHEN` note, remove the skip, and make it green.
+- **Acceptance contracts — `test_future_milestones.py`.** These encode the M3–M7 milestone
+  contracts; all are now enabled and green (no remaining skips). The file's header documents the
+  `ENABLE WHEN` pattern so future milestones can add new skipped acceptance tests the same way.
 - **Frontend component tests** — `frontend/src/*.test.ts` (Vitest + jsdom, run with
   `make frontend-test`). These execute the real Svelte mount in a DOM, so they catch
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 138 passing + 1 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 146 passing + 0 skipped backend, 2 passing agent, 4 passing frontend.
 
 ### Start here (next agent)
 
