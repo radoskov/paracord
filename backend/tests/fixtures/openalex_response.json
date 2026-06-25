@@ -1,0 +1,23 @@
+{
+  "id": "https://openalex.org/W2963403868",
+  "doi": "https://doi.org/10.1109/cvpr.2016.90",
+  "display_name": "Deep Residual Learning for Image Recognition",
+  "title": "Deep Residual Learning for Image Recognition",
+  "publication_year": 2016,
+  "abstract_inverted_index": {
+    "Deeper": [0],
+    "neural": [1],
+    "networks": [2],
+    "are": [3],
+    "harder": [4],
+    "to": [5],
+    "train.": [6]
+  },
+  "authorships": [
+    { "author": { "display_name": "Kaiming He" } },
+    { "author": { "display_name": "Xiangyu Zhang" } }
+  ],
+  "primary_location": {
+    "source": { "display_name": "2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)" }
+  }
+}

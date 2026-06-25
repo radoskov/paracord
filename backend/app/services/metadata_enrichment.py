@@ -23,10 +23,18 @@ from app.utils.normalization import normalize_title
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 CROSSREF_API = "https://api.crossref.org/works"
+OPENALEX_API = "https://api.openalex.org/works"
+SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper"
+SEMANTIC_SCHOLAR_FIELDS = "title,abstract,year,venue,authors,externalIds"
 ATOM_NS = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+
+_ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$", re.IGNORECASE)
 
 # Work columns that an external assertion may be promoted into.
 PROMOTABLE_FIELDS = ("title", "abstract", "year", "venue", "doi")
+
+# Sources trusted to overwrite a canonical (non-user-locked) field.
+TRUSTED_SOURCES = {"user", "grobid", "crossref", "arxiv", "openalex", "semanticscholar"}
 
 
 @dataclass
@@ -44,7 +52,7 @@ def should_replace_canonical_field(source: str, field_name: str, user_locked: bo
     """Return whether an external assertion may replace a canonical field."""
     if user_locked:
         return False
-    return source in {"user", "grobid", "crossref", "arxiv"} and field_name not in {"user_note"}
+    return source in TRUSTED_SOURCES and field_name not in {"user_note"}
 
 
 def _clean(text: str | None) -> str | None:
@@ -104,6 +112,60 @@ def parse_crossref(payload: dict) -> ExternalMetadata | None:
     )
 
 
+def parse_openalex(payload: dict) -> ExternalMetadata | None:
+    """Parse an OpenAlex /works/{id} JSON payload into ExternalMetadata."""
+    work = payload or {}
+    if not work.get("id"):
+        return None
+    doi = work.get("doi")
+    if doi:
+        doi = doi.removeprefix("https://doi.org/")
+    venue = ((work.get("primary_location") or {}).get("source") or {}).get("display_name") or (
+        work.get("host_venue") or {}
+    ).get("display_name")
+    authors = [
+        (authorship.get("author") or {}).get("display_name")
+        for authorship in work.get("authorships", [])
+    ]
+    return ExternalMetadata(
+        source="openalex",
+        title=_clean(work.get("display_name") or work.get("title")),
+        abstract=_openalex_abstract(work.get("abstract_inverted_index")),
+        authors=[a for a in (_clean(name) for name in authors) if a],
+        doi=doi,
+        year=work.get("publication_year"),
+        venue=_clean(venue),
+    )
+
+
+def _openalex_abstract(inverted_index: dict | None) -> str | None:
+    """Rebuild plain text from OpenAlex's word -> [positions] inverted index."""
+    if not inverted_index:
+        return None
+    positioned: list[tuple[int, str]] = [
+        (position, word) for word, positions in inverted_index.items() for position in positions
+    ]
+    positioned.sort()
+    return _clean(" ".join(word for _, word in positioned))
+
+
+def parse_semantic_scholar(payload: dict) -> ExternalMetadata | None:
+    """Parse a Semantic Scholar /paper/{id} JSON payload into ExternalMetadata."""
+    paper = payload or {}
+    if not (paper.get("title") or paper.get("externalIds")):
+        return None
+    authors = [author.get("name") for author in paper.get("authors", [])]
+    return ExternalMetadata(
+        source="semanticscholar",
+        title=_clean(paper.get("title")),
+        abstract=_clean(paper.get("abstract")),
+        authors=[a for a in (_clean(name) for name in authors) if a],
+        doi=(paper.get("externalIds") or {}).get("DOI"),
+        year=paper.get("year"),
+        venue=_clean(paper.get("venue")),
+    )
+
+
 # --- live fetchers (injectable; only call out per enabled source) -----------
 
 
@@ -125,6 +187,45 @@ def fetch_crossref_by_doi(doi: str, *, mailto: str | None = None) -> ExternalMet
         return None
     response.raise_for_status()
     return parse_crossref(response.json())
+
+
+def fetch_openalex(doi: str, *, mailto: str | None = None, **_kwargs) -> ExternalMetadata | None:
+    """Fetch metadata for a DOI from the OpenAlex API."""
+    # A mailto puts the request in OpenAlex's faster "polite pool".
+    params = {"mailto": mailto} if mailto else {}
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        response = client.get(f"{OPENALEX_API}/doi:{doi}", params=params)
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return parse_openalex(response.json())
+
+
+def fetch_semantic_scholar(
+    *, arxiv_id: str | None = None, doi: str | None = None, **_kwargs
+) -> ExternalMetadata | None:
+    """Fetch metadata from Semantic Scholar by arXiv id (preferred) or DOI."""
+    if arxiv_id:
+        identifier = f"arXiv:{_arxiv_base(arxiv_id)}"
+    elif doi:
+        identifier = f"DOI:{doi}"
+    else:
+        return None
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        response = client.get(
+            f"{SEMANTIC_SCHOLAR_API}/{identifier}",
+            params={"fields": SEMANTIC_SCHOLAR_FIELDS},
+        )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return parse_semantic_scholar(response.json())
+
+
+def _arxiv_base(arxiv_id: str) -> str:
+    """Normalize a stored arXiv id to its bare, version-less form for lookups."""
+    cleaned = arxiv_id.strip().removeprefix("arXiv:").removeprefix("https://arxiv.org/abs/")
+    return _ARXIV_VERSION_SUFFIX.sub("", cleaned)
 
 
 # --- merge into the work ----------------------------------------------------
@@ -208,16 +309,23 @@ def enrich_work(
     actor_user_id=None,
     arxiv_fetcher=fetch_arxiv,
     crossref_fetcher=fetch_crossref_by_doi,
+    openalex_fetcher=fetch_openalex,
+    semantic_scholar_fetcher=fetch_semantic_scholar,
 ) -> dict:
     """Enrich a work from external sources matched by its arXiv id / DOI."""
     if not getattr(settings, "enrichment_enabled", True):
         return {"sources": [], "promoted": []}
 
+    mailto = getattr(settings, "crossref_mailto", None)
     metas: list[ExternalMetadata | None] = []
     if getattr(settings, "enrichment_arxiv", True) and work.arxiv_id:
         metas.append(arxiv_fetcher(work.arxiv_id))
     if getattr(settings, "enrichment_crossref", True) and work.doi:
-        metas.append(crossref_fetcher(work.doi, mailto=getattr(settings, "crossref_mailto", None)))
+        metas.append(crossref_fetcher(work.doi, mailto=mailto))
+    if getattr(settings, "enrichment_openalex", False) and work.doi:
+        metas.append(openalex_fetcher(work.doi, mailto=mailto))
+    if getattr(settings, "enrichment_semantic_scholar", False) and (work.arxiv_id or work.doi):
+        metas.append(semantic_scholar_fetcher(arxiv_id=work.arxiv_id, doi=work.doi))
 
     sources: list[str] = []
     promoted: list[str] = []

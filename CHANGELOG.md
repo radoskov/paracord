@@ -8,6 +8,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added OpenAlex and Semantic Scholar metadata-enrichment connectors (identifier-based, like
+  the existing arXiv/Crossref ones): OpenAlex is queried by DOI (reconstructing its
+  inverted-index abstract) and Semantic Scholar by arXiv id or DOI. Both are wired into
+  `enrich_work` behind new `enrichment_openalex` / `enrichment_semantic_scholar` settings (and
+  `metadata_enrichment.sources.*` config keys, now read by the loader), default **off**. They
+  record provenance assertions and promote trusted fields exactly like the existing sources,
+  send only the bibliographic identifier (no titles/abstracts) so the data-egress policy is
+  preserved, and are covered by parser + `enrich_work` tests.
 - Hardened the M4 duplicate/version review: duplicate-candidate API responses now include
   human-readable entity labels, a summary string, and a `suggested_target_work_id`. When a
   merge/link action is applied without an explicit target, the surviving canonical work is now

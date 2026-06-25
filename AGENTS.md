@@ -29,7 +29,7 @@ Before working on any larger feature, read SPECIFICATION.md and make sure you un
 
 Update the progress tracking documents.
 Add add relevant files to staging and create a commit with descriptive message (but not too long).
-Don't put your credentials in the commit message.
+Don't put your credentials in the commit message (e.g., never put there "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>")
 
 ## Branch naming convention
 

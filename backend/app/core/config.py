@@ -69,6 +69,10 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["enrichment_arxiv"] = sources["arxiv"]
     if "crossref" in sources:
         values["enrichment_crossref"] = sources["crossref"]
+    if "openalex" in sources:
+        values["enrichment_openalex"] = sources["openalex"]
+    if "semantic_scholar" in sources:
+        values["enrichment_semantic_scholar"] = sources["semantic_scholar"]
     if "crossref_mailto" in enrichment:
         values["crossref_mailto"] = enrichment["crossref_mailto"]
     return values
@@ -103,6 +107,8 @@ class Settings(BaseSettings):
     enrichment_enabled: bool = True
     enrichment_arxiv: bool = True
     enrichment_crossref: bool = True
+    enrichment_openalex: bool = False
+    enrichment_semantic_scholar: bool = False
     crossref_mailto: str | None = None
 
 

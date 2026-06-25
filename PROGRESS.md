@@ -45,6 +45,13 @@ What works today (real, tested in-container on Python 3.12):
   auto-corrected GROBID's mis-detected title ("Provided proper attribution…") to
   "Attention Is All You Need" via arXiv, with both values kept as assertions and the
   conflict flagged.
+- **M2 enrichment connectors extended (OpenAlex + Semantic Scholar):** two more identifier-based
+  connectors in `services/metadata_enrichment.py` — OpenAlex by DOI (rebuilding its
+  inverted-index abstract) and Semantic Scholar by arXiv id/DOI — wired into `enrich_work`
+  behind `enrichment_openalex` / `enrichment_semantic_scholar` settings (both opt-in/off by
+  default). They record provenance assertions and promote like the existing sources, and stay
+  within the egress policy (only the DOI/arXiv identifier leaves the machine). Parsers are
+  unit-tested against fixtures.
 - **M2 raw TEI + citation mention persistence:** raw TEI blobs are stored in
   `raw_tei_documents`; TEI body `ref type="bibr"` markers are parsed into
   `CitationMention` rows with section label and before/current/after sentence contexts,
@@ -101,8 +108,9 @@ What still does NOT exist yet:
 
 - Citation context graph integration is not implemented yet; the lightweight library panel
   exists, but the full PDF.js reader/reference-panel integration is still pending.
-- OpenAlex/Semantic Scholar connectors; Crossref/arXiv title-based (fuzzy) lookup — only
-  exact-identifier enrichment is implemented so far.
+- Crossref/arXiv title-based (fuzzy) lookup and arXiv/DOI link ingestion — only
+  exact-identifier enrichment is implemented so far (arXiv, Crossref, OpenAlex, Semantic
+  Scholar).
 - Annotation search/export, PDF.js-specific rendering/anchors,
   hardened duplicate/version UX, citation graph, AI summaries, topics.
 
@@ -128,7 +136,7 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 89 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
+Current count: 95 passing + 6 skipped backend, 2 passing agent, 3 passing frontend.
 
 ### Start here (next agent)
 
@@ -145,8 +153,10 @@ candidate detection, and split-file UI. Continue M2/M4:
    default target (user-confirmed → latest arXiv version → metadata completeness), candidate
    responses now carry entity labels + a human summary + a suggested target, and actions are
    refused on already-resolved candidates (with an extra guard against re-splitting a file).
-3. Optional: OpenAlex/Semantic Scholar connectors and title-based Crossref lookup (needs the
-   normalized-title similarity guard before promoting), and arXiv/DOI link *ingestion*.
+3. **OpenAlex/Semantic Scholar connectors** — **Done** (identifier-based, opt-in). Still open:
+   title-based (fuzzy) Crossref/arXiv lookup, which needs a normalized-title similarity guard
+   before promoting since it would break the "identifier-only" egress invariant, and arXiv/DOI
+   link *ingestion* (create a work from a pasted identifier/URL).
 
 The leftover M0 auth items (login rate limiting, in-app password change) remain
 deliberately deferred — hardening, not the product.

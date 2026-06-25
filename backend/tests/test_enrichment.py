@@ -13,6 +13,8 @@ from app.services.metadata_enrichment import (
     enrich_work,
     parse_arxiv_atom,
     parse_crossref,
+    parse_openalex,
+    parse_semantic_scholar,
 )
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -20,6 +22,10 @@ from sqlalchemy.orm import sessionmaker
 FIXTURES = Path(__file__).parent / "fixtures"
 ARXIV_XML = (FIXTURES / "arxiv_response.xml").read_text(encoding="utf-8")
 CROSSREF_JSON = json.loads((FIXTURES / "crossref_response.json").read_text(encoding="utf-8"))
+OPENALEX_JSON = json.loads((FIXTURES / "openalex_response.json").read_text(encoding="utf-8"))
+SEMANTIC_SCHOLAR_JSON = json.loads(
+    (FIXTURES / "semantic_scholar_response.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.fixture()
@@ -59,6 +65,35 @@ def test_parse_crossref() -> None:
 
 def test_parse_crossref_empty() -> None:
     assert parse_crossref({}) is None
+
+
+def test_parse_openalex_rebuilds_inverted_abstract() -> None:
+    meta = parse_openalex(OPENALEX_JSON)
+    assert meta.source == "openalex"
+    assert meta.title == "Deep Residual Learning for Image Recognition"
+    assert meta.doi == "10.1109/cvpr.2016.90"  # https://doi.org/ prefix stripped
+    assert meta.year == 2016
+    assert meta.venue.startswith("2016 IEEE")
+    assert meta.authors == ["Kaiming He", "Xiangyu Zhang"]
+    assert meta.abstract == "Deeper neural networks are harder to train."  # rebuilt in order
+
+
+def test_parse_openalex_empty() -> None:
+    assert parse_openalex({}) is None
+
+
+def test_parse_semantic_scholar() -> None:
+    meta = parse_semantic_scholar(SEMANTIC_SCHOLAR_JSON)
+    assert meta.source == "semanticscholar"
+    assert meta.title == "Attention Is All You Need"
+    assert meta.doi == "10.48550/arXiv.1706.03762"
+    assert meta.year == 2017
+    assert meta.venue == "Neural Information Processing Systems"
+    assert meta.authors == ["Ashish Vaswani", "Noam Shazeer"]
+
+
+def test_parse_semantic_scholar_empty() -> None:
+    assert parse_semantic_scholar({}) is None
 
 
 # --- enrich_work ------------------------------------------------------------
@@ -149,6 +184,63 @@ def test_enrich_work_crossref_by_doi(db_session) -> None:
 
     assert work.canonical_title == "Deep Residual Learning for Image Recognition"
     assert work.year == 2016
+
+
+def test_enrich_work_uses_openalex_and_semantic_scholar_when_enabled(db_session) -> None:
+    work = Work(
+        canonical_title="x",
+        normalized_title="x",
+        doi="10.1109/cvpr.2016.90",
+        arxiv_id="1706.03762",
+    )
+    db_session.add(work)
+    db_session.commit()
+
+    settings = Settings(
+        enrichment_enabled=True,
+        enrichment_arxiv=False,
+        enrichment_crossref=False,
+        enrichment_openalex=True,
+        enrichment_semantic_scholar=True,
+    )
+    result = enrich_work(
+        db_session,
+        work,
+        settings=settings,
+        openalex_fetcher=lambda _doi, mailto=None: parse_openalex(OPENALEX_JSON),
+        semantic_scholar_fetcher=lambda arxiv_id=None, doi=None: parse_semantic_scholar(
+            SEMANTIC_SCHOLAR_JSON
+        ),
+    )
+    db_session.commit()
+
+    assert set(result["sources"]) == {"openalex", "semanticscholar"}
+    recorded = {a.source for a in db_session.scalars(select(MetadataAssertion)).all()}
+    assert {"openalex", "semanticscholar"} <= recorded
+    called = db_session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == "metadata.enrichment_called")
+    ).all()
+    assert {event.details["source"] for event in called} == {"openalex", "semanticscholar"}
+
+
+def test_enrich_work_new_sources_are_off_by_default(db_session) -> None:
+    work = Work(canonical_title="x", normalized_title="x", doi="10.1109/cvpr.2016.90")
+    db_session.add(work)
+    db_session.commit()
+
+    def _must_not_call(*_args, **_kwargs):
+        raise AssertionError("opt-in source was queried while disabled")
+
+    result = enrich_work(
+        db_session,
+        work,
+        settings=Settings(
+            enrichment_enabled=True, enrichment_arxiv=False, enrichment_crossref=False
+        ),
+        openalex_fetcher=_must_not_call,
+        semantic_scholar_fetcher=_must_not_call,
+    )
+    assert result["sources"] == []
 
 
 def test_enrich_work_is_idempotent(db_session) -> None:
