@@ -8,6 +8,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Expanded the test suite with high-level coverage: a shared `conftest.py` harness
+  (FastAPI `TestClient` over in-memory SQLite) and three layers — service/unit tests,
+  user-oriented API flow tests (`test_api_flows.py`: import → organize → search → read,
+  metadata review, citation contexts), a security suite (`test_api_security.py`: RBAC matrix,
+  no-guest, auth-required, account-enumeration, audit, PDF path-escape), and skipped
+  forward-looking tests for M3+ (`test_future_milestones.py`, each with an `ENABLE WHEN`
+  note to turn on as its milestone lands). ~75 passing + 8 skipped backend.
 - Added the M4 duplicate/version review queue foundation: `duplicate_candidates` model and
   migration `0006_dupe_candidates`, plus a DB-backed scanner for same-DOI, same-arXiv-base,
   fuzzy-title, text-fingerprint, and exact-file candidates with idempotent candidate upserts.

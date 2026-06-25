@@ -90,6 +90,23 @@ What still does NOT exist yet:
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
 `paperracks` queue and processes both GROBID extraction and enrichment jobs.
 
+### Testing
+
+The suite has three layers (run with `make test`):
+
+- **Service/unit tests** — `test_extraction.py`, `test_enrichment.py`, `test_duplicate_detection.py`,
+  `test_m1_core_library.py`, `test_auth_service.py`, etc. (SQLite, direct calls).
+- **High-level API/flow + security tests** — `test_api_flows.py` (import → organize → search →
+  read; metadata review; citation contexts), `test_api_security.py` (RBAC matrix, no-guest,
+  auth-required, account-enumeration, audit, path-escape), `test_api_smoke.py`. These run the
+  real app via `TestClient` against in-memory SQLite (shared harness in `conftest.py`).
+- **Forward-looking tests (skipped) — `test_future_milestones.py`.** These encode the intended
+  M3+ contracts and are `@pytest.mark.skip`-ped. **When you implement a milestone, enabling its
+  test is part of the Definition of Done:** search `test_future_milestones.py` for the matching
+  `ENABLE WHEN` note, remove the skip, and make it green.
+
+Current count: ~75 passing + 8 skipped (forward-looking) backend, 2 agent.
+
 ### Start here (next agent)
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. M4 duplicate detection has
