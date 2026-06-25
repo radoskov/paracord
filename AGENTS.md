@@ -20,6 +20,16 @@ This file is for coding agents that will work on PaRacORD in parallel. Treat `SP
 10. Prefer small, reviewable pull requests that complete one vertical slice.
 11. **Never commit a real credential, secret, or personal datum.** Light config (URLs, IPs, ports, flags) goes through `.env` / `config/*.local.yaml` with placeholders in the `*.example` files. Serious secrets (DB passwords, `PARACORD_SECRET_KEY`, agent tokens, API keys) are read from the environment and referenced by env-var name, never inlined. User passwords use `hash_password`/`verify_password` (bcrypt) only — never plaintext, never logged. Other recoverable sensitive data is encrypted at rest with a key from the environment. Only *clearly fake* dummy/test values may appear in the repo. The full, enforced policy is in `docs/runbooks/secrets_management.md` — read it before touching auth, config, storage, or external integrations.
 
+## Before starting any work (e.g., after query from a user)
+
+Read progress tracking documents: PROGRESS.md, CHANGELOG.md, ROADMAP.md
+Before working on any larger feature, read SPECIFICATION.md and make sure you understand the feature! If anything is not clear enough, ask a human.
+
+## After finishing a logical chunk of code
+
+Update the progress tracking documents.
+Add add relevant files to staging and create a commit with descriptive message.
+
 ## Branch naming convention
 
 ```text
