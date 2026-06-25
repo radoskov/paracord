@@ -22,7 +22,8 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > integration has started with an embedded authenticated PDF surface and References tab powered
 > by extracted citation contexts. Separate annotation storage and work-scoped create/list
 > endpoints are now in place, and the embedded reader Notes tab can create/list annotations.
-> Next: harden toward PDF.js anchors/overlays and annotation search/export.
+> Initial BibTeX export for work/shelf/rack scopes is also live. Next: harden toward PDF.js
+> anchors/overlays and broaden export formats.
 > See `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
@@ -69,6 +70,7 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
   annotation create/list UI started; search pending)
 - References / citation-context tabs. (initial References tab started)
 - BibTeX, BibLaTeX, RIS, CSL JSON, Markdown, HTML, plain-text exports.
+  (BibTeX/text service started for work/shelf/rack scopes)
 - Import from BibTeX/RIS/CSL JSON; Zotero-compatible interchange documented.
 - Citation key management; live always-current shelf/rack bibliography.
 

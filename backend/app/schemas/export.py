@@ -1,11 +1,12 @@
 """Export schemas."""
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class ExportRequest(BaseModel):
-    scope_type: str
+    scope_type: str = Field(validation_alias=AliasChoices("scope_type", "target_type"))
     scope_id: str | None = None
+    target_id: str | None = None
     format: str
     style: str | None = None
 

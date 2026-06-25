@@ -20,9 +20,6 @@ import pytest
 # --- M3: reader, annotations, exports (SPEC §8.8, §8.13, §10.8) -------------
 
 
-@pytest.mark.skip(
-    reason="M3 export: ENABLE WHEN services/export_service.py renders BibTeX (SPEC §8.13/§10.8)"
-)
 def test_export_shelf_as_bibtex(client, auth_headers, db):
     from app.models.organization import Shelf, ShelfWork
     from app.models.work import Work
