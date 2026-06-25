@@ -20,6 +20,8 @@ The format follows Keep a Changelog style conventions, but the project is curren
   and ignore, with audit events and focused tests.
 - Updated the Svelte duplicate-review panel to call explicit backend actions (merge, link
   version, mark duplicate, keep separate, ignore) and reopen resolved candidates.
+- Added initial multiwork-file candidate detection: long/proceedings-like files or previews with
+  repeated abstract/reference markers now enter the duplicate review queue as `multiwork_file`.
 - Added raw TEI storage and citation mention persistence for M2 extraction: migration
   `0005_raw_tei_mentions`, `RawTeiDocument`, source-TEI links on references/mentions, TEI
   body `ref type="bibr"` parsing with sentence contexts, and idempotent persistence of

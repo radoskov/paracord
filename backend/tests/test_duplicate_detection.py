@@ -101,6 +101,31 @@ def test_scan_file_candidates_finds_text_fingerprint_match(db_session) -> None:
     assert candidates[0].signals == {"text_fingerprint": "fp-1"}
 
 
+def test_scan_file_candidates_flags_possible_multiwork_file(db_session) -> None:
+    file = File(
+        sha256="c" * 64,
+        size_bytes=100,
+        mime_type="application/pdf",
+        page_count=42,
+        preview_text="Proceedings\nContents\nPaper 1\nAbstract\nPaper 2\nAbstract",
+    )
+    db_session.add(file)
+    db_session.commit()
+
+    candidates = scan_duplicate_candidates(db_session, file=file)
+    db_session.commit()
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_type == "multiwork_file"
+    assert candidates[0].entity_a_id == file.id
+    assert candidates[0].entity_b_id == file.id
+    assert candidates[0].signals["reason"] == "multiple_section_markers"
+
+    scan_duplicate_candidates(db_session, file=file)
+    db_session.commit()
+    assert len(db_session.scalars(select(DuplicateCandidate)).all()) == 1
+
+
 def test_split_arxiv_id_handles_versioned_and_url_forms() -> None:
     assert split_arxiv_id("arXiv:1706.03762v5") == {"base": "1706.03762", "version": "v5"}
     assert split_arxiv_id("https://arxiv.org/abs/2106.01345") == {

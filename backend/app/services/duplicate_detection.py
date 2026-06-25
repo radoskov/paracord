@@ -86,7 +86,57 @@ def find_file_candidates(db: Session, *, file: File) -> list[DuplicateCandidate]
                     signals={"text_fingerprint": file.text_fingerprint},
                 )
             )
+    candidates.extend(_multiwork_file_candidates(db, file))
     return candidates
+
+
+def _multiwork_file_candidates(db: Session, file: File) -> list[DuplicateCandidate]:
+    signals = _multiwork_signals(file)
+    if not signals:
+        return []
+    return [
+        _upsert_candidate(
+            db,
+            candidate_type="multiwork_file",
+            entity_a_type="file",
+            entity_a_id=file.id,
+            entity_b_type="file",
+            entity_b_id=file.id,
+            score=signals.pop("score"),
+            signals=signals,
+        )
+    ]
+
+
+def _multiwork_signals(file: File) -> dict[str, Any]:
+    preview = (file.preview_text or "").lower()
+    abstract_count = preview.count("abstract")
+    references_count = preview.count("references")
+    title_like_markers = sum(
+        marker in preview
+        for marker in [
+            "proceedings",
+            "table of contents",
+            "contents",
+            "session ",
+            "paper ",
+        ]
+    )
+    if abstract_count >= 2 or references_count >= 2:
+        return {
+            "score": 0.78,
+            "reason": "multiple_section_markers",
+            "abstract_count": abstract_count,
+            "references_count": references_count,
+        }
+    if (file.page_count or 0) >= 40 and title_like_markers >= 2:
+        return {
+            "score": 0.68,
+            "reason": "proceedings_like_preview",
+            "page_count": file.page_count,
+            "title_like_marker_count": title_like_markers,
+        }
+    return {}
 
 
 def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
