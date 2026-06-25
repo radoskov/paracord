@@ -1,6 +1,9 @@
+import { mount } from 'svelte';
+
 import App from './App.svelte';
 
-const app = new App({
+// Svelte 5 mounts components with mount(); `new App({...})` (Svelte 4) throws at runtime.
+const app = mount(App, {
   target: document.getElementById('app') as HTMLElement,
 });
 
