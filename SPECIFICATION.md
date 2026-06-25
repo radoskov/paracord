@@ -1,6 +1,6 @@
-# PaperRacks Software Specification
+# PaRacORD Software Specification
 
-**Project codename:** PaperRacks
+**Project codename:** PaRacORD
 **Document type:** implementation specification and multi-agent build guide
 **Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser
 **Document date:** 2026-06-23
@@ -24,21 +24,21 @@
 
 ## 1. Executive summary
 
-PaperRacks is a local-first, self-hostable scientific-paper library and literature-graph system. It is designed for hundreds to thousands of scientific PDFs, with long-term growth, fast runtime behavior, privacy-preserving filesystem access, citation-context extraction, local citation graphs, shelves/racks/tags organization, PDF reading, citation export, local AI summaries, and topic/keyword modeling.
+PaRacORD is a local-first, self-hostable scientific-paper library and literature-graph system. It is designed for hundreds to thousands of scientific PDFs, with long-term growth, fast runtime behavior, privacy-preserving filesystem access, citation-context extraction, local citation graphs, shelves/racks/tags organization, PDF reading, citation export, local AI summaries, and topic/keyword modeling.
 
-The system intentionally avoids making Zotero the core database. Zotero-compatible import/export is supported through standard bibliography formats, but the canonical model is PaperRacks' own work/version/file graph.
+The system intentionally avoids making Zotero the core database. Zotero-compatible import/export is supported through standard bibliography formats, but the canonical model is PaRacORD's own work/version/file graph.
 
 The core design is:
 
 ```text
 Browser UI
-   -> PaperRacks Server API
+   -> PaRacORD Server API
       -> PostgreSQL + pgvector
       -> Redis/RQ background queue
       -> GROBID extraction service
       -> optional Ollama/local LLM service
       -> optional online metadata connectors
-   -> PaperRacks Local Agent(s)
+   -> PaRacORD Local Agent(s)
       -> configured local folders only
       -> file hashing, manifesting, upload/teleport, optional streaming
 ```
@@ -222,7 +222,7 @@ The original source path remains recorded as a `Location`, but the server can no
 
 ```yaml
 services:
-  api: PaperRacks FastAPI server
+  api: PaRacORD FastAPI server
   web: SvelteKit frontend, or static frontend served by api/nginx
   worker: RQ worker for extraction/enrichment/AI/export jobs
   postgres: PostgreSQL with pgvector
@@ -267,10 +267,10 @@ Credential recovery must be possible only with OS-level access to the server PC 
 Required recovery mechanisms:
 
 ```text
-paperracks admin list-users
-paperracks admin reset-password --user <username>
-paperracks admin create-owner --user <username>
-paperracks admin revoke-sessions --user <username>
+paracord admin list-users
+paracord admin reset-password --user <username>
+paracord admin create-owner --user <username>
+paracord admin revoke-sessions --user <username>
 ```
 
 Rules:
@@ -363,7 +363,7 @@ timestamp
 ### 7.7 Network exposure
 
 1. Default bind is `127.0.0.1`.
-2. LAN mode requires explicit configuration, e.g. `PAPERRACKS_BIND=0.0.0.0` and `PAPERRACKS_LAN_MODE=true`.
+2. LAN mode requires explicit configuration, e.g. `PARACORD_BIND=0.0.0.0` and `PARACORD_LAN_MODE=true`.
 3. Production LAN deployment should use Caddy/nginx/Traefik with TLS where practical.
 4. GROBID, PostgreSQL, Redis, and Ollama bind only to Docker internal network or localhost.
 5. URL importers must block private/LAN IP ranges by default to avoid server-side request forgery.
@@ -739,7 +739,7 @@ Citation key requirements:
 6. Provide `copy BibTeX`, `copy citation`, and `download export` actions.
 7. Include unresolved-reference export with warning labels.
 
-Canonical internal export representation should be CSL JSON plus PaperRacks-specific metadata.
+Canonical internal export representation should be CSL JSON plus PaRacORD-specific metadata.
 
 ### 8.14 Local AI summaries and external summaries
 
@@ -1453,7 +1453,7 @@ Responsibilities:
 2. User runs on workstation:
 
 ```bash
-paperracks-agent enroll --server https://server.local:8443 --token <token> --name "my-laptop"
+paracord-agent enroll --server https://server.local:8443 --token <token> --name "my-laptop"
 ```
 
 3. Agent sends public key or token proof and host alias.
@@ -1464,8 +1464,8 @@ paperracks-agent enroll --server https://server.local:8443 --token <token> --nam
 ### 11.3 Agent folder registration
 
 ```bash
-paperracks-agent add-root --name "Project A papers" --path /home/me/projects/a/papers
-paperracks-agent add-root --name "Global papers" --path /home/me/papers
+paracord-agent add-root --name "Project A papers" --path /home/me/projects/a/papers
+paracord-agent add-root --name "Global papers" --path /home/me/papers
 ```
 
 The agent stores canonicalized roots and refuses files outside them.
@@ -1958,7 +1958,7 @@ security:
   audit_retention_days: 365
 
 storage:
-  managed_library_path: "/srv/paperracks/library"
+  managed_library_path: "/srv/paracord/library"
   allow_symlink_escape: false
   display_absolute_paths_to_members: false
 
@@ -2011,7 +2011,7 @@ topic_modeling:
 Agent config example:
 
 ```yaml
-server_url: "https://paperracks-server.local:8443"
+server_url: "https://paracord-server.local:8443"
 agent_name: "workstation"
 roots:
   - id: "project-a"
@@ -2395,7 +2395,7 @@ This section is written for multiple coding agents working in parallel.
 This is the actual repository layout the scaffold uses. `WORK_SPLIT.md` maps work packages onto these paths.
 
 ```text
-paperracks/
+paracord/
   backend/
     app/
       main.py
@@ -2601,7 +2601,7 @@ Teleport: keep original location record, mark managed copy primary only if user 
 
 ## 25. Definition of done for v1.0
 
-PaperRacks v1.0 is complete when:
+PaRacORD v1.0 is complete when:
 
 1. User can deploy server on Ubuntu with Docker Compose.
 2. User can run an agent on another Ubuntu PC.
@@ -2783,7 +2783,7 @@ Each coding agent should receive:
 Suggested first instruction to any coding agent:
 
 ```text
-Implement only your assigned section of PaperRacks. Preserve the no-guest, no-arbitrary-path, audit-logged design. Do not change shared API/database contracts without updating OpenAPI, Alembic migrations, tests, and an ADR.
+Implement only your assigned section of PaRacORD. Preserve the no-guest, no-arbitrary-path, audit-logged design. Do not change shared API/database contracts without updating OpenAPI, Alembic migrations, tests, and an ADR.
 ```
 
 ---

@@ -1,4 +1,4 @@
-# PaperRacks Frontend
+# PaRacORD Frontend
 
 Vite + Svelte web UI for the M1 library workflow.
 

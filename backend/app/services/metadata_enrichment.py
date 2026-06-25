@@ -118,7 +118,7 @@ def fetch_arxiv(arxiv_id: str, **_kwargs) -> ExternalMetadata | None:
 def fetch_crossref_by_doi(doi: str, *, mailto: str | None = None) -> ExternalMetadata | None:
     """Fetch metadata for a DOI from the Crossref REST API."""
     # A mailto puts the request in Crossref's "polite pool" (faster, recommended).
-    headers = {"User-Agent": f"PaperRacks/0.0 (mailto:{mailto})"} if mailto else {}
+    headers = {"User-Agent": f"PaRacORD/0.0 (mailto:{mailto})"} if mailto else {}
     with httpx.Client(timeout=30, headers=headers, follow_redirects=True) as client:
         response = client.get(f"{CROSSREF_API}/{doi}")
     if response.status_code == 404:

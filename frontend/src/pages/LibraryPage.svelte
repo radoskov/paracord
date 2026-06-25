@@ -74,7 +74,7 @@
   $: readingQueue = works.filter((work) => readingQueueStatuses.has(work.reading_status));
 
   onMount(() => {
-    token = window.localStorage.getItem('paperracks_token') ?? '';
+    token = window.localStorage.getItem('paracord_token') ?? '';
     if (token) refreshAll();
   });
 
@@ -96,7 +96,7 @@
   async function login(): Promise<void> {
     await run(async () => {
       token = await new ApiClient(apiBaseUrl).login(username, password);
-      window.localStorage.setItem('paperracks_token', token);
+      window.localStorage.setItem('paracord_token', token);
       password = '';
       await refreshAll();
     }, 'Signed in');
@@ -104,7 +104,7 @@
 
   function logout(): void {
     token = '';
-    window.localStorage.removeItem('paperracks_token');
+    window.localStorage.removeItem('paracord_token');
     works = [];
     shelves = [];
     racks = [];

@@ -1,7 +1,7 @@
 """Application settings.
 
 Settings are loaded from conservative built-in defaults, optionally overlaid with the server YAML
-file selected by ``PAPERRACKS_SERVER_CONFIG``, and finally overridden by environment variables.
+file selected by ``PARACORD_SERVER_CONFIG``, and finally overridden by environment variables.
 """
 
 import os
@@ -75,17 +75,17 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
 
 
 class Settings(BaseSettings):
-    """Runtime settings for the PaperRacks backend."""
+    """Runtime settings for the PaRacORD backend."""
 
     model_config = SettingsConfigDict(populate_by_name=True)
 
-    environment: str = Field(default="development", alias="PAPERRACKS_ENV")
-    bind_host: str = Field(default="127.0.0.1", alias="PAPERRACKS_BIND_HOST")
-    bind_port: int = Field(default=8000, alias="PAPERRACKS_BIND_PORT")
-    lan_mode: bool = Field(default=False, alias="PAPERRACKS_LAN_MODE")
+    environment: str = Field(default="development", alias="PARACORD_ENV")
+    bind_host: str = Field(default="127.0.0.1", alias="PARACORD_BIND_HOST")
+    bind_port: int = Field(default=8000, alias="PARACORD_BIND_PORT")
+    lan_mode: bool = Field(default=False, alias="PARACORD_LAN_MODE")
     public_base_url: str = Field(
         default="http://127.0.0.1:8000",
-        alias="PAPERRACKS_PUBLIC_BASE_URL",
+        alias="PARACORD_PUBLIC_BASE_URL",
     )
     database_url: str = Field(
         default="postgresql+psycopg://paperracks:paperracks_dev_password@localhost:5432/paperracks",
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
     guest_access_enabled: bool = False
     allowed_roles: list[str] = ["owner", "editor", "reader"]
-    session_ttl_minutes: int = Field(default=720, alias="PAPERRACKS_SESSION_TTL_MINUTES")
+    session_ttl_minutes: int = Field(default=720, alias="PARACORD_SESSION_TTL_MINUTES")
     managed_library_root: str = "./storage/library"
     server_allowed_roots: list[Any] = []
     enrichment_enabled: bool = True
@@ -120,6 +120,6 @@ def _environment_overrides() -> dict[str, Any]:
 @lru_cache
 def get_settings() -> Settings:
     """Return cached settings."""
-    config_path = Path(os.environ.get("PAPERRACKS_SERVER_CONFIG", DEFAULT_CONFIG_PATH))
+    config_path = Path(os.environ.get("PARACORD_SERVER_CONFIG", DEFAULT_CONFIG_PATH))
     yaml_values = _server_settings_from_yaml(_load_yaml(config_path))
     return Settings(**(yaml_values | _environment_overrides()))  # type: ignore[call-arg]

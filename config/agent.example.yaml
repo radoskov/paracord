@@ -1,8 +1,8 @@
 agent:
   name: workstation-agent
   server_url: http://127.0.0.1:8000
-  token_file: ~/.config/paperracks/agent.token
-  database_file: ~/.local/share/paperracks-agent/agent.sqlite3
+  token_file: ~/.config/paracord/agent.token
+  database_file: ~/.local/share/paracord-agent/agent.sqlite3
   poll_interval_seconds: 30
 
 filesystem:
@@ -33,4 +33,4 @@ streaming:
 
 logging:
   level: INFO
-  file: ~/.local/share/paperracks-agent/agent.log
+  file: ~/.local/share/paracord-agent/agent.log

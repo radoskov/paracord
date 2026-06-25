@@ -3,7 +3,7 @@
 import httpx
 
 
-class PaperRacksServerClient:
+class PaRacORDServerClient:
     """Agent-side API client."""
 
     def __init__(self, server_url: str, token: str | None = None) -> None:

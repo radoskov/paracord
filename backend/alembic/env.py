@@ -1,4 +1,4 @@
-"""Alembic environment for PaperRacks migrations."""
+"""Alembic environment for PaRacORD migrations."""
 
 from logging.config import fileConfig
 

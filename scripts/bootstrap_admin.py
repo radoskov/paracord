@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the first PaperRacks owner account.
+"""Create the first PaRacORD owner account.
 
 This script must run on the server PC or inside the backend container with database access.
 """

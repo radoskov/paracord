@@ -8,7 +8,7 @@ from paperracks_agent.watcher import iter_pdf_files
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="paperracks-agent")
+    parser = argparse.ArgumentParser(prog="paracord-agent")
     subparsers = parser.add_subparsers(dest="command")
 
     scan_parser = subparsers.add_parser("scan", help="Scan configured folders")

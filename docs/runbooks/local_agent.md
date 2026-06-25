@@ -5,7 +5,7 @@ The local agent scans only configured roots. It sends manifests to the server an
 ## Registration flow
 
 1. Owner creates an agent bootstrap token on the server.
-2. Workstation runs `paperracks-agent register`.
+2. Workstation runs `paracord-agent register`.
 3. Server returns an agent ID and token.
 4. Agent stores token in a user-readable-only token file.
 5. Future requests use the scoped token.

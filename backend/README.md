@@ -1,6 +1,6 @@
-# PaperRacks Backend
+# PaRacORD Backend
 
-FastAPI backend for PaperRacks.
+FastAPI backend for PaRacORD.
 
 ## Responsibilities
 

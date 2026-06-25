@@ -2,13 +2,13 @@
 
 ```text
 Browser UI
-  -> PaperRacks Server API
+  -> PaRacORD Server API
      -> PostgreSQL + pgvector
      -> Redis/RQ workers
      -> GROBID service
      -> optional Ollama/local LLM
      -> optional metadata connectors
-  -> PaperRacks Local Agent(s)
+  -> PaRacORD Local Agent(s)
      -> configured roots only
      -> manifests
      -> teleport uploads

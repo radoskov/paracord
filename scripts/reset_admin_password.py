@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Server-console credential recovery for PaperRacks.
+"""Server-console credential recovery for PaRacORD.
 
 This script is intentionally local/operator-driven. Do not expose equivalent functionality through
 an unauthenticated web endpoint.

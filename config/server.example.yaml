@@ -1,10 +1,10 @@
 server:
-  name: paperracks-server
+  name: paracord-server
   bind_host: 127.0.0.1
   bind_port: 8000
   public_base_url: http://127.0.0.1:8000
   allow_lan_access: false
-  secret_key_env: PAPERRACKS_SECRET_KEY
+  secret_key_env: PARACORD_SECRET_KEY
 
 security:
   guest_access_enabled: false
@@ -30,7 +30,7 @@ storage:
   # arbitrary filesystem paths to scan.
   server_allowed_roots:
     # - alias: papers
-    #   path: /srv/paperracks/imports/papers
+    #   path: /srv/paracord/imports/papers
 
 agents:
   registration_enabled: true

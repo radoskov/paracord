@@ -1,4 +1,4 @@
-"""FastAPI application entrypoint for PaperRacks."""
+"""FastAPI application entrypoint for PaRacORD."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,12 +9,12 @@ from app.core.security import assert_no_guest_roles
 
 
 def create_app() -> FastAPI:
-    """Create and configure the PaperRacks API application."""
+    """Create and configure the PaRacORD API application."""
     settings = get_settings()
     # Fail fast if a guest/anonymous role was configured — there is no guest access.
     assert_no_guest_roles(settings.allowed_roles)
     app = FastAPI(
-        title="PaperRacks API",
+        title="PaRacORD API",
         version="0.0.0",
         description="Local-first scientific paper library and literature graph API.",
     )

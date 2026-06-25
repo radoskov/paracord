@@ -96,7 +96,7 @@ What still does NOT exist yet:
   hardened duplicate/version UX, citation graph, AI summaries, topics.
 
 Component note: **Redis has a live consumer** — the `worker` service runs the RQ
-`paperracks` queue and processes both GROBID extraction and enrichment jobs.
+`paracord` queue and processes both GROBID extraction and enrichment jobs.
 
 ### Testing
 

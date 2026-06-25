@@ -1,6 +1,6 @@
 # Documentation
 
-This folder contains implementation notes, runbooks, diagrams, agent handoffs, and LaTeX source for the PaperRacks manual.
+This folder contains implementation notes, runbooks, diagrams, agent handoffs, and LaTeX source for the PaRacORD manual.
 
 ## Contents
 

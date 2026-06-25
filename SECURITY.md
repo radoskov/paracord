@@ -1,6 +1,6 @@
 # Security Model
 
-PaperRacks is intended for authenticated local-network use. It is not designed to be exposed directly to the public internet without additional hardening.
+PaRacORD is intended for authenticated local-network use. It is not designed to be exposed directly to the public internet without additional hardening.
 
 ## Non-negotiable requirements
 
@@ -18,7 +18,7 @@ PaperRacks is intended for authenticated local-network use. It is not designed t
 The full policy lives in [`docs/runbooks/secrets_management.md`](docs/runbooks/secrets_management.md) and is **automatically enforced** (see [Enforcement](#enforcement)). Summary:
 
 - **Light, non-secret config** (URLs, hostnames, IP addresses, ports, flags) is provided through environment variables loaded from a local `.env` file and/or `config/*.local.yaml`. Only `*.example` files with placeholder values are committed.
-- **Serious machine secrets** (database passwords, `PAPERRACKS_SECRET_KEY`, agent tokens, API keys) are read from the environment / a secret store and referenced in YAML by env-var name (the `*_env` keys), never inlined. They are never committed in any form.
+- **Serious machine secrets** (database passwords, `PARACORD_SECRET_KEY`, agent tokens, API keys) are read from the environment / a secret store and referenced in YAML by env-var name (the `*_env` keys), never inlined. They are never committed in any form.
 - **User passwords** are stored only as bcrypt hashes via `hash_password` / `verify_password` in `backend/app/core/security.py` — one-way, never reversibly encoded, never logged. Other sensitive stored fields that must remain recoverable are **encrypted at rest** with a key supplied from the environment.
 - **Personal data** (usernames, emails) lives in the database, never in source, fixtures, logs, or examples. The only personal data in the repository is the git author name/email in commit metadata.
 - *Clearly fake* placeholders and test values are allowed; mark unavoidable realistic test values with `# pragma: allowlist secret`.
@@ -55,7 +55,7 @@ Do not add a web endpoint for unauthenticated password reset unless a future sec
 
 ## Data egress and privacy
 
-PaperRacks is local-first and built only from open-source, auditable components (GROBID, PostgreSQL, Redis, PDF.js, Ollama, BERTopic, and the supporting tools listed in `SPECIFICATION.md` §5.3). None is a closed binary that could silently scan the host or exfiltrate data.
+PaRacORD is local-first and built only from open-source, auditable components (GROBID, PostgreSQL, Redis, PDF.js, Ollama, BERTopic, and the supporting tools listed in `SPECIFICATION.md` §5.3). None is a closed binary that could silently scan the host or exfiltrate data.
 
 - No component reads outside its configured roots (server roots, managed store, agent roots). There is no host-wide scanning.
 - The only outbound traffic is **opt-in metadata enrichment and GROBID consolidation**, and it carries only **bibliographic identifiers** — titles, authors, DOIs, arXiv IDs, and raw reference strings.

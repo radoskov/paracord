@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT.parent / "paperracks_source_archive.zip"
+OUT = ROOT.parent / "paracord_source_archive.zip"
 
 with zipfile.ZipFile(OUT, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for path in ROOT.rglob("*"):

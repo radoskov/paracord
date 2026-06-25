@@ -1,4 +1,4 @@
-# PaperRacks development & evaluation stack.
+# PaRacORD development & evaluation stack.
 #
 # First run:  cp .env.example .env  &&  docker compose up -d --build
 # Run tests:  docker compose run --rm api pytest
@@ -33,15 +33,15 @@ services:
       timeout: 3s
       retries: 10
 
-  # PaperRacks server (FastAPI). Runs DB migrations on start, then serves the API.
+  # PaRacORD server (FastAPI). Runs DB migrations on start, then serves the API.
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     env_file: .env
     environment:
-      PAPERRACKS_ENV: development
-      PAPERRACKS_BIND_HOST: "0.0.0.0"
+      PARACORD_ENV: development
+      PARACORD_BIND_HOST: "0.0.0.0"
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
@@ -84,16 +84,16 @@ services:
       - ./scripts:/app/scripts
       - ./config:/app/config
       - ./pyproject.toml:/app/pyproject.toml
-    command: ["rq", "worker", "--url", "redis://redis:6379/0", "paperracks"]
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "paracord"]
 
-  # PaperRacks local workstation agent (client). Idles by default; drive it with
+  # PaRacORD local workstation agent (client). Idles by default; drive it with
   #   docker compose exec agent python -m paperracks_agent.cli --help
   agent:
     build:
       context: .
       dockerfile: agent/Dockerfile
     environment:
-      PAPERRACKS_SERVER_URL: "http://api:8000"
+      PARACORD_SERVER_URL: "http://api:8000"
     depends_on:
       api:
         condition: service_started
@@ -101,7 +101,7 @@ services:
       - ./agent:/app/agent
     command: ["sleep", "infinity"]
 
-  # PaperRacks web frontend (Vite + Svelte). Dependencies live in the named
+  # PaRacORD web frontend (Vite + Svelte). Dependencies live in the named
   # node_modules volume, not on the host bind mount.
   frontend:
     build:

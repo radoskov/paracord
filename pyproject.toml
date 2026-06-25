@@ -1,5 +1,5 @@
 [project]
-name = "paperracks-monorepo"
+name = "paracord-monorepo"
 version = "0.0.0"
 description = "Local-first scientific paper library and literature graph scaffold"
 requires-python = ">=3.12"

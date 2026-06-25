@@ -1,4 +1,4 @@
-# Pre-commit hooks for PaperRacks.
+# Pre-commit hooks for PaRacORD.
 #
 # Install once:  pre-commit install
 # Run manually:  pre-commit run --all-files
@@ -8,8 +8,8 @@
 repos:
   - repo: local
     hooks:
-      - id: paperracks-secret-scan
-        name: PaperRacks secret scan
+      - id: paracord-secret-scan
+        name: PaRacORD secret scan
         entry: python scripts/check_secrets.py
         language: system
         pass_filenames: false

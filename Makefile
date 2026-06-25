@@ -1,4 +1,4 @@
-# PaRacORD / PaperRacks developer Makefile
+# PaRacORD developer Makefile
 #
 # Philosophy:
 # - Docker Compose is the source of truth for runtime, migrations, and tests.

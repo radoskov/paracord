@@ -1,6 +1,6 @@
 # Coding-Agent Coordination Guide
 
-This file is for coding agents that will work on PaperRacks in parallel. Treat `SPECIFICATION.md` as the product contract and `WORK_SPLIT.md` as the recommended implementation partition.
+This file is for coding agents that will work on PaRacORD in parallel. Treat `SPECIFICATION.md` as the product contract and `WORK_SPLIT.md` as the recommended implementation partition.
 
 ## Global rules
 
@@ -18,7 +18,7 @@ This file is for coding agents that will work on PaperRacks in parallel. Treat `
 8. Store raw GROBID TEI for reproducibility.
 9. Add tests for every implemented service boundary.
 10. Prefer small, reviewable pull requests that complete one vertical slice.
-11. **Never commit a real credential, secret, or personal datum.** Light config (URLs, IPs, ports, flags) goes through `.env` / `config/*.local.yaml` with placeholders in the `*.example` files. Serious secrets (DB passwords, `PAPERRACKS_SECRET_KEY`, agent tokens, API keys) are read from the environment and referenced by env-var name, never inlined. User passwords use `hash_password`/`verify_password` (bcrypt) only — never plaintext, never logged. Other recoverable sensitive data is encrypted at rest with a key from the environment. Only *clearly fake* dummy/test values may appear in the repo. The full, enforced policy is in `docs/runbooks/secrets_management.md` — read it before touching auth, config, storage, or external integrations.
+11. **Never commit a real credential, secret, or personal datum.** Light config (URLs, IPs, ports, flags) goes through `.env` / `config/*.local.yaml` with placeholders in the `*.example` files. Serious secrets (DB passwords, `PARACORD_SECRET_KEY`, agent tokens, API keys) are read from the environment and referenced by env-var name, never inlined. User passwords use `hash_password`/`verify_password` (bcrypt) only — never plaintext, never logged. Other recoverable sensitive data is encrypted at rest with a key from the environment. Only *clearly fake* dummy/test values may appear in the repo. The full, enforced policy is in `docs/runbooks/secrets_management.md` — read it before touching auth, config, storage, or external integrations.
 
 ## Branch naming convention
 

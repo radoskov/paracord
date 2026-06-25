@@ -13,5 +13,5 @@ class HealthResponse(BaseModel):
     """Health response."""
 
     status: str
-    service: str = "paperracks-api"
+    service: str = "paracord-api"
     version: str = "0.0.0"

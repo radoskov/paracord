@@ -1,10 +1,10 @@
 [Unit]
-Description=PaperRacks Local Agent
+Description=PaRacORD Local Agent
 After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/paperracks-agent serve --config /etc/paperracks/agent.yaml
+ExecStart=/usr/local/bin/paracord-agent serve --config /etc/paracord/agent.yaml
 Restart=on-failure
 User=%i
 

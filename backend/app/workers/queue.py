@@ -11,7 +11,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-QUEUE_NAME = "paperracks"
+QUEUE_NAME = "paracord"
 EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
 

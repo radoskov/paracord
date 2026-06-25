@@ -1,1 +1,1 @@
-"""PaperRacks backend package."""
+"""PaRacORD backend package."""

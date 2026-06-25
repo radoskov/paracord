@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to PaperRacks should be documented in this file.
+All notable changes to PaRacORD should be documented in this file.
 
 The format follows Keep a Changelog style conventions, but the project is currently pre-release.
 

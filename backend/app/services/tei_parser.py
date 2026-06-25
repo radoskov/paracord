@@ -68,7 +68,7 @@ def _year(date_element) -> int | None:
 
 
 def parse_tei(tei_xml: str) -> ParsedPaper:
-    """Parse GROBID TEI into PaperRacks structures."""
+    """Parse GROBID TEI into PaRacORD structures."""
     paper = ParsedPaper()
     if not tei_xml or not tei_xml.strip():
         return paper

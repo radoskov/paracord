@@ -81,7 +81,7 @@ Treat every secret as radioactive. Concretely:
 ```text
 URLs / IPs / ports / flags   -> .env or config/*.local.yaml (placeholder in *.example)
 DB passwords / API keys /
-  PAPERRACKS_SECRET_KEY /
+  PARACORD_SECRET_KEY /
   agent tokens               -> read from os.environ; reference by *_env name in YAML
 user passwords               -> hash_password() / verify_password() (bcrypt), never stored or logged in plaintext
 other recoverable secrets    -> encrypt at rest with a key from the environment

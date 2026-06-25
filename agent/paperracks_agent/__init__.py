@@ -1,1 +1,1 @@
-"""PaperRacks local workstation agent."""
+"""PaRacORD local workstation agent."""

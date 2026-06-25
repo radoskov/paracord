@@ -1,6 +1,6 @@
 # Contributing
 
-PaperRacks is currently scaffolded for multi-agent implementation. Contributions should follow the work packages in `WORK_SPLIT.md`.
+PaRacORD is currently scaffolded for multi-agent implementation. Contributions should follow the work packages in `WORK_SPLIT.md`.
 
 ## Development expectations
 

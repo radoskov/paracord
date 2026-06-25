@@ -21,7 +21,7 @@ def hash_token(token: str) -> str:
 @functools.lru_cache(maxsize=1)
 def _timing_equalizer_hash() -> str:
     """Throwaway bcrypt hash used to equalize timing on the no-user path."""
-    return hash_password("paperracks-no-such-account")  # pragma: allowlist secret
+    return hash_password("paracord-no-such-account")  # pragma: allowlist secret
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:

@@ -1,4 +1,4 @@
-# PaRacORD / PaperRacks
+# PaRacORD
 
 **PaRacORD** — **Pa**per **Rac**ks for **O**rganization, **R**etrieval, and **D**iscovery — is a local-first, self-hostable scientific-paper library and literature-graph system for Linux.
 

@@ -1,6 +1,6 @@
 # Secrets and Credential Handling Policy
 
-This is the **authoritative policy** for how PaperRacks handles configuration, secrets,
+This is the **authoritative policy** for how PaRacORD handles configuration, secrets,
 and credentials. It applies to every human contributor and every coding agent. The rule
 of thumb is simple:
 
@@ -32,7 +32,7 @@ log levels, allowed roots.
   and keeps Tier 1/2 values out of source entirely.
 
 ### Tier 1 — Service secrets ("serious" machine credentials)
-Examples: database passwords, `PAPERRACKS_SECRET_KEY`, agent bootstrap/scoped tokens,
+Examples: database passwords, `PARACORD_SECRET_KEY`, agent bootstrap/scoped tokens,
 Redis auth, third-party API keys, signing keys.
 
 - **Where:** injected at runtime from the environment (`.env` locally; a real secret
@@ -42,7 +42,7 @@ Redis auth, third-party API keys, signing keys.
 - **Never** hardcode a real value in source, YAML, `docker-compose.yml`, Dockerfiles,
   CI files, tests, fixtures, logs, or error messages.
 - Reference secrets indirectly. The server YAML already does this correctly with
-  `secret_key_env: PAPERRACKS_SECRET_KEY` and `*_url_env` keys — point at the env var
+  `secret_key_env: PARACORD_SECRET_KEY` and `*_url_env` keys — point at the env var
   name, do not inline the value.
 - Rotate on exposure. If a real secret is ever committed, treat it as compromised:
   rotate it **and** purge it from history (see [If a secret leaks](#if-a-secret-leaks)).
@@ -60,7 +60,7 @@ Examples: user passwords, anything that authenticates a human.
     and exceeded — by hashing it.
 - **Other sensitive stored fields that must remain recoverable** (e.g. a stored
   third-party credential the app must replay on the user's behalf) must be **encrypted at
-  rest** with a key supplied via Tier 1 (`PAPERRACKS_SECRET_KEY` or a dedicated data key),
+  rest** with a key supplied via Tier 1 (`PARACORD_SECRET_KEY` or a dedicated data key),
   never with a key committed to the repo.
 - Usernames and emails are personal data: keep them in the database, never in source,
   fixtures, logs shipped to git, or example files (use `user@example.com`-style fakes).
