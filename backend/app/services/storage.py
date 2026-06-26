@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.source import ImportBatch, Source
@@ -289,3 +289,111 @@ def _arxiv_id_from_filename(path: Path) -> str | None:
     """Return the arXiv id if the filename is an arXiv id (e.g. 1706.03762.pdf)."""
     match = _ARXIV_ID_RE.match(path.stem.strip())
     return match.group(1) if match else None
+
+
+def import_uploaded_pdf(
+    db: Session,
+    *,
+    filename: str,
+    pdf_bytes: bytes,
+    actor: User,
+    settings: Settings | None = None,
+) -> tuple[ImportBatch, File, bool]:
+    """Register an uploaded PDF in the managed library.
+
+    The file is stored content-addressed under ``managed_library_root`` so uploads are
+    automatically deduplicated by SHA-256.  Returns ``(batch, file, created_file)``;
+    ``created_file`` is False when the exact same file already existed.
+    """
+    if settings is None:
+        settings = get_settings()
+
+    sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+    managed_root = Path(settings.managed_library_root).expanduser().resolve()
+    managed_root.mkdir(parents=True, exist_ok=True)
+    dest = content_addressed_path(managed_root, sha256)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists():
+        dest.write_bytes(pdf_bytes)
+
+    now = datetime.now(UTC)
+    file = db.scalar(select(File).where(File.sha256 == sha256))
+    created_file = file is None
+    preview = _extract_pdf_preview(dest)
+
+    if file is None:
+        safe_name = Path(filename).name or "upload.pdf"
+        file = File(
+            sha256=sha256,
+            size_bytes=len(pdf_bytes),
+            mime_type="application/pdf",
+            original_filename=safe_name,
+            page_count=preview.get("page_count"),
+            text_layer_quality=preview.get("text_layer_quality", "unknown"),
+            status="available",
+            preview_text=preview.get("preview_text"),
+            last_seen_at=now,
+        )
+        db.add(file)
+        db.flush()
+    else:
+        file.last_seen_at = now
+
+    # Location pointing to the managed store.
+    if not db.scalar(
+        select(Location.id).where(
+            Location.file_id == file.id,
+            Location.location_type == "managed_path",
+        )
+    ):
+        db.add(
+            Location(
+                file_id=file.id,
+                source_id=None,
+                location_type="managed_path",
+                display_path=Path(filename).name,
+                internal_uri=str(dest),
+                is_available=True,
+                is_primary=True,
+                last_verified_at=now,
+            )
+        )
+
+    if created_file:
+        title = _title_from_filename(Path(filename))
+        raw_arxiv_id = _arxiv_id_from_filename(Path(filename))
+        work = Work(
+            canonical_title=title,
+            normalized_title=normalize_title(title),
+            canonical_metadata_source="filename",
+            arxiv_id=raw_arxiv_id,
+            arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
+        )
+        db.add(work)
+        db.flush()
+        db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+
+    batch = ImportBatch(
+        source_id=None,
+        input_type="upload",
+        status="complete",
+        started_at=now,
+        finished_at=now,
+        stats={
+            "files_scanned": 1,
+            "files_created": int(created_file),
+            "works_created": int(created_file),
+            "duplicates_skipped": int(not created_file),
+        },
+    )
+    db.add(batch)
+    db.flush()
+    record_event(
+        db,
+        "import.upload",
+        actor_user_id=actor.id,
+        entity_type="file",
+        entity_id=str(file.id),
+        details={"filename": Path(filename).name, "sha256_prefix": sha256[:8]},
+    )
+    return batch, file, created_file

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.file import File, Location
@@ -78,7 +79,7 @@ def extract_file(
 
 @router.get("/{file_id}/stream")
 def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
-    """Stream a PDF from a configured server-folder location."""
+    """Stream a PDF from a server-folder or managed-library location."""
     file = db.get(File, file_id)
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -87,21 +88,30 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
         select(Location)
         .where(
             Location.file_id == file_id,
-            Location.location_type == "server_path",
+            Location.location_type.in_(["server_path", "managed_path"]),
             Location.is_available.is_(True),
         )
         .order_by(Location.is_primary.desc(), Location.created_at.desc())
     )
-    if location is None or location.source_id is None or not location.internal_uri:
+    if location is None or not location.internal_uri:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found"
         )
 
-    source = db.get(Source, location.source_id)
-    if source is None or source.type != "server_folder" or not source.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not available")
+    if location.location_type == "managed_path":
+        path = _validated_managed_file_path(location.internal_uri)
+    else:
+        if location.source_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found"
+            )
+        source = db.get(Source, location.source_id)
+        if source is None or source.type != "server_folder" or not source.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Source not available"
+            )
+        path = _validated_server_file_path(source, location.internal_uri)
 
-    path = _validated_server_file_path(source, location.internal_uri)
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not available")
     return FileResponse(
@@ -109,6 +119,21 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
         media_type=file.mime_type or "application/pdf",
         filename=file.original_filename or path.name,
     )
+
+
+def _validated_managed_file_path(internal_uri: str) -> Path:
+    """Validate that a managed-path location is inside the managed library root."""
+    settings = get_settings()
+    root = Path(settings.managed_library_root).expanduser().resolve()
+    path = Path(internal_uri).expanduser().resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="File location escapes managed library root",
+        ) from exc
+    return path
 
 
 def _validated_server_file_path(source: Source, internal_uri: str) -> Path:
