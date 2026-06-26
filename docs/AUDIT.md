@@ -31,13 +31,16 @@ lacked both, so `POST/GET /works/{id}/summaries` and `POST /ai/topics` raised `U
 production. Tests missed it because `conftest.py` builds the schema from `Base.metadata` on SQLite.
 **Fixed** by migration `0010_summaries_topics`; verified head `0010` leaves no model table missing.
 
-### C2 — Migrations are never run in tests; no model↔migration parity check  [CRITICAL]
-`backend/tests/conftest.py:37` and all service tests build the schema via
-`Base.metadata.create_all` on in-memory SQLite. No test runs `alembic upgrade head` or touches
-Postgres. The entire `alembic/versions/` chain is unexercised, which is why C1 shipped.
-**Fix:** add an integration test (Postgres via the compose service or testcontainers) that runs
-`alembic upgrade head` then asserts model tables ⊆ DB tables and that autogenerate yields no
-operations. This is the durable guard for C1/C3/C4 and the single highest-leverage test to add.
+### C2 — Migrations are never run in tests; no model↔migration parity check  ✅ ADDRESSED
+`backend/tests/conftest.py` and all service tests build the schema via `Base.metadata.create_all`
+on in-memory SQLite; no test ran `alembic upgrade head` or touched Postgres, which is why C1
+shipped. **Added** `backend/tests/test_migration_parity.py`: it creates a throwaway Postgres DB,
+runs `alembic upgrade head`, and asserts every model table and column exists in the migrated
+schema (self-skips when no Postgres is reachable). Wired via `make test-migrations` and a Postgres
+service in the CI `backend` job. Verified it fails at the pre-fix head (`0009`) reporting exactly
+`summaries`/`topic_assignments`. **Still open (follow-up):** extend it to also assert
+autogenerate-clean once C3 (FKs) and C4 (JSONB) are resolved — today autogenerate is intentionally
+dirty for those, so only table/column presence is asserted, not full type/constraint parity.
 
 ### C3 — Foreign keys exist in migrations but not in the ORM models  [HIGH]
 Only `UserSession.user_id` declares `ForeignKey` (`models/session.py:20`). Every other relation is
@@ -221,8 +224,9 @@ values, pgvector, and `String(n)` / case-sensitive `LIKE` collation (affects ded
 Ordered by leverage. Each item references the findings above.
 
 **P0 — Make production real & trustworthy (do first)**
-1. **Postgres migration/parity test** (C2) — runs `alembic upgrade head` + autogenerate-clean + a
-   couple of FK-cascade/timestamptz/JSONB assertions. The guard that would have caught C1.
+1. ~~**Postgres migration/parity test** (C2) — the guard that would have caught C1.~~ **Done**
+   (`test_migration_parity.py`, `make test-migrations`, CI Postgres service). Follow-up: extend to
+   assert autogenerate-clean once C3/C4 land, and add FK-cascade/timestamptz/JSONB assertions.
 2. **FK + JSONB model alignment** (C3, C4) so autogenerate is clean and cascades are real.
 3. **Production build + compose profile** (H5); pin/decide `httpx2` (H1); fix `.env` prefix (H6).
 

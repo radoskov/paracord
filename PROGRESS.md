@@ -321,9 +321,10 @@ deliberately deferred — hardening, not the product.
 **Top-priority from the 2026-06-25 audit (see AUDIT.md for detail):**
 - ~~`summaries`/`topic_assignments` model tables had no migration (prod-breaking).~~ **Fixed** —
   migration `0010_summaries_topics`, verified on Postgres (AUDIT C1).
-- **No migration/Postgres test** — tests build the schema from `Base.metadata` on SQLite and never
-  run `alembic upgrade head`, so model↔migration drift is invisible (this is why C1 shipped). Add a
-  Postgres parity test (AUDIT C2). Highest-leverage follow-up.
+- ~~**No migration/Postgres test** — drift is invisible (this is why C1 shipped).~~ **Done** —
+  `backend/tests/test_migration_parity.py` runs `alembic upgrade head` on a throwaway Postgres and
+  asserts model↔schema table/column parity (`make test-migrations`; CI Postgres service; self-skips
+  without PG). Follow-up: assert autogenerate-clean after C3/C4 (AUDIT C2).
 - **FK + JSONB drift** — FKs live in migrations but not models; `JSONB` in migrations vs generic
   `JSON` in models. Makes autogenerate dirty and leaves cascades untested (AUDIT C3/C4).
 - **`httpx2`** is an unpinned niche fork on the only egress path — pin it or revert to mainline

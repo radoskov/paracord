@@ -8,6 +8,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added a Postgres migration↔model parity test (`backend/tests/test_migration_parity.py`, AUDIT
+  C2): it creates a throwaway database, runs `alembic upgrade head`, and asserts every model table
+  and column exists in the migrated schema — the guard that would have caught the missing-migration
+  bug above. It self-skips when no Postgres is reachable (so the SQLite-only run and current CI
+  stay green), runs via `make test-migrations`, and the CI `backend` job now has a Postgres service
+  + `DATABASE_URL` so it runs there. Also set `path_separator = os` in `alembic.ini` to clear an
+  alembic deprecation warning.
 - Added `docs/AUDIT.md` — a full functional + implementation audit (2026-06-25) covering
   spec-fidelity per capability, correctness/infra/security/data-model findings with severities, and
   a prioritized "Path to a fully functional app" backlog. Refreshed `docs/architecture/api_surface.md`

@@ -11,6 +11,26 @@ jobs:
   backend:
     runs-on: ubuntu-latest
 
+    # Postgres lets the migration<->model parity test (backend/tests/test_migration_parity.py)
+    # run `alembic upgrade head` against a real DB; it self-skips if this is absent.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: paperracks
+          POSTGRES_PASSWORD: paperracks_dev_password
+          POSTGRES_DB: paperracks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U paperracks"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://paperracks:paperracks_dev_password@localhost:5432/paperracks
+
     steps:
       - uses: actions/checkout@v6
 

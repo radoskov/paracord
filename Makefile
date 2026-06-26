@@ -175,6 +175,10 @@ test-api: init ## Run backend tests inside the API container.
 test-agent: init ## Run agent tests inside the agent container.
 	$(AGENT_RUN) pytest agent/tests
 
+.PHONY: test-migrations
+test-migrations: init ## Run the migration<->model parity test against the compose Postgres.
+	$(API_RUN) pytest backend/tests/test_migration_parity.py -v
+
 .PHONY: test-local
 test-local: ## Run tests on the host interpreter.
 	pytest $(PYTEST_PATHS)
