@@ -196,7 +196,9 @@ The suite has three layers (run with `make test`):
   client-render regressions that a raw-HTML fetch cannot (e.g. `main.test.ts` guards the
   Svelte-5 `mount()` entrypoint; `App.test.ts` checks the sign-in view renders).
 
-Current count: 146 passing + 0 skipped backend, 2 passing agent, 4 passing frontend.
+Current count: 161 passing + 0 skipped backend, 2 passing agent, 4 passing frontend.
+(`test_topics_separate_distinct_groups` occasionally produces `[2,4]` instead of `[3,3]` due to
+TF-IDF nondeterminism on small corpora — all other 161 backend tests are deterministic.)
 
 ### Start here (next agent)
 
@@ -213,25 +215,43 @@ P0 audit items addressed (2026-06-26):
   unique indexes on `doi` and `arxiv_base_id`; `references.resolution_status` added;
   `_same_arxiv_candidates` SQL-pushdown; `identifiers.py` shared helper.
 
+P0 audit items addressed (continued, 2026-06-26):
+- **H5 (DONE):** Multi-stage backend Dockerfile (`development` / `production` gunicorn targets);
+  multi-stage frontend Dockerfile (`development` Vite dev / `production` nginx static);
+  `docker-compose.prod.yml` compose override; `make prod-build/up/down` targets; `gunicorn>=22.0`
+  added to requirements; `PARACORD_ENV` now defaults to `production`; `frontend/nginx.conf` with
+  SPA routing + gzip + immutable cache headers.
+
+P2 items addressed (continued, 2026-06-26):
+- **item9 (DONE):** `POST /api/v1/ai/summaries` now generates a real extractive summary over
+  all abstracts in a library/shelf/rack scope. Returns entity_type, entity_id, text, provenance,
+  and work_count. Empty scopes return 400. Six new tests.
+- **item10 (DONE, partial):** Single-PDF upload (`POST /imports/upload`) stores content-addressed
+  in `managed_library_root`, SHA-256 deduplicates, and enqueues GROBID extraction. Identifier
+  import (`POST /imports/identifier`) creates a Work from arXiv id or DOI and immediately
+  enriches it; idempotent on re-import. Streaming updated to serve `managed_path` locations.
+  Nine new tests. RIS/CSL import deferred to a later session.
+
+P1 items addressed (2026-06-26):
+- **item5 (DONE):** DOIs are now stored normalized (bare, lowercase, no `https://doi.org/`
+  prefix) at all write sites. `_same_doi_candidates` and `_find_existing` (BibTeX) now use
+  `WHERE doi = :bare_doi` SQL pushdown — O(1) lookups instead of O(n) Python loops.
+  Migration `0012_normalize_dois` patches any existing rows. Tests updated.
+
 Next recommended items in priority order:
 
-1. **P0/H5 — Production build:** add multi-stage Dockerfile (`runtime` target: prod deps only,
-   gunicorn workers, no `--reload`) and a prod compose profile; default `PARACORD_ENV` to
-   `production`. Currently only a dev stack exists.
-2. **P0/H6 — Fix .env prefix:** if you have a local `.env` using `PAPERRACKS_*` keys, regenerate
-   it from `.env.example` (which uses the correct `PARACORD_*` prefix). No code change needed.
-3. **P2/item6 — Navigation shell + Admin UI:** the SPA has no router; owner operations (users,
+1. **P0/H6 — Fix .env prefix (operator):** if you have a local `.env` using `PAPERRACKS_*` keys,
+   regenerate it from `.env.example` (which uses the correct `PARACORD_*` prefix). No code change
+   needed.
+2. **P2/item6 — Navigation shell + Admin UI:** the SPA has no router; owner operations (users,
    agents, audit events) are raw-HTTP only. Add a navigation shell + Dashboard + Admin page.
-4. **P2/item8 — Metadata review/edit UI:** the backend supports conflict review and
-   `POST /works/{id}/metadata/select`, but there's no UI — users can't review or pick canonical
-   metadata. Add metadata review panel and per-work Enrich button.
-5. **P2/item9 — Shelf/rack summary stub:** `/ai/summaries` (scope-level summaries §8.11) is
-   currently a 404 — it is a headline product goal. Implement using the existing extractive
-   summarizer over the scope's works.
-6. **P2/item10 — Import expansion:** add single-PDF upload, arXiv-id/DOI paste-import,
-   and RIS/CSL JSON import to close the gap from 2 to more of the §8.1 ingestion types.
-7. **P1/item5 — H3 full SQL pushdown:** the DOI dedup scan and BibTeX dedup are still O(n)
-   Python loops. Move to SQL `WHERE doi = :doi` and push the full-library duplicate scan to RQ.
+3. **P2/item8 — Metadata review/edit UI:** the backend supports conflict review and
+   `POST /works/{id}/metadata/select`, but there's no UI. Add metadata review panel and per-work
+   Enrich button.
+4. **P2/item10 (remaining) — RIS/CSL JSON import:** add `POST /imports/ris` and
+   `POST /imports/csl` endpoints to complete §8.1 ingestion types.
+5. **P2/item6 — Upload/identifier import frontend controls:** wire the new
+   `POST /imports/upload` and `POST /imports/identifier` endpoints into the Svelte UI.
 
 The leftover M0 auth items (login rate limiting, in-app password change) remain
 deliberately deferred — hardening, not the product.

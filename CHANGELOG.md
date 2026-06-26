@@ -8,6 +8,33 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **P1/item5 — DOI SQL pushdown:** DOIs are now stored normalized (bare, lowercase, no URL
+  prefix) at every write site (`bibtex.py`, `metadata_enrichment.py`, works create/
+  metadata-select endpoints, identifier import).  `_same_doi_candidates` (duplicate scanner)
+  and `_find_existing` (BibTeX import) now use `WHERE doi = :bare_doi` SQL equality instead
+  of O(n) Python loops.  Migration `0012_normalize_dois` fixes any existing rows (Postgres:
+  single UPDATE with `regexp_replace`; SQLite: row-by-row).  (AUDIT H3 partial)
+- **P2/item9 — Scope-level extractive summaries:** `POST /api/v1/ai/summaries` now generates
+  (and idempotently replaces) an extractive summary over all abstracts in a library/shelf/rack
+  scope, replacing the previous `{"status":"todo"}` stub.  Returns `entity_type`, `entity_id`,
+  `text`, model provenance, and `work_count`.  Empty scopes (no abstracts) return 400.  Stored
+  in the existing `summaries` table; library scope uses the nil UUID as entity_id sentinel.
+- **P2/item10 (partial) — Import expansion:** `POST /api/v1/imports/upload` accepts a
+  multipart PDF, writes content-addressed to `managed_library_root` (SHA-256 dedup), creates
+  `File/Location(managed_path)/Work/FileWorkLink`, and enqueues GROBID extraction.  Magic-byte
+  check rejects non-PDFs; 200 MB hard limit.  `POST /api/v1/imports/identifier` creates or
+  re-enriches a work from an arXiv id or DOI (idempotent on re-import).
+  `GET /api/v1/files/{id}/stream` updated to also serve `managed_path` locations with
+  path-escape validation.  RIS/CSL JSON import deferred.
+- **P0/H5 — Multi-stage production builds:** `backend/Dockerfile` now has `development`
+  (uvicorn `--reload`, bind-mount overlay) and `production` (gunicorn + UvicornWorker,
+  runtime-only dependencies, no source bind-mount) stages. `frontend/Dockerfile` adds a
+  `builder` stage (Vite build) and a `production` stage (nginx:1.27-alpine serving the
+  pre-compiled Svelte SPA with gzip + immutable cache headers for hashed assets and SPA
+  `try_files` routing). `docker-compose.prod.yml` is a compose override that selects
+  `production` targets for `api`, `worker`, and `frontend` and removes all source-code
+  bind-mounts. `make prod-build`, `make prod-up`, `make prod-down` targets added. Config
+  default changed to `environment: production`. (AUDIT H5)
 - **P0/C3 — FK declarations in ORM models:** added `ForeignKey(…, ondelete=…)` to all
   model columns whose migrations already declare a FK constraint (`Location.file_id /
   source_id`, `WorkVersion.work_id`, `FileSegment.file_id`, `FileWorkLink.file_id /
