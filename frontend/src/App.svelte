@@ -1,15 +1,44 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { ApiClient } from './api/client';
+  import AdminPage from './pages/AdminPage.svelte';
   import LibraryPage from './pages/LibraryPage.svelte';
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+
+  let token = '';
+  let hash = '#library';
+
+  $: adminClient = new ApiClient(apiBaseUrl, token || null);
+
+  onMount(() => {
+    hash = window.location.hash || '#library';
+    const onHashChange = (): void => {
+      hash = window.location.hash || '#library';
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  });
 </script>
 
 <main>
   <header>
-    <div>
+    <div class="brand">
       <h1>PaRacORD</h1>
-      <p>Library</p>
     </div>
+    {#if token}
+      <nav>
+        <a href="#library" class:active={hash !== '#admin'}>Library</a>
+        <a href="#admin" class:active={hash === '#admin'}>Admin</a>
+      </nav>
+    {/if}
   </header>
-  <LibraryPage />
+
+  {#if hash === '#admin' && token}
+    <AdminPage client={adminClient} />
+  {:else}
+    <LibraryPage bind:token />
+  {/if}
 </main>
 
 <style>
@@ -44,26 +73,40 @@
     max-width: 92rem;
   }
 
-  header div {
+  .brand {
     align-items: baseline;
     display: flex;
     gap: 0.65rem;
   }
 
-  h1,
-  p {
-    margin: 0;
-  }
-
   h1 {
     font-size: 1.45rem;
     letter-spacing: 0;
+    margin: 0;
   }
 
-  p {
+  nav {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  nav a {
+    border-radius: 6px;
     color: #64717f;
-    font-size: 0.9rem;
-    font-weight: 700;
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 0.35rem 0.75rem;
+    text-decoration: none;
+  }
+
+  nav a:hover {
+    background: #e2e8f0;
+    color: #203142;
+  }
+
+  nav a.active {
+    background: #203142;
+    color: white;
   }
 
   :global(section) {

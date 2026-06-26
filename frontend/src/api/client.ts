@@ -246,6 +246,53 @@ export interface WorkQuery {
   tagId?: string;
 }
 
+export interface IdentifierImportResponse {
+  work_id: string;
+  created: boolean;
+  enriched_sources: string[];
+}
+
+export interface ScopeSummaryResponse {
+  entity_type: string;
+  entity_id: string;
+  summary_type: string;
+  text: string;
+  model_name: string | null;
+  prompt_version: string | null;
+  work_count: number;
+}
+
+export type UserRole = 'owner' | 'editor' | 'reader';
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  role: string;
+  created_at: string;
+  disabled_at: string | null;
+}
+
+export interface AgentRecord {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  event_type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  actor_user_id: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface EnrollTokenOut {
+  token: string;
+  expires_at: string;
+}
+
 export class ApiClient {
   constructor(
     private readonly baseUrl: string,
@@ -449,6 +496,85 @@ export class ApiClient {
       method: 'POST',
       body: { content },
     });
+  }
+
+  async uploadPdf(file: File): Promise<ImportBatch> {
+    const form = new FormData();
+    form.append('file', file);
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/v1/imports/upload`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      let detail = `Upload failed: ${response.status}`;
+      try {
+        const payload = await response.json();
+        detail = payload.detail ?? detail;
+      } catch { /* keep status message */ }
+      throw new Error(detail);
+    }
+    return response.json() as Promise<ImportBatch>;
+  }
+
+  async importByIdentifier(
+    identifierType: 'arxiv' | 'doi',
+    value: string,
+  ): Promise<IdentifierImportResponse> {
+    return this.request<IdentifierImportResponse>('/api/v1/imports/identifier', {
+      method: 'POST',
+      body: { identifier_type: identifierType, value },
+    });
+  }
+
+  async createScopeScope(
+    scopeType: 'library' | 'shelf' | 'rack',
+    scopeId: string | null,
+  ): Promise<ScopeSummaryResponse> {
+    return this.request<ScopeSummaryResponse>('/api/v1/ai/summaries', {
+      method: 'POST',
+      body: { scope_type: scopeType, scope_id: scopeId ?? null },
+    });
+  }
+
+  async listAdminUsers(): Promise<AdminUser[]> {
+    return this.request<AdminUser[]>('/api/v1/admin/users');
+  }
+
+  async createAdminUser(username: string, password: string, role: UserRole): Promise<AdminUser> {
+    return this.request<AdminUser>('/api/v1/admin/users', {
+      method: 'POST',
+      body: { username, password, role },
+    });
+  }
+
+  async updateUserRole(userId: string, role: UserRole): Promise<AdminUser> {
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: { role },
+    });
+  }
+
+  async disableUser(userId: string): Promise<AdminUser> {
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/disable`, { method: 'POST' });
+  }
+
+  async listAgents(): Promise<AgentRecord[]> {
+    return this.request<AgentRecord[]>('/api/v1/admin/agents');
+  }
+
+  async approveAgent(agentId: string): Promise<{ agent_id: string; status: string; agent_token: string }> {
+    return this.request('/api/v1/admin/agents/' + agentId + '/approve', { method: 'POST' });
+  }
+
+  async issueEnrollToken(): Promise<EnrollTokenOut> {
+    return this.request<EnrollTokenOut>('/api/v1/admin/agents/enroll-token', { method: 'POST' });
+  }
+
+  async listAuditEvents(limit = 50): Promise<AuditEvent[]> {
+    return this.request<AuditEvent[]>(`/api/v1/admin/audit-events?limit=${limit}`);
   }
 
   async listFiles(): Promise<FileRecord[]> {

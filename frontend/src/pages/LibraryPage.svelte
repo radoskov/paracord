@@ -34,7 +34,7 @@
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
   const readingQueueStatuses = new Set(['reading', 'important', 'revisit']);
 
-  let token = '';
+  export let token = '';
   let username = '';
   let password = '';
   let message = '';
@@ -80,6 +80,8 @@
   let newSourceAlias = '';
   let selectedSourceId = '';
   let bibtexContent = '';
+  let uploadFileInput: File | null = null;
+  let identifierInput = '';
   let selectedShelfForWork = '';
   let selectedRackForShelf = '';
   let selectedTagId = '';
@@ -329,6 +331,31 @@
       bibtexContent = '';
       await loadWorks();
       message = `BibTeX import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
+    });
+  }
+
+  async function uploadPdf(): Promise<void> {
+    if (!uploadFileInput) return;
+    const file = uploadFileInput;
+    await run(async () => {
+      const batch = await client.uploadPdf(file);
+      uploadFileInput = null;
+      await Promise.all([loadWorks(), loadFiles()]);
+      message = `PDF uploaded (batch ${batch.status})`;
+    });
+  }
+
+  async function importByIdentifier(): Promise<void> {
+    const value = identifierInput.trim();
+    if (!value) return;
+    await run(async () => {
+      const isArxiv = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/i.test(value);
+      const result = await client.importByIdentifier(isArxiv ? 'arxiv' : 'doi', value);
+      identifierInput = '';
+      await loadWorks();
+      message = result.created
+        ? `Imported (${result.enriched_sources.join(', ') || 'no enrichment'})`
+        : `Already exists, re-enriched`;
     });
   }
 
@@ -1009,6 +1036,20 @@
             rows="4"
           ></textarea>
           <button type="submit" disabled={!bibtexContent.trim() || loading}>Import BibTeX</button>
+        </form>
+        <div class="inline-action">
+          <input
+            type="file"
+            accept=".pdf,application/pdf"
+            on:change={(e) => { uploadFileInput = e.currentTarget.files?.[0] ?? null; }}
+          />
+          <button type="button" on:click={uploadPdf} disabled={!uploadFileInput || loading}>
+            Upload PDF
+          </button>
+        </div>
+        <form on:submit|preventDefault={importByIdentifier} class="inline-action">
+          <input bind:value={identifierInput} placeholder="arXiv ID or DOI" />
+          <button type="submit" disabled={!identifierInput.trim() || loading}>Import</button>
         </form>
       </section>
 
