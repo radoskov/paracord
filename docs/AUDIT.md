@@ -102,7 +102,8 @@ gate manifest/teleport behind agent-token auth now (401 when unauthenticated), e
 is unimplemented; don't return a success stub. Also remove the dead `citations.py` `/contexts`
 `{"status":"todo"}` route from the OpenAPI surface.
 
-### H5 — No production build/config; only a dev stack exists  [HIGH]
+### H5 — No production build/config; only a dev stack exists  [MEDIUM]
+This can be solved at later stages, since we are still in development.
 `backend/Dockerfile` installs `requirements-dev.txt` and runs `uvicorn --reload`;
 `frontend/Dockerfile` runs `npm run dev` (Vite dev server); `docker-compose.yml` hardcodes
 `PARACORD_ENV=development` and binds `0.0.0.0`. There is no prod target. SECURITY.md anticipates LAN

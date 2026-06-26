@@ -83,7 +83,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(populate_by_name=True)
 
-    environment: str = Field(default="development", alias="PARACORD_ENV")
+    environment: str = Field(default="production", alias="PARACORD_ENV")
     bind_host: str = Field(default="127.0.0.1", alias="PARACORD_BIND_HOST")
     bind_port: int = Field(default=8000, alias="PARACORD_BIND_PORT")
     lan_mode: bool = Field(default=False, alias="PARACORD_LAN_MODE")

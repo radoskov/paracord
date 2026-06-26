@@ -10,6 +10,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose
+COMPOSE_PROD ?= docker compose -f docker-compose.yml -f docker-compose.prod.yml
 API_SERVICE ?= api
 AGENT_SERVICE ?= agent
 FRONTEND_SERVICE ?= frontend
@@ -53,6 +54,18 @@ build: ## Build all Docker Compose images.
 .PHONY: up
 up: init ## Build and start the full development stack.
 	$(COMPOSE) up -d --build
+
+.PHONY: prod-build
+prod-build: init ## Build the production images (api + worker: gunicorn; frontend: nginx).
+	$(COMPOSE_PROD) build
+
+.PHONY: prod-up
+prod-up: init ## Build and start the production stack (gunicorn + nginx static frontend).
+	$(COMPOSE_PROD) up -d --build
+
+.PHONY: prod-down
+prod-down: ## Stop the production stack.
+	$(COMPOSE_PROD) down
 
 .PHONY: up-api
 up-api: init ## Start only runtime services needed by the API.

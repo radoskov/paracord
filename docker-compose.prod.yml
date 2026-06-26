@@ -1,0 +1,42 @@
+# Production compose overrides.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# This overlay:
+#   * switches api + worker to the `production` Dockerfile target (runtime deps only,
+#     gunicorn workers, no --reload)
+#   * switches frontend to the `production` target (pre-built nginx static bundle)
+#   * removes the source-code bind-mounts so the built image is self-contained
+#   * sets PARACORD_ENV=production
+#   * binds services to 127.0.0.1 for LAN-proxied deployments (adjust for your setup)
+#
+# Credentials still come from .env — never store secrets in this file.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+    environment:
+      PARACORD_ENV: production
+    volumes: []    # No bind-mounts: the built image contains all application code.
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+    volumes: []
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: production
+    environment:
+      # VITE_API_BASE_URL is baked into the static bundle at build time, not runtime.
+      # Set it in .env before building: VITE_API_BASE_URL=https://your-server:8000
+      {}
+    ports:
+      - "127.0.0.1:80:80"
+    volumes: []    # Static bundle is baked into the image.
