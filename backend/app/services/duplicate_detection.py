@@ -143,24 +143,21 @@ def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
     if not work.doi:
         return []
     doi = normalize_doi(work.doi)
-    candidates: list[DuplicateCandidate] = []
-    matches = db.scalars(select(Work).where(Work.doi.is_not(None), Work.id != work.id)).all()
-    for other in matches:
-        if not other.doi or normalize_doi(other.doi) != doi:
-            continue
-        candidates.append(
-            _upsert_candidate(
-                db,
-                candidate_type="same_doi",
-                entity_a_type="work",
-                entity_a_id=work.id,
-                entity_b_type="work",
-                entity_b_id=other.id,
-                score=1.0,
-                signals={"doi": doi},
-            )
+    # SQL-pushdown: DOIs are stored normalized so exact equality works.
+    others = db.scalars(select(Work).where(Work.doi == doi, Work.id != work.id)).all()
+    return [
+        _upsert_candidate(
+            db,
+            candidate_type="same_doi",
+            entity_a_type="work",
+            entity_a_id=work.id,
+            entity_b_type="work",
+            entity_b_id=other.id,
+            score=1.0,
+            signals={"doi": doi},
         )
-    return candidates
+        for other in others
+    ]
 
 
 def _same_arxiv_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:

@@ -65,7 +65,7 @@ def test_scan_duplicates_endpoint_creates_and_lists_candidates(db_session, edito
     second = Work(
         canonical_title="Publisher Copy",
         normalized_title="publisher copy",
-        doi="https://doi.org/10.5555/transformer",
+        doi="10.5555/transformer",  # stored normalized (DOI normalize happens at write time)
     )
     db_session.add_all([first, second])
     db_session.commit()

@@ -81,7 +81,8 @@ def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
         if not title:
             skipped += 1
             continue
-        doi = entry.fields.get("doi")
+        raw_doi = entry.fields.get("doi")
+        doi = normalize_doi(raw_doi) if raw_doi else None
         normalized = normalize_title(title)
         if _find_existing(db, doi=doi, normalized_title=normalized) is not None:
             matched += 1
@@ -227,10 +228,10 @@ def _arxiv_id(fields: dict[str, str]) -> str | None:
 
 def _find_existing(db: Session, *, doi: str | None, normalized_title: str | None) -> Work | None:
     if doi:
-        target = normalize_doi(doi)
-        for work in db.scalars(select(Work).where(Work.doi.is_not(None))).all():
-            if work.doi and normalize_doi(work.doi) == target:
-                return work
+        # doi is expected to be already normalized (bare, lowercase, no prefix).
+        existing = db.scalar(select(Work).where(Work.doi == doi))
+        if existing is not None:
+            return existing
     if normalized_title:
         existing = db.scalar(select(Work).where(Work.normalized_title == normalized_title))
         if existing is not None:

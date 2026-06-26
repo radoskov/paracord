@@ -243,7 +243,9 @@ def _apply_field(work: Work, field_name: str, value: str, source: str) -> None:
     elif field_name == "venue":
         work.venue = value
     elif field_name == "doi":
-        work.doi = value
+        from app.utils.normalization import normalize_doi
+
+        work.doi = normalize_doi(value)
 
 
 def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str]:

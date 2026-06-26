@@ -18,7 +18,7 @@ from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work
 from app.services.summarization import list_work_summaries, summarize_work
-from app.utils.normalization import normalize_title
+from app.utils.normalization import normalize_doi, normalize_title
 from app.workers.queue import enqueue_enrichment
 
 router = APIRouter()
@@ -117,7 +117,7 @@ def create_work(
         canonical_title=payload.canonical_title,
         normalized_title=normalize_title(payload.canonical_title or ""),
         abstract=payload.abstract,
-        doi=payload.doi,
+        doi=normalize_doi(payload.doi) if payload.doi else None,
         arxiv_id=payload.arxiv_id,
         venue=payload.venue,
         year=payload.year,
@@ -377,7 +377,7 @@ def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: st
     elif field_name == "venue":
         work.venue = value
     elif field_name == "doi":
-        work.doi = value
+        work.doi = normalize_doi(value)
 
 
 @router.get("/{work_id}/metadata", response_model=list[FieldReview])

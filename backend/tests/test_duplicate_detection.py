@@ -32,7 +32,7 @@ def test_scan_work_candidates_finds_doi_arxiv_and_fuzzy_title(db_session) -> Non
     target = Work(
         canonical_title="Attention Is All You Need",
         normalized_title="attention is all you need",
-        doi="10.5555/TRANSFORMER",
+        doi="10.5555/transformer",  # stored normalized (lowercase, no prefix)
         arxiv_id="1706.03762v1",
         year=2017,
     )
