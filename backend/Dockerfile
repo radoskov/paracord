@@ -4,6 +4,7 @@
 #   development  (default) — dev deps, uvicorn --reload, suitable for bind-mount overlay
 #   production              — runtime deps only, gunicorn workers, no --reload
 #
+# The following is not true:
 # docker compose  uses `development` by default via docker-compose.yml.
 # docker compose -f docker-compose.yml -f docker-compose.prod.yml  uses `production`.
 

@@ -60,6 +60,13 @@ JSON-ish column (`config`, `signals`, `stats`, `coordinates`, metadata) use gene
 implies won't work, and autogenerate flags the mismatch. **Fix:** use
 `JSON().with_variant(JSONB, "postgresql")` (or `postgresql.JSONB`) consistently in the models.
 
+### C5 - Trying to make production env and test broke the development environment  [HIGH] (started)
+`make build`, which should build development images, was building production images.
+There are also misleading comments in `Dockerfile` that claim `docker-compose` builds development
+by default. This was not originally true! This was fixed to some extend by adding `target: development`
+to the `docker-compose.yml` file. However, the pipeline should be checked if there aren't any
+more issues related to this one and also change the missing comments in `Dockerfile`(s).
+
 ### H1 — `httpx2` dependency: unpinned niche fork on the egress path  [HIGH]
 `backend/requirements.txt` and `agent/requirements.txt` list `httpx2` (unpinned); imported as
 `import httpx2 as httpx` in `metadata_enrichment.py:14`, `grobid_client.py:5`, and the agent.

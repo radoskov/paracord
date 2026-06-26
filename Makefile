@@ -182,19 +182,19 @@ test: test-api test-agent ## Run backend and agent tests, each in its own contai
 
 .PHONY: test-api
 test-api: init ## Run backend tests inside the API container.
-	$(API_RUN_NODEPS) pytest backend/tests
+	$(API_RUN_NODEPS) python -m pytest backend/tests
 
 .PHONY: test-agent
 test-agent: init ## Run agent tests inside the agent container.
-	$(AGENT_RUN) pytest agent/tests
+	$(AGENT_RUN) python -m pytest agent/tests
 
 .PHONY: test-migrations
 test-migrations: init ## Run the migration<->model parity test against the compose Postgres.
-	$(API_RUN) pytest backend/tests/test_migration_parity.py -v
+	$(API_RUN) python -m pytest backend/tests/test_migration_parity.py -v
 
 .PHONY: test-local
 test-local: ## Run tests on the host interpreter.
-	pytest $(PYTEST_PATHS)
+	python -m pytest $(PYTEST_PATHS)
 
 # Ruff is pure static analysis (no runtime/services needed), so lint/format are
 # host-local. Versions are pinned via .pre-commit-config.yaml and requirements-dev.txt.

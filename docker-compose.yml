@@ -5,6 +5,10 @@
 #
 # Credentials come from the local .env file (gitignored). Never hardcode real
 # credentials here — see docs/runbooks/secrets_management.md.
+# Development Compose stack.
+# Backend services build the `development` Dockerfile target, which includes
+# pytest/ruff/dev tools and live bind mounts.
+# Production should create and use docker-compose.prod.yml to select `production`.
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -38,6 +42,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      target: development
     env_file: .env
     environment:
       PARACORD_ENV: development
@@ -69,6 +74,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      target: development
     env_file: .env
     environment:
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
@@ -107,6 +113,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      target: development
     environment:
       VITE_API_BASE_URL: "http://127.0.0.1:8000"
     depends_on:
