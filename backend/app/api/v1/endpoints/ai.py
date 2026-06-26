@@ -11,6 +11,7 @@ from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
+from app.services.summarization import summarize_scope
 from app.services.topic_modeling import model_topics
 
 router = APIRouter()
@@ -18,10 +19,50 @@ DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
 
 
-@router.post("/summaries")
-def create_summary_job() -> dict[str, str]:
-    """Queue a scope-level summary job (per-work summaries live under /works/{id}/summaries)."""
-    return {"status": "todo"}
+class ScopeSummaryRequest(BaseModel):
+    scope_type: Literal["library", "shelf", "rack"]
+    scope_id: uuid.UUID | None = None
+    summary_type: Literal["extractive"] = "extractive"
+    max_sentences: int = 8
+
+
+class ScopeSummaryResponse(BaseModel):
+    entity_type: str
+    entity_id: str
+    summary_type: str
+    text: str
+    model_name: str | None = None
+    prompt_version: str | None = None
+    work_count: int
+
+
+@router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
+def create_scope_summary(
+    payload: ScopeSummaryRequest,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> ScopeSummaryResponse:
+    """Generate (replacing prior) an extractive summary over a library/shelf/rack scope."""
+    try:
+        summary, work_count = summarize_scope(
+            db,
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            summary_type=payload.summary_type,
+            max_sentences=max(3, min(payload.max_sentences, 20)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    return ScopeSummaryResponse(
+        entity_type=summary.entity_type,
+        entity_id=str(summary.entity_id),
+        summary_type=summary.summary_type,
+        text=summary.text,
+        model_name=summary.model_name,
+        prompt_version=summary.prompt_version,
+        work_count=work_count,
+    )
 
 
 class TopicRequest(BaseModel):

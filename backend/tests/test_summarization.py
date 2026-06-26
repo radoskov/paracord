@@ -7,10 +7,12 @@ import pytest
 from app.db.base import Base
 from app.models.ai import Summary
 from app.models.citation import RawTeiDocument
+from app.models.organization import Shelf, ShelfWork
 from app.models.work import Work
 from app.services.summarization import (
     list_work_summaries,
     summarize_extractive,
+    summarize_scope,
     summarize_work,
 )
 from app.services.tei_parser import extract_body_text
@@ -36,7 +38,13 @@ def db_session(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'summaries.db'}")
     Base.metadata.create_all(
         bind=engine,
-        tables=[Work.__table__, Summary.__table__, RawTeiDocument.__table__],
+        tables=[
+            Work.__table__,
+            Summary.__table__,
+            RawTeiDocument.__table__,
+            Shelf.__table__,
+            ShelfWork.__table__,
+        ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     with session_local() as session:
@@ -169,3 +177,105 @@ def test_summary_api_returns_provenance(client, auth_headers, db) -> None:
     assert body["model_name"] == "tier0-abstract"
     assert body["prompt_version"] == "v1"
     assert body["text"] == "A real abstract sentence."
+
+
+# --- scope-level summaries --------------------------------------------------
+
+
+def test_summarize_scope_shelf(db_session) -> None:
+    shelf = Shelf(name="ML")
+    db_session.add(shelf)
+    db_session.flush()
+    for i in range(3):
+        work = Work(
+            canonical_title=f"Paper {i}",
+            normalized_title=f"paper {i}",
+            abstract=f"Abstract sentence {i}. It contains technical content about neural networks.",
+        )
+        db_session.add(work)
+        db_session.flush()
+        db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.commit()
+
+    summary, count = summarize_scope(db_session, scope_type="shelf", scope_id=shelf.id)
+    db_session.commit()
+
+    assert count == 3
+    assert summary.entity_type == "shelf"
+    assert summary.entity_id == shelf.id
+    assert summary.model_name == "tier1-extractive-frequency-scope"
+    assert len(summary.text) > 10
+
+
+def test_summarize_scope_is_idempotent(db_session) -> None:
+    shelf = Shelf(name="Idm")
+    db_session.add(shelf)
+    db_session.flush()
+    work = Work(canonical_title="w", normalized_title="w", abstract="A short abstract here.")
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.commit()
+
+    summarize_scope(db_session, scope_type="shelf", scope_id=shelf.id)
+    db_session.commit()
+    summarize_scope(db_session, scope_type="shelf", scope_id=shelf.id)
+    db_session.commit()
+
+    count = db_session.scalar(
+        select(func.count()).select_from(Summary).where(Summary.entity_type == "shelf")
+    )
+    assert count == 1
+
+
+def test_summarize_scope_raises_when_no_abstracts(db_session) -> None:
+    shelf = Shelf(name="Empty")
+    db_session.add(shelf)
+    db_session.commit()
+    with pytest.raises(ValueError, match="No abstracts"):
+        summarize_scope(db_session, scope_type="shelf", scope_id=shelf.id)
+
+
+def test_scope_summary_api_creates_and_returns(client, auth_headers, db) -> None:
+    from app.models.organization import Shelf, ShelfWork
+
+    shelf = Shelf(name="Scope test")
+    db.add(shelf)
+    db.flush()
+    for i in range(2):
+        work = Work(
+            canonical_title=f"W{i}",
+            normalized_title=f"w{i}",
+            abstract=f"The paper presents research on topic {i}. Experiments show improvements.",
+        )
+        db.add(work)
+        db.flush()
+        db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    r = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id)},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["entity_type"] == "shelf"
+    assert body["work_count"] == 2
+    assert body["model_name"] == "tier1-extractive-frequency-scope"
+    assert len(body["text"]) > 10
+
+
+def test_scope_summary_api_empty_scope_returns_400(client, auth_headers, db) -> None:
+    from app.models.organization import Shelf
+
+    shelf = Shelf(name="Empty scope")
+    db.add(shelf)
+    db.commit()
+
+    r = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id)},
+    )
+    assert r.status_code == 400

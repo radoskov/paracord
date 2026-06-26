@@ -18,8 +18,12 @@ from sqlalchemy.orm import Session
 
 from app.models.ai import Summary
 from app.models.citation import RawTeiDocument
+from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
 from app.services.tei_parser import extract_body_text
+
+# Sentinel used as entity_id for library-scoped summaries (no real entity row).
+_LIBRARY_SCOPE_ID = uuid.UUID(int=0)
 
 SUPPORTED_SUMMARY_TYPES = ("abstract", "extractive")
 PROMPT_VERSION = "v1"
@@ -190,3 +194,74 @@ def list_work_summaries(db: Session, work_id: uuid.UUID) -> list[Summary]:
             .order_by(Summary.created_at.desc())
         ).all()
     )
+
+
+def _scope_works(db: Session, *, scope_type: str, scope_id: uuid.UUID | None) -> list[Work]:
+    if scope_type == "library":
+        return list(db.scalars(select(Work)).all())
+    if scope_type == "shelf":
+        if scope_id is None:
+            raise ValueError("scope_id is required for a shelf summary")
+        return list(
+            db.scalars(
+                select(Work)
+                .join(ShelfWork, ShelfWork.work_id == Work.id)
+                .where(ShelfWork.shelf_id == scope_id)
+            ).all()
+        )
+    if scope_type == "rack":
+        if scope_id is None:
+            raise ValueError("scope_id is required for a rack summary")
+        return list(
+            db.scalars(
+                select(Work)
+                .join(ShelfWork, ShelfWork.work_id == Work.id)
+                .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+                .where(RackShelf.rack_id == scope_id)
+                .distinct()
+            ).all()
+        )
+    raise ValueError(f"Unsupported scope type: {scope_type!r}")
+
+
+def summarize_scope(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None = None,
+    summary_type: str = "extractive",
+    max_sentences: int = 8,
+) -> tuple[Summary, int]:
+    """Generate (replacing prior) an extractive summary over all works in a scope.
+
+    Returns ``(summary, work_count)`` so the caller can include the count without an
+    extra query.
+    """
+    works = _scope_works(db, scope_type=scope_type, scope_id=scope_id)
+    entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+
+    abstracts = [w.abstract for w in works if w.abstract]
+    if not abstracts:
+        raise ValueError(f"No abstracts available in {scope_type!r} scope to summarize")
+
+    combined = " ".join(abstracts)
+    text = summarize_extractive(combined, max_sentences=max_sentences)
+
+    db.execute(
+        delete(Summary).where(
+            Summary.entity_type == scope_type,
+            Summary.entity_id == entity_id,
+            Summary.summary_type == summary_type,
+        )
+    )
+    summary = Summary(
+        entity_type=scope_type,
+        entity_id=entity_id,
+        summary_type=summary_type,
+        text=text,
+        model_name="tier1-extractive-frequency-scope",
+        prompt_version=PROMPT_VERSION,
+    )
+    db.add(summary)
+    db.flush()
+    return summary, len(abstracts)
