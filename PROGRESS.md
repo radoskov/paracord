@@ -1,10 +1,19 @@
 # Progress Report
 
+> **Read `docs/AUDIT.md` first.** A full functional + implementation audit (2026-06-25) maps what
+> the app actually does for a user vs. `SPECIFICATION.md`, lists correctness/infra/security
+> findings with severities, and gives a prioritized **"Path to a fully functional app"** backlog.
+> Two things every contributor must know: (1) models and migrations are **separate** schema
+> definitions and have drifted — change a model → write + verify the migration on Postgres; and
+> (2) "semantic search" and "topic modeling" are honest **lexical/TF-IDF approximations**, not
+> embedding/BERTopic implementations.
+
 ## Current status
 
-**Milestone 0 (foundation) and Milestone 1 (core library) are complete enough for the
-single-machine loop; Milestone 2 extraction/enrichment is live; Milestone 4 duplicate review
-has started in the backend.**
+**Milestones 0–7 have an implemented vertical for every acceptance contract (all
+`test_future_milestones.py` tests enabled and green). Much of M3–M7 is backend-complete but
+under-exposed in the single-page UI, and several "AI" features are deliberate lightweight
+stand-ins — see `docs/AUDIT.md` for the gap analysis and what to build next.**
 
 What works today (real, tested in-container on Python 3.12):
 
@@ -306,7 +315,22 @@ deliberately deferred — hardening, not the product.
 
 ## Tech debt and cleanups
 
-Low-severity items found during the audit, not tied to a feature milestone. Address opportunistically.
+> The authoritative, severity-ranked list (with the prioritized fix order) now lives in
+> **`docs/AUDIT.md`**. The items below are kept as quick pointers; AUDIT.md supersedes them.
+
+**Top-priority from the 2026-06-25 audit (see AUDIT.md for detail):**
+- ~~`summaries`/`topic_assignments` model tables had no migration (prod-breaking).~~ **Fixed** —
+  migration `0010_summaries_topics`, verified on Postgres (AUDIT C1).
+- **No migration/Postgres test** — tests build the schema from `Base.metadata` on SQLite and never
+  run `alembic upgrade head`, so model↔migration drift is invisible (this is why C1 shipped). Add a
+  Postgres parity test (AUDIT C2). Highest-leverage follow-up.
+- **FK + JSONB drift** — FKs live in migrations but not models; `JSONB` in migrations vs generic
+  `JSON` in models. Makes autogenerate dirty and leaves cascades untested (AUDIT C3/C4).
+- **`httpx2`** is an unpinned niche fork on the only egress path — pin it or revert to mainline
+  `httpx` (AUDIT H1).
+- **Perf**: dedup scan / BibTeX import / semantic-index are full-table Python loops on the request
+  thread — push to indexed SQL + RQ (AUDIT H2/H3).
+- **No production build** (dev `--reload`/Vite-dev image is the only stack) (AUDIT H5).
 
 - Remove or fully wire the dead `guest_access_enabled` setting (`backend/app/core/config.py`). A startup `assert_no_guest_roles` check now enforces that no guest role is present in `security.allowed_roles`.
 - ~~Migrate deprecated `datetime.utcnow()` to timezone-aware `datetime.now(UTC)` across `services/auth.py`, `models/*`, `services/users.py`, and `scripts/reset_admin_password.py`, together with switching the model `DateTime` columns to `DateTime(timezone=True)` (plus a migration).~~ **Done.** All write/default sites use `datetime.now(UTC)`; all model `DateTime` columns are `timezone=True`; migration `6a310e33c3d6` converts the existing Postgres columns to `timestamptz` (interpreting stored values as UTC, no-op on SQLite). `auth.py` normalizes session timestamps via `_as_utc()` so the comparison is robust even where a backend round-trips naive datetimes (SQLite, or a not-yet-migrated column).

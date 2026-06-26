@@ -8,6 +8,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- Added `docs/AUDIT.md` — a full functional + implementation audit (2026-06-25) covering
+  spec-fidelity per capability, correctness/infra/security/data-model findings with severities, and
+  a prioritized "Path to a fully functional app" backlog. Refreshed `docs/architecture/api_surface.md`
+  and `data_model.md` (they were pre-M2 stubs) to match the real routes/tables, and added a top-of-file
+  audit pointer + honest framing (semantic search / topics are lexical/TF-IDF stand-ins) to
+  `PROGRESS.md`.
+
 - Added M7 lightweight topic modeling (no ML dependency): `POST /api/v1/ai/topics` clusters a
   library/shelf/rack scope's works into keyword-labelled topics (`services/topic_modeling.py` —
   TF-IDF + a small deterministic k-means, fully local/no-egress, deterministic for a given input
@@ -229,6 +236,11 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Fixed
 
+- Fixed a prod-breaking schema gap: the `summaries` and `topic_assignments` model tables had no
+  Alembic migration, so a fully migrated Postgres lacked them and the M7 summary/topic endpoints
+  would raise `UndefinedTable` in production (tests missed it because they build the schema from
+  `Base.metadata` on SQLite). Added migration `0010_summaries_topics`, verified on Postgres. Found
+  during the full-project audit (`docs/AUDIT.md` C1).
 - Fixed `auth.get_active_session` raising `TypeError: can't compare offset-naive and
   offset-aware datetimes`: session `expires_at` values are normalized with a new `_as_utc()`
   helper before comparison against `datetime.now(UTC)`, so the check is robust on backends that
