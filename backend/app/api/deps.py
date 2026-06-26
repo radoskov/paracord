@@ -3,12 +3,14 @@
 from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.agent import Agent
 from app.models.user import User
-from app.services.auth import get_active_session
+from app.services.auth import get_active_session, hash_token
 
 
 def require_authenticated_user(
@@ -56,3 +58,25 @@ def require_owner(user: User = Depends(require_authenticated_user)) -> User:
             detail="Owner role required",
         )
     return user
+
+
+def require_agent_token(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Agent:
+    """Return the authenticated approved agent or reject with 401."""
+    scheme, _, raw_token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing agent bearer token"
+        )
+    agent = db.scalar(
+        select(Agent).where(
+            Agent.token_hash == hash_token(raw_token.strip()), Agent.status == "approved"
+        )
+    )
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or unapproved agent token"
+        )
+    return agent

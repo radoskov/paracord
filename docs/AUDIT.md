@@ -67,8 +67,8 @@ implies won't work, and autogenerate flags the mismatch. **Fix:** use
 so the running stack is fine — but `httpx2` is an obscure fork, unpinned, and its public-index
 availability is unconfirmed, so a fresh non-container `pip install -r requirements.txt` may fail
 and the build is not reproducible. The code uses the standard httpx API. **Fix:** pin it
-(`httpx2==2.4.0`) and document/vendor the install source, or switch back to mainline
-`httpx>=0.27` (drop-in) unless there is a specific reason for the fork.
+(`httpx2==2.4.0`) and document/vendor the install source. DO NOT switch back to mainline
+`httpx>=0.27`!
 
 ### H2 — Semantic search writes on the read path and can race  [HIGH]
 `semantic_search.py:semantic_search` calls `ensure_work_embeddings` (which `select(Work).all()` and

@@ -17,6 +17,7 @@ from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.work import Work
 from app.services.audit import record_event
+from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.utils.normalization import normalize_title
 
 # New-style arXiv id, optionally with a version suffix (e.g. 2106.01345 / 1706.03762v5).
@@ -221,11 +222,13 @@ def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str
     created_work = False
     if created_file:
         title = _title_from_filename(pdf_path)
+        raw_arxiv_id = _arxiv_id_from_filename(pdf_path)
         work = Work(
             canonical_title=title,
             normalized_title=normalize_title(title),
             canonical_metadata_source="filename",
-            arxiv_id=_arxiv_id_from_filename(pdf_path),
+            arxiv_id=raw_arxiv_id,
+            arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
         )
         db.add(work)
         db.flush()

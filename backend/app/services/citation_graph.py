@@ -76,9 +76,14 @@ def build_citation_graph(
     for reference in references:
         resolved = _resolve_reference(reference, local_index)
         if resolved is None:
+            if reference.resolution_status == "unresolved":
+                pass  # status already correct
             unresolved += 1
             continue
         target_node, resolution = resolved
+        # Persist the resolution result so subsequent queries don't need to re-resolve.
+        if reference.resolution_status == "unresolved":
+            reference.resolution_status = resolution
         # In local_only mode keep only edges that stay inside the scope.
         if node_mode == "local_only" and (
             resolution == "external" or target_node.work_id not in scope_works

@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -20,6 +20,7 @@ class Work(Base):
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    arxiv_base_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     venue: Mapped[str | None] = mapped_column(Text, nullable=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     work_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
@@ -42,7 +43,9 @@ class WorkVersion(Base):
     __tablename__ = "work_versions"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), index=True
+    )
     version_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     publication_state: Mapped[str | None] = mapped_column(String(64), nullable=True)

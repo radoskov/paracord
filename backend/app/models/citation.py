@@ -24,6 +24,7 @@ class Reference(Base):
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolution_status: Mapped[str] = mapped_column(String(32), default="unresolved", index=True)
     source_tei_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )

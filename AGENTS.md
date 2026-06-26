@@ -52,6 +52,8 @@ agent/docs/latex-manual
 area: concise imperative description
 ```
 
+DO NOT PUT YOUR CREDENTIALS into the commit message (e.g., never put there "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>")
+
 Examples:
 
 ```text

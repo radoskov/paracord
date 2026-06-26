@@ -164,21 +164,31 @@ def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
 
 
 def _same_arxiv_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
-    if not work.arxiv_id:
-        return []
-    arxiv = split_arxiv_id(work.arxiv_id)
-    if not arxiv["base"]:
+    base = work.arxiv_base_id or (split_arxiv_id(work.arxiv_id)["base"] if work.arxiv_id else None)
+    if not base:
         return []
 
+    # SQL-pushdown: filter by the indexed arxiv_base_id column when available.
+    if work.arxiv_base_id:
+        others = db.scalars(
+            select(Work).where(Work.arxiv_base_id == base, Work.id != work.id)
+        ).all()
+    else:
+        others = [
+            other
+            for other in db.scalars(
+                select(Work).where(Work.arxiv_id.is_not(None), Work.id != work.id)
+            ).all()
+            if split_arxiv_id(other.arxiv_id)["base"] == base
+        ]
+
     candidates: list[DuplicateCandidate] = []
-    for other in db.scalars(select(Work).where(Work.arxiv_id.is_not(None), Work.id != work.id)):
+    arxiv = split_arxiv_id(work.arxiv_id)
+    for other in others:
         other_arxiv = split_arxiv_id(other.arxiv_id)
-        if other_arxiv["base"] != arxiv["base"]:
-            continue
-        candidate_type = "same_arxiv"
         score = 1.0
         signals: dict[str, Any] = {
-            "arxiv_base_id": arxiv["base"],
+            "arxiv_base_id": base,
             "arxiv_id": work.arxiv_id,
             "other_arxiv_id": other.arxiv_id,
         }
@@ -188,7 +198,7 @@ def _same_arxiv_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
         candidates.append(
             _upsert_candidate(
                 db,
-                candidate_type=candidate_type,
+                candidate_type="same_arxiv",
                 entity_a_type="work",
                 entity_a_id=work.id,
                 entity_b_type="work",

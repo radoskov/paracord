@@ -8,6 +8,43 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **P0/C3 — FK declarations in ORM models:** added `ForeignKey(…, ondelete=…)` to all
+  model columns whose migrations already declare a FK constraint (`Location.file_id /
+  source_id`, `WorkVersion.work_id`, `FileSegment.file_id`, `FileWorkLink.file_id /
+  work_id / version_id / segment_id`, `ShelfWork.shelf_id / work_id`, `RackShelf.rack_id /
+  shelf_id`, `TagLink.tag_id`, `ImportBatch.source_id`). Autogenerate is now clean for
+  these tables and cascade/SET-NULL behavior is declared at the ORM layer. (AUDIT C3)
+- **P0/C4 — JSONB for audit events:** `AuditEvent.details` now uses
+  `JSON().with_variant(JSONB(), "postgresql")` so the Postgres column type matches the
+  `postgresql.JSONB` declared in migration `0001` and GIN/`@>` queries work. (AUDIT C4)
+- **P0/H1 — Pin `httpx2==2.4.0`:** both `backend/requirements.txt` and
+  `agent/requirements.txt` now pin the Pydantic-maintained fork at `2.4.0` for a
+  reproducible build. (AUDIT H1)
+- **P0/H4 — Agent stub security:** `POST /agents/manifest` and `POST /agents/teleport/{id}`
+  now require a valid approved-agent bearer token (`require_agent_token` dep in
+  `app/api/deps.py`) and return **501 Not Implemented** instead of an unauthenticated
+  500/200. The deprecated `POST /agents/register` stub now returns 410 Gone. Removed the
+  dead `GET /citations/contexts` stub (`{"status":"todo"}`) from the OpenAPI surface.
+  (AUDIT H4)
+- **P1/item4 — `works.arxiv_base_id` + schema identifiers:** new `Work.arxiv_base_id`
+  column (String 64, indexed) stores the version-less arXiv base id so version-collapsing,
+  duplicate detection, and graph edge resolution can key on the stable id without runtime
+  string manipulation. Partial unique indexes on `arxiv_base_id WHERE NOT NULL` and
+  `doi WHERE NOT NULL` enforce the identifier uniqueness SPEC §9.2 requires. Migration
+  `0011_schema_identifiers` adds the column, backfills existing rows from `arxiv_id`
+  (Postgres only — tests build from metadata), and creates the partial unique indexes.
+  `storage.py` and `bibtex.py` now populate `arxiv_base_id` at creation time.
+  Shared helper `app/services/identifiers.py` provides the `arxiv_base_id()` normalizer.
+  (AUDIT P1 item 4 / PROGRESS data-model divergences §2)
+- **P1/item4 — `references.resolution_status`:** new `Reference.resolution_status` column
+  (`unresolved | local_match | external`) as required by SPEC §12.5 for citation-graph
+  edge classification. Migration `0011` adds the column with server default `unresolved`.
+  `build_citation_graph` now persists the resolution result on each `Reference` row so
+  subsequent graph builds reuse the persisted status. (AUDIT P1 item 4)
+- **Dedup SQL pushdown:** `_same_arxiv_candidates` now filters by the indexed
+  `arxiv_base_id` column via SQL when the column is populated, eliminating the O(n) Python
+  scan over all arXiv works for per-work duplicate detection. (AUDIT H3 partial)
+
 - Added a Postgres migration↔model parity test (`backend/tests/test_migration_parity.py`, AUDIT
   C2): it creates a throwaway database, runs `alembic upgrade head`, and asserts every model table
   and column exists in the migrated schema — the guard that would have caught the missing-migration

@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -78,8 +78,12 @@ class ShelfWork(Base):
 
     __tablename__ = "shelf_works"
 
-    shelf_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    shelf_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("shelves.id", ondelete="CASCADE"), primary_key=True
+    )
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), primary_key=True
+    )
     added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
@@ -97,8 +101,12 @@ class RackShelf(Base):
 
     __tablename__ = "rack_shelves"
 
-    rack_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
-    shelf_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    rack_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("racks.id", ondelete="CASCADE"), primary_key=True
+    )
+    shelf_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("shelves.id", ondelete="CASCADE"), primary_key=True
+    )
     added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
@@ -115,7 +123,9 @@ class TagLink(Base):
 
     __tablename__ = "tag_links"
 
-    tag_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
     entity_type: Mapped[str] = mapped_column(String(64), primary_key=True)
     entity_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

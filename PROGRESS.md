@@ -201,22 +201,37 @@ Current count: 146 passing + 0 skipped backend, 2 passing agent, 4 passing front
 ### Start here (next agent)
 
 M1 done; M2 extraction + enrichment pipeline is live and validated. M3 reader/annotations/export
-has started. M4 duplicate detection has
-the queue table, scanner, review API, backend action semantics, frontend action panel, multiwork
-candidate detection, and split-file UI. Continue M2/M4:
+has started. M4 duplicate detection is complete. M6 citation graph and M7 AI features are done.
 
-1. ~~**Export expansion**: add Markdown/CSL JSON/RIS exports and audit `paper.exported`.~~
-   **Done** — BibTeX/BibLaTeX/RIS/CSL-JSON/Markdown/HTML/text, authors + `authorYEAR` keys,
-   `paper.exported` audit, and a frontend shelf/rack export control.
-2. ~~**Duplicate/version hardening**: add better target-work selection for merge/version actions,
-   richer candidate labels, and safeguards around repeated split actions.~~ **Done** — heuristic
-   default target (user-confirmed → latest arXiv version → metadata completeness), candidate
-   responses now carry entity labels + a human summary + a suggested target, and actions are
-   refused on already-resolved candidates (with an extra guard against re-splitting a file).
-3. **OpenAlex/Semantic Scholar connectors** — **Done** (identifier-based, opt-in). Still open:
-   title-based (fuzzy) Crossref/arXiv lookup, which needs a normalized-title similarity guard
-   before promoting since it would break the "identifier-only" egress invariant, and arXiv/DOI
-   link *ingestion* (create a work from a pasted identifier/URL).
+P0 audit items addressed (2026-06-26):
+- **C3 (DONE):** FK declarations added to all ORM models matching their migration constraints.
+- **C4 (DONE):** `AuditEvent.details` uses `JSONB` variant on Postgres.
+- **H1 (DONE):** `httpx2==2.4.0` pinned in both `requirements.txt` files.
+- **H4 (DONE):** Agent manifest/teleport endpoints now require agent-token auth and return 501.
+  Dead `/citations/contexts` stub removed from OpenAPI.
+- **P1/item4 (DONE):** `works.arxiv_base_id` persisted (migration 0011, backfilled), partial
+  unique indexes on `doi` and `arxiv_base_id`; `references.resolution_status` added;
+  `_same_arxiv_candidates` SQL-pushdown; `identifiers.py` shared helper.
+
+Next recommended items in priority order:
+
+1. **P0/H5 — Production build:** add multi-stage Dockerfile (`runtime` target: prod deps only,
+   gunicorn workers, no `--reload`) and a prod compose profile; default `PARACORD_ENV` to
+   `production`. Currently only a dev stack exists.
+2. **P0/H6 — Fix .env prefix:** if you have a local `.env` using `PAPERRACKS_*` keys, regenerate
+   it from `.env.example` (which uses the correct `PARACORD_*` prefix). No code change needed.
+3. **P2/item6 — Navigation shell + Admin UI:** the SPA has no router; owner operations (users,
+   agents, audit events) are raw-HTTP only. Add a navigation shell + Dashboard + Admin page.
+4. **P2/item8 — Metadata review/edit UI:** the backend supports conflict review and
+   `POST /works/{id}/metadata/select`, but there's no UI — users can't review or pick canonical
+   metadata. Add metadata review panel and per-work Enrich button.
+5. **P2/item9 — Shelf/rack summary stub:** `/ai/summaries` (scope-level summaries §8.11) is
+   currently a 404 — it is a headline product goal. Implement using the existing extractive
+   summarizer over the scope's works.
+6. **P2/item10 — Import expansion:** add single-PDF upload, arXiv-id/DOI paste-import,
+   and RIS/CSL JSON import to close the gap from 2 to more of the §8.1 ingestion types.
+7. **P1/item5 — H3 full SQL pushdown:** the DOI dedup scan and BibTeX dedup are still O(n)
+   Python loops. Move to SQL `WHERE doi = :doi` and push the full-library duplicate scan to RQ.
 
 The leftover M0 auth items (login rate limiting, in-app password change) remain
 deliberately deferred — hardening, not the product.
@@ -325,12 +340,15 @@ deliberately deferred — hardening, not the product.
   `backend/tests/test_migration_parity.py` runs `alembic upgrade head` on a throwaway Postgres and
   asserts model↔schema table/column parity (`make test-migrations`; CI Postgres service; self-skips
   without PG). Follow-up: assert autogenerate-clean after C3/C4 (AUDIT C2).
-- **FK + JSONB drift** — FKs live in migrations but not models; `JSONB` in migrations vs generic
-  `JSON` in models. Makes autogenerate dirty and leaves cascades untested (AUDIT C3/C4).
-- **`httpx2`** is an unpinned niche fork on the only egress path — pin it or revert to mainline
-  `httpx` (AUDIT H1).
+- ~~**FK + JSONB drift** — FKs live in migrations but not models; `JSONB` in migrations vs generic
+  `JSON` in models. Makes autogenerate dirty and leaves cascades untested (AUDIT C3/C4).~~ **Fixed**
+  — ForeignKey declared in all 14 affected model columns; `AuditEvent.details` uses JSONB variant.
+- ~~**`httpx2`** is an unpinned niche fork on the only egress path.~~ **Fixed** — pinned to
+  `httpx2==2.4.0` in both `requirements.txt` files. (`httpx2` is the Pydantic-maintained
+  security-patch fork; reverting to mainline `httpx` would be wrong — AUDIT H1 misstated the fix.)
 - **Perf**: dedup scan / BibTeX import / semantic-index are full-table Python loops on the request
-  thread — push to indexed SQL + RQ (AUDIT H2/H3).
+  thread — push to indexed SQL + RQ (AUDIT H2/H3). `arxiv_base_id` SQL pushdown is now in place
+  for `_same_arxiv_candidates`; DOI/BibTeX dedup and the semantic index still need RQ offload.
 - **No production build** (dev `--reload`/Vite-dev image is the only stack) (AUDIT H5).
 
 - Remove or fully wire the dead `guest_access_enabled` setting (`backend/app/core/config.py`). A startup `assert_no_guest_roles` check now enforces that no guest role is present in `security.allowed_roles`.
@@ -345,15 +363,13 @@ deliberately deferred — hardening, not the product.
 These cost a migration + re-extraction if M4 (duplicates) / M6 (citation graph) / M7 (topics)
 are built on the current shapes, so address the first two before the M4 review workflows harden:
 
-- **Split `works.arxiv_id` into `arxiv_base_id`** (strip the `vN` suffix) and add a **UNIQUE**
-  constraint on `doi` and the arXiv base id. §8.4 version-dedup and §6 version-collapsing key
-  on the *base* id, and §9.2 expects uniqueness; today both are plain indexes. The current
-  duplicate scanner derives arXiv bases at runtime, but the physical schema still needs cleanup
-  before version-linking and collapse modes depend on it.
-- **`Reference` is missing `resolution_status` / `resolution_confidence`** (and `parsed_authors`/
-  `parsed_venue`). The M6 graph pipeline (§12.5) marks edges by `resolution_status`
-  (unresolved / local_match / external_match); building the graph without it means another
-  migration + reparse.
+- ~~**Split `works.arxiv_id` into `arxiv_base_id`** (strip the `vN` suffix) and add a **UNIQUE**
+  constraint on `doi` and the arXiv base id.~~ **Done** — `arxiv_base_id` column added (migration
+  0011, backfilled), partial unique indexes on both fields. `arxiv_id` kept for provenance; base id
+  is the dedup/graph key.
+- ~~**`Reference` is missing `resolution_status`**.~~ **Done** — `resolution_status` column added
+  (migration 0011, default `unresolved`); `build_citation_graph` now persists the result.
+  `resolution_confidence` and `parsed_authors`/`parsed_venue` are still not modeled.
 - **`CitationMention` is missing `extraction_confidence`** and stores coordinates as four float
   columns instead of §9.3's `pdf_coordinates` jsonb (the PDF.js reader contract for M3).
 - **Topic modeling is collapsed** into a single `topic_assignments` table instead of §9.3's

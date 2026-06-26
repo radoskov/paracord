@@ -21,6 +21,7 @@ from app.models.source import ImportBatch
 from app.models.user import User
 from app.models.work import Work
 from app.services.audit import record_event
+from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.utils.normalization import normalize_doi, normalize_title
 
 _ENTRY_START = re.compile(r"@(\w+)\s*\{", re.IGNORECASE)
@@ -85,12 +86,14 @@ def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
         if _find_existing(db, doi=doi, normalized_title=normalized) is not None:
             matched += 1
             continue
+        raw_arxiv_id = _arxiv_id(entry.fields)
         work = Work(
             canonical_title=title,
             normalized_title=normalized,
             year=_parse_year(entry.fields.get("year")),
             doi=doi,
-            arxiv_id=_arxiv_id(entry.fields),
+            arxiv_id=raw_arxiv_id,
+            arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
             venue=_first_field(entry.fields, _VENUE_FIELDS),
             abstract=entry.fields.get("abstract"),
             work_type=entry.entry_type,

@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -36,9 +36,12 @@ class Location(Base):
     __tablename__ = "locations"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
     source_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("sources.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -67,7 +70,9 @@ class FileSegment(Base):
     __tablename__ = "file_segments"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -85,15 +90,21 @@ class FileWorkLink(Base):
     __tablename__ = "file_work_links"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    file_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
-    work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+    work_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), index=True
+    )
     version_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("work_versions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     segment_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("file_segments.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
