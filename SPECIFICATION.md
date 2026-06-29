@@ -13,7 +13,7 @@
 3. Architecture, deployment, security, and access control
 4. Functional requirements
 5. Data model and API specification
-6. Local agent protocol
+6. Local agent protocol (§11; redesigned in §32, review draft)
 7. Processing pipelines
 8. User interface specification
 9. Search, export, performance, and configuration
@@ -1430,6 +1430,11 @@ Export request example:
 
 ## 11. Local agent protocol
 
+> **Note (2026-06-29):** A redesigned agent model — single persistent agent, a local-only web
+> GUI, privilege-gated and agent-controlled teleport, and an `index_only` / `index_and_extract` /
+> `teleport` action model — is specified in **§32 (Local agent & teleport — redesign v2)**. §32 is a
+> review draft that supersedes/expands this section once accepted. §6.2 and §7.5 still apply.
+
 ### 11.1 Agent responsibilities
 
 The local agent is a companion process running on a machine that owns PDFs. It is mandatory for external-server mode and optional for same-machine mode.
@@ -2810,3 +2815,186 @@ Implement only your assigned section of PaRacORD. Preserve the no-guest, no-arbi
 18. vis-network documentation: https://visjs.github.io/vis-network/docs/network/
 19. EmbeddingGemma overview: https://ai.google.dev/gemma/docs/embeddinggemma
 20. llama.cpp quantization docs: https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md
+
+---
+
+## 32. Local agent & teleport — redesign v2 (review draft)
+
+**Status:** DRAFT for maintainer review (2026-06-29). Once accepted this supersedes and expands
+§11; §6.2 (deployment) and §7.5 (agent security) still apply. **Not yet implemented.** The current
+`enroll`/`sync`/`teleport`/`serve` CLI, the `AgentFile` table, `POST /agents/manifest`, and
+`POST /imports/teleport` are the v1 foundation that this design evolves.
+
+### 32.1 Goals and principles
+
+- **Exactly one persistent agent per host.** The agent never spawns additional agents. It owns all
+  configuration and state, stored durably, so stopping and restarting it restores the server
+  connection, the monitored folders/files, and per-file status — no re-setup.
+- **Local-first and operator-controlled.** The agent is managed *locally* (a CLI plus a
+  local-only web GUI). The server can never browse the host or pull arbitrary paths; it may only
+  *request* a transfer, which the agent fulfils by **pushing**, and only as far as the agent's own
+  configuration, privileges, and per-item policy permit.
+- **Minimal always-on footprint.** The management GUI is started/stopped on demand
+  (`web up` / `web down`). Only a lightweight monitoring/sync loop runs continuously, and only when
+  the agent is started (optionally as a daemon).
+- **Trust via token handshake (unchanged).** Enroll → owner approval → scoped agent token. Once
+  configured it persists.
+
+### 32.2 Agent identity, configuration and state (persistent)
+
+- **Config directory:** `~/.config/paracord/` (XDG; overridable via `--config` or
+  `$PARACORD_AGENT_HOME`).
+- **`agent.yaml`** — human-editable: server URL, agent name, the managed folders/files (each with
+  path, mode, default action, teleport policy), the global default action + teleport policy, poll
+  interval, and web-GUI port.
+- **Secrets** (server bearer token + web access token) — stored in the **OS keyring when
+  available, else a `0600` file** (`secrets.json`) in the config dir. *(Maintainer decision.)*
+- **`state.sqlite3`** — durable local index/state: one row per known PDF (`local_file_id` = content
+  hash, path, size, mtime, last-indexed time, cached server-side processing status, last action).
+  Restored on restart so the GUI/CLI show current status immediately.
+- The agent is identified to the server by its approved token; `agent_id` is stored after
+  enrollment.
+
+### 32.3 Managed items: folders and files
+
+Two kinds of persistent managed entries:
+
+- **Monitored folder** — continuously watched (e.g. `watchfiles`). New/changed/removed PDFs update
+  the manifest automatically; the entry's default action is applied to newly seen files.
+- **One-time import** (folder or single file) — scanned once, on demand; the current PDFs are
+  indexed; no ongoing watch.
+
+Each entry carries:
+
+- **`default_action` ∈ {`index_only`, `index_and_extract`, `teleport`}** — what happens to bytes
+  (see §32.4). Inherits the global default unless overridden per entry.
+- **`teleport_policy` ∈ {`ask`, `allow`}** — whether the server may teleport these items without
+  per-request approval (see §32.6).
+
+A **global default switch** sets the default action and teleport policy applied to *newly added*
+folders/files (including files auto-discovered in monitored folders). Per-entry overrides win.
+
+### 32.4 Import actions — what happens to the bytes *(maintainer decision)*
+
+When the agent processes an indexed PDF (on add/import, or automatically when a monitored folder
+sees a new file), exactly one action runs. The **default is `index_only`**; the action is chosen
+per import in the CLI/GUI and/or taken from the entry's default:
+
+1. **`index_only`** *(default)* — the agent sends only the manifest entry (path label, content
+   hash, size, page count). **No bytes leave the host.** The server knows the file exists and can
+   later *request* a teleport.
+2. **`index_and_extract`** — the agent uploads the bytes to a transient server endpoint; the server
+   runs extraction (GROBID → metadata, abstract, references), creates/updates the Work, **then
+   discards the PDF** and keeps only a *reference* (the manifest entry marking the file as
+   agent-resident). The paper becomes fully searchable in the library with references, but the PDF
+   is **not** stored server-side; the user can teleport the actual file later. *(Privacy-preserving:
+   metadata without permanent file storage.)*
+3. **`teleport`** — the agent uploads the bytes; the server stores the PDF **permanently** in the
+   managed library (content-addressed) and extracts it. Requires the agent's `can_teleport`
+   privilege.
+
+All three verify the uploaded bytes' SHA-256 against the manifest server-side before
+processing/storing.
+
+### 32.5 Command-line interface
+
+The CLI configures the single local agent; it never creates a second agent.
+
+- `paracord-agent enroll --server URL --token <enrollment-token> [--name]` — token handshake;
+  stores the server URL and (after owner approval) the agent token.
+- `paracord-agent start [--daemon]` — run the monitoring/sync loop (foreground, or
+  detached/daemon; a systemd **user** unit is provided in `agent/systemd/`).
+- `paracord-agent stop` / `status` — stop the loop / show connection, approval state + granted
+  privileges, managed items, and last sync.
+- `paracord-agent add-folder <path> [--monitor | --once] [--action index|extract|teleport]
+  [--teleport allow|ask]`, `remove-folder`, `add-file <path>`, `list`.
+- `paracord-agent sync` / `import <path>` — one-shot manifest sync / folder import.
+- `paracord-agent teleport <local-file-id>` — agent-initiated push (requires `can_teleport`).
+- `paracord-agent web up | down | status` — manage the local web GUI (§32.7).
+
+### 32.6 Teleport model — agent-controlled; the server can only request
+
+Bytes are always **pushed by the agent**; the server never reads the host disk. Triggers:
+
+- **Agent-initiated** — the user pushes a file from the agent GUI/CLI (requires `can_teleport`).
+- **Server request** — an admin/user clicks "request teleport" on the server, creating a *pending
+  request* the agent surfaces (GUI + CLI):
+  - if the item's `teleport_policy = ask`, the user must **approve** it in the agent before it
+    pushes;
+  - if `teleport_policy = allow`, the request is **auto-approved** and the agent pushes without
+    prompting.
+- Every push is privilege-gated and SHA-256-verified server-side.
+
+The global default switch (§32.3) sets whether newly added items are `allow` or `ask`.
+
+### 32.7 Local web GUI — minimal self-served page *(maintainer decision)*
+
+- **Implementation:** a small **Starlette/FastAPI + uvicorn** app serving **one** static HTML+JS
+  page plus a tiny JSON API it calls. Chosen over Streamlit for much lighter dependencies and full
+  control (the agent already ships `httpx2`/`pydantic`).
+- **Local-only:** binds to **`127.0.0.1`** on a configurable/ephemeral port; not reachable
+  off-host.
+- **Access token:** `web up` generates a short random token and prints it with the URL; the page
+  requires it (query param → cookie). Defense-in-depth on top of localhost binding.
+- `web up` starts it, `web down` stops it, `web status` reports running/URL/port (and can reveal
+  the token to copy).
+- **Features — all agent management lives here:**
+  - **Connection:** set/change/remove the server URL; enroll (paste the server's enrollment token)
+    and show approval state; store/rotate/remove the agent token (secrets via keyring/0600).
+  - **Folders & files:** add/remove; choose monitored vs one-time; set each item's default action
+    and teleport policy; set the global defaults; trigger one-time import / manual sync.
+  - **Status:** server reachable (up/down); approval state + granted privileges; sync state + last
+    sync time; per-file status (indexed / uploaded-for-extraction / extracted / teleported /
+    failed) by polling the server for this agent's own items; pending teleport requests with
+    Approve / Deny.
+  - **Activity log:** recent sync / import / teleport / extraction events and errors.
+  - *Candidate extras:* monitored-folder size summary, manual "re-extract", per-file "remove from
+    server".
+
+### 32.8 Server side
+
+- **Enrollment/approval** unchanged (§11.2); persistent once approved.
+- **Per-agent privileges**, set by the owner in Admin → Agents, **least-privilege by default.**
+  Proposed set (maintainer to confirm exact granularity):
+  - `can_index` — accept manifests from this agent;
+  - `can_extract` — accept `index_and_extract` uploads (transient extract, discard PDF);
+  - `can_teleport` — accept teleport uploads (permanent storage);
+  - `can_be_requested` — the server/users may issue teleport requests to this agent;
+  - `status_visibility` — what processing/status the server exposes back to the agent.
+- **Endpoints** (agent-token scoped): manifest ingest; transient extract-upload
+  (extract → discard → keep reference); teleport-upload (permanent); list this agent's pending
+  teleport requests; report this agent's per-item status. Server→agent teleport **requests** are
+  recorded and surfaced to the agent by polling — the server never connects to the agent.
+- **Admin UI:** list agents, set privileges, browse an agent's manifested items, request teleport,
+  and see per-item state.
+
+### 32.9 Data-model deltas
+
+- Server `agent_files` gains: `action`/`import_mode`, `teleport_policy`, a richer
+  `processing_state` (indexed / extracted / teleported / failed), and a flag distinguishing
+  "resident on agent only" vs "stored in library". A Work may exist with extracted metadata but
+  **no stored file** (the `index_and_extract` case).
+- New: **per-agent privileges** (columns or a table); **teleport-request** records
+  (requested_by, item, status: pending / approved / denied / completed / failed).
+- Agent side: the `state.sqlite3` schema (managed entries, per-file states, pending requests).
+
+### 32.10 Security summary (addresses the "managed-by-server" concern)
+
+- The agent is configured and controlled **locally**. The server holds no host paths and cannot
+  enumerate or pull files; it can only *request*, and the agent decides — per privileges and
+  per-item policy — whether and what to push.
+- The management GUI is **local-only** (`127.0.0.1`) and token-gated; no always-on network service
+  is exposed.
+- Opaque `local_file_id` (content hash); SHA-256 verification on every upload; secrets in
+  keyring/`0600`; least-privilege defaults; every server-side action audit-logged.
+
+### 32.11 Open questions for maintainer verification
+
+1. The exact privilege list and granularity (§32.8) — is the proposed set right?
+2. `index_and_extract`: keep a lightweight server-side preview/thumbnail, or truly nothing but
+   metadata + references?
+3. Daemonization on non-Linux hosts — systemd user unit (Linux) is clear; what about macOS/Windows
+   (built-in `--detach`, launchd, NSSM)?
+4. When a monitored folder loses a file (deleted on disk), should the server-side Work/reference be
+   removed, marked missing, or left intact?
+5. Web-GUI port: fixed default (e.g. 8765) vs ephemeral-and-printed each time?
