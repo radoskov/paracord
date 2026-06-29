@@ -217,13 +217,13 @@ check-secrets: ## Run the repository secret scanner.
 	python scripts/check_secrets.py --all
 
 .PHONY: check
-check: lint test ## Host-local lint plus Docker tests.
+check: lint test test-migrations ## Host-local lint + Docker backend/agent tests + migration parity.
 
 .PHONY: ready
-ready: fix precommit check ## Auto-fix locally, run pre-commit, then lint + tests.
+ready: fix precommit check frontend-check ## Auto-fix, pre-commit, then full backend + frontend checks.
 
 .PHONY: ci
-ci: lint test frontend-test check-secrets ## Approximate the CI checks locally.
+ci: lint test test-migrations frontend-check check-secrets ## Mirror the CI checks locally.
 
 # ---------------------------------------------------------------------------
 # Application commands

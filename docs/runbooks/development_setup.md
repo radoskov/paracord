@@ -86,9 +86,9 @@ make test-api             # run backend tests in the API container
 make test-agent           # run agent tests in the agent container
 make test-local           # run tests on the host, only if dependencies are installed
 
-make check                # host-local lint + Docker tests
-make ready                # make fix + pre-commit + lint + tests
-make ci                   # approximate CI locally
+make check                # lint + Docker backend/agent tests + migration parity
+make ready                # fix + pre-commit + check + frontend-check (run before pushing)
+make ci                   # mirror CI: lint, tests, migration parity, frontend, secrets
 
 make bootstrap-admin      # create first owner account
 make reset-admin-password # reset an owner/admin password from server console
@@ -204,7 +204,16 @@ git commit -m "..."
 git push
 ```
 
-Use `make check` before pushing. It runs host-local Ruff lint and Docker-based tests; Docker is the authoritative environment for tests (runtime + database), while Ruff is pure static analysis and runs on the host.
+Use `make ready` before pushing — it mirrors the CI surface so a green `ready` means a green CI.
+`ready` runs `fix` + `precommit` + `check` + `frontend-check`, where:
+
+- `check` = host-local Ruff lint + Docker backend/agent tests + **migration parity**
+  (`test-migrations`, which applies Alembic against the compose Postgres; it self-skips if no
+  Postgres is reachable).
+- `frontend-check` = `npm ci` + Vitest component tests + `npm run build` in Docker.
+
+Docker is the authoritative environment for tests (runtime + database); Ruff is pure static
+analysis and runs on the host. `make check` alone is the faster backend-only subset.
 
 ## Database schema-change workflow
 

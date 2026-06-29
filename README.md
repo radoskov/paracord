@@ -178,9 +178,9 @@ make test                  Run backend (api container) + agent (agent container)
 make test-api              Run backend tests in the API container
 make test-agent            Run agent tests in the agent container
 make test-local            Run host tests
-make check                 Host-local lint + Docker tests
-make ready                 Auto-fix, run pre-commit, then lint + tests
-make ci                    Approximate CI checks locally
+make check                 Lint + Docker backend/agent tests + migration parity
+make ready                 Auto-fix, pre-commit, then full backend + frontend checks
+make ci                    Mirror CI locally (lint, tests, migrations, frontend, secrets)
 
 make bootstrap-admin       Create the initial owner account
 make reset-admin-password  Reset an owner/admin password from the server console
