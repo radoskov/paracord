@@ -47,6 +47,8 @@ services:
     environment:
       PARACORD_ENV: development
       PARACORD_BIND_HOST: "0.0.0.0"
+      # Don't write .pyc into the bind-mounted source tree (they'd be root-owned on the host).
+      PYTHONDONTWRITEBYTECODE: "1"
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
@@ -77,6 +79,7 @@ services:
       target: development
     env_file: .env
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
@@ -99,6 +102,7 @@ services:
       context: .
       dockerfile: agent/Dockerfile
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
       PARACORD_SERVER_URL: "http://api:8000"
     depends_on:
       api:

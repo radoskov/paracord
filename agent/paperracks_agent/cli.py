@@ -95,6 +95,18 @@ async def _serve(args: argparse.Namespace) -> None:
         await asyncio.sleep(interval)
 
 
+def _report_error(exc: Exception, server: str | None) -> None:
+    """Print a concise, actionable message for connection failures (no raw traceback)."""
+    message = str(exc) or exc.__class__.__name__
+    print(f"Error: {message}")
+    server = server or ""
+    if ("SSL" in message or "WRONG_VERSION" in message) and server.startswith("https://"):
+        fixed = server.replace("https://", "http://", 1)
+        print(f"Hint: the server speaks plain HTTP — use --server {fixed}")
+    elif "Connect" in exc.__class__.__name__ or "refused" in message.lower():
+        print(f"Hint: is the server running and reachable at {server or 'the given URL'}?")
+
+
 def _add_common(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("--config", type=Path, default=None, help="Path to agent YAML config")
     subparser.add_argument("--server", default=None, help="Server base URL (overrides config)")
@@ -128,19 +140,20 @@ def main() -> None:
         for path in iter_pdf_files(args.roots):
             item = build_manifest_item(path)
             print(f"{item.local_file_id} {item.size_bytes} {item.path}")
-    elif args.command == "enroll":
-        asyncio.run(_enroll(args))
-    elif args.command == "sync":
-        asyncio.run(_sync(args))
-    elif args.command == "teleport":
-        asyncio.run(_teleport(args))
-    elif args.command == "serve":
-        try:
-            asyncio.run(_serve(args))
-        except KeyboardInterrupt:
-            print("\nstopped")
-    else:
+        return
+
+    handlers = {"enroll": _enroll, "sync": _sync, "teleport": _teleport, "serve": _serve}
+    handler = handlers.get(args.command)
+    if handler is None:
         parser.print_help()
+        return
+    try:
+        asyncio.run(handler(args))
+    except KeyboardInterrupt:
+        print("\nstopped")
+    except Exception as exc:  # noqa: BLE001 - show connection errors cleanly, not as a traceback
+        _report_error(exc, getattr(args, "server", None))
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

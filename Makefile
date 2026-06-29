@@ -180,17 +180,20 @@ db-shell: init ## Open psql inside the Postgres container.
 .PHONY: test
 test: test-api test-agent ## Run backend and agent tests, each in its own container.
 
+# Keep pytest's cache out of the bind-mounted source tree (it would be root-owned on the host).
+PYTEST := python -m pytest -o cache_dir=/tmp/paracord-pytest-cache
+
 .PHONY: test-api
 test-api: init ## Run backend tests inside the API container.
-	$(API_RUN_NODEPS) python -m pytest backend/tests
+	$(API_RUN_NODEPS) $(PYTEST) backend/tests
 
 .PHONY: test-agent
 test-agent: init ## Run agent tests inside the agent container.
-	$(AGENT_RUN) python -m pytest agent/tests
+	$(AGENT_RUN) $(PYTEST) agent/tests
 
 .PHONY: test-migrations
 test-migrations: init ## Run the migration<->model parity test against the compose Postgres.
-	$(API_RUN) python -m pytest backend/tests/test_migration_parity.py -v
+	$(API_RUN) $(PYTEST) backend/tests/test_migration_parity.py -v
 
 .PHONY: test-local
 test-local: ## Run tests on the host interpreter.
