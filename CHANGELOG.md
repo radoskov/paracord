@@ -27,6 +27,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Stage 4.5 (batch 1) — UX refinements:** new-paper **dialog** taking title / DOI / arXiv id /
+  URL (not just title); the PDF reader now opens in a full-width **modal** ("Read") with a "New
+  tab ↗" option instead of the cramped side panel; the top navigation bar is **sticky**; a shared
+  selection store keeps the **open paper selected across tab switches**; owner can **re-enable** a
+  disabled user (`POST /admin/users/{id}/enable`). Fixed the **empty Audit-events list** (the
+  client read the paginated `{items}` envelope as a bare array). Honest enrichment message naming
+  the background worker. (Batch 2 — Jobs/queue tab, delete-paper, agent-management UI,
+  server-folder clarity — is scheduled in `docs/WORKPLAN.md` Stage 4.5.)
 - **Stage 5 — Local-agent manifest + teleport (M5):** the remote-workstation feature now works as
   a secure **agent-push** vertical. New `AgentFile` model + migration `0014_agent_files`.
   `POST /agents/manifest` (agent token) ingests opaque file identity (`local_file_id`, sha256,

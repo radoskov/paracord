@@ -213,6 +213,43 @@ and master–detail selection; existing tests stay green; no backend capability 
 
 ---
 
+## Stage 4.5 — UX refinements & operational visibility  *(from a 2026-06-29 in-vivo review)*
+
+A second hands-on pass surfaced concrete follow-ups. Tracked here so the polish is scheduled, not
+lost. **Batch 1 (✅ done 2026-06-29):**
+- ✅ **New-paper dialog** — a modal taking title / DOI / arXiv id / URL (URL parsed to id), not
+  just a title.
+- ✅ **Reader placement** — opens in a full-width **modal** ("Read") + "New tab ↗" for the raw PDF,
+  instead of the cramped side panel.
+- ✅ **Frozen top nav** — sticky header; the page scrolls under it.
+- ✅ **Cross-tab selection persistence** — shared `lib/selection.ts` store keeps the open paper
+  when you leave and return to a tab (Library wired; shelves/racks in batch 2).
+- ✅ **Admin re-enable user** — `POST /admin/users/{id}/enable`; disabling is reversible.
+- ✅ **Empty Audit-events list (bug)** — client read the paginated `{items}` envelope as an array.
+- ✅ **Honest enrichment message** — names the background worker + Jobs tab.
+
+**Batch 2 (planned, next):**
+- **Jobs tab + queue visibility** — a backend endpoint exposing RQ queued/started/finished/failed
+  (and "queue/worker unavailable"), and a Jobs tab. This is the fix for *"Enrichment queued but
+  nothing happens"* and *"abstract not extracted"*: both are background-worker tasks — if the
+  `worker` service (or Redis/GROBID) isn't running, jobs sit unprocessed with no UI signal today.
+- **Delete paper** — `DELETE /works/{id}` (cascade dependent rows) + UI, with confirm.
+- **Selection persistence for shelves/racks** — finish wiring `lib/selection.ts` so a half-built
+  shelf stays open across tabs (the construct-a-shelf workflow).
+- **Server-folder clarity + agent management UI** — explain what a "server-folder alias" is and
+  where it's configured (server YAML `storage.server_allowed_roots`); make clear that adding a
+  folder *on the user's own PC* is the **agent** path, not server-folder. Add an Agents UI to
+  drive the local agent: show enrolled agents, their manifested files, and a "request teleport"
+  action (the Stage 5 backend already supports this) + guidance on running the agent with its
+  enrollment/bearer token.
+- **Operational doc** — a short "is the background worker running?" runbook note; surface worker
+  health in the Jobs tab.
+
+**Batch 3 (deferred / smaller):** per-field `user_confirmed` locking; list a paper's applied tags;
+durable agent SQLite index.
+
+---
+
 ## Stage 5 — Local agent vertical (M5)  *(the distinctive remote-machine feature)*
 
 The agent is the project's differentiator and is still mostly enrollment scaffold. Build it as one
