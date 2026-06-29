@@ -5,19 +5,22 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.ai import Embedding, Summary
 from app.models.annotation import Annotation
 from app.models.citation import CitationMention, Reference
+from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
-from app.models.work import Work
+from app.models.work import Work, WorkVersion
+from app.services.audit import record_event
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_doi, normalize_title
@@ -165,6 +168,76 @@ def update_work(
     db.commit()
     db.refresh(work)
     return work
+
+
+@router.delete("/{work_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_work(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> None:
+    """Delete a paper and its dependent rows.
+
+    Removes links and derived data (memberships, tags, assertions, summaries, embeddings,
+    references, mentions, annotations, versions, duplicate candidates). The underlying File
+    rows and managed PDFs are content-addressed and may be shared, so they are kept; only the
+    file↔work links are removed.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+
+    db.execute(delete(FileWorkLink).where(FileWorkLink.work_id == work_id))
+    db.execute(delete(ShelfWork).where(ShelfWork.work_id == work_id))
+    db.execute(delete(Annotation).where(Annotation.work_id == work_id))
+    db.execute(delete(CitationMention).where(CitationMention.citing_work_id == work_id))
+    db.execute(delete(Reference).where(Reference.citing_work_id == work_id))
+    db.execute(delete(WorkVersion).where(WorkVersion.work_id == work_id))
+    db.execute(
+        delete(MetadataAssertion).where(
+            MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work_id
+        )
+    )
+    db.execute(delete(Summary).where(Summary.entity_type == "work", Summary.entity_id == work_id))
+    db.execute(
+        delete(Embedding).where(Embedding.entity_type == "work", Embedding.entity_id == work_id)
+    )
+    db.execute(delete(TagLink).where(TagLink.entity_type == "work", TagLink.entity_id == work_id))
+    db.execute(
+        delete(DuplicateCandidate).where(
+            or_(
+                and_(
+                    DuplicateCandidate.entity_a_type == "work",
+                    DuplicateCandidate.entity_a_id == work_id,
+                ),
+                and_(
+                    DuplicateCandidate.entity_b_type == "work",
+                    DuplicateCandidate.entity_b_id == work_id,
+                ),
+            )
+        )
+    )
+    # Detach references/mentions in *other* works that resolved to this one.
+    db.execute(
+        update(Reference)
+        .where(Reference.resolved_work_id == work_id)
+        .values(resolved_work_id=None, resolution_status="unresolved")
+    )
+    db.execute(
+        update(CitationMention)
+        .where(CitationMention.resolved_cited_work_id == work_id)
+        .values(resolved_cited_work_id=None)
+    )
+
+    db.delete(work)
+    record_event(
+        db,
+        "work.deleted",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work_id),
+    )
+    db.commit()
 
 
 class MetadataAssertionRead(BaseModel):

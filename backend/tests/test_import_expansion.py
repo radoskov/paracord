@@ -239,3 +239,46 @@ def test_list_work_files_empty_and_missing(client, auth_headers) -> None:
     assert client.get(f"/api/v1/works/{work['id']}/files", headers=headers).json() == []
     missing = client.get(f"/api/v1/works/{uuid.uuid4()}/files", headers=headers)
     assert missing.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Delete a paper (Stage 4.5 / 6B)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_work_removes_paper_and_links(client, auth_headers, db) -> None:
+    from app.core.config import get_settings
+
+    headers = auth_headers("editor")
+    work = client.post(
+        "/api/v1/works", headers=headers, json={"canonical_title": "Throwaway"}
+    ).json()
+    with (
+        patch("app.services.storage.get_settings", return_value=get_settings()),
+        patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        client.post(
+            f"/api/v1/works/{work['id']}/files",
+            headers=headers,
+            files={"file": ("p.pdf", io.BytesIO(_TINY_PDF), "application/pdf")},
+        )
+
+    deleted = client.delete(f"/api/v1/works/{work['id']}", headers=headers)
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/works/{work['id']}", headers=headers).status_code == 404
+    assert (
+        db.query(FileWorkLink).filter(FileWorkLink.work_id == uuid.UUID(work["id"])).first() is None
+    )
+
+
+def test_delete_work_missing_returns_404(client, auth_headers) -> None:
+    r = client.delete(f"/api/v1/works/{uuid.uuid4()}", headers=auth_headers("editor"))
+    assert r.status_code == 404
+
+
+def test_delete_work_requires_editor(client, auth_headers) -> None:
+    work = client.post(
+        "/api/v1/works", headers=auth_headers("editor"), json={"canonical_title": "X"}
+    ).json()
+    r = client.delete(f"/api/v1/works/{work['id']}", headers=auth_headers("reader"))
+    assert r.status_code == 403

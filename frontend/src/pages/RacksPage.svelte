@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   import { ApiClient, type Rack, type Shelf } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { selectedRackId } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -38,10 +40,16 @@
       [racks, allShelves] = await Promise.all([client.listRacks(), client.listShelves()]);
       if (selected) selected = racks.find((r) => r.id === selected?.id) ?? null;
     });
+    if (!selected) {
+      const remembered = get(selectedRackId);
+      const rack = remembered ? racks.find((r) => r.id === remembered) : undefined;
+      if (rack) await select(rack);
+    }
   }
 
   async function select(rack: Rack): Promise<void> {
     selected = rack;
+    selectedRackId.set(rack.id);
     pickShelfId = '';
     await run(async () => {
       rackShelves = await client.listRackShelves(rack.id);
@@ -83,6 +91,7 @@
     await run(async () => {
       await client.updateRack(rack.id, { status: 'archived' });
       selected = null;
+      selectedRackId.set(null);
       rackShelves = [];
       racks = await client.listRacks();
     }, 'Rack archived');

@@ -122,6 +122,12 @@
     selected = work;
     works = works.map((w) => (w.id === work.id ? work : w));
   }
+
+  function onDeleted(workId: string): void {
+    works = works.filter((w) => w.id !== workId);
+    selectWork(null);
+    message = 'Paper deleted';
+  }
 </script>
 
 <section class="layout">
@@ -179,7 +185,7 @@
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
-        <WorkDetail {client} work={selected} {onUpdated} onClose={() => selectWork(null)} />
+        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} onClose={() => selectWork(null)} />
       {/key}
     {:else}
       <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>

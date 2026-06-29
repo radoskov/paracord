@@ -20,6 +20,7 @@
   export let work: Work;
   export let onUpdated: (work: Work) => void = () => {};
   export let onClose: () => void = () => {};
+  export let onDeleted: (workId: string) => void = () => {};
 
   const STATUSES = ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'];
 
@@ -107,6 +108,17 @@
     });
   }
 
+  async function deletePaper(): Promise<void> {
+    const title = form.canonical_title || 'this paper';
+    if (!window.confirm(`Delete “${title}”? Its files stay in the library; links and notes are removed.`))
+      return;
+    const id = work.id;
+    await run(async () => {
+      await client.deleteWork(id);
+      onDeleted(id);
+    });
+  }
+
   async function selectCanonical(assertionId: string): Promise<void> {
     await run(async () => {
       const updated = await client.selectMetadataAssertion(work.id, assertionId);
@@ -185,7 +197,11 @@
 <div class="detail">
   <div class="bar">
     <h2>{form.canonical_title || 'Untitled paper'}</h2>
-    <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
+    <div class="bar-actions">
+      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading}
+        title="Delete this paper (files are kept)">Delete</button>
+      <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
+    </div>
   </div>
   {#if message}<p class="muted">{message}</p>{/if}
 
@@ -447,5 +463,15 @@
     display: flex;
     flex-shrink: 0;
     gap: 0.35rem;
+  }
+
+  .bar-actions {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .danger-btn {
+    border-color: #f1b0a8;
+    color: #b3261e;
   }
 </style>

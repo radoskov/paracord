@@ -392,6 +392,10 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/${id}`, { method: 'PATCH', body: payload });
   }
 
+  async deleteWork(id: string): Promise<void> {
+    await this.request<void>(`/api/v1/works/${id}`, { method: 'DELETE' });
+  }
+
   async listWorkMetadata(workId: string): Promise<FieldReview[]> {
     return this.request<FieldReview[]>(`/api/v1/works/${workId}/metadata`);
   }

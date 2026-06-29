@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   import { ApiClient, type Shelf, type Work } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { selectedShelfId } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -43,10 +45,17 @@
       [shelves, allWorks] = await Promise.all([client.listShelves(), client.listWorks()]);
       if (selected) selected = shelves.find((s) => s.id === selected?.id) ?? null;
     });
+    // Restore the shelf left open on a previous visit to this tab.
+    if (!selected) {
+      const remembered = get(selectedShelfId);
+      const shelf = remembered ? shelves.find((s) => s.id === remembered) : undefined;
+      if (shelf) await select(shelf);
+    }
   }
 
   async function select(shelf: Shelf): Promise<void> {
     selected = shelf;
+    selectedShelfId.set(shelf.id);
     pickWorkId = '';
     await run(async () => {
       shelfWorks = await client.listShelfWorks(shelf.id);
@@ -89,6 +98,7 @@
     await run(async () => {
       await client.updateShelf(shelf.id, { status: 'archived' });
       selected = null;
+      selectedShelfId.set(null);
       shelfWorks = [];
       shelves = await client.listShelves();
     }, 'Shelf archived');
@@ -151,15 +161,15 @@
               <option value={work.id}>{work.canonical_title ?? 'Untitled'}{work.year ? ` (${work.year})` : ''}</option>
             {/each}
           </select>
-          <button type=”button” on:click={addWork} disabled={!pickWorkId || loading}
+          <button type="button" on:click={addWork} disabled={!pickWorkId || loading}
             title={pickWorkId ? 'Add the chosen paper' : 'Choose a paper first'}>Add paper</button>
         </div>
-        {#if !pickWorkId}<p class=”hintline”>Pick a paper above to enable “Add paper”.</p>{/if}
+        {#if !pickWorkId}<p class="hintline">Pick a paper above to enable “Add paper”.</p>{/if}
       </div>
 
       <h3>Papers in this shelf ({shelfWorks.length})</h3>
       {#if shelfWorks.length === 0}
-        <p class=”empty”>This shelf is empty. Use “Add a paper” above.</p>
+        <p class="empty">This shelf is empty. Use “Add a paper” above.</p>
       {:else}
         <ul class="member-list">
           {#each shelfWorks as work (work.id)}
