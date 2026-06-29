@@ -31,15 +31,16 @@ upload + identifier import frontend + backend).
 - **A1** ✅ managed-path extraction fix · **A3** ✅ `make ready`/`ci` mirror CI → Stage 1
 - **B1** ✅ GROBID options config-driven + PDF coordinate extraction → Stage 2
 - **PDF.js reader** ✅ and **Cytoscape graph** ✅ components → Stage 3
+- **Frontend IA & UX overhaul** ✅ — tabbed shell, master–detail Library with work editing +
+  metadata review + attach/open PDFs, explicit shelves/racks managers, RIS/CSL import,
+  attach-file-to-work backend, tooltips/disabled-reasons/help → Stage 4
 
 **Still open and scheduled below:**
-- **Frontend IA & UX overhaul** (NEW PRIORITY) — tabbed app shell, master–detail library with
-  work editing, fixed shelves/racks organize UX, tooltips/disabled-reasons/help; **subsumes** the
-  metadata-review/edit UI and RIS/CSL import. → **Stage 4**
-- **Agent manifest/teleport** — the distinctive remote feature; still scaffold. → Stage 5
+- **Agent manifest/teleport** — the distinctive remote feature; still scaffold. → **Stage 5 (next)**
 - **H2** (AI read-path writes), embedding/topic/summary **provider interface**. → Stage 6
 - **H3** fuzzy-title perf, **C3/C4** remaining edges, **H7** pgvector, export polish, auth
-  hardening, security-doc truthfulness, backups, prod smoke. → Stage 7 (deferred polish)
+  hardening, security-doc truthfulness, backups, prod smoke, plus Stage-4 refinements
+  (per-field `user_confirmed`, applied-tags listing, import-queue panel). → Stage 7 (deferred)
 
 ---
 
@@ -139,6 +140,17 @@ PDF.js reader, anchored highlights, and citation→mention jumps.
 > (P2/item10 remainder) — the metadata editing becomes part of the work-detail panel. It is
 > frontend-heavy with one small backend addition (F). **No capability may regress** during the
 > refactor; the current page is the source pool for components being moved.
+
+> **Status: ✅ implemented (2026-06-29).** All of 6A–6F landed. The monolithic `LibraryPage`
+> was decomposed into a tabbed shell (`App.svelte`) over per-area pages
+> (`LibraryPage`/`ImportPage`/`ShelvesPage`/`RacksPage`/`TagsPage`/`DuplicatesPage`/
+> `InsightsPage`/`AdminPage`); the Library is now a searchable master list + `WorkDetail` panel
+> (edit, metadata-conflict review, Enrich, attach/open PDFs, embedded reader); shelves/racks use
+> explicit add-pickers (no more overloaded selection); RIS/CSL import and the
+> attach-file-to-work endpoint (6F) shipped; tooltips/disabled-reasons/empty-states/confirms are
+> in throughout. **Deferred refinements** (Stage 7): per-field `user_confirmed` locking (6B/6F —
+> field editing + canonical-select shipped; per-field lock not yet), listing a work's applied
+> tags (no backend endpoint yet), and an import-batch/queue status panel (6D).
 
 **6A. Tabbed application shell.** Extend the existing dependency-free hash router (`App.svelte`)
 from `#library`/`#admin` to first-class areas, each its own page component under `pages/`:
@@ -267,17 +279,15 @@ user-visible problem (e.g. import latency for H3).
 ```
 Stage 1 ✅ ──► Stage 2 ✅ GROBID coords ──► Stage 3 ✅ reader + graph components
                                                   │
-Stage 4  frontend IA & UX overhaul  ◄─────────────┘   (tabbed shell, master–detail
-         (subsumes metadata-edit UI + RIS/CSL)          library w/ editing, organize
+Stage 4 ✅ frontend IA & UX overhaul  ◄───────────┘   (tabbed shell, master–detail
+          (metadata-edit UI + RIS/CSL folded in)        library w/ editing, organize
                                                          fix, affordances/help)
-Stage 5  agent vertical (independent; can parallelize with 4)
+Stage 5  agent vertical (NEXT; independent)
 Stage 6  AI provider hardening (independent; after 1)
 Stage 7  deferred polish (last)
 ```
 
-Stages 1–3 are done. **Stage 4 is now the priority**: the reader and graph *components* exist
-(Stage 3) but are buried in an unusable single-page console — Stage 4 makes the whole app navigable
-and comprehensible, and is the prerequisite for meaningful in-vivo testing. It folds in the former
-Stage-4 items (metadata-edit UI as the work-detail panel; RIS/CSL import into the Import tab).
-Stage 5 (agent) and Stage 6 (AI) remain independent and can run in parallel per `WORK_SPLIT.md`
-(Agent C owns the agent; Agent I owns AI). Everything in Stage 7 is intentionally last.
+Stages 1–4 are done — the app is now navigable and editable end-to-end. **Stage 5 (agent
+manifest/teleport) is next**: the distinctive remote-machine feature, still enrollment-only.
+Stage 5 and Stage 6 (AI) are independent and can run in parallel per `WORK_SPLIT.md` (Agent C owns
+the agent; Agent I owns AI). Everything in Stage 7 is intentionally last.

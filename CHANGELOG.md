@@ -27,6 +27,21 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Stage 4 — Frontend information architecture & UX overhaul:** the single ~10-section operator
+  page is replaced by a hash-routed **tabbed shell** (`App.svelte`: Library / Import / Shelves /
+  Racks / Tags / Duplicates / Insights / Admin), each tab a focused page with a one-line hint.
+  The **Library** becomes a searchable master list + a `WorkDetail` panel — edit fields + Save,
+  metadata-conflict review with canonical "Use this", per-work **Enrich**, **attach/open PDFs**
+  (new `GET`/`POST /works/{id}/files` + `attach_uploaded_pdf_to_work`), an embedded PDF.js reader,
+  and tag apply. **Shelves/Racks** become explicit master–detail managers with add-pickers scoped
+  to the open item — fixing the prior overloaded-selection bug where clicking a chip silently
+  primed the add-target so "Archive" appeared to enable "Add". **Import** consolidates folder /
+  upload / identifier / BibTeX / **RIS** / **CSL-JSON** (`services/bibliography_import.py`,
+  `POST /imports/ris` + `/imports/csl`). Cross-cutting affordances: tooltips, disabled-reason
+  hints, empty-state guidance, per-tab blurbs, and confirmation on destructive actions. Login moved
+  into the shell. Frontend: 11 component tests (added a shell-routing test); backend 190 passed.
+  Deferred to Stage 7: per-field `user_confirmed` locking, applied-tags listing, import-queue
+  panel. (AUDIT B6 / P2/item8 / P2/item10; WORKPLAN Stage 4)
 - **Stage 3 — PDF.js reader + interactive citation graph (frontend):**
   `PdfReader.svelte` replaces the `<iframe>` with a `pdfjs-dist` canvas reader: page navigation,
   thumbnail rail, zoom, in-app full-text search, a citation highlight overlay driven by the

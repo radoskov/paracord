@@ -244,6 +244,16 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **Stage 4 (DONE) — Frontend IA & UX overhaul:** the single ~10-section page was replaced with a
+  hash-routed **tabbed shell** (`App.svelte`) over per-area pages — Library, Import, Shelves, Racks,
+  Tags, Duplicates, Insights, Admin. The **Library** is now a searchable master list + a
+  `WorkDetail` panel (edit fields + Save, metadata-conflict review with canonical select, per-work
+  Enrich, attach/open PDFs via the new `/works/{id}/files` endpoints, embedded PDF.js reader, tag
+  apply). **Shelves/Racks** are explicit master–detail managers with add-pickers scoped to the open
+  item (fixing the overloaded-selection confusion). **Import** consolidates folder/upload/identifier
+  /BibTeX/**RIS**/**CSL-JSON**. Cross-cutting affordances (tooltips, disabled-reason hints,
+  empty-state help, per-tab blurbs, destructive-action confirms) throughout. Deferred to Stage 7:
+  per-field `user_confirmed` locking, applied-tags listing, import-queue panel.
 - **Stage 3 (DONE) — PDF.js reader + interactive Cytoscape graph:** `PdfReader.svelte` replaces the
   iframe with a `pdfjs-dist` canvas reader (page nav, thumbnail rail, zoom, in-app text search,
   citation-coordinate highlight overlay, References→page jump, and text-selection→annotation with a
@@ -294,16 +304,12 @@ to the last stage**. Summary of the next stages:
    mirror CI.
 2. **Stage 2 — GROBID settings + coordinate extraction (B1) — DONE.**
 3. **Stage 3 — PDF.js reader + interactive Cytoscape graph — DONE.**
-4. **Next: Stage 4 — Frontend IA & UX overhaul (NEW PRIORITY after a 2026-06-29 in-vivo UI
-   review).** The reader/graph components exist but are buried in an unusable single-page console.
-   Stage 4 introduces a tabbed app shell (Library / Shelves / Racks / Tags / Import / Duplicates /
-   Insights / Admin), turns the Library into a searchable master list + work-detail panel with
-   **editable fields, metadata-conflict review, file attach/open** (subsumes P2/item8), fixes the
-   confusing shelves/racks organize controls (selection currently silently primes the add-target,
-   so "Archive" appears to enable "Add"), adds tooltips / disabled-reasons / empty-state help, and
-   folds in **RIS/CSL import** (P2/item10 remainder). See `docs/WORKPLAN.md` Stage 4 for the full
-   spec (6A–6F), including the one small backend addition (attach-file-to-work + per-field
-   `user_confirmed`).
+4. **Stage 4 — Frontend IA & UX overhaul — DONE.**
+5. **Next: Stage 5 — Local agent manifest/teleport vertical (M5).** The distinctive
+   remote-machine feature is still enrollment-only; build the agent local index, server
+   `AgentFile`/manifest ingestion (token-auth), user-authorized teleport with checksum + audit,
+   and remove the raw-path teleport helper. See `docs/WORKPLAN.md` Stage 5; the acceptance
+   contract is `backend/tests/future/test_future_agent_teleport_acceptance.py`.
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 5. **Stage 5 — agent manifest/teleport vertical (M5).**
 6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**

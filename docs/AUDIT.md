@@ -940,21 +940,21 @@ drifting (addresses finding **A2**).
 | A2 | doc drift after fixes | **OPEN → being closed** | this section + WORKPLAN + refreshed PROGRESS/ROADMAP/CHANGELOG |
 | A3 | `make ready` ≠ CI surface | **OPEN** | `ready: fix precommit check`, `check: lint test`, `test: test-api test-agent` — no `frontend-check`/`test-migrations` in `ready`/`ci` → **Stage 1** |
 | B1 | GROBID config/coordinates | **FIXED (2026-06-29)** | options config-driven from `processing.grobid:` YAML; `GrobidClient` sends `teiCoordinates`; `tei_parser` parses `coords` → `CitationMention.pdf_coordinates` JSONB (migration `0013`, replaces 4 scalar cols, §9.3); citation API exposes `pdf_coordinates`/`pdf_x..` |
-| B6 | frontend single-page | **MOSTLY ADDRESSED (2026-06-29)** | hash router + Admin UI (`94151b4`); PDF.js reader (canvas, thumbnails, search, coordinate highlights, selection→annotation) and interactive Cytoscape graph (click-to-open, layouts, Graph/List toggle) landed in Stage 3; **metadata-review UI** still pending → Stage 4 |
+| B6 | frontend single-page | **ADDRESSED (2026-06-29)** | Stage 4 replaced the single page with a tabbed shell over per-area pages; Library is a master list + WorkDetail (edit, metadata-conflict review, Enrich, attach/open PDFs, embedded reader); explicit shelves/racks managers; reader + Cytoscape graph from Stage 3. Refinements (per-field lock, applied-tags listing, import-queue panel) → Stage 7 |
 | B5 | agent scaffold only | **OPEN** | enrollment works; manifest/teleport stubs → **Stage 5** |
 | P1/item4 | `arxiv_base_id` + UNIQUE | **FIXED** | migration `0011`, partial unique indexes |
 | P1/item5 | DOI normalization | **FIXED** | normalize-at-write + SQL pushdown, migration `0012` |
 | P2/item9 | scope summaries | **FIXED** | `POST /ai/summaries` real implementation |
-| P2/item10 | import expansion | **PARTIAL** | upload + identifier done (frontend+backend); upload extraction now works (A1 fixed); RIS/CSL pending → Stage 4 |
+| P2/item10 | import expansion | **DONE (2026-06-29)** | server-folder, upload, identifier, BibTeX, and now RIS + CSL-JSON import all shipped; upload extraction works (A1) |
 
 ## Confirmed-valid open items, by priority
 
 1. ~~**A1** (HIGH correctness) — managed-path extraction.~~ **FIXED 2026-06-29.**
 2. ~~**A3** (process) — make local readiness mirror CI.~~ **FIXED 2026-06-29.**
 3. ~~**B1** (extraction) — GROBID settings + coordinates.~~ **FIXED 2026-06-29.**
-4. **B6 remainder** — PDF.js reader + Cytoscape graph **DONE (Stage 3)**; **metadata-review UI**
-   pending → Stage 4.
-5. **B5** — agent manifest/teleport vertical.
+4. ~~**B6** — frontend overhaul (reader, graph, metadata-review UI, tabbed shell).~~ **DONE
+   (Stages 3–4, 2026-06-29).**
+5. **B5** — agent manifest/teleport vertical (**next**).
 6. **H2** — embeddings off the read path; provider interface.
 7. Deferred (Stage 7): H3 perf, C3/C4 remainder, H7 pgvector, export polish, M0 auth hardening,
    security-doc truthfulness (M2/M3/M4/M5), backups, prod smoke.
