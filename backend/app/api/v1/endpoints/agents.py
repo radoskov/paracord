@@ -1,24 +1,35 @@
 """Local agent protocol endpoints.
 
 ``/enroll-request`` is intentionally unauthenticated: the agent has no user session and proves
-itself with the owner-issued enrollment token. The remaining manifest/teleport endpoints require
-a valid agent bearer token (minted on owner approval) and return 501 until M5 is implemented.
+itself with the owner-issued enrollment token. The manifest/teleport endpoints require a valid
+agent bearer token (minted on owner approval), and the server only ever handles opaque file
+identity + agent-pushed bytes — never a path on the agent's machine.
 """
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_agent_token
 from app.db.session import get_db
-from app.schemas.agent import AgentManifestRequest, AgentRegisterRequest, AgentRegisterResponse
+from app.models.agent import Agent
+from app.schemas.agent import (
+    AgentManifestRequest,
+    AgentRegisterRequest,
+    AgentRegisterResponse,
+    PendingTeleportItem,
+)
+from app.services import agent_files
 from app.services import agents as agent_service
+from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-AGENT_AUTH = Depends(require_agent_token)
+AGENT_DEP = Depends(require_agent_token)
+
+_MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
 
 
 class AgentEnrollRequest(BaseModel):
@@ -53,19 +64,57 @@ def register_agent(payload: AgentRegisterRequest) -> AgentRegisterResponse:
     )
 
 
-@router.post("/manifest", dependencies=[AGENT_AUTH])
-def receive_manifest(payload: AgentManifestRequest) -> dict[str, str]:
-    """Receive a scanned-file manifest from an authenticated agent (M5, not yet implemented)."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Manifest ingestion is not implemented yet.",
-    )
+@router.post("/manifest", status_code=status.HTTP_202_ACCEPTED)
+def receive_manifest(
+    payload: AgentManifestRequest,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, int | str]:
+    """Receive a scanned-file manifest from an authenticated agent."""
+    received = agent_files.ingest_manifest(db, agent=agent, items=payload.items)
+    db.commit()
+    return {"status": "accepted", "received": received}
 
 
-@router.post("/teleport/{agent_file_id}", dependencies=[AGENT_AUTH])
-def request_teleport(agent_file_id: str) -> dict[str, str]:
-    """Request a teleport of an agent-owned file to managed storage (M5, not yet implemented)."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Teleport is not implemented yet.",
-    )
+@router.get("/teleports/pending", response_model=list[PendingTeleportItem])
+def list_pending_teleports(
+    db: Session = DB_DEP, agent: Agent = AGENT_DEP
+) -> list[PendingTeleportItem]:
+    """List this agent's files a user has requested to teleport (the agent then uploads them)."""
+    return [
+        PendingTeleportItem(
+            local_file_id=item.local_file_id, sha256=item.sha256, display_path=item.display_path
+        )
+        for item in agent_files.pending_teleports(db, agent=agent)
+    ]
+
+
+@router.post("/teleports/{local_file_id}/content", status_code=status.HTTP_201_CREATED)
+async def upload_teleport_content(
+    local_file_id: str,
+    file: UploadFile,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, str]:
+    """Agent pushes the bytes for a requested teleport; the server verifies the hash + stores it."""
+    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded file exceeds 200 MB limit",
+        )
+    if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
+        )
+    try:
+        stored = agent_files.complete_teleport(
+            db, agent=agent, local_file_id=local_file_id, pdf_bytes=pdf_bytes
+        )
+    except ValueError as exc:
+        db.commit()  # persist the teleport.failed audit/state before surfacing the error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(stored)
+    enqueue_extraction(stored.id)
+    return {"file_id": str(stored.id), "sha256": stored.sha256, "status": "complete"}

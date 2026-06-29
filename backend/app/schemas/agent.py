@@ -1,5 +1,7 @@
 """Local agent protocol schemas."""
 
+import uuid
+
 from pydantic import BaseModel, Field
 
 
@@ -13,15 +15,27 @@ class AgentRegisterResponse(BaseModel):
     agent_token: str
 
 
-class AgentFileManifestItem(BaseModel):
+class AgentManifestItem(BaseModel):
     local_file_id: str
-    display_path: str
     sha256: str
     size_bytes: int
+    display_path: str | None = None
+    mime_type: str | None = None
     modified_at: str | None = None
     page_count: int | None = None
 
 
 class AgentManifestRequest(BaseModel):
-    agent_id: str
-    files: list[AgentFileManifestItem] = Field(default_factory=list)
+    # The agent is identified by its bearer token, not a body field.
+    items: list[AgentManifestItem] = Field(default_factory=list)
+
+
+class PendingTeleportItem(BaseModel):
+    local_file_id: str
+    sha256: str
+    display_path: str | None = None
+
+
+class TeleportRequest(BaseModel):
+    agent_id: uuid.UUID
+    local_file_id: str

@@ -1,6 +1,6 @@
 """ORM model exports."""
 
-from app.models.agent import Agent, AgentEnrollmentToken
+from app.models.agent import Agent, AgentEnrollmentToken, AgentFile
 from app.models.ai import Embedding, Summary, TopicAssignment
 from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
@@ -17,6 +17,7 @@ from app.models.work import Work, WorkVersion
 __all__ = [
     "Agent",
     "AgentEnrollmentToken",
+    "AgentFile",
     "AuditEvent",
     "Annotation",
     "CitationMention",

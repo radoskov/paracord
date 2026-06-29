@@ -16,6 +16,8 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.source import ImportBatch, Source
 from app.models.user import User
+from app.schemas.agent import TeleportRequest
+from app.services import agent_files
 from app.services.bibliography_import import import_csl, import_ris
 from app.services.bibtex import import_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
@@ -130,6 +132,35 @@ def import_csl_entries(
     db.commit()
     db.refresh(batch)
     return batch
+
+
+@router.post("/teleport", status_code=status.HTTP_202_ACCEPTED)
+def request_teleport(
+    payload: TeleportRequest,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> dict[str, str]:
+    """Request a teleport of an agent-indexed file to the managed library (user-authorised).
+
+    Marks the manifest entry as requested; the agent then pushes the bytes to
+    ``/agents/teleports/{local_file_id}/content``.
+    """
+    try:
+        agent_files.request_teleport(
+            db,
+            agent_id=payload.agent_id,
+            local_file_id=payload.local_file_id,
+            requested_by=actor,
+        )
+    except ValueError as exc:
+        code = status.HTTP_404_NOT_FOUND if "No such" in str(exc) else status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    db.commit()
+    return {
+        "agent_id": str(payload.agent_id),
+        "local_file_id": payload.local_file_id,
+        "status": "requested",
+    }
 
 
 _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit

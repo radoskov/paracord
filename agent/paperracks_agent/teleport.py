@@ -1,12 +1,20 @@
-"""Teleport upload implementation."""
+"""Teleport upload implementation.
 
-from pathlib import Path
+A teleport is always resolved through the agent's own :class:`AgentIndex` by opaque
+``local_file_id``. The agent never accepts a raw filesystem path from the server, so the server
+cannot ask the agent to read a file it did not itself index.
+"""
+
+from typing import BinaryIO
+
+from paperracks_agent.index import AgentIndex
 
 
-def open_file_for_teleport(path: Path):
-    """Open a file selected by local file ID for server upload.
+def open_file_for_teleport(index: AgentIndex, local_file_id: str) -> BinaryIO:
+    """Open an indexed file for upload, resolved only via ``local_file_id``.
 
-    TODO: Resolve local_file_id through the agent index. Do not accept arbitrary raw path requests
-    from the server.
+    Raises ``KeyError`` if the id is unknown to the agent or resolves outside the configured
+    roots — there is no code path that opens a server-supplied path.
     """
+    path = index.resolve_path(local_file_id)
     return path.open("rb")

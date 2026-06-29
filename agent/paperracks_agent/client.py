@@ -24,3 +24,25 @@ class PaRacORDServerClient:
                 headers=self._headers(),
             )
             response.raise_for_status()
+
+    async def get_pending_teleports(self) -> list[dict]:
+        """Return the files a user has requested this agent to teleport (by local_file_id)."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.server_url}/api/v1/agents/teleports/pending",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def upload_teleport_content(self, local_file_id: str, handle) -> dict:
+        """Push the bytes for a requested teleport; the server verifies the hash before storing."""
+        async with httpx.AsyncClient(timeout=120) as client:
+            files = {"file": (f"{local_file_id}.pdf", handle, "application/pdf")}
+            response = await client.post(
+                f"{self.server_url}/api/v1/agents/teleports/{local_file_id}/content",
+                files=files,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return response.json()

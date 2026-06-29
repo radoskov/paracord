@@ -13,6 +13,8 @@ class ManifestItem:
     path: Path
     sha256: str
     size_bytes: int
+    display_path: str = ""
+    mime_type: str = "application/pdf"
 
 
 def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -25,11 +27,18 @@ def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 
 def build_manifest_item(path: Path) -> ManifestItem:
-    """Build a manifest item for one PDF."""
+    """Build a manifest item for one PDF.
+
+    ``local_file_id`` is the content hash, so it is stable across rescans and exposes no
+    filesystem path to the server. ``display_path`` is the file name only — a human label,
+    never a server-usable path.
+    """
     file_hash = hash_file(path)
     return ManifestItem(
         local_file_id=file_hash,
         path=path,
         sha256=file_hash,
         size_bytes=path.stat().st_size,
+        display_path=path.name,
+        mime_type="application/pdf",
     )
