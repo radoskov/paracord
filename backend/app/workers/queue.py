@@ -99,7 +99,7 @@ def queue_status(limit: int = 25) -> dict:
                         "status": (job.get_status(refresh=False) or fallback_status),
                         "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
                         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-                        "error": (job.exc_info or "").strip()[-400:] or None
+                        "error": (job.exc_info or "").strip()[-2000:] or None
                         if fallback_status == "failed"
                         else None,
                     }

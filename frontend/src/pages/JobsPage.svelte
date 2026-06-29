@@ -94,10 +94,17 @@
           <ul class="jobs">
             {#each status.jobs as job (job.id)}
               <li>
-                <span class="badge badge-{job.status}">{job.status}</span>
-                <strong>{job.task}</strong>
-                <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
-                {#if job.error}<code class="err" title={job.error}>{job.error.slice(0, 120)}</code>{/if}
+                <div class="job-row">
+                  <span class="badge badge-{job.status}">{job.status}</span>
+                  <strong>{job.task}</strong>
+                  <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
+                </div>
+                {#if job.error}
+                  <details class="err-details">
+                    <summary>error — {job.error.split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 140)}</summary>
+                    <pre class="err">{job.error}</pre>
+                  </details>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -188,12 +195,24 @@
   }
 
   .jobs li {
-    align-items: center;
     border-bottom: 1px solid #eef1f4;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.4rem 0;
+  }
+
+  .job-row {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-    padding: 0.4rem 0;
+  }
+
+  .err-details summary {
+    color: #b3261e;
+    cursor: pointer;
+    font-size: 0.78rem;
   }
 
   .badge {
@@ -225,10 +244,16 @@
   }
 
   .err {
-    color: #b3261e;
-    font-size: 0.75rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    background: #fff5f5;
+    border: 1px solid #f1d0cc;
+    border-radius: 4px;
+    color: #7f1d1d;
+    font-size: 0.74rem;
+    margin: 0.3rem 0 0;
+    max-height: 16rem;
+    overflow: auto;
+    padding: 0.5rem;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 </style>

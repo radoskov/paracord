@@ -19,14 +19,18 @@ services:
       target: production
     environment:
       PARACORD_ENV: production
-    volumes: []    # No bind-mounts: the built image contains all application code.
+    # No source bind-mounts (image is self-contained), but the managed library is persistent
+    # data and must be shared with the worker.
+    volumes:
+      - paperracks_library:/app/storage
 
   worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
       target: production
-    volumes: []
+    volumes:
+      - paperracks_library:/app/storage
 
   frontend:
     build:

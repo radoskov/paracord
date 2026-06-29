@@ -65,6 +65,9 @@ services:
       - ./scripts:/app/scripts
       - ./config:/app/config
       - ./pyproject.toml:/app/pyproject.toml
+      # Managed library: shared with the worker and persisted across restarts so uploaded/
+      # teleported PDFs the API stores are readable by the extraction worker.
+      - paperracks_library:/app/storage
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
       interval: 10s
@@ -93,6 +96,8 @@ services:
       - ./scripts:/app/scripts
       - ./config:/app/config
       - ./pyproject.toml:/app/pyproject.toml
+      # Same managed-library volume as the api, so the worker can read uploaded PDFs.
+      - paperracks_library:/app/storage
     command: ["rq", "worker", "--url", "redis://redis:6379/0", "paracord"]
 
   # PaRacORD local workstation agent (client). Idles by default; drive it with
@@ -155,3 +160,4 @@ volumes:
   paperracks_postgres:
   paperracks_ollama:
   paperracks_frontend_node_modules:
+  paperracks_library:
