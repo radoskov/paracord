@@ -4,9 +4,11 @@ import io
 import uuid
 from unittest.mock import patch
 
-from app.models.file import File, Location
+from app.models.file import File, FileWorkLink, Location
 from app.models.work import Work
 from app.services.metadata_enrichment import ExternalMetadata
+
+_PREVIEW = {"page_count": 1, "preview_text": "Sample text.", "text_layer_quality": "good"}
 
 # Minimal valid PDF bytes (just the header — enough to pass the magic-byte check).
 _TINY_PDF = b"%PDF-1.4\n%%EOF\n"
@@ -187,3 +189,53 @@ def test_identifier_import_requires_auth(client) -> None:
         json={"identifier_type": "arxiv", "value": "1706.03762"},
     )
     assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Attach a PDF to an existing work (6F)
+# ---------------------------------------------------------------------------
+
+
+def test_upload_file_to_work_attaches_and_links(client, auth_headers, db) -> None:
+    from app.core.config import get_settings
+
+    headers = auth_headers("editor")
+    work = client.post(
+        "/api/v1/works", headers=headers, json={"canonical_title": "Manual Work"}
+    ).json()
+
+    with (
+        patch("app.services.storage.get_settings", return_value=get_settings()),
+        patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            f"/api/v1/works/{work['id']}/files",
+            headers=headers,
+            files={"file": ("p.pdf", io.BytesIO(_TINY_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    assert r.json()["original_filename"] == "p.pdf"
+
+    listing = client.get(f"/api/v1/works/{work['id']}/files", headers=headers).json()
+    assert len(listing) == 1
+    link = db.query(FileWorkLink).filter(FileWorkLink.work_id == uuid.UUID(work["id"])).first()
+    assert link is not None
+
+
+def test_upload_file_to_work_rejects_non_pdf(client, auth_headers) -> None:
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "W"}).json()
+    r = client.post(
+        f"/api/v1/works/{work['id']}/files",
+        headers=headers,
+        files={"file": ("note.txt", io.BytesIO(b"not a pdf"), "text/plain")},
+    )
+    assert r.status_code == 400
+
+
+def test_list_work_files_empty_and_missing(client, auth_headers) -> None:
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "W"}).json()
+    assert client.get(f"/api/v1/works/{work['id']}/files", headers=headers).json() == []
+    missing = client.get(f"/api/v1/works/{uuid.uuid4()}/files", headers=headers)
+    assert missing.status_code == 404

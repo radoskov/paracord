@@ -291,23 +291,15 @@ def _arxiv_id_from_filename(path: Path) -> str | None:
     return match.group(1) if match else None
 
 
-def import_uploaded_pdf(
-    db: Session,
-    *,
-    filename: str,
-    pdf_bytes: bytes,
-    actor: User,
-    settings: Settings | None = None,
-) -> tuple[ImportBatch, File, bool]:
-    """Register an uploaded PDF in the managed library.
+def _ensure_managed_file(
+    db: Session, *, filename: str, pdf_bytes: bytes, settings: Settings
+) -> tuple[File, bool]:
+    """Store PDF bytes content-addressed under the managed root and ensure File + Location.
 
-    The file is stored content-addressed under ``managed_library_root`` so uploads are
-    automatically deduplicated by SHA-256.  Returns ``(batch, file, created_file)``;
-    ``created_file`` is False when the exact same file already existed.
+    Returns ``(file, created_file)``. Shared by upload-as-new-work
+    (:func:`import_uploaded_pdf`) and attach-to-existing-work
+    (:func:`attach_uploaded_pdf_to_work`); dedups by SHA-256.
     """
-    if settings is None:
-        settings = get_settings()
-
     sha256 = hashlib.sha256(pdf_bytes).hexdigest()
     managed_root = Path(settings.managed_library_root).expanduser().resolve()
     managed_root.mkdir(parents=True, exist_ok=True)
@@ -319,9 +311,9 @@ def import_uploaded_pdf(
     now = datetime.now(UTC)
     file = db.scalar(select(File).where(File.sha256 == sha256))
     created_file = file is None
-    preview = _extract_pdf_preview(dest)
 
     if file is None:
+        preview = _extract_pdf_preview(dest)
         safe_name = Path(filename).name or "upload.pdf"
         file = File(
             sha256=sha256,
@@ -358,6 +350,30 @@ def import_uploaded_pdf(
                 last_verified_at=now,
             )
         )
+    return file, created_file
+
+
+def import_uploaded_pdf(
+    db: Session,
+    *,
+    filename: str,
+    pdf_bytes: bytes,
+    actor: User,
+    settings: Settings | None = None,
+) -> tuple[ImportBatch, File, bool]:
+    """Register an uploaded PDF in the managed library as a new work.
+
+    The file is stored content-addressed under ``managed_library_root`` so uploads are
+    automatically deduplicated by SHA-256.  Returns ``(batch, file, created_file)``;
+    ``created_file`` is False when the exact same file already existed.
+    """
+    if settings is None:
+        settings = get_settings()
+
+    now = datetime.now(UTC)
+    file, created_file = _ensure_managed_file(
+        db, filename=filename, pdf_bytes=pdf_bytes, settings=settings
+    )
 
     if created_file:
         title = _title_from_filename(Path(filename))
@@ -394,6 +410,43 @@ def import_uploaded_pdf(
         actor_user_id=actor.id,
         entity_type="file",
         entity_id=str(file.id),
-        details={"filename": Path(filename).name, "sha256_prefix": sha256[:8]},
+        details={"filename": Path(filename).name, "sha256_prefix": file.sha256[:8]},
     )
     return batch, file, created_file
+
+
+def attach_uploaded_pdf_to_work(
+    db: Session,
+    *,
+    work: Work,
+    filename: str,
+    pdf_bytes: bytes,
+    actor: User,
+    settings: Settings | None = None,
+) -> tuple[File, bool, bool]:
+    """Store an uploaded PDF and link it to an *existing* work (not a new one).
+
+    Lets a manually-created work gain a PDF.  Returns ``(file, created_file, newly_linked)``;
+    ``newly_linked`` is False when this file was already attached to the work.
+    """
+    if settings is None:
+        settings = get_settings()
+
+    file, created_file = _ensure_managed_file(
+        db, filename=filename, pdf_bytes=pdf_bytes, settings=settings
+    )
+    existing_link = db.scalar(
+        select(FileWorkLink).where(FileWorkLink.file_id == file.id, FileWorkLink.work_id == work.id)
+    )
+    newly_linked = existing_link is None
+    if newly_linked:
+        db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=True))
+    record_event(
+        db,
+        "work.file_attached",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work.id),
+        details={"file_id": str(file.id), "filename": Path(filename).name},
+    )
+    return file, created_file, newly_linked

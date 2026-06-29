@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
@@ -13,13 +13,17 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.annotation import Annotation
 from app.models.citation import CitationMention, Reference
+from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work
+from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_doi, normalize_title
-from app.workers.queue import enqueue_enrichment
+from app.workers.queue import enqueue_enrichment, enqueue_extraction
+
+_MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -294,6 +298,70 @@ def get_work_citation_contexts(
             )
         )
     return contexts
+
+
+class WorkFileRead(BaseModel):
+    id: uuid.UUID
+    sha256: str
+    size_bytes: int
+    original_filename: str | None = None
+    page_count: int | None = None
+    text_layer_quality: str
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{work_id}/files", response_model=list[WorkFileRead])
+def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[File]:
+    """List the files attached to a work (via FileWorkLink)."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    return list(
+        db.scalars(
+            select(File)
+            .join(FileWorkLink, FileWorkLink.file_id == File.id)
+            .where(FileWorkLink.work_id == work_id)
+            .order_by(File.created_at.desc())
+        ).all()
+    )
+
+
+@router.post("/{work_id}/files", response_model=WorkFileRead, status_code=status.HTTP_201_CREATED)
+async def upload_work_file(
+    work_id: uuid.UUID,
+    file: UploadFile,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> File:
+    """Upload a PDF and attach it to an existing work (so a manual work isn't a dead end)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    if file.content_type and file.content_type not in (
+        "application/pdf",
+        "application/octet-stream",
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are accepted"
+        )
+    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded file exceeds 200 MB limit",
+        )
+    if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is not a valid PDF"
+        )
+    file_obj, _created, _linked = attach_uploaded_pdf_to_work(
+        db, work=work, filename=file.filename or "upload.pdf", pdf_bytes=pdf_bytes, actor=actor
+    )
+    db.commit()
+    db.refresh(file_obj)
+    enqueue_extraction(file_obj.id)
+    return file_obj
 
 
 @router.get("/{work_id}/annotations", response_model=list[AnnotationRead])
