@@ -50,6 +50,50 @@ def enqueue_enrichment(work_id) -> str | None:
 _FUNC_LABELS = {EXTRACT_JOB: "extract", ENRICH_JOB: "enrich"}
 
 
+def clear_jobs(which: str = "finished_failed") -> dict:
+    """Clear job history from the registries. Returns counts removed (never raises).
+
+    ``which``: ``finished_failed`` (default — the noise), ``failed``, ``finished``, or ``all``
+    (also drops still-queued jobs). Running jobs are never touched.
+    """
+    try:
+        from redis import Redis
+        from rq import Queue
+        from rq.job import Job
+
+        conn = Redis.from_url(get_settings().redis_url)
+        conn.ping()
+        queue = Queue(QUEUE_NAME, connection=conn)
+
+        targets = {
+            "finished_failed": ("finished", "failed"),
+            "failed": ("failed",),
+            "finished": ("finished",),
+            "all": ("finished", "failed", "queued"),
+        }.get(which, ("finished", "failed"))
+
+        registries = {
+            "finished": queue.finished_job_registry,
+            "failed": queue.failed_job_registry,
+        }
+        removed = 0
+        for name in targets:
+            if name == "queued":
+                removed += queue.count
+                queue.empty()
+                continue
+            registry = registries[name]
+            for job_id in list(registry.get_job_ids()):
+                try:
+                    Job.fetch(job_id, connection=conn).delete()
+                    removed += 1
+                except Exception:  # noqa: BLE001 - job may already be gone
+                    registry.remove(job_id)
+        return {"available": True, "cleared": removed}
+    except Exception as exc:  # noqa: BLE001 - report unavailability instead of crashing
+        return {"available": False, "error": str(exc), "cleared": 0}
+
+
 def queue_status(limit: int = 25) -> dict:
     """Introspect the RQ queue: counts, workers, and recent jobs.
 

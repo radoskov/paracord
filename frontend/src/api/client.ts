@@ -295,6 +295,9 @@ export interface WorkQuery {
   shelfId?: string;
   rackId?: string;
   tagId?: string;
+  hasPdf?: boolean;
+  hasReferences?: boolean;
+  missing?: string[];
 }
 
 export interface IdentifierImportResponse {
@@ -411,6 +414,9 @@ export class ApiClient {
     if (query.shelfId) params.set('shelf_id', query.shelfId);
     if (query.rackId) params.set('rack_id', query.rackId);
     if (query.tagId) params.set('tag_id', query.tagId);
+    if (query.hasPdf !== undefined) params.set('has_pdf', String(query.hasPdf));
+    if (query.hasReferences !== undefined) params.set('has_references', String(query.hasReferences));
+    if (query.missing?.length) params.set('missing', query.missing.join(','));
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return this.request<Work[]>(`/api/v1/works${suffix}`);
   }
@@ -760,6 +766,16 @@ export class ApiClient {
 
   async getJobs(limit = 25): Promise<QueueStatus> {
     return this.request<QueueStatus>(`/api/v1/jobs?limit=${limit}`);
+  }
+
+  async clearJobs(
+    which: 'finished_failed' | 'failed' | 'finished' | 'all' = 'finished_failed',
+  ): Promise<{ available: boolean; cleared: number; error?: string }> {
+    return this.request(`/api/v1/jobs/clear?which=${which}`, { method: 'POST' });
+  }
+
+  async extractFile(fileId: string): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/files/${fileId}/extract`, { method: 'POST' });
   }
 
   async listAuditEvents(limit = 50): Promise<AuditEvent[]> {

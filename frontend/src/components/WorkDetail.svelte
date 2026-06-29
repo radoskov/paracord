@@ -140,6 +140,33 @@
     }, `Attached “${file.name}”; extraction queued`);
   }
 
+  async function reextract(file: WorkFile): Promise<void> {
+    await run(async () => {
+      const result = await client.extractFile(file.id);
+      files = await client.listWorkFiles(work.id);
+      message =
+        `Extraction ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab.';
+    });
+  }
+
+  function fileStatusLabel(status: string): string {
+    return (
+      { extracted: 'extracted ✓', extract_failed: 'extraction failed', available: 'not extracted' }[
+        status
+      ] ?? status
+    );
+  }
+
+  async function copyHash(sha: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(sha);
+      message = 'Content hash copied';
+    } catch {
+      message = sha;
+    }
+  }
+
   async function openInReader(file: WorkFile): Promise<void> {
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
@@ -275,16 +302,32 @@
       <ul class="files">
         {#each files as file (file.id)}
           <li>
-            <span>{file.original_filename ?? file.id.slice(0, 8)} · {formatBytes(file.size_bytes)} · {file.status}</span>
+            <div class="file-main">
+              <span class="fname">{file.original_filename ?? file.id.slice(0, 8)}</span>
+              <small class="muted">{formatBytes(file.size_bytes)}</small>
+              <span class="fstatus fstatus-{file.status}">{fileStatusLabel(file.status)}</span>
+              <button
+                type="button"
+                class="hash"
+                on:click={() => copyHash(file.sha256)}
+                title={`Content hash (SHA-256) — matches the agent's local file id:\n${file.sha256}\nClick to copy`}
+              >#{file.sha256.slice(0, 12)}…</button>
+            </div>
             <span class="file-actions">
               <button type="button" class="secondary small" on:click={() => openInReader(file)} disabled={loading}
                 title="Open in the in-app reader (annotations + citation overlay)">Read</button>
               <button type="button" class="secondary small" on:click={() => openInNewTab(file)} disabled={loading}
                 title="Open the raw PDF in a new browser tab">New tab ↗</button>
+              <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading}
+                title="Queue GROBID extraction again for this file">Re-extract</button>
             </span>
           </li>
         {/each}
       </ul>
+      <p class="hintline">
+        The <strong>#hash</strong> is the file's content hash — the same value the agent shows as its
+        local file id, so you can cross-reference a server paper with a file on a workstation.
+      </p>
     {/if}
   </details>
 
@@ -482,8 +525,56 @@
   .files li {
     align-items: center;
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: space-between;
+  }
+
+  .file-main {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .fname {
+    overflow-wrap: anywhere;
+  }
+
+  .fstatus {
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.05rem 0.35rem;
+    text-transform: uppercase;
+  }
+
+  .fstatus-extracted {
+    background: #bbf7d0;
+    color: #14532d;
+  }
+
+  .fstatus-extract_failed {
+    background: #fecaca;
+    color: #7f1d1d;
+  }
+
+  .fstatus-available {
+    background: #e2e8f0;
+    color: #475569;
+  }
+
+  .hash {
+    background: #eef1f4;
+    border: 1px solid #d8dee6;
+    border-radius: 0.25rem;
+    color: #475569;
+    cursor: pointer;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    min-height: auto;
+    padding: 0.05rem 0.35rem;
   }
 
   .small {

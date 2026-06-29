@@ -159,7 +159,14 @@
     }, 'Agent removed');
   }
 
-  $: void refresh();
+  // Load whenever the authenticated client is (re)created — including the null-token → authed
+  // transition on a hard refresh, which a dependency-less `$: void refresh()` would miss (it ran
+  // once before the token was read, leaving the page empty until the tab was clicked again).
+  let loadedFor: ApiClient | null = null;
+  $: if (client && client !== loadedFor) {
+    loadedFor = client;
+    void refresh();
+  }
 
   function formatDate(iso: string): string {
     return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });

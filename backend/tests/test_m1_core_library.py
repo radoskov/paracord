@@ -22,6 +22,7 @@ from app.core.config import Settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
+from app.models.citation import Reference
 from app.models.file import File, FileWorkLink, Location
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch, Source
@@ -57,6 +58,7 @@ def db_session(tmp_path: Path):
             RackShelf.__table__,
             Tag.__table__,
             TagLink.__table__,
+            Reference.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -203,6 +205,45 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
     assert filtered_ids(shelf_id=shelf.id) == [included.id]
     assert filtered_ids(rack_id=rack.id) == [included.id]
     assert filtered_ids(tag_id=tag.id) == [included.id]
+
+
+def test_work_list_filters_by_extraction_status(db_session, owner: User) -> None:
+    """has_pdf / has_references / missing filter on extraction + metadata completeness."""
+    import uuid
+
+    # with_pdf: has a file + references; without: bare manual work missing year + abstract.
+    with_pdf = Work(canonical_title="Has PDF", normalized_title="has pdf", year=2020, abstract="a")
+    without = Work(canonical_title="Bare", normalized_title="bare")
+    db_session.add_all([with_pdf, without])
+    db_session.flush()
+    pdf = File(sha256="c" * 64, size_bytes=1, original_filename="p.pdf")
+    db_session.add(pdf)
+    db_session.flush()
+    db_session.add(FileWorkLink(file_id=pdf.id, work_id=with_pdf.id))
+    db_session.add(Reference(id=uuid.uuid4(), citing_work_id=with_pdf.id, raw_citation="ref"))
+    db_session.commit()
+
+    def ids(**filters) -> set:
+        return {
+            w.id
+            for w in list_works(
+                q=None,
+                reading_status=None,
+                shelf_id=None,
+                rack_id=None,
+                tag_id=None,
+                limit=100,
+                db=db_session,
+                **filters,
+            )
+        }
+
+    assert ids(has_pdf=True) == {with_pdf.id}
+    assert ids(has_pdf=False) == {without.id}
+    assert ids(has_references=True) == {with_pdf.id}
+    assert ids(has_references=False) == {without.id}
+    assert ids(missing="year,abstract") == {without.id}
+    assert ids(missing="title") == set()  # both have titles
 
 
 def test_stream_file_uses_configured_server_folder_location(

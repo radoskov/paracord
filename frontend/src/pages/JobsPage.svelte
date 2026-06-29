@@ -10,8 +10,26 @@
   let message = '';
   let auto = true;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let filter = 'all';
 
   const COUNT_ORDER = ['queued', 'started', 'finished', 'failed', 'scheduled', 'deferred'];
+
+  $: visibleJobs = (status?.jobs ?? []).filter((j) => filter === 'all' || j.status === filter);
+
+  function setFilter(key: string): void {
+    filter = filter === key ? 'all' : key;
+  }
+
+  async function clean(): Promise<void> {
+    if (!window.confirm('Clear finished and failed job history? Running jobs are kept.')) return;
+    try {
+      const result = await client.clearJobs('finished_failed');
+      message = result.available ? `Cleared ${result.cleared} job(s)` : `Unavailable: ${result.error ?? ''}`;
+      await refresh();
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
 
   onMount(() => {
     void refresh();
@@ -56,6 +74,8 @@
       <div class="controls">
         <label class="auto"><input type="checkbox" checked={auto} on:change={toggleAuto} /> Auto-refresh</label>
         <button type="button" class="secondary" on:click={refresh} title="Refresh now">Refresh</button>
+        <button type="button" class="secondary" on:click={clean}
+          title="Clear finished and failed job history (running jobs are kept)">Clean</button>
       </div>
     </div>
     <p class="muted">
@@ -80,19 +100,26 @@
           {/if}
         </p>
         <div class="counts">
+          <button type="button" class="count count-all" class:active={filter === 'all'} on:click={() => (filter = 'all')}>
+            <span class="n">{status.jobs.length}</span>
+            <span class="k">all</span>
+          </button>
           {#each COUNT_ORDER as key (key)}
-            <div class="count count-{key}">
+            <button type="button" class="count count-{key}" class:active={filter === key} on:click={() => setFilter(key)}
+              title={`Show only ${key} jobs`}>
               <span class="n">{status.counts[key] ?? 0}</span>
               <span class="k">{key}</span>
-            </div>
+            </button>
           {/each}
         </div>
 
         {#if status.jobs.length === 0}
           <p class="empty">No recent jobs. Import a PDF or click Enrich on a paper to create one.</p>
+        {:else if visibleJobs.length === 0}
+          <p class="empty">No <strong>{filter}</strong> jobs in the recent window. <button type="button" class="linkish" on:click={() => (filter = 'all')}>Show all</button></p>
         {:else}
           <ul class="jobs">
-            {#each status.jobs as job (job.id)}
+            {#each visibleJobs as job (job.id)}
               <li>
                 <div class="job-row">
                   <span class="badge badge-{job.status}">{job.status}</span>
@@ -161,8 +188,31 @@
     background: #f4f6f9;
     border: 1px solid #e1e7ee;
     border-radius: 8px;
+    color: inherit;
+    cursor: pointer;
+    display: block;
     padding: 0.6rem;
     text-align: center;
+    width: 100%;
+  }
+
+  .count:hover {
+    border-color: #b9c4d0;
+  }
+
+  .count.active {
+    border-color: #2d3e50;
+    box-shadow: inset 0 0 0 1px #2d3e50;
+  }
+
+  .linkish {
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    min-height: auto;
+    padding: 0;
+    text-decoration: underline;
   }
 
   .count .n {

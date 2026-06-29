@@ -336,6 +336,7 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}
 td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-align:middle}
 .muted{color:#64717f;font-size:.85rem}.ok{color:#14532d}.bad{color:#b3261e}
 .pill{font-size:.72rem;border-radius:10px;padding:.05rem .45rem;background:#eef1f4;color:#41505f}
+.pill.mono{font-family:ui-monospace,Menlo,monospace;cursor:help}
 .paused{opacity:.55}
 .modal{position:fixed;inset:0;background:rgba(20,28,38,.5);display:none;align-items:center;justify-content:center;z-index:20}
 .modal.open{display:flex}
@@ -480,8 +481,9 @@ async function refresh(){
   // indexed files
   let files=[];try{files=await api('/api/files');}catch(e){toast('files: '+e.message,'bad');}
   document.getElementById('cFiles').textContent=files.length;
-  document.getElementById('files').innerHTML = files.length? '<table><tr><th>file</th><th>action</th><th>state</th><th></th></tr>'+
+  document.getElementById('files').innerHTML = files.length? '<table><tr><th>file</th><th>id (hash)</th><th>action</th><th>state</th><th></th></tr>'+
     files.map(f=>`<tr><td>${esc(f.virtual_path||f.local_file_id.slice(0,10))}${f.present?'':' <span class="bad">(removed)</span>'}</td>`+
+      `<td><span class="pill mono" title="${esc(f.local_file_id)}\n(this content hash is the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span></td>`+
       `<td><span class="pill">${f.action}</span></td><td>${f.processing_state}${f.blocked?' <span class="bad">blocked</span>':''}</td>`+
       `<td class="row"><button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')">re-extract</button>`+
       (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')">unblock</button>`:'')+

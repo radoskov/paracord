@@ -72,6 +72,17 @@ class WorkRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Work columns that the `missing` filter can test for absence (NULL or empty string).
+_MISSING_FIELDS = {
+    "title": Work.canonical_title,
+    "abstract": Work.abstract,
+    "year": Work.year,
+    "venue": Work.venue,
+    "doi": Work.doi,
+    "arxiv_id": Work.arxiv_id,
+}
+
+
 @router.get("", response_model=list[WorkRead])
 def list_works(
     q: str | None = Query(default=None),
@@ -79,10 +90,13 @@ def list_works(
     shelf_id: uuid.UUID | None = Query(default=None),
     rack_id: uuid.UUID | None = Query(default=None),
     tag_id: uuid.UUID | None = Query(default=None),
+    has_pdf: bool | None = None,
+    has_references: bool | None = None,
+    missing: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
 ) -> list[Work]:
-    """List/search works by basic metadata."""
+    """List/search works by basic metadata and extraction/metadata completeness."""
     stmt = select(Work)
     if q:
         like = f"%{q.strip()}%"
@@ -109,6 +123,21 @@ def list_works(
             TagLink,
             (TagLink.entity_id == Work.id) & (TagLink.entity_type == "work"),
         ).where(TagLink.tag_id == tag_id)
+    if has_pdf is not None:
+        has_file = select(FileWorkLink.work_id).where(FileWorkLink.work_id == Work.id).exists()
+        stmt = stmt.where(has_file if has_pdf else ~has_file)
+    if has_references is not None:
+        has_refs = select(Reference.id).where(Reference.citing_work_id == Work.id).exists()
+        stmt = stmt.where(has_refs if has_references else ~has_refs)
+    for field in (missing or "").split(","):
+        name = field.strip()
+        column = _MISSING_FIELDS.get(name)
+        if column is None:
+            continue
+        # Non-text columns (year) only test NULL; text columns also treat "" as missing.
+        stmt = stmt.where(
+            column.is_(None) if name == "year" else or_(column.is_(None), column == "")
+        )
     stmt = stmt.distinct().order_by(Work.updated_at.desc()).limit(limit)
     return list(db.scalars(stmt).all())
 

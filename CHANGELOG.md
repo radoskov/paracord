@@ -27,6 +27,29 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Library UI pass** (`LibraryPage.svelte`, `PaperTable.svelte`, `WorkDetail.svelte`): the paper
+  list and the detail pane now **scroll independently** (each column owns its scroll within a
+  viewport-height layout) instead of the whole page scrolling as one. Added **multi-select**
+  (checkbox column + select-all) with a batch bar — **delete**, **re-extract** (queues GROBID for
+  every attached file), and **set reading status** across the selection. Added extraction/metadata
+  **filters** (has-PDF, has-references, and missing-field chips: title/abstract/year/venue/doi/
+  arxiv_id) backed by new `list_works` query params, and a **semantic-search** mode in the library
+  search box (ranks by local embedding similarity, intersected with the active filters). Each
+  attached file now shows its **content hash** (`#…`, click to copy) and an extraction-state badge.
+- **Cross-reference identifier surfaced in both GUIs**: a file's SHA-256 content hash *is* the
+  agent's `local_file_id`, so the server paper detail and the agent's indexed-files list now both
+  show it — you can match a server paper to a file on a workstation. (No new identifier was
+  invented; the existing content hash is now displayed.)
+- **Re-run extraction from the server UI**: per-file **Re-extract** button in the paper detail (and
+  batch re-extract in the library) calling the existing `POST /files/{id}/extract`. The worker now
+  records a durable `file.status` of **`extracted`** / **`extract_failed`**, so the UI shows whether
+  a successful extraction ever ran.
+- **Jobs page controls**: the count tiles are now **filter buttons** (click *failed* to see only
+  failed jobs; an **all** tile clears the filter) and a **Clean** button clears finished/failed job
+  history via the new owner/editor `POST /jobs/clear` (running jobs are never touched).
+- **Admin page no longer loads empty on hard refresh**: the page now (re)loads its data whenever the
+  authenticated client is created — including the null-token → authed transition on refresh — rather
+  than once before the token was read (which left it blank until the tab was re-clicked).
 - **Agent web GUI usability pass** (`agent/paperracks_agent/web.py`): the page is now a
   frozen-header **tabbed** layout (Connection / Folders &amp; files / Indexed / Requests) so a long
   file list scrolls on its own instead of stretching the page. Added a **file/folder picker** that

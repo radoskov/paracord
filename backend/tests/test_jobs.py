@@ -16,3 +16,18 @@ def test_jobs_endpoint_returns_status_shape(client, auth_headers) -> None:
 
 def test_jobs_endpoint_requires_auth(client) -> None:
     assert client.get("/api/v1/jobs").status_code == 401
+
+
+def test_clear_jobs_requires_editor_and_returns_shape(client, auth_headers) -> None:
+    # Reader may not clear; editor may. Shape is stable whether or not Redis is reachable.
+    assert client.post("/api/v1/jobs/clear", headers=auth_headers("reader")).status_code == 403
+    ok = client.post("/api/v1/jobs/clear", headers=auth_headers("editor"))
+    assert ok.status_code == 200
+    body = ok.json()
+    assert isinstance(body["available"], bool)
+    assert isinstance(body["cleared"], int)
+
+
+def test_clear_jobs_rejects_bad_which(client, auth_headers) -> None:
+    bad = client.post("/api/v1/jobs/clear?which=nonsense", headers=auth_headers("owner"))
+    assert bad.status_code == 422

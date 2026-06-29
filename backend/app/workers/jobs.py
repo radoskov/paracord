@@ -26,7 +26,15 @@ def extract_pdf_job(file_id: str) -> None:
         file = db.get(File, uuid.UUID(str(file_id)))
         if file is None:
             return
-        extract_and_store(db, file=file, fetch_tei=client.process_fulltext_document_sync)
+        try:
+            extract_and_store(db, file=file, fetch_tei=client.process_fulltext_document_sync)
+        except Exception:
+            # Persist a durable failure marker (so the UI can show extraction never succeeded)
+            # before letting RQ record the job as failed.
+            file.status = "extract_failed"
+            db.commit()
+            raise
+        file.status = "extracted"
         link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
         work_id = str(link.work_id) if link else None
         # For index_and_extract uploads, discard the PDF now that extraction is stored —
