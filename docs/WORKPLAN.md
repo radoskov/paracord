@@ -27,12 +27,15 @@ JSONB), C5 (docker dev/prod targets), H1 (`httpx2==2.4.0`), H4 (agent stub auth 
 pushdown), P2/item6 (nav shell + Admin UI), P2/item9 (scope summaries), P2/item10-partial (PDF
 upload + identifier import frontend + backend).
 
+**Done so far:**
+- **A1** ✅ managed-path extraction fix · **A3** ✅ `make ready`/`ci` mirror CI → Stage 1
+- **B1** ✅ GROBID options config-driven + PDF coordinate extraction → Stage 2
+- **PDF.js reader** ✅ and **Cytoscape graph** ✅ components → Stage 3
+
 **Still open and scheduled below:**
-- **A1** (HIGH, *correctness*) — uploaded `managed_path` PDFs cannot be extracted. → Stage 1
-- **A3** (process) — `make ready`/`ci` don't mirror CI (no `frontend-check`/`test-migrations`). → Stage 1
-- **B1** (extraction) — GROBID options hardcoded; no coordinate extraction. → Stage 2
-- **PDF.js reader**, **Cytoscape graph**, **metadata-review UI** — packages installed, unused. → Stages 3–4
-- **RIS/CSL import** — completes §8.1. → Stage 4
+- **Frontend IA & UX overhaul** (NEW PRIORITY) — tabbed app shell, master–detail library with
+  work editing, fixed shelves/racks organize UX, tooltips/disabled-reasons/help; **subsumes** the
+  metadata-review/edit UI and RIS/CSL import. → **Stage 4**
 - **Agent manifest/teleport** — the distinctive remote feature; still scaffold. → Stage 5
 - **H2** (AI read-path writes), embedding/topic/summary **provider interface**. → Stage 6
 - **H3** fuzzy-title perf, **C3/C4** remaining edges, **H7** pgvector, export polish, auth
@@ -114,20 +117,85 @@ PDF.js reader, anchored highlights, and citation→mention jumps.
 
 ---
 
-## Stage 4 — Metadata review & import completion  *(closes §8.1 / §8.12 gaps)*
+## Stage 4 — Frontend information architecture & UX overhaul  *(make the app usable in-vivo)*
 
-6. **Metadata review / edit UI.** Surface the existing backend (`GET /works/{id}/metadata`,
-   `POST /works/{id}/metadata/select`, `POST /works/{id}/enrich`): a conflict dashboard to compare
-   per-field assertions by source, pick the canonical value, edit a work, and a per-work "Enrich"
-   button. Add **per-field `user_confirmed` locking** (§8.12) so enrichment never overwrites a
-   field the user has confirmed (today it's per-work all-or-nothing).
-   *DoD:* a user can resolve a title conflict and edit metadata entirely from the UI; a confirmed
-   field is not overwritten by re-enrichment.
+> **Why this is now the priority (UI review, 2026-06-29).** The backend is broad but the
+> frontend is still one ~10-section "operator console" that is genuinely confusing to use. Concrete
+> problems observed in-vivo and confirmed in code (`LibraryPage.svelte`):
+> - **Everything is on one page.** ~10 stacked sections (library, contexts, search, summaries,
+>   duplicates, graph, topics, queue, files, reader) + a sidebar (new-work, sources, shelves,
+>   racks, tags). Functionally distinct areas should be separate tabs/pages.
+> - **A manually-created work is a dead end.** Selecting a library row loads contexts/annotations
+>   /summaries but offers **no detail panel, no field editing, no way to attach a file** (upload
+>   always mints its own work). Users can create a work and then do nothing with it.
+> - **Organize controls feel broken.** Clicking a shelf chip silently sets *two* hidden states
+>   (`selectedShelf` **and** the "Add work" target `selectedShelfForWork`), so a single selection
+>   enables the adjacent **Archive shelf** *and* **Add work** buttons at once — which reads as
+>   "Archive let me add a work." Same for racks. Selection has almost no visual feedback.
+> - **No affordances.** No tooltips, no explanation of *why* a button is disabled, no empty-state
+>   guidance, no per-area help text, no confirmation on destructive actions.
+>
+> This stage subsumes the former "Metadata review/edit UI" (P2/item8) and "RIS/CSL import"
+> (P2/item10 remainder) — the metadata editing becomes part of the work-detail panel. It is
+> frontend-heavy with one small backend addition (F). **No capability may regress** during the
+> refactor; the current page is the source pool for components being moved.
 
-7. **RIS + CSL JSON import.** Add `POST /imports/ris` and `POST /imports/csl` mirroring the BibTeX
-   path (dedup by normalized DOI/title, `ImportBatch` + audit event). Completes the headline §8.1
-   ingestion set alongside server-folder, BibTeX, upload, and identifier import.
-   *DoD:* round-trip a RIS and a CSL-JSON file into works with dedup; tests cover both.
+**6A. Tabbed application shell.** Extend the existing dependency-free hash router (`App.svelte`)
+from `#library`/`#admin` to first-class areas, each its own page component under `pages/`:
+**Library**, **Shelves**, **Racks**, **Tags**, **Import** (sources/folder · upload · identifier ·
+BibTeX/RIS/CSL · batch & queue status), **Duplicates**, **Insights** (graph · topics · semantic
+search · scope summaries), **Admin**. A persistent left or top tab bar with clear labels + icons;
+the active tab is reflected in the hash (shareable/back-button-able). Reader opens from a work's
+detail rather than being a permanent panel.
+
+**6B. Library as master–detail (incl. metadata edit, P2/item8).** Left: the searchable/filterable
+work **list** (reuse existing filters; add result count + sort). Right (or a routed
+`#library/{id}`): a **work detail** panel with:
+  - **editable fields** (title, year, venue, DOI, arXiv id, abstract, reading status) with Save;
+  - **per-field provenance/conflict review** comparing assertions by source with "select canonical"
+    (`GET /works/{id}/metadata`, `POST /works/{id}/metadata/select`) and a per-work **Enrich**
+    button (`POST /works/{id}/enrich`);
+  - **per-field `user_confirmed` locking** (§8.12) so enrichment never overwrites a confirmed field
+    (today it is per-work all-or-nothing — needs a small backend change, see 6F);
+  - **attached files** with "open in Reader", plus the work's contexts / annotations / summaries
+    (moved out of the mega-page).
+  *DoD:* a user can create a work, edit its fields, resolve a title conflict, attach/open a PDF, and
+  enrich — all from one coherent panel; a confirmed field survives re-enrichment.
+
+**6C. Shelves / Racks / Tags as explicit manager views.** Replace the overloaded-selection design:
+  - A selected shelf/rack gets a clear **detail header** ("Shelf: Name") with its own grouped
+    actions (rename, archive-with-confirm) and its membership list.
+  - **Decouple selection from the add-target** — adding uses an explicit, searchable picker
+    ("Add a work to this shelf…", "Add a shelf to this rack…") instead of a hidden dropdown that
+    a chip-click silently primes. This removes the "archive enabled add" confusion.
+  - Obvious selected-state styling and breadcrumbs.
+
+**6D. Import area + queue visibility.** Consolidate all ingestion into one tabbed area and add
+**RIS + CSL JSON import** — `POST /imports/ris` and `POST /imports/csl` mirroring the BibTeX path
+(dedup by normalized DOI/title, `ImportBatch` + audit event), completing the §8.1 set. Surface
+recent `ImportBatch` rows and extraction/enrichment job status so a user can see what's processing.
+  *DoD:* RIS and CSL-JSON files round-trip into works with dedup (tested); import results and batch
+  status are visible in the UI.
+
+**6E. Affordances & help (cross-cutting, applies to every area).**
+  - `title=` tooltips on all action buttons.
+  - When an action is disabled, state **why** (inline hint or tooltip: "Select a work first",
+    "Pick a shelf to add it to") — never a silently dead button.
+  - Empty-state guidance per area ("No works yet — import a PDF, add by arXiv/DOI, or create one").
+  - A one-line explanatory blurb at the top of each tab.
+  - Confirmation prompts for destructive/irreversible actions (archive, remove, disable).
+
+**6F. Small backend support (dependency for 6B).**
+  - Endpoint to **attach an existing file to a work** (or upload-into-an-existing-work) so a
+    manually-created work isn't a dead end; and a "files for a work" read.
+  - Per-field confirm: extend metadata-select / a `user_confirmed` set to be **per field** rather
+    than per work (§8.12), with a migration if a column/representation change is needed.
+  *DoD:* the work-detail panel can attach + open a PDF and lock individual fields; covered by tests.
+
+**Stage-4 exit:** the app is navigable by area; a new user can, without guidance, find how to
+import/create works, edit them, attach PDFs, organize into shelves/racks, and review duplicates —
+with visible help and no dead/unexplained controls. Frontend component tests cover shell routing
+and master–detail selection; existing tests stay green; no backend capability regresses.
 
 ---
 
@@ -197,14 +265,19 @@ user-visible problem (e.g. import latency for H3).
 ## Sequencing rationale
 
 ```
-Stage 1  correctness/CI ──► Stage 2  GROBID coordinates ──► Stage 3  reader + graph
+Stage 1 ✅ ──► Stage 2 ✅ GROBID coords ──► Stage 3 ✅ reader + graph components
                                                   │
-Stage 4  metadata UI + RIS/CSL  ◄─────────────────┘
-Stage 5  agent vertical (independent; can parallelize with 3–4)
+Stage 4  frontend IA & UX overhaul  ◄─────────────┘   (tabbed shell, master–detail
+         (subsumes metadata-edit UI + RIS/CSL)          library w/ editing, organize
+                                                         fix, affordances/help)
+Stage 5  agent vertical (independent; can parallelize with 4)
 Stage 6  AI provider hardening (independent; after 1)
 Stage 7  deferred polish (last)
 ```
 
-Stage 2 gates Stage 3 (coordinates → anchored reader). Stage 5 (agent) and Stage 6 (AI) are
-independent of the reader work and can run in parallel by a second contributor per `WORK_SPLIT.md`
+Stages 1–3 are done. **Stage 4 is now the priority**: the reader and graph *components* exist
+(Stage 3) but are buried in an unusable single-page console — Stage 4 makes the whole app navigable
+and comprehensible, and is the prerequisite for meaningful in-vivo testing. It folds in the former
+Stage-4 items (metadata-edit UI as the work-detail panel; RIS/CSL import into the Import tab).
+Stage 5 (agent) and Stage 6 (AI) remain independent and can run in parallel per `WORK_SPLIT.md`
 (Agent C owns the agent; Agent I owns AI). Everything in Stage 7 is intentionally last.

@@ -294,7 +294,16 @@ to the last stage**. Summary of the next stages:
    mirror CI.
 2. **Stage 2 — GROBID settings + coordinate extraction (B1) — DONE.**
 3. **Stage 3 — PDF.js reader + interactive Cytoscape graph — DONE.**
-4. **Next: Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
+4. **Next: Stage 4 — Frontend IA & UX overhaul (NEW PRIORITY after a 2026-06-29 in-vivo UI
+   review).** The reader/graph components exist but are buried in an unusable single-page console.
+   Stage 4 introduces a tabbed app shell (Library / Shelves / Racks / Tags / Import / Duplicates /
+   Insights / Admin), turns the Library into a searchable master list + work-detail panel with
+   **editable fields, metadata-conflict review, file attach/open** (subsumes P2/item8), fixes the
+   confusing shelves/racks organize controls (selection currently silently primes the add-target,
+   so "Archive" appears to enable "Add"), adds tooltips / disabled-reasons / empty-state help, and
+   folds in **RIS/CSL import** (P2/item10 remainder). See `docs/WORKPLAN.md` Stage 4 for the full
+   spec (6A–6F), including the one small backend addition (attach-file-to-work + per-field
+   `user_confirmed`).
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 5. **Stage 5 — agent manifest/teleport vertical (M5).**
 6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**
