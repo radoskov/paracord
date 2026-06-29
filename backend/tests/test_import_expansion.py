@@ -282,3 +282,33 @@ def test_delete_work_requires_editor(client, auth_headers) -> None:
     ).json()
     r = client.delete(f"/api/v1/works/{work['id']}", headers=auth_headers("reader"))
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# References (bibliography) endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_work_references_endpoint_lists_bibliography(client, auth_headers, db) -> None:
+    from app.models.citation import Reference
+
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "Citing"}).json()
+    db.add(
+        Reference(
+            citing_work_id=uuid.UUID(work["id"]),
+            title="A Cited Paper",
+            year=2020,
+            doi="10.1/x",
+            resolution_status="unresolved",
+        )
+    )
+    db.commit()
+
+    refs = client.get(f"/api/v1/works/{work['id']}/references", headers=headers).json()
+    assert len(refs) == 1
+    assert refs[0]["title"] == "A Cited Paper"
+    assert refs[0]["year"] == 2020
+
+    missing = client.get(f"/api/v1/works/{uuid.uuid4()}/references", headers=headers)
+    assert missing.status_code == 404

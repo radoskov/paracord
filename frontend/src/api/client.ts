@@ -211,6 +211,17 @@ export interface WorkFile {
   status: string;
 }
 
+export interface ReferenceRecord {
+  id: string;
+  title: string | null;
+  raw_citation: string | null;
+  doi: string | null;
+  arxiv_id: string | null;
+  year: number | null;
+  resolution_status: string;
+  resolved_work_id: string | null;
+}
+
 export interface Annotation {
   id: string;
   work_id: string;
@@ -423,6 +434,10 @@ export class ApiClient {
 
   async listWorkFiles(workId: string): Promise<WorkFile[]> {
     return this.request<WorkFile[]>(`/api/v1/works/${workId}/files`);
+  }
+
+  async listWorkReferences(workId: string): Promise<ReferenceRecord[]> {
+    return this.request<ReferenceRecord[]>(`/api/v1/works/${workId}/references`);
   }
 
   async uploadWorkFile(workId: string, file: File): Promise<WorkFile> {

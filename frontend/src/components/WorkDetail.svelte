@@ -7,6 +7,7 @@
     type AnnotationCreate,
     type CitationContext,
     type FieldReview,
+    type ReferenceRecord,
     type Summary,
     type Tag,
     type Work,
@@ -34,6 +35,7 @@
   let fields: FieldReview[] = [];
   let files: WorkFile[] = [];
   let contexts: CitationContext[] = [];
+  let references: ReferenceRecord[] = [];
   let annotations: Annotation[] = [];
   let summaries: Summary[] = [];
   let tags: Tag[] = [];
@@ -72,10 +74,11 @@
       reading_status: w.reading_status,
     };
     await run(async () => {
-      [fields, files, contexts, annotations, summaries, tags] = await Promise.all([
+      [fields, files, contexts, references, annotations, summaries, tags] = await Promise.all([
         client.listWorkMetadata(w.id),
         client.listWorkFiles(w.id),
         client.listCitationContexts(w.id),
+        client.listWorkReferences(w.id),
         client.listAnnotations(w.id),
         client.listSummaries(w.id),
         client.listTags(),
@@ -298,17 +301,49 @@
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
 
-  {#if summaries.length || contexts.length}
+  <details open={references.length > 0}>
+    <summary>References ({references.length})</summary>
+    {#if references.length === 0}
+      <p class="empty">
+        No references extracted yet. They appear after GROBID extraction runs on an attached PDF
+        (watch the Jobs tab); a manually-created paper with no PDF won’t have any.
+      </p>
+    {:else}
+      <ol class="refs">
+        {#each references as ref (ref.id)}
+          <li>
+            <span class="ref-title">{ref.title ?? ref.raw_citation ?? 'Untitled reference'}</span>
+            <small class="muted">
+              {ref.year ?? ''}{ref.doi ? ` · doi:${ref.doi}` : ''}{ref.arxiv_id
+                ? ` · arXiv:${ref.arxiv_id}`
+                : ''}
+              {#if ref.resolved_work_id}<span class="ref-badge">in library</span>{/if}
+            </small>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+  </details>
+
+  {#if contexts.length}
     <details>
-      <summary>References &amp; summaries</summary>
-      {#if summaries.length}
-        <h4>Summaries</h4>
-        {#each summaries as s (s.id)}<p class="muted">{s.summary_type}: {s.text}</p>{/each}
-      {/if}
-      {#if contexts.length}
-        <h4>Citation contexts ({contexts.length})</h4>
-        <p class="hintline">Open a PDF with “Read” to see anchored references in the reader.</p>
-      {/if}
+      <summary>In-text citations ({contexts.length})</summary>
+      <p class="hintline">Open a PDF with “Read” to jump to each citation in the reader.</p>
+      <ul class="ctx">
+        {#each contexts as c (c.id)}
+          <li>
+            <strong>{c.marker_text ?? '•'}</strong>
+            <span>{c.context_sentence ?? c.reference_title ?? c.reference_raw_citation ?? ''}</span>
+          </li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
+
+  {#if summaries.length}
+    <details>
+      <summary>Summaries ({summaries.length})</summary>
+      {#each summaries as s (s.id)}<p class="muted">{s.summary_type}: {s.text}</p>{/each}
     </details>
   {/if}
 </div>
@@ -345,9 +380,6 @@
     overflow-wrap: anywhere;
   }
 
-  h4 {
-    margin: 0.6rem 0 0.3rem;
-  }
 
   details {
     background: #f4f6f9;
@@ -473,5 +505,51 @@
   .danger-btn {
     border-color: #f1b0a8;
     color: #b3261e;
+  }
+
+  .refs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0;
+    padding-left: 1.1rem;
+  }
+
+  .refs li {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .ref-title {
+    overflow-wrap: anywhere;
+  }
+
+  .ref-badge {
+    background: #bbf7d0;
+    border-radius: 0.25rem;
+    color: #14532d;
+    font-size: 0.68rem;
+    margin-left: 0.3rem;
+    padding: 0.03rem 0.3rem;
+  }
+
+  .ctx {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    list-style: none;
+    margin: 0.4rem 0 0;
+    max-height: 16rem;
+    overflow: auto;
+    padding: 0;
+  }
+
+  .ctx li {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .ctx span {
+    overflow-wrap: anywhere;
   }
 </style>

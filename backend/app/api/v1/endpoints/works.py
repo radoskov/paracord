@@ -330,6 +330,33 @@ class SummaryRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReferenceRead(BaseModel):
+    id: uuid.UUID
+    title: str | None = None
+    raw_citation: str | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    year: int | None = None
+    resolution_status: str
+    resolved_work_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{work_id}/references", response_model=list[ReferenceRead])
+def list_work_references(work_id: uuid.UUID, db: Session = DB_DEP) -> list[Reference]:
+    """Return the parsed bibliography (extracted references) for a work."""
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    return list(
+        db.scalars(
+            select(Reference)
+            .where(Reference.citing_work_id == work_id)
+            .order_by(Reference.created_at)
+        ).all()
+    )
+
+
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
 def get_work_citation_contexts(
     work_id: uuid.UUID,
