@@ -27,6 +27,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Stage 4.5 (batch 2) — operational visibility & management:** a **Jobs** tab backed by
+  `GET /jobs` (RQ queue counts, worker count, recent jobs with errors; `available:false` when
+  Redis/worker is down) — the fix for "enrichment queued but nothing happens" and "abstract not
+  extracted" (both are background-worker tasks). **Delete paper** (`DELETE /works/{id}`, cascades
+  dependent rows, keeps the content-addressed files) with a confirm in the detail panel.
+  **Shelves/racks selection persistence** across tab switches. **Agent management**: Admin → Agents
+  lists an approved agent's manifested files (`GET /admin/agents/{id}/files`) with a **Teleport**
+  action and concrete agent CLI run instructions; the Import tab now explains that "Server folder"
+  is server-side (aliases from `storage.server_allowed_roots`) while files on your own PC go
+  through the **agent**. Also fixed smart-quote attributes left by a manual rename.
 - **Stage 4.5 (batch 1) — UX refinements:** new-paper **dialog** taking title / DOI / arXiv id /
   URL (not just title); the PDF reader now opens in a full-width **modal** ("Read") with a "New
   tab ↗" option instead of the cramped side panel; the top navigation bar is **sticky**; a shared

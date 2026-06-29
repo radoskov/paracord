@@ -228,25 +228,19 @@ lost. **Batch 1 (✅ done 2026-06-29):**
 - ✅ **Empty Audit-events list (bug)** — client read the paginated `{items}` envelope as an array.
 - ✅ **Honest enrichment message** — names the background worker + Jobs tab.
 
-**Batch 2 (planned, next):**
-- **Jobs tab + queue visibility** — a backend endpoint exposing RQ queued/started/finished/failed
-  (and "queue/worker unavailable"), and a Jobs tab. This is the fix for *"Enrichment queued but
-  nothing happens"* and *"abstract not extracted"*: both are background-worker tasks — if the
-  `worker` service (or Redis/GROBID) isn't running, jobs sit unprocessed with no UI signal today.
-- **Delete paper** — `DELETE /works/{id}` (cascade dependent rows) + UI, with confirm.
-- **Selection persistence for shelves/racks** — finish wiring `lib/selection.ts` so a half-built
-  shelf stays open across tabs (the construct-a-shelf workflow).
-- **Server-folder clarity + agent management UI** — explain what a "server-folder alias" is and
-  where it's configured (server YAML `storage.server_allowed_roots`); make clear that adding a
-  folder *on the user's own PC* is the **agent** path, not server-folder. Add an Agents UI to
-  drive the local agent: show enrolled agents, their manifested files, and a "request teleport"
-  action (the Stage 5 backend already supports this) + guidance on running the agent with its
-  enrollment/bearer token.
-- **Operational doc** — a short "is the background worker running?" runbook note; surface worker
-  health in the Jobs tab.
+**Batch 2 (✅ done 2026-06-29):**
+- ✅ **Jobs tab + queue visibility** — `GET /jobs` exposes RQ queued/started/finished/failed +
+  worker count + recent jobs, or `available:false` when Redis/worker is down. The Jobs tab
+  auto-refreshes and flags "worker unavailable / no worker connected" — the fix for *"enrichment
+  queued but nothing happens"* / *"abstract not extracted"* (both are worker tasks).
+- ✅ **Delete paper** — `DELETE /works/{id}` cascades dependent rows; UI confirm; files kept.
+- ✅ **Selection persistence for shelves/racks** — `lib/selection.ts` wired into both pages.
+- ✅ **Server-folder clarity + agent management UI** — Import explains server-folder is server-side
+  (aliases from `storage.server_allowed_roots`) and points PC folders to the agent; Admin → Agents
+  lists an agent's manifested files with a Teleport action + agent CLI run instructions.
 
 **Batch 3 (deferred / smaller):** per-field `user_confirmed` locking; list a paper's applied tags;
-durable agent SQLite index.
+durable agent SQLite index; "is the worker running?" runbook note.
 
 ---
 
