@@ -51,6 +51,18 @@ async def _fulfil_pending(client: PaRacORDServerClient, index: AgentIndex) -> in
     return count
 
 
+async def _enroll(args: argparse.Namespace) -> None:
+    config = load_agent_config(args.config) if getattr(args, "config", None) else AgentConfig()
+    server = args.server or config.server_url
+    name = args.name or config.name
+    result = await PaRacORDServerClient(server).enroll(args.token, name)
+    print(
+        f"Enrolled as pending agent {result['agent_id']} ('{name}').\n"
+        "Ask the owner to approve it in the server UI (Admin -> Agents), then set the returned\n"
+        "token as PARACORD_AGENT_TOKEN and run `paracord-agent serve`."
+    )
+
+
 async def _sync(args: argparse.Namespace) -> None:
     server, roots, token, _ = _resolve(args)
     index = AgentIndex(roots).scan()
@@ -97,6 +109,14 @@ def main() -> None:
     scan_parser = subparsers.add_parser("scan", help="List indexed PDFs (local only)")
     scan_parser.add_argument("roots", nargs="*", type=Path)
 
+    enroll_parser = subparsers.add_parser("enroll", help="Enroll with an owner-issued token")
+    enroll_parser.add_argument(
+        "--config", type=Path, default=None, help="Path to agent YAML config"
+    )
+    enroll_parser.add_argument("--server", default=None, help="Server base URL")
+    enroll_parser.add_argument("--token", required=True, help="Enrollment token from the server UI")
+    enroll_parser.add_argument("--name", default=None, help="A name for this agent")
+
     _add_common(subparsers.add_parser("sync", help="Send the manifest to the server once"))
     _add_common(subparsers.add_parser("teleport", help="Upload any files the server requested"))
     serve_parser = subparsers.add_parser("serve", help="Run continuously: sync + auto-teleport")
@@ -108,6 +128,8 @@ def main() -> None:
         for path in iter_pdf_files(args.roots):
             item = build_manifest_item(path)
             print(f"{item.local_file_id} {item.size_bytes} {item.path}")
+    elif args.command == "enroll":
+        asyncio.run(_enroll(args))
     elif args.command == "sync":
         asyncio.run(_sync(args))
     elif args.command == "teleport":

@@ -214,9 +214,9 @@
 
       {#if enrollToken}
         <div class="token-box">
-          <p>Enroll the agent with this token (shown once):</p>
-          <code>paracord-agent sync --server &lt;server-url&gt; --token {enrollToken} &lt;folder&gt;</code>
-          <small>Expires {formatDate(enrollExpiry)} · then approve the agent below.</small>
+          <p>On the workstation, enroll the agent with this token (shown once):</p>
+          <code>paracord-agent enroll --server &lt;server-url&gt; --token {enrollToken} --name my-workstation</code>
+          <small>Expires {formatDate(enrollExpiry)} · then approve the agent below to mint its token.</small>
         </div>
       {/if}
 

@@ -20,14 +20,17 @@ python -m pip install -e .          # provides the `paracord-agent` command
 ## Enroll & run
 
 1. In the server UI, **Admin → Agents → Issue enrollment token**.
-2. Enroll, then have the owner **approve** the agent to get its bearer token:
+2. Enroll this agent with that token (one-time):
    ```bash
-   paracord-agent sync --server http://SERVER:8000 --token <ENROLLMENT_OR_AGENT_TOKEN> ~/papers
-   export PARACORD_AGENT_TOKEN=<AGENT_TOKEN>     # after approval
+   paracord-agent enroll --server http://SERVER:8000 --token <ENROLLMENT_TOKEN> --name my-workstation
    ```
-3. Run the daemon — it keeps the manifest fresh and auto-fulfils teleports requested in the UI:
+3. The owner **approves** it in Admin → Agents and copies the agent bearer token (shown once):
    ```bash
-   paracord-agent serve --config ~/.config/paracord/agent.yaml
+   export PARACORD_AGENT_TOKEN=<AGENT_TOKEN>
+   ```
+4. Run the daemon — it keeps the manifest fresh and auto-fulfils teleports requested in the UI:
+   ```bash
+   paracord-agent serve --config ~/.config/paracord/agent.yaml ~/papers
    ```
 
 Config file (see `config/agent.example.yaml`): `filesystem.allowed_roots` lists the folders to

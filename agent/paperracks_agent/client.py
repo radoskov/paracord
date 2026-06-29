@@ -15,6 +15,16 @@ class PaRacORDServerClient:
             return {}
         return {"Authorization": f"Bearer {self.token}"}
 
+    async def enroll(self, enrollment_token: str, name: str) -> dict:
+        """Enroll with an owner-issued enrollment token (creates a pending agent)."""
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.server_url}/api/v1/agents/enroll-request",
+                json={"token": enrollment_token, "name": name},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def send_manifest(self, payload: dict) -> None:
         """Send a file manifest to the server."""
         async with httpx.AsyncClient(timeout=60) as client:
