@@ -27,6 +27,20 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **B1 / Stage 2 — GROBID settings + PDF coordinate extraction:** GROBID extraction options
+  (consolidation, raw citations, sentence segmentation, and which TEI elements get coordinates)
+  are now driven from the `processing.grobid:` YAML block / settings instead of hardcoded flags;
+  `GrobidClient` emits repeated `teiCoordinates` form fields. `tei_parser` parses the `coords`
+  attribute on `<ref type="bibr">` markers into `CitationMention.pdf_coordinates` — a JSONB list
+  of `{page,x,y,w,h}` boxes (multi-box for line-wrapped mentions) that **replaces** the four
+  scalar `pdf_x/pdf_y/pdf_width/pdf_height` columns (migration `0013_citation_pdf_coordinates`,
+  SPEC §9.3). `GET /works/{id}/citation-contexts` now returns `pdf_coordinates` plus convenience
+  `pdf_x/pdf_y/pdf_w/pdf_h` for the primary box. The coordinate acceptance test
+  (`tests/future/test_future_grobid_coordinates_acceptance.py`) was rewritten to be deterministic
+  and is now enabled. (AUDIT B1; WORKPLAN Stage 2)
+- **A3 — `make ready`/`ci` mirror CI:** `check` now also runs `test-migrations`; `ready` and `ci`
+  now run `frontend-check` (install + Vitest + build). A green `make ready` implies a green CI.
+  (AUDIT A3; WORKPLAN Stage 1)
 - **A1 — Managed-path extraction fix (HIGH):** uploaded managed-library PDFs are now extractable.
   Added a shared resolver `app/services/file_paths.py::resolve_backend_readable_pdf_path` that
   resolves both `server_path` (validated against the server-folder source root) and `managed_path`

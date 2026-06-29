@@ -244,6 +244,15 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **A3 (DONE):** `make check` now includes `test-migrations`; `make ready` and `make ci` include
+  `frontend-check` — so a green `ready` mirrors CI (backend+agent tests, migration parity, frontend
+  build/test). WORKPLAN Stage 1, item 2.
+- **B1 / Stage 2 (DONE):** GROBID extraction options are config-driven (`processing.grobid:` YAML);
+  `GrobidClient` sends `teiCoordinates`; `tei_parser` parses PDF `coords` into
+  `CitationMention.pdf_coordinates` (JSONB list of `{page,x,y,w,h}` boxes, replacing the four
+  scalar `pdf_*` columns — migration `0013`, SPEC §9.3); the citation-context API now returns
+  `pdf_coordinates` + `pdf_x/y/w/h`. Deterministic coordinate acceptance test enabled. This
+  unblocks the PDF.js reader anchors (Stage 3).
 - **A1 (DONE, HIGH):** managed-path extraction fix. New shared resolver
   `services/file_paths.py::resolve_backend_readable_pdf_path` handles both `server_path` and
   `managed_path` (with root-escape validation); `extract_and_store()` and `files.py::stream_file`
@@ -273,11 +282,11 @@ app. It re-validates every open audit finding against the current code and group
 work into 7 stages, front-loading whole-area unblockers and **deferring minor polish/optimizations
 to the last stage**. Summary of the next stages:
 
-1. **Stage 1 — correctness/CI:** **A1** managed-path extraction fix — **DONE** (shared
-   `resolve_backend_readable_pdf_path` resolver; uploaded PDFs now extractable). Remaining: **A3**
-   make `ready`/`ci` include `frontend-check` + `test-migrations`.
-2. **Stage 2 — GROBID settings + coordinate extraction (B1)** — unblocks the reader/graph.
-3. **Stage 3 — PDF.js reader + interactive Cytoscape graph** (packages already installed, unused).
+1. **Stage 1 — correctness/CI — DONE:** **A1** managed-path extraction fix + **A3** `ready`/`ci`
+   mirror CI.
+2. **Stage 2 — GROBID settings + coordinate extraction (B1) — DONE.**
+3. **Stage 3 — PDF.js reader + interactive Cytoscape graph** (packages already installed, unused)
+   — **in progress**.
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 5. **Stage 5 — agent manifest/teleport vertical (M5).**
 6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**

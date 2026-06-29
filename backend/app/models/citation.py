@@ -2,11 +2,16 @@
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, Integer, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# A JSON column that becomes JSONB on Postgres (for @>/-> queries) and plain JSON on SQLite.
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Reference(Base):
@@ -50,10 +55,10 @@ class CitationMention(Base):
     context_sentence: Mapped[str | None] = mapped_column(Text, nullable=True)
     context_after: Mapped[str | None] = mapped_column(Text, nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pdf_x: Mapped[float | None] = mapped_column(Float, nullable=True)
-    pdf_y: Mapped[float | None] = mapped_column(Float, nullable=True)
-    pdf_width: Mapped[float | None] = mapped_column(Float, nullable=True)
-    pdf_height: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # PDF coordinate boxes from GROBID teiCoordinates, as a list of
+    # {"page", "x", "y", "w", "h"} dicts (multi-box spans supported). Replaces the four
+    # scalar pdf_* columns so a mention can anchor across line wraps (SPEC §9.3).
+    pdf_coordinates: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSONB, nullable=True)
     source_tei_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )

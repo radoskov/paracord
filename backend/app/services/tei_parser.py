@@ -30,6 +30,8 @@ class ParsedCitationMention:
     context_before: str | None = None
     context_sentence: str | None = None
     context_after: str | None = None
+    page: int | None = None
+    pdf_coordinates: list[dict[str, float | int]] = field(default_factory=list)
 
 
 @dataclass
@@ -125,6 +127,7 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
         reference_key = target.removeprefix("#")
         if not reference_key:
             continue
+        boxes = _parse_coords(ref.get("coords"))
         mention = ParsedCitationMention(
             reference_key=reference_key,
             marker_text=_text(ref),
@@ -132,10 +135,34 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
             context_before=_neighbor_sentence(ref, previous=True),
             context_sentence=_context_sentence(ref),
             context_after=_neighbor_sentence(ref, previous=False),
+            page=boxes[0]["page"] if boxes else None,
+            pdf_coordinates=boxes,
         )
         paper.citation_mentions.append(mention)
 
     return paper
+
+
+def _parse_coords(coords: str | None) -> list[dict[str, float | int]]:
+    """Parse a GROBID ``coords`` attribute into coordinate boxes.
+
+    GROBID emits ``"page,x,y,width,height"`` per box, with multiple boxes separated by
+    ``;`` (a mention that wraps across lines). Malformed boxes are skipped.
+    """
+    if not coords:
+        return []
+    boxes: list[dict[str, float | int]] = []
+    for raw_box in coords.split(";"):
+        parts = [part.strip() for part in raw_box.split(",")]
+        if len(parts) != 5:
+            continue
+        try:
+            page = int(float(parts[0]))
+            x, y, w, h = (float(value) for value in parts[1:])
+        except ValueError:
+            continue
+        boxes.append({"page": page, "x": x, "y": y, "w": w, "h": h})
+    return boxes
 
 
 def _context_sentence(element) -> str | None:

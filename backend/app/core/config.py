@@ -56,6 +56,17 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["grobid_url"] = services["grobid_url"]
     if "ollama_url" in services:
         values["ollama_url"] = services["ollama_url"]
+    grobid = (data.get("processing") or {}).get("grobid") or {}
+    if "consolidate_header" in grobid:
+        values["grobid_consolidate_header"] = grobid["consolidate_header"]
+    if "consolidate_citations" in grobid:
+        values["grobid_consolidate_citations"] = grobid["consolidate_citations"]
+    if "include_raw_citations" in grobid:
+        values["grobid_include_raw_citations"] = grobid["include_raw_citations"]
+    if "segment_sentences" in grobid:
+        values["grobid_segment_sentences"] = grobid["segment_sentences"]
+    if "include_coordinates" in grobid:
+        values["grobid_coordinate_elements"] = grobid["include_coordinates"]
     storage = data.get("storage") or {}
     if "managed_library_root" in storage:
         values["managed_library_root"] = storage["managed_library_root"]
@@ -97,6 +108,13 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     grobid_url: str = Field(default="http://localhost:8070", alias="GROBID_URL")
+    # GROBID extraction options (driven from the `grobid:` YAML block / env).
+    grobid_consolidate_header: bool = True
+    grobid_consolidate_citations: bool = True
+    grobid_include_raw_citations: bool = True
+    grobid_segment_sentences: bool = True
+    # TEI elements to request PDF coordinates for (enables reader anchors); empty disables.
+    grobid_coordinate_elements: list[str] = ["ref", "biblStruct", "s", "p"]
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
     guest_access_enabled: bool = False

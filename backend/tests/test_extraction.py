@@ -73,6 +73,42 @@ def test_parse_tei_handles_empty_and_invalid() -> None:
     assert parse_tei("<not-tei>").title is None
 
 
+def test_parse_tei_extracts_citation_coordinates() -> None:
+    parsed = parse_tei(FIXTURE)
+    first, second = parsed.citation_mentions
+    assert first.page == 3
+    assert first.pdf_coordinates == [{"page": 3, "x": 123.4, "y": 456.7, "w": 12.0, "h": 10.5}]
+    # A mention can wrap across lines → multiple coordinate boxes.
+    assert second.page == 4
+    assert len(second.pdf_coordinates) == 2
+    assert second.pdf_coordinates[1]["x"] == 100.0
+
+
+def test_parse_coords_handles_malformed() -> None:
+    from app.services.tei_parser import _parse_coords
+
+    assert _parse_coords(None) == []
+    assert _parse_coords("") == []
+    assert _parse_coords("garbage") == []
+    assert _parse_coords("3,1,2,3") == []  # too few parts
+    assert _parse_coords("3,1.0,2.0,3.0,4.0") == [
+        {"page": 3, "x": 1.0, "y": 2.0, "w": 3.0, "h": 4.0}
+    ]
+
+
+def test_grobid_form_data_reflects_settings() -> None:
+    from app.core.config import get_settings
+    from app.services.grobid_client import GrobidClient
+
+    settings = get_settings().model_copy(
+        update={"grobid_consolidate_header": False, "grobid_coordinate_elements": ["ref", "s"]}
+    )
+    data = GrobidClient("http://grobid:8070", settings=settings)._form_data()
+    assert ("consolidateHeader", "0") in data
+    assert ("consolidateCitations", "1") in data
+    assert [value for key, value in data if key == "teiCoordinates"] == ["ref", "s"]
+
+
 def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) -> None:
     work = Work(
         canonical_title="attention is all you need",
@@ -181,6 +217,8 @@ def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path
     assert raw_tei.tei_xml == FIXTURE
     mention = db_session.scalar(select(CitationMention).where(CitationMention.marker_text == "[1]"))
     assert mention.source_tei_id == raw_tei.id
+    assert mention.page == 3
+    assert mention.pdf_coordinates == [{"page": 3, "x": 123.4, "y": 456.7, "w": 12.0, "h": 10.5}]
     contexts = get_work_citation_contexts(work.id, db=db_session)
     assert len(contexts) == 2
     assert contexts[0].reference_title.startswith("Neural Machine Translation")

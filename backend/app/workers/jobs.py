@@ -18,7 +18,8 @@ def extract_pdf_job(file_id: str) -> None:
     from app.services.grobid_client import GrobidClient
     from app.workers.queue import enqueue_enrichment
 
-    client = GrobidClient(get_settings().grobid_url)
+    settings = get_settings()
+    client = GrobidClient(settings.grobid_url, settings=settings)
     work_id = None
     with SessionLocal() as db:
         file = db.get(File, uuid.UUID(str(file_id)))

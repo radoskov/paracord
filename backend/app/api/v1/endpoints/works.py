@@ -198,6 +198,13 @@ class CitationContextRead(BaseModel):
     context_sentence: str | None = None
     context_after: str | None = None
     page: int | None = None
+    # Full list of PDF coordinate boxes ({"page","x","y","w","h"}); empty if not extracted.
+    pdf_coordinates: list[dict] | None = None
+    # Convenience scalars for the primary (first) box — what a single-anchor reader uses.
+    pdf_x: float | None = None
+    pdf_y: float | None = None
+    pdf_w: float | None = None
+    pdf_h: float | None = None
     source_tei_id: uuid.UUID | None = None
 
 
@@ -260,24 +267,33 @@ def get_work_citation_contexts(
         .where(CitationMention.citing_work_id == work_id)
         .order_by(CitationMention.section_label, CitationMention.created_at)
     ).all()
-    return [
-        CitationContextRead(
-            id=mention.id,
-            reference_id=reference.id,
-            resolved_cited_work_id=mention.resolved_cited_work_id,
-            reference_title=reference.title,
-            reference_raw_citation=reference.raw_citation,
-            reference_doi=reference.doi,
-            marker_text=mention.marker_text,
-            section_label=mention.section_label,
-            context_before=mention.context_before,
-            context_sentence=mention.context_sentence,
-            context_after=mention.context_after,
-            page=mention.page,
-            source_tei_id=mention.source_tei_id,
+    contexts: list[CitationContextRead] = []
+    for mention, reference in rows:
+        boxes = mention.pdf_coordinates or []
+        primary = boxes[0] if boxes else {}
+        contexts.append(
+            CitationContextRead(
+                id=mention.id,
+                reference_id=reference.id,
+                resolved_cited_work_id=mention.resolved_cited_work_id,
+                reference_title=reference.title,
+                reference_raw_citation=reference.raw_citation,
+                reference_doi=reference.doi,
+                marker_text=mention.marker_text,
+                section_label=mention.section_label,
+                context_before=mention.context_before,
+                context_sentence=mention.context_sentence,
+                context_after=mention.context_after,
+                page=mention.page,
+                pdf_coordinates=boxes or None,
+                pdf_x=primary.get("x"),
+                pdf_y=primary.get("y"),
+                pdf_w=primary.get("w"),
+                pdf_h=primary.get("h"),
+                source_tei_id=mention.source_tei_id,
+            )
         )
-        for mention, reference in rows
-    ]
+    return contexts
 
 
 @router.get("/{work_id}/annotations", response_model=list[AnnotationRead])

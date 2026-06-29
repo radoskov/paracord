@@ -133,6 +133,8 @@ def store_parsed_extraction(
                 context_before=mention.context_before,
                 context_sentence=mention.context_sentence,
                 context_after=mention.context_after,
+                page=mention.page,
+                pdf_coordinates=mention.pdf_coordinates or None,
                 source_tei_id=source_tei.id if source_tei else None,
             )
         )

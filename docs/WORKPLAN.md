@@ -72,15 +72,18 @@ is currently broken by A1; fix it before building more on top.
 The single most leverage-rich backend item: real PDF coordinates are the prerequisite for the
 PDF.js reader, anchored highlights, and citation→mention jumps.
 
-3. **B1 — GROBID settings + coordinate extraction.** Add a `GrobidSettings` block to
-   `config.py`/server YAML (consolidation flags, `include_raw_citations`, `segment_sentences`,
-   `include_coordinates: [ref, biblStruct, s, p]`); pass it into
-   `grobid_client.process_fulltext_document()` (removes the hardcoded `"1"` flags and the TODO at
-   `grobid_client.py:32`). Extend `tei_parser` to persist coordinate-bearing mentions
-   (`pdf_coordinates jsonb`, per SPEC §9.3 — replaces the 4 scalar float columns on
-   `CitationMention`).
-   *DoD:* enable `backend/tests/future/test_future_grobid_coordinates_acceptance.py`; consolidation
-   and coordinates are config-driven; at least one coordinate surfaces through the citation API.
+3. **B1 — GROBID settings + coordinate extraction. ✅ DONE (2026-06-29).** GROBID options are
+   now config-driven (`grobid_consolidate_header/_citations`, `grobid_include_raw_citations`,
+   `grobid_segment_sentences`, `grobid_coordinate_elements`), read from the `processing.grobid:`
+   YAML block; `GrobidClient` builds the form data (incl. repeated `teiCoordinates` fields) from
+   settings — the hardcoded flags and the TODO are gone. `tei_parser` parses the `coords`
+   attribute into `pdf_coordinates` (a list of `{page,x,y,w,h}` boxes, multi-box for line wraps),
+   which replaced the four scalar `pdf_*` columns on `CitationMention` (migration
+   `0013_citation_pdf_coordinates`, §9.3). The citation-context API exposes `pdf_coordinates`
+   plus convenience `pdf_x/y/w/h` from the primary box. The acceptance test
+   `test_future_grobid_coordinates_acceptance.py` was rewritten to be deterministic (fixture-driven
+   through the real `extract_and_store` + HTTP read) and is now enabled. Backend suite: 179 passed,
+   6 skipped; migration parity green on Postgres.
 
 ---
 

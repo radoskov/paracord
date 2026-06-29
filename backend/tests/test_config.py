@@ -62,6 +62,34 @@ services:
     assert settings.database_url == "postgresql+psycopg://example/example"
 
 
+def test_settings_load_grobid_options(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "server.yaml"
+    config_path.write_text(
+        """
+processing:
+  grobid:
+    consolidate_header: false
+    consolidate_citations: false
+    include_raw_citations: true
+    segment_sentences: false
+    include_coordinates:
+      - ref
+      - s
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PARACORD_SERVER_CONFIG", str(config_path))
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.grobid_consolidate_header is False
+    assert settings.grobid_consolidate_citations is False
+    assert settings.grobid_include_raw_citations is True
+    assert settings.grobid_segment_sentences is False
+    assert settings.grobid_coordinate_elements == ["ref", "s"]
+
+
 def test_environment_overrides_yaml_config(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "server.yaml"
     config_path.write_text("server:\n  bind_port: 9000\n", encoding="utf-8")

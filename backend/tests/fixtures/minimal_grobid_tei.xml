@@ -37,8 +37,8 @@
         <head>Introduction</head>
         <p>
           <s>Sequence models have long used recurrent layers.</s>
-          <s>Attention models improved translation quality <ref type="bibr" target="#b0">[1]</ref>.</s>
-          <s>Other baselines were also considered <ref type="bibr" target="#b1">[2]</ref>.</s>
+          <s>Attention models improved translation quality <ref type="bibr" target="#b0" coords="3,123.40,456.70,12.00,10.50">[1]</ref>.</s>
+          <s>Other baselines were also considered <ref type="bibr" target="#b1" coords="4,88.00,120.00,10.00,9.00;4,100.00,120.00,6.00,9.00">[2]</ref>.</s>
         </p>
       </div>
     </body>
