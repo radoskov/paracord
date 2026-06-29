@@ -910,3 +910,53 @@ Acceptance:
 PaRacORD is now a coherent early application, not merely a scaffold. The backend architecture and development hygiene are strong enough to support parallel agent work. The main danger is now **coordination drift**: docs, roadmap, and audit state must be kept as accurate as the code, because this project is explicitly using documents to guide multiple coding agents.
 
 The highest-value technical fix is the managed-upload extraction gap. The highest-value process fix is making `make ready` and docs fully mirror the current CI/development reality. The highest-value roadmap fix is to clearly label current AI/search/topic features as lightweight baselines while preserving the path toward GROBID coordinates, pgvector/local embeddings, BERTopic-like topics, local LLM summaries, and a real PDF.js/Cytoscape frontend.
+
+---
+
+# AUDIT Re-validation — 2026-06-29
+
+Every prior finding was re-checked against the actual tree at `HEAD` on 2026-06-29 (not the
+audit's original commit), partly via targeted code inspection. The ordered remediation plan now
+lives in **`docs/WORKPLAN.md`**; this section only records validity/status so the audit stops
+drifting (addresses finding **A2**).
+
+## Status of prior findings
+
+| ID | Finding | Status @ 2026-06-29 | Evidence / note |
+|---|---|---|---|
+| C1 | summaries/topics migration missing | **FIXED** | migration `0010`, parity test covers it |
+| C2 | no migration parity test | **FIXED** | `test_migration_parity.py` + CI Postgres |
+| C3 | ORM missing FKs | **MOSTLY FIXED** | core relations have FKs; weak edges remain (`Location.agent_id`, `Reference`, `CitationMention`) → Stage 7 |
+| C4 | JSONB vs JSON | **PARTIAL (accepted)** | `AuditEvent.details` is JSONB; others stay JSON for MVP → Stage 7 |
+| C5 | docker built prod by mistake | **FIXED** | commit `c274605`; compose pins `target: development` |
+| H1 | `httpx2` unpinned | **FIXED** | pinned `httpx2==2.4.0` (keep — Pydantic-maintained fork) |
+| H2 | semantic search writes on read path | **OPEN (guarded)** | `semantic_search.py:70` still inserts+commits on read; guarded against the unique constraint by a Python set check → Stage 6 |
+| H3 | dedup O(n²) | **PARTIAL** | DOI (`duplicate_detection.py:147`) + arXiv-base now SQL; fuzzy-title still `SequenceMatcher` over all works (`:216,:222`); no `rapidfuzz` → Stage 7 |
+| H4 | unauth agent stubs | **FIXED** | manifest/teleport require approved-agent token, return 501; register → 410 |
+| H5 | no prod build | **FIXED** | multi-stage Dockerfiles + `docker-compose.prod.yml` |
+| H6 | `.env` prefix mismatch | **N/A (operator)** | `.env.example` correct; regenerate local `.env` |
+| H7 | embeddings not pgvector | **BY DESIGN** | JSON vectors documented as portable; pgvector deferred → Stage 7 |
+| A1 | managed-path extraction gap | **OPEN — HIGH** | `extraction.py:163-170` filters `location_type == "server_path"` only; uploaded `managed_path` PDFs fail extraction. No shared resolver exists (`files.py` `stream_file` handles both; extraction does not) → **Stage 1** |
+| A2 | doc drift after fixes | **OPEN → being closed** | this section + WORKPLAN + refreshed PROGRESS/ROADMAP/CHANGELOG |
+| A3 | `make ready` ≠ CI surface | **OPEN** | `ready: fix precommit check`, `check: lint test`, `test: test-api test-agent` — no `frontend-check`/`test-migrations` in `ready`/`ci` → **Stage 1** |
+| B1 | GROBID config/coordinates | **OPEN** | flags hardcoded `grobid_client.py:23-26`, TODO `:32`, no coordinate parsing; `config.py` has only `grobid_url` → **Stage 2** |
+| B6 | frontend single-page | **PARTIALLY ADDRESSED** | hash router + Admin UI landed (`94151b4`); PDF.js reader, Cytoscape graph, metadata-review UI still pending → Stages 3–4 |
+| B5 | agent scaffold only | **OPEN** | enrollment works; manifest/teleport stubs → **Stage 5** |
+| P1/item4 | `arxiv_base_id` + UNIQUE | **FIXED** | migration `0011`, partial unique indexes |
+| P1/item5 | DOI normalization | **FIXED** | normalize-at-write + SQL pushdown, migration `0012` |
+| P2/item9 | scope summaries | **FIXED** | `POST /ai/summaries` real implementation |
+| P2/item10 | import expansion | **PARTIAL** | upload + identifier done (frontend+backend); RIS/CSL pending → Stage 4; **note A1 currently breaks upload extraction** |
+
+## Confirmed-valid open items, by priority
+
+1. **A1** (HIGH correctness) — managed-path extraction; breaks the already-shipped upload flow.
+2. **A3** (process) — make local readiness mirror CI.
+3. **B1** (extraction) — GROBID settings + coordinates; gates the PDF.js reader.
+4. **B6 remainder** — PDF.js reader, Cytoscape graph, metadata-review UI.
+5. **B5** — agent manifest/teleport vertical.
+6. **H2** — embeddings off the read path; provider interface.
+7. Deferred (Stage 7): H3 perf, C3/C4 remainder, H7 pgvector, export polish, M0 auth hardening,
+   security-doc truthfulness (M2/M3/M4/M5), backups, prod smoke.
+
+The audit's own top-3 priorities (managed-upload extraction, `make ready`/doc parity, then
+GROBID coordinates) are preserved as Stages 1–2 of `docs/WORKPLAN.md`.

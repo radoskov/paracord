@@ -8,6 +8,33 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **P2/item6 — Navigation shell + Admin UI:** `frontend/src/App.svelte` now does hash-based
+  routing (`#library` / `#admin`) with a nav bar and lifts the auth token so both pages share one
+  authenticated client. New `frontend/src/pages/AdminPage.svelte` provides user management (create /
+  role-change / disable), agent management (issue enrollment token, approve, reveal the bearer
+  token once), and a last-50 audit-event list. `client.ts` gains the matching admin/agent/audit
+  methods plus `uploadPdf` and `importByIdentifier`. (AUDIT P2/item6)
+- **P2/item10 frontend — Upload + identifier import controls:** `LibraryPage.svelte` Sources panel
+  now has a PDF file-upload control and an arXiv/DOI identifier-import field wired to
+  `POST /imports/upload` and `POST /imports/identifier`. (AUDIT P2/item10)
+- **Forward-looking acceptance contracts:** four *skipped* acceptance tests under
+  `backend/tests/future/` (GROBID coordinates, agent teleport, local-LLM summaries, topic
+  modeling) define the completion signal for upcoming `docs/WORKPLAN.md` stages; plus additional
+  algorithm/library/security contract tests and a deterministic topic-modeling test.
+- **`docs/WORKPLAN.md`:** authoritative, execution-ordered plan (2026-06-29) to a fully functional
+  app — re-validates every open audit finding against the current code and groups remaining work
+  into 7 stages, deferring minor polish to the last stage.
+
+### Changed / Fixed
+
+- **C5 — Docker dev/prod split repaired:** the H5 production-build work had made `make build`
+  produce production images and left misleading `Dockerfile` comments. `docker-compose.yml` now
+  pins `target: development` for `api`/`worker`/`frontend`; development is the default build again.
+  (AUDIT C5)
+- **Tooling:** ruff checks extended to `frontend/` and `config/`; added `INSTALL.md` and
+  `docs/testing/` references (`ADDITIONAL_TEST_BATTERY.md`, `OPTIONAL_MAKEFILE_TARGETS.md`,
+  `TEST_DESIGN_REVIEW.md`).
+
 - **P1/item5 — DOI SQL pushdown:** DOIs are now stored normalized (bare, lowercase, no URL
   prefix) at every write site (`bibtex.py`, `metadata_enrichment.py`, works create/
   metadata-select endpoints, identifier import).  `_same_doi_candidates` (duplicate scanner)

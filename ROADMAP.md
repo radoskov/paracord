@@ -6,25 +6,24 @@ The ordering is value-first: it front-loads the complete single-machine loop
 agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M8).
 `WORK_SPLIT.md` maps the work packages (A–J) onto these milestones.
 
-> **Current position:** M0 done; **M1 done and validated end-to-end**; **M2 extraction +
-> metadata enrichment are live and validated on real arXiv PDFs** — GROBID via the RQ
-> worker, then arXiv/Crossref enrichment that auto-corrects bad GROBID titles, with a
-> provenance/conflict review surface. Raw TEI and citation mentions are now persisted.
-> M4 duplicate/version detection has started: the review-queue table and scanner now generate
-> DOI/arXiv/fuzzy-title/text-fingerprint/exact-file candidates idempotently, and
-> `/api/v1/duplicates` can list, scan, and mark review status. The initial Svelte review panel
-> can trigger scans and mark candidates accepted/rejected/ignored. Backend review actions now
-> apply merge-work, link-as-version, duplicate-file, keep-separate, and ignore decisions without
-> deleting files/works, and the Svelte review panel now calls those explicit actions.
-> Multiwork-file candidates are now generated from conservative proceedings/repeated-section
-> heuristics, and `split_file` creates file segments, works, and contains links from supplied
-> segment ranges. The Svelte review panel can submit those split ranges. Reader/reference
-> integration has started with an embedded authenticated PDF surface and References tab powered
-> by extracted citation contexts. Separate annotation storage and work-scoped create/list
-> endpoints are now in place, and the embedded reader Notes tab can create/list annotations.
-> Initial BibTeX export for work/shelf/rack scopes is also live. Next: harden toward PDF.js
-> anchors/overlays and broaden export formats.
-> See `PROGRESS.md` → "Start here (next agent)".
+> **Current position (2026-06-29):** M0–M1 done and validated end-to-end. **M2–M7 all have an
+> implemented, tested backend vertical** — GROBID extraction via the RQ worker;
+> arXiv/Crossref/OpenAlex/Semantic-Scholar enrichment with a provenance/conflict surface; raw TEI
+> + citation mentions; the full M4 duplicate/version/multiwork review (scan, merge, link-version,
+> mark-dup, split, keep, ignore) with a frontend panel; M6 scoped citation graph; and M7
+> semantic search / extractive + scope summaries / topic modeling. The frontend now has a
+> hash-routed navigation shell, an Admin UI (users / agents / audit), and PDF-upload + arXiv/DOI
+> identifier import. M5 (agent) is still enrollment-only; manifest/teleport are stubs.
+>
+> Several M3–M7 features are deliberate **lightweight baselines** (iframe reader not PDF.js;
+> text-edge-list not Cytoscape; hash-BOW "semantic" search; TF-IDF topics; extractive summaries)
+> and the reader/graph UI, metadata-review UI, and agent teleport are the largest remaining gaps.
+>
+> **The ordered plan to finish the app is `docs/WORKPLAN.md` (2026-06-29)** — it re-validates the
+> audit against current code and sequences the remaining work in 7 stages, front-loading
+> whole-area unblockers (managed-path extraction fix, GROBID coordinates, PDF.js + Cytoscape,
+> metadata UI, agent teleport, AI provider seams) and deferring minor polish to the last stage.
+> See also `PROGRESS.md` → "Start here (next agent)".
 > The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
 > are deliberately deferred in favour of building the product.
 

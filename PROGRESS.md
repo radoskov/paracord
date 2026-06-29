@@ -159,8 +159,16 @@ What works today (real, tested in-container on Python 3.12):
   library has a semantic search box that opens the matched work. Covered by
   `test_semantic_search.py` and the enabled forward-looking `test_semantic_search_returns_neighbours`.
 
+- **Frontend navigation shell + Admin UI + import controls (P2/item6, P2/item10):** the SPA now
+  has hash-based routing (`#library` / `#admin`) with a nav bar; an Admin page for user management,
+  agent enrollment/approval, and the audit-event log; and PDF-upload + arXiv/DOI identifier-import
+  controls in the Library Sources panel.
+
 What still does NOT exist yet:
 
+- **A1 (known bug):** uploaded `managed_path` PDFs are queued for extraction but
+  `extract_and_store()` only resolves `server_path`, so background extraction of uploaded PDFs
+  fails. Fix is Stage 1 in `docs/WORKPLAN.md`.
 - Rich citation-graph rendering (Cytoscape interactive canvas) — the scoped graph API and a
   lightweight summary/edge-list panel exist, but the full interactive graph view and the
   PDF.js reader/reference-panel integration are still pending. Reference resolution is
@@ -238,23 +246,44 @@ P1 items addressed (2026-06-26):
   `WHERE doi = :bare_doi` SQL pushdown — O(1) lookups instead of O(n) Python loops.
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
-Next recommended items in priority order:
+P2 / P0 items addressed (2026-06-29):
+- **P2/item6 (DONE):** Navigation shell + Admin UI. `App.svelte` now has hash-based routing
+  (`#library` / `#admin`) and a nav bar; new `pages/AdminPage.svelte` covers user management
+  (create / role-change / disable), agent management (issue enrollment token, approve, reveal
+  bearer token once), and the last-50 audit-event list. The token is lifted to `App.svelte` so the
+  Admin page shares the authenticated client. (commit `94151b4`)
+- **P2/item10 frontend (DONE):** `LibraryPage.svelte` Sources section now has a PDF file-upload
+  control (`uploadPdf`) and an arXiv/DOI identifier-import control (`importByIdentifier`) wired to
+  the import endpoints. (commit `94151b4`)
+- **C5 (DONE):** the production-build work (H5) had made `make build` build production images and
+  left misleading `Dockerfile` comments; `docker-compose.yml` now pins `target: development` for
+  `api`/`worker`/`frontend` and the dev/prod split is correct again. (commit `c274605`)
+- **Test battery + tooling (DONE):** added additional algorithm/library/security contract tests,
+  a more robust (deterministic) topic-modeling test, four *skipped* forward-looking acceptance
+  contracts under `backend/tests/future/` (GROBID coordinates, agent teleport, local LLM, topic
+  modeling), ruff coverage extended to `frontend/`+`config/`, and `INSTALL.md`. (commits `accd526`,
+  `517cdb1`)
 
-1. **P0/H6 — Fix .env prefix (operator):** if you have a local `.env` using `PAPERRACKS_*` keys,
-   regenerate it from `.env.example` (which uses the correct `PARACORD_*` prefix). No code change
-   needed.
-2. **P2/item6 — Navigation shell + Admin UI:** the SPA has no router; owner operations (users,
-   agents, audit events) are raw-HTTP only. Add a navigation shell + Dashboard + Admin page.
-3. **P2/item8 — Metadata review/edit UI:** the backend supports conflict review and
-   `POST /works/{id}/metadata/select`, but there's no UI. Add metadata review panel and per-work
-   Enrich button.
-4. **P2/item10 (remaining) — RIS/CSL JSON import:** add `POST /imports/ris` and
-   `POST /imports/csl` endpoints to complete §8.1 ingestion types.
-5. **P2/item6 — Upload/identifier import frontend controls:** wire the new
-   `POST /imports/upload` and `POST /imports/identifier` endpoints into the Svelte UI.
+### >> The ordered plan now lives in `docs/WORKPLAN.md` <<
 
-The leftover M0 auth items (login rate limiting, in-app password change) remain
-deliberately deferred — hardening, not the product.
+`docs/WORKPLAN.md` (2026-06-29) is the authoritative, execution-ordered plan to a fully functional
+app. It re-validates every open audit finding against the current code and groups the remaining
+work into 7 stages, front-loading whole-area unblockers and **deferring minor polish/optimizations
+to the last stage**. Summary of the next stages:
+
+1. **Stage 1 — correctness/CI (now):** **A1** managed-path extraction fix (uploaded PDFs currently
+   can't be extracted — `extraction.py` only resolves `server_path`); **A3** make `ready`/`ci`
+   include `frontend-check` + `test-migrations`.
+2. **Stage 2 — GROBID settings + coordinate extraction (B1)** — unblocks the reader/graph.
+3. **Stage 3 — PDF.js reader + interactive Cytoscape graph** (packages already installed, unused).
+4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
+5. **Stage 5 — agent manifest/teleport vertical (M5).**
+6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**
+7. **Stage 7 — deferred polish:** H3 fuzzy perf, remaining FK/JSONB, pgvector (H7), export polish,
+   M0 auth hardening, security-doc truthfulness, backups, prod smoke.
+
+H6 (`.env` prefix) is an operator action: regenerate a local `.env` from `.env.example`
+(`PARACORD_*`) — no code change. The leftover M0 auth items remain deliberately deferred.
 
 ## Completed
 
