@@ -1,5 +1,6 @@
 """Import pipeline endpoints."""
 
+import json
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -15,6 +16,7 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.source import ImportBatch, Source
 from app.models.user import User
+from app.services.bibliography_import import import_csl, import_ris
 from app.services.bibtex import import_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.services.metadata_enrichment import enrich_work
@@ -90,6 +92,41 @@ def import_bibtex_entries(
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty BibTeX content")
     batch = import_bibtex(db, payload.content, actor=actor)
+    db.commit()
+    db.refresh(batch)
+    return batch
+
+
+@router.post("/ris", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
+def import_ris_entries(
+    payload: BibtexImportCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ImportBatch:
+    """Create works from pasted/uploaded RIS content."""
+    if not payload.content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty RIS content")
+    batch = import_ris(db, payload.content, actor=actor)
+    db.commit()
+    db.refresh(batch)
+    return batch
+
+
+@router.post("/csl", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
+def import_csl_entries(
+    payload: BibtexImportCreate,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ImportBatch:
+    """Create works from pasted/uploaded CSL-JSON content."""
+    if not payload.content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty CSL content")
+    try:
+        batch = import_csl(db, payload.content, actor=actor)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSL JSON: {exc}"
+        ) from exc
     db.commit()
     db.refresh(batch)
     return batch

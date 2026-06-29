@@ -13,6 +13,8 @@
   let uploadFile: File | null = null;
   let identifierValue = '';
   let bibtexContent = '';
+  let risContent = '';
+  let cslContent = '';
   let loading = false;
   let message = '';
 
@@ -90,6 +92,24 @@
       message = `BibTeX import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
   }
+
+  async function importRis(): Promise<void> {
+    if (!risContent.trim()) return;
+    await run(async () => {
+      const batch = await client.importRis(risContent);
+      risContent = '';
+      message = `RIS import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
+    });
+  }
+
+  async function importCsl(): Promise<void> {
+    if (!cslContent.trim()) return;
+    await run(async () => {
+      const batch = await client.importCsl(cslContent);
+      cslContent = '';
+      message = `CSL import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
+    });
+  }
 </script>
 
 <section class="grid">
@@ -141,7 +161,24 @@
       <textarea bind:value={bibtexContent} rows="5" placeholder="@article&#123;...&#125;" aria-label="BibTeX"></textarea>
       <button type="submit" disabled={!bibtexContent.trim() || loading}>Import BibTeX</button>
     </form>
-    <p class="hintline">RIS and CSL-JSON import are coming in a follow-up.</p>
+  </div>
+
+  <div class="card">
+    <h2>Paste RIS</h2>
+    <p class="muted">Reference Manager / EndNote format (tagged lines, one record per <code>ER</code>).</p>
+    <form on:submit|preventDefault={importRis} class="stack">
+      <textarea bind:value={risContent} rows="5" placeholder="TY  - JOUR&#10;TI  - Title&#10;ER  -" aria-label="RIS"></textarea>
+      <button type="submit" disabled={!risContent.trim() || loading}>Import RIS</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Paste CSL JSON</h2>
+    <p class="muted">Citation Style Language JSON (an array of items, as exported by Zotero).</p>
+    <form on:submit|preventDefault={importCsl} class="stack">
+      <textarea bind:value={cslContent} rows="5" placeholder={'[{"title": "…", "DOI": "…"}]'} aria-label="CSL JSON"></textarea>
+      <button type="submit" disabled={!cslContent.trim() || loading}>Import CSL JSON</button>
+    </form>
   </div>
 </section>
 

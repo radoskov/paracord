@@ -579,6 +579,14 @@ export class ApiClient {
     });
   }
 
+  async importRis(content: string): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/ris', { method: 'POST', body: { content } });
+  }
+
+  async importCsl(content: string): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/csl', { method: 'POST', body: { content } });
+  }
+
   async uploadPdf(file: File): Promise<ImportBatch> {
     const form = new FormData();
     form.append('file', file);
