@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { ApiClient, type AdminUser, type AgentRecord, type AuditEvent, type UserRole } from '../api/client';
+  import {
+    ApiClient,
+    type AdminUser,
+    type AgentFileRecord,
+    type AgentRecord,
+    type AuditEvent,
+    type UserRole,
+  } from '../api/client';
 
   export let client: ApiClient;
 
@@ -8,6 +15,9 @@
   let auditEvents: AuditEvent[] = [];
   let message = '';
   let loading = false;
+
+  let openAgentId = '';
+  let agentFiles: AgentFileRecord[] = [];
 
   let newUsername = '';
   let newPassword = '';
@@ -76,6 +86,25 @@
       enrollToken = result.token;
       enrollExpiry = result.expires_at;
     }, 'Enrollment token issued — copy it now, it will not be shown again');
+  }
+
+  async function viewAgentFiles(agent: AgentRecord): Promise<void> {
+    if (openAgentId === agent.id) {
+      openAgentId = '';
+      agentFiles = [];
+      return;
+    }
+    await run(async () => {
+      agentFiles = await client.listAgentFiles(agent.id);
+      openAgentId = agent.id;
+    });
+  }
+
+  async function teleport(agentId: string, file: AgentFileRecord): Promise<void> {
+    await run(async () => {
+      await client.requestTeleport(agentId, file.local_file_id);
+      agentFiles = await client.listAgentFiles(agentId);
+    }, 'Teleport requested — run the agent’s “teleport” command to push the file');
   }
 
   async function approveAgent(agent: AgentRecord): Promise<void> {
@@ -170,6 +199,12 @@
     <!-- Agents -->
     <section class="surface admin-section">
       <h2>Agents</h2>
+      <p class="muted small-help">
+        A local <strong>agent</strong> runs on a workstation and indexes PDFs in folders <em>on
+        that machine</em> (use this for files on your own PC — the “Server folder” import is only
+        for folders on the server). Issue an enrollment token, run the agent with it, approve it
+        here, then browse its files and teleport the ones you want into the library.
+      </p>
 
       <div class="inline-action">
         <button type="button" on:click={issueEnrollToken} disabled={loading}>
@@ -179,16 +214,18 @@
 
       {#if enrollToken}
         <div class="token-box">
-          <p>Share this token with the agent operator (shown once):</p>
-          <code>{enrollToken}</code>
-          <small>Expires {formatDate(enrollExpiry)}</small>
+          <p>Enroll the agent with this token (shown once):</p>
+          <code>paracord-agent sync --server &lt;server-url&gt; --token {enrollToken} &lt;folder&gt;</code>
+          <small>Expires {formatDate(enrollExpiry)} · then approve the agent below.</small>
         </div>
       {/if}
 
       {#if lastApprovedToken}
         <div class="token-box">
-          <p>Agent bearer token (shown once):</p>
-          <code>{lastApprovedToken}</code>
+          <p>Agent bearer token (shown once) — set it on the workstation:</p>
+          <code>export PARACORD_AGENT_TOKEN={lastApprovedToken}</code>
+          <small>Then run <code>paracord-agent sync &lt;folder&gt;</code> to index, and
+            <code>paracord-agent teleport &lt;folder&gt;</code> to push requested files.</small>
         </div>
       {/if}
 
@@ -210,6 +247,37 @@
                 >
                   Approve
                 </button>
+              {:else if agent.status === 'approved'}
+                <button
+                  type="button"
+                  on:click={() => viewAgentFiles(agent)}
+                  disabled={loading}
+                  title="Browse the files this agent has indexed"
+                >
+                  {openAgentId === agent.id ? 'Hide files' : 'View files'}
+                </button>
+              {/if}
+
+              {#if openAgentId === agent.id}
+                {#if agentFiles.length === 0}
+                  <p class="empty">No files reported yet. Run <code>paracord-agent sync</code> on the workstation.</p>
+                {:else}
+                  <ul class="agent-files">
+                    {#each agentFiles as file (file.id)}
+                      <li>
+                        <span class="fname">{file.display_path ?? file.local_file_id.slice(0, 10)}</span>
+                        {#if file.teleport_status === 'complete'}
+                          <span class="role-badge role-approved">in library</span>
+                        {:else if file.teleport_status === 'requested'}
+                          <span class="role-badge role-pending">awaiting push</span>
+                        {:else}
+                          <button type="button" on:click={() => teleport(agent.id, file)} disabled={loading}
+                            title="Request this file be teleported into the library">Teleport</button>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
               {/if}
             </article>
           {/each}
@@ -446,5 +514,38 @@
   small {
     font-size: 0.75rem;
     color: #64748b;
+  }
+
+  .small-help {
+    font-size: 0.8rem;
+    line-height: 1.45;
+    margin: 0 0 0.6rem;
+  }
+
+  .agent-files {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+  }
+
+  .agent-files li {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+
+  .agent-files .fname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-files button {
+    min-height: 1.8rem;
+    padding: 0.15rem 0.5rem;
   }
 </style>

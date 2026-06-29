@@ -124,3 +124,44 @@ def test_enroll_token_requires_owner(client, auth_headers) -> None:
 def test_enroll_request_rejects_bad_token(client) -> None:
     r = client.post("/api/v1/agents/enroll-request", json={"token": "nope", "name": "x"})
     assert r.status_code == 400
+
+
+def test_admin_list_agent_files(client, auth_headers, db) -> None:
+    import uuid as _uuid
+
+    from app.models.agent import Agent, AgentFile
+
+    agent = Agent(name="ws", status="approved")
+    db.add(agent)
+    db.flush()
+    db.add(
+        AgentFile(
+            agent_id=agent.id,
+            local_file_id="local-1",
+            sha256="a" * 64,
+            size_bytes=10,
+            display_path="paper.pdf",
+        )
+    )
+    db.commit()
+
+    listed = client.get(f"/api/v1/admin/agents/{agent.id}/files", headers=auth_headers("owner"))
+    assert listed.status_code == 200
+    body = listed.json()
+    assert len(body) == 1
+    assert body[0]["local_file_id"] == "local-1"
+    assert body[0]["teleport_status"] == "none"
+
+    # Non-owner is rejected; unknown agent is 404.
+    assert (
+        client.get(
+            f"/api/v1/admin/agents/{agent.id}/files", headers=auth_headers("editor")
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            f"/api/v1/admin/agents/{_uuid.uuid4()}/files", headers=auth_headers("owner")
+        ).status_code
+        == 404
+    )

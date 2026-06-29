@@ -333,6 +333,16 @@ export interface EnrollTokenOut {
   expires_at: string;
 }
 
+export interface AgentFileRecord {
+  id: string;
+  local_file_id: string;
+  sha256: string;
+  size_bytes: number;
+  display_path: string | null;
+  teleport_status: string;
+  file_id: string | null;
+}
+
 export interface JobRecord {
   id: string;
   task: string;
@@ -685,6 +695,17 @@ export class ApiClient {
 
   async issueEnrollToken(): Promise<EnrollTokenOut> {
     return this.request<EnrollTokenOut>('/api/v1/admin/agents/enroll-token', { method: 'POST' });
+  }
+
+  async listAgentFiles(agentId: string): Promise<AgentFileRecord[]> {
+    return this.request<AgentFileRecord[]>(`/api/v1/admin/agents/${agentId}/files`);
+  }
+
+  async requestTeleport(agentId: string, localFileId: string): Promise<void> {
+    await this.request<void>('/api/v1/imports/teleport', {
+      method: 'POST',
+      body: { agent_id: agentId, local_file_id: localFileId },
+    });
   }
 
   async getJobs(limit = 25): Promise<QueueStatus> {

@@ -136,7 +136,14 @@
 
   <div class="card">
     <h2>Server folder</h2>
-    <p class="muted">Register a configured server-folder root (by alias) and scan it for PDFs.</p>
+    <p class="muted">
+      Scans a folder <strong>on the server machine</strong> for PDFs. For security the server
+      won’t read arbitrary paths — an operator first whitelists folders in the server config
+      (<code>storage.server_allowed_roots</code> in <code>server.yaml</code>), each with an
+      <em>alias</em>. Enter that alias below. <br />
+      <strong>Files on your own computer?</strong> Use a local <strong>agent</strong> instead
+      (see the <em>Admin → Agents</em> tab) — server-folder can’t reach your PC.
+    </p>
     <form on:submit|preventDefault={createSource} class="stack">
       <input bind:value={newSourceName} placeholder="Source name" aria-label="Source name" />
       <input bind:value={newSourceAlias} placeholder="Configured alias" aria-label="Configured alias" />

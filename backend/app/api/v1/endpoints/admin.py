@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_owner
 from app.db.session import get_db
+from app.models.agent import Agent, AgentFile
 from app.models.audit import AuditEvent
 from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
@@ -35,6 +36,18 @@ class AgentApprovedOut(BaseModel):
     agent_id: uuid.UUID
     status: str
     agent_token: str
+
+
+class AgentFileOut(BaseModel):
+    id: uuid.UUID
+    local_file_id: str
+    sha256: str
+    size_bytes: int
+    display_path: str | None = None
+    teleport_status: str
+    file_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -171,6 +184,24 @@ def list_agents(
 ) -> list:
     """List enrolled/pending agents (owner only)."""
     return agent_service.list_agents(db)
+
+
+@router.get("/agents/{agent_id}/files", response_model=list[AgentFileOut])
+def list_agent_files(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _owner: User = Depends(require_owner),
+) -> list:
+    """List the files an agent has reported via its manifest (owner only)."""
+    if db.get(Agent, agent_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    return list(
+        db.scalars(
+            select(AgentFile)
+            .where(AgentFile.agent_id == agent_id)
+            .order_by(AgentFile.created_at.desc())
+        ).all()
+    )
 
 
 @router.post("/agents/{agent_id}/approve", response_model=AgentApprovedOut)
