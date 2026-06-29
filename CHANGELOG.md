@@ -27,6 +27,20 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **§32 agent redesign (in progress)** — agent core (S3 + S4):
+  - **Persistent config + state + secrets**: tool-managed `agent.yaml` (server URL, agent id,
+    managed folders/files with per-item mode/action/teleport-policy, defaults, refresh interval,
+    web port), a SQLite `state.sqlite3` mapping opaque `local_file_id` → real on-disk path
+    (local-only) + per-file state/blocks, and secrets via the OS **keyring if available, else a
+    `0600` file** (`pip install -e agent[keyring]` enables keyring).
+  - **CLI** (`paracord-agent`): `enroll`, `set-token`, `set-server`, `add-folder`/`add-file`
+    (mode/action/policy) / `remove` / `list`, `sync`, `status`, `refresh`, `teleport <id>`,
+    `request --list/--approve/--reject [--forever]/--unblock`, and `start` (monitor + periodic
+    sync). `agent_ops` applies the per-file action on sync (index_only → manifest only;
+    index_and_extract → upload-for-extraction; teleport → push), reports removed sources, and
+    auto-fulfils `allow`-policy requests / auto-rejects blocked ones.
+  - **Server**: `GET /agents/me` (identity + privileges) and
+    `POST /agents/files/source-removed` for the agent's status + removal reporting.
 - **§32 agent redesign (in progress)** — server-side foundations:
   - **S1 — per-agent privileges** (migration `0015`): `can_index`/`can_extract`/`can_be_requested`
     /`processing_visibility`/`server_status_visibility` (default on) + `can_teleport` (default off,

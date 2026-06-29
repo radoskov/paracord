@@ -200,6 +200,38 @@ def unblock_teleport(
     return {"local_file_id": local_file_id, "status": "unblocked"}
 
 
+@router.get("/me")
+def agent_self(agent: Agent = AGENT_DEP) -> dict:
+    """Return the calling agent's identity, approval, and granted privileges (reachability check)."""
+    return {
+        "agent_id": str(agent.id),
+        "name": agent.name,
+        "status": agent.status,
+        "can_index": agent.can_index,
+        "can_extract": agent.can_extract,
+        "can_teleport": agent.can_teleport,
+        "can_be_requested": agent.can_be_requested,
+        "processing_visibility": agent.processing_visibility,
+        "server_status_visibility": agent.server_status_visibility,
+    }
+
+
+class SourceRemovedRequest(BaseModel):
+    local_file_ids: list[str]
+
+
+@router.post("/files/source-removed", status_code=status.HTTP_200_OK)
+def report_source_removed(
+    payload: SourceRemovedRequest,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, int]:
+    """The agent reports files whose local source disappeared (kept + flagged server-side)."""
+    marked = agent_files.mark_source_removed(db, agent=agent, local_file_ids=payload.local_file_ids)
+    db.commit()
+    return {"marked": marked}
+
+
 @router.get("/files", response_model=list[AgentFileStatus])
 def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> list:
     """Report this agent's files + their processing/teleport state (for the agent's own status view)."""

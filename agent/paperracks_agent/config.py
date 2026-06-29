@@ -1,59 +1,71 @@
-"""Agent configuration."""
+"""Agent configuration (SPEC §32.2).
+
+The agent owns a single, persistent, tool-managed config at ``~/.config/paracord/agent.yaml``
+(override with ``$PARACORD_AGENT_HOME`` or an explicit path). It round-trips via pydantic, so the
+CLI and web GUI can read and rewrite it. Secrets live separately (see ``secrets.py``).
+"""
 
 import os
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# Import action applied to a file: index_only | index_and_extract | teleport.
+ACTIONS = ("index_only", "index_and_extract", "teleport")
+# Whether the server may teleport without per-request approval: ask | allow.
+POLICIES = ("ask", "allow")
+
+
+class ManagedFolder(BaseModel):
+    path: Path
+    mode: str = "monitored"  # monitored | once
+    action: str = "index_only"
+    teleport_policy: str = "ask"
+
+
+class ManagedFile(BaseModel):
+    path: Path
+    action: str = "index_only"
+    teleport_policy: str = "ask"
 
 
 class AgentConfig(BaseModel):
-    """Local agent configuration.
-
-    Folders to index live in ``allowed_roots`` — edit the config file (or pass roots on the
-    command line) to add/remove them; that is the agent's "manage folders" surface.
-    """
+    """Persistent agent configuration."""
 
     name: str = "workstation-agent"
     server_url: str = "http://127.0.0.1:8000"
-    allowed_roots: list[Path] = []
+    agent_id: str | None = None
+    refresh_interval: int = 30
+    web_port: int = 8765
+    default_action: str = "index_only"
+    default_teleport_policy: str = "ask"
     follow_symlinks: bool = False
-    teleport_enabled: bool = True
-    poll_interval_seconds: int = 30
-    token_file: Path | None = None
+    folders: list[ManagedFolder] = Field(default_factory=list)
+    files: list[ManagedFile] = Field(default_factory=list)
 
 
-def load_agent_config(path: Path) -> AgentConfig:
-    """Load an :class:`AgentConfig` from the YAML config file (see config/agent.example.yaml)."""
-    data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8")) or {}
-    agent = data.get("agent") or {}
-    filesystem = data.get("filesystem") or {}
-    teleport = data.get("teleport") or {}
-    values: dict = {}
-    if "name" in agent:
-        values["name"] = agent["name"]
-    if "server_url" in agent:
-        values["server_url"] = agent["server_url"]
-    if "poll_interval_seconds" in agent:
-        values["poll_interval_seconds"] = agent["poll_interval_seconds"]
-    if "token_file" in agent:
-        values["token_file"] = Path(str(agent["token_file"])).expanduser()
-    if "allowed_roots" in filesystem:
-        values["allowed_roots"] = [Path(str(r)).expanduser() for r in filesystem["allowed_roots"]]
-    if "follow_symlinks" in filesystem:
-        values["follow_symlinks"] = filesystem["follow_symlinks"]
-    if "enabled" in teleport:
-        values["teleport_enabled"] = teleport["enabled"]
-    return AgentConfig(**values)
+def default_config_path() -> Path:
+    """Return the agent's config path (``$PARACORD_AGENT_HOME`` or ~/.config/paracord)."""
+    env = os.environ.get("PARACORD_AGENT_HOME")
+    base = Path(env).expanduser() if env else Path("~/.config/paracord").expanduser()
+    return base / "agent.yaml"
 
 
-def resolve_token(explicit: str | None, config: AgentConfig | None) -> str | None:
-    """Resolve the agent bearer token from --token, then $PARACORD_AGENT_TOKEN, then token_file."""
-    if explicit:
-        return explicit
-    env = os.environ.get("PARACORD_AGENT_TOKEN")
-    if env:
-        return env
-    if config and config.token_file and config.token_file.expanduser().exists():
-        return config.token_file.expanduser().read_text(encoding="utf-8").strip()
-    return None
+def load_config(path: Path | None = None) -> AgentConfig:
+    """Load the agent config (returns defaults if the file does not exist yet)."""
+    resolved = Path(path).expanduser() if path else default_config_path()
+    if not resolved.exists():
+        return AgentConfig()
+    data = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    return AgentConfig(**data)
+
+
+def save_config(config: AgentConfig, path: Path | None = None) -> Path:
+    """Persist the agent config, creating the directory if needed."""
+    resolved = Path(path).expanduser() if path else default_config_path()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(
+        yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+    )
+    return resolved

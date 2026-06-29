@@ -416,3 +416,24 @@ def test_discard_after_extract_removes_file_keeps_work(db, tmp_path) -> None:
     row = db.query(AgentFile).filter(AgentFile.local_file_id == "f1").first()
     assert row.processing_state == "extracted"
     assert row.file_id is None
+
+
+def test_agent_me_and_source_removed(client, db) -> None:
+    from app.models.agent import AgentFile
+
+    agent, headers = _agent_with_token(db)
+    me = client.get("/api/v1/agents/me", headers=headers).json()
+    assert me["status"] == "approved"
+    assert me["can_index"] is True
+
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={"items": [{"local_file_id": "g1", "sha256": _PDF_SHA, "size_bytes": len(_PDF)}]},
+    )
+    r = client.post(
+        "/api/v1/agents/files/source-removed", headers=headers, json={"local_file_ids": ["g1"]}
+    )
+    assert r.status_code == 200 and r.json()["marked"] == 1
+    row = db.query(AgentFile).filter(AgentFile.local_file_id == "g1").first()
+    assert row.processing_state == "source_removed"

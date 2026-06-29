@@ -16,6 +16,10 @@ dependencies = [
     "rich>=13.7",
 ]
 
+[project.optional-dependencies]
+# Optional OS-keyring secret storage; without it the agent falls back to a 0600 file.
+keyring = ["keyring>=24"]
+
 [project.scripts]
 paracord-agent = "paperracks_agent.cli:main"
 
