@@ -2874,6 +2874,12 @@ Each entry carries:
 A **global default switch** sets the default action and teleport policy applied to *newly added*
 folders/files (including files auto-discovered in monitored folders). Per-entry overrides win.
 
+Every indexed file has a stable **virtual path** (its path relative to the monitored root) used as
+its server-visible reference (§32.4). If a monitored file is **deleted on disk** and it was *not*
+already teleported to the server, the server **keeps** its Work, metadata, references, and preview,
+and marks it with a **"source file on client removed"** warning (the agent reports the file as
+gone on its next sync); the entry is not deleted server-side.
+
 ### 32.4 Import actions — what happens to the bytes *(maintainer decision)*
 
 When the agent processes an indexed PDF (on add/import, or automatically when a monitored folder
@@ -2884,11 +2890,19 @@ per import in the CLI/GUI and/or taken from the entry's default:
    hash, size, page count). **No bytes leave the host.** The server knows the file exists and can
    later *request* a teleport.
 2. **`index_and_extract`** — the agent uploads the bytes to a transient server endpoint; the server
-   runs extraction (GROBID → metadata, abstract, references), creates/updates the Work, **then
-   discards the PDF** and keeps only a *reference* (the manifest entry marking the file as
-   agent-resident). The paper becomes fully searchable in the library with references, but the PDF
-   is **not** stored server-side; the user can teleport the actual file later. *(Privacy-preserving:
-   metadata without permanent file storage.)*
+   runs extraction (GROBID → metadata, abstract, references), creates/updates the Work, keeps a
+   **lightweight preview/thumbnail** (first-page text + small image), **then discards the original
+   PDF** and retains only a *reference* (see "virtual path" below) marking the file as
+   agent-resident. The paper becomes fully searchable in the library with references and a preview,
+   but the full PDF is **not** stored server-side; the user can teleport the actual file later.
+   *(Privacy-preserving: metadata + preview without permanent file storage.)*
+
+   The **reference** is the file's **virtual path** — a stable, human-readable label (the file's
+   path relative to its monitored root, e.g. `Project A/transformers/paper.pdf`) stored alongside
+   the opaque `local_file_id` (content hash). The server uses the virtual path only to *show which
+   file it is* and to *address it in a teleport request*. The **agent** resolves a virtual path (or
+   `local_file_id`) back to the real on-disk absolute path **locally only** — the real path never
+   leaves the host.
 3. **`teleport`** — the agent uploads the bytes; the server stores the PDF **permanently** in the
    managed library (content-addressed) and extracts it. Requires the agent's `can_teleport`
    privilege.
@@ -2898,19 +2912,33 @@ processing/storing.
 
 ### 32.5 Command-line interface
 
-The CLI configures the single local agent; it never creates a second agent.
+The CLI configures and drives the single local agent; it never creates a second agent. It is a
+**minimal, fast interface** — the web GUI (§32.7) offers the same capabilities and more.
 
 - `paracord-agent enroll --server URL --token <enrollment-token> [--name]` — token handshake;
   stores the server URL and (after owner approval) the agent token.
-- `paracord-agent start [--daemon]` — run the monitoring/sync loop (foreground, or
-  detached/daemon; a systemd **user** unit is provided in `agent/systemd/`).
-- `paracord-agent stop` / `status` — stop the loop / show connection, approval state + granted
-  privileges, managed items, and last sync.
+- `paracord-agent start [--daemon]` / `stop` — **start/stop the monitoring + sync loop**
+  (foreground, or detached/daemon; a systemd **user** unit is provided in `agent/systemd/`).
+- `paracord-agent status` — connection, approval state + granted privileges, managed items, the
+  refresh interval, and last sync.
+- `paracord-agent refresh` — force an **off-schedule** refresh now (re-poll server status + push
+  any pending manifest changes), independent of the periodic interval.
 - `paracord-agent add-folder <path> [--monitor | --once] [--action index|extract|teleport]
   [--teleport allow|ask]`, `remove-folder`, `add-file <path>`, `list`.
 - `paracord-agent sync` / `import <path>` — one-shot manifest sync / folder import.
 - `paracord-agent teleport <local-file-id>` — agent-initiated push (requires `can_teleport`).
+- `paracord-agent request` — manage incoming server teleport requests:
+  - `--list` — list pending teleport requests (id, virtual path, requester, policy);
+  - `--approve <id>` — approve a request (agent pushes the file);
+  - `--reject [--forever] <id>` — reject a request; `--forever` also **blocks all future**
+    requests for that file (auto-rejected until unblocked);
+  - `--unblock <id>` — clear a `--forever` block so the file can be requested again.
 - `paracord-agent web up | down | status` — manage the local web GUI (§32.7).
+
+**Refresh rate.** The periodic poll/sync interval is configurable (`refresh_interval` in
+`agent.yaml`, **default 30 s**). Import/teleport/approval **actions sync instantly** (not on the
+timer); the timer only drives background status re-polls and manifest reconciliation. `refresh`
+forces a cycle immediately.
 
 ### 32.6 Teleport model — agent-controlled; the server can only request
 
@@ -2923,6 +2951,10 @@ Bytes are always **pushed by the agent**; the server never reads the host disk. 
     pushes;
   - if `teleport_policy = allow`, the request is **auto-approved** and the agent pushes without
     prompting.
+- **Reject / block:** a pending request can be **rejected**. Rejecting with **`forever`** also
+  records a per-file **block**, so the agent **auto-rejects all future requests** for that file
+  until it is **unblocked** (`request --unblock`, or via the GUI). A blocked file is never pushed,
+  even under an `allow` policy.
 - Every push is privilege-gated and SHA-256-verified server-side.
 
 The global default switch (§32.3) sets whether newly added items are `allow` or `ask`.
@@ -2932,35 +2964,42 @@ The global default switch (§32.3) sets whether newly added items are `allow` or
 - **Implementation:** a small **Starlette/FastAPI + uvicorn** app serving **one** static HTML+JS
   page plus a tiny JSON API it calls. Chosen over Streamlit for much lighter dependencies and full
   control (the agent already ships `httpx2`/`pydantic`).
-- **Local-only:** binds to **`127.0.0.1`** on a configurable/ephemeral port; not reachable
-  off-host.
+- **Local-only:** binds to **`127.0.0.1`** on a **fixed default port (8765), configurable** in
+  `agent.yaml`; not reachable off-host.
 - **Access token:** `web up` generates a short random token and prints it with the URL; the page
   requires it (query param → cookie). Defense-in-depth on top of localhost binding.
 - `web up` starts it, `web down` stops it, `web status` reports running/URL/port (and can reveal
   the token to copy).
-- **Features — all agent management lives here:**
+- **Features — all agent management lives here (CLI is the minimal subset):**
   - **Connection:** set/change/remove the server URL; enroll (paste the server's enrollment token)
     and show approval state; store/rotate/remove the agent token (secrets via keyring/0600).
-  - **Folders & files:** add/remove; choose monitored vs one-time; set each item's default action
-    and teleport policy; set the global defaults; trigger one-time import / manual sync.
+  - **Managed items list:** browse all managed folders **and** files with, per item, its mode
+    (monitored/one-time), default action, teleport policy, and current per-file state; add/remove
+    items; edit each item's action + policy; set the global defaults.
+  - **Imports/sync:** trigger one-time import, manual sync, and an off-schedule **refresh**;
+    configure the **refresh interval** (default 30 s).
   - **Status:** server reachable (up/down); approval state + granted privileges; sync state + last
     sync time; per-file status (indexed / uploaded-for-extraction / extracted / teleported /
-    failed) by polling the server for this agent's own items; pending teleport requests with
-    Approve / Deny.
+    failed / **source removed**) by polling the server for this agent's own items.
+  - **Teleport requests:** list pending requests with **Approve / Reject / Reject-forever**, and a
+    view to **unblock** previously blocked files.
   - **Activity log:** recent sync / import / teleport / extraction events and errors.
-  - *Candidate extras:* monitored-folder size summary, manual "re-extract", per-file "remove from
-    server".
+  - **Extras (all included):** monitored-folder size summary; per-file **re-extract**; per-file
+    **remove from server**.
 
 ### 32.8 Server side
 
 - **Enrollment/approval** unchanged (§11.2); persistent once approved.
-- **Per-agent privileges**, set by the owner in Admin → Agents, **least-privilege by default.**
-  Proposed set (maintainer to confirm exact granularity):
-  - `can_index` — accept manifests from this agent;
-  - `can_extract` — accept `index_and_extract` uploads (transient extract, discard PDF);
-  - `can_teleport` — accept teleport uploads (permanent storage);
-  - `can_be_requested` — the server/users may issue teleport requests to this agent;
-  - `status_visibility` — what processing/status the server exposes back to the agent.
+- **Per-agent privileges**, set by the owner in Admin → Agents. Defaults shown in brackets:
+  - `can_index` *(on)* — accept manifests from this agent;
+  - `can_extract` *(on)* — accept `index_and_extract` uploads (transient extract + preview, discard
+    PDF);
+  - `can_teleport` *(off)* — accept teleport uploads (permanent storage); the most sensitive, so
+    opt-in;
+  - `can_be_requested` *(on)* — the server/users may issue teleport requests to this agent;
+  - `processing_visibility` *(on)* — the agent may see the **extraction/processing status** of its
+    own files;
+  - `server_status_visibility` *(on)* — the agent may see **server up/health status**.
 - **Endpoints** (agent-token scoped): manifest ingest; transient extract-upload
   (extract → discard → keep reference); teleport-upload (permanent); list this agent's pending
   teleport requests; report this agent's per-item status. Server→agent teleport **requests** are
@@ -2970,13 +3009,16 @@ The global default switch (§32.3) sets whether newly added items are `allow` or
 
 ### 32.9 Data-model deltas
 
-- Server `agent_files` gains: `action`/`import_mode`, `teleport_policy`, a richer
-  `processing_state` (indexed / extracted / teleported / failed), and a flag distinguishing
-  "resident on agent only" vs "stored in library". A Work may exist with extracted metadata but
-  **no stored file** (the `index_and_extract` case).
-- New: **per-agent privileges** (columns or a table); **teleport-request** records
-  (requested_by, item, status: pending / approved / denied / completed / failed).
-- Agent side: the `state.sqlite3` schema (managed entries, per-file states, pending requests).
+- Server `agent_files` gains: `action`/`import_mode`, `teleport_policy`, a **`virtual_path`**
+  reference, a richer `processing_state` (indexed / extracted / teleported / failed /
+  **source_removed**), a flag distinguishing "resident on agent only" vs "stored in library", and
+  (for `index_and_extract`) a stored **preview** (first-page text + thumbnail). A Work may exist
+  with extracted metadata + preview but **no stored file**.
+- New: **per-agent privileges** (the six flags in §32.8); **teleport-request** records
+  (requested_by, item, status: pending / approved / rejected / completed / failed); a per-file
+  **`teleport_blocked`** flag (the `reject --forever` block).
+- Agent side: the `state.sqlite3` schema (managed entries with mode/action/policy, per-file states
+  + `virtual_path` → real-path mapping kept local-only, pending requests, blocked files).
 
 ### 32.10 Security summary (addresses the "managed-by-server" concern)
 
@@ -2988,13 +3030,25 @@ The global default switch (§32.3) sets whether newly added items are `allow` or
 - Opaque `local_file_id` (content hash); SHA-256 verification on every upload; secrets in
   keyring/`0600`; least-privilege defaults; every server-side action audit-logged.
 
-### 32.11 Open questions for maintainer verification
+### 32.11 Decisions captured (2026-06-29) and remaining notes
 
-1. The exact privilege list and granularity (§32.8) — is the proposed set right?
-2. `index_and_extract`: keep a lightweight server-side preview/thumbnail, or truly nothing but
-   metadata + references?
-3. Daemonization on non-Linux hosts — systemd user unit (Linux) is clear; what about macOS/Windows
-   (built-in `--detach`, launchd, NSSM)?
-4. When a monitored folder loses a file (deleted on disk), should the server-side Work/reference be
-   removed, marked missing, or left intact?
-5. Web-GUI port: fixed default (e.g. 8765) vs ephemeral-and-printed each time?
+Resolved with the maintainer:
+
+1. **Privileges** — `can_index`, `can_extract`, `can_teleport`, `can_be_requested` (**default on**),
+   plus two split visibility flags: `processing_visibility` (extraction/processing) and
+   `server_status_visibility` (§32.8).
+2. **`index_and_extract`** keeps a **lightweight preview/thumbnail**; otherwise discards the PDF and
+   keeps the **virtual-path reference** (resolvable to the real path only by the local agent) (§32.4).
+3. **Deleted source file** (not yet teleported) → keep Work/metadata/references/preview, mark
+   **"source file on client removed"** (§32.3).
+4. **Web-GUI port** → **fixed default 8765, configurable** (§32.7).
+5. **Refresh** → configurable interval (**default 30 s**); actions sync instantly; a `refresh`
+   command/button forces an off-schedule cycle (§32.5/§32.7).
+6. **CLI `request`** (`--list` / `--approve` / `--reject [--forever]` / `--unblock`) and the
+   start/stop/status monitoring controls (§32.5); the web GUI provides the same and more.
+
+Lowest-priority / left to implementer (Linux is the primary target):
+
+- **Daemonization on non-Linux:** Linux uses a systemd **user** unit (primary). macOS/Windows are
+  best-effort — a built-in `--detach` fallback, with a documented launchd plist (macOS) and
+  NSSM/Task Scheduler recipe (Windows). Not a v1 blocker.
