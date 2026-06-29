@@ -291,11 +291,11 @@ make lint
 Manual equivalent:
 
 ```bash
-ruff check backend agent scripts --fix    # fix
-ruff format backend agent scripts
+ruff check backend agent scripts frontend config --fix    # fix
+ruff format backend agent scripts frontend config
 
-ruff check backend agent scripts          # check-only
-ruff format --check backend agent scripts
+ruff check backend agent scripts frontend config          # check-only
+ruff format --check backend agent scripts frontend config
 ```
 
 CI should use check-only commands, not auto-fix commands.

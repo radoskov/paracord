@@ -15,7 +15,7 @@ API_SERVICE ?= api
 AGENT_SERVICE ?= agent
 FRONTEND_SERVICE ?= frontend
 
-PY_PATHS := backend agent scripts
+PY_PATHS := backend agent scripts frontend config frontend config
 PYTEST_PATHS := backend/tests agent/tests
 
 ALEMBIC := alembic -c backend/alembic.ini

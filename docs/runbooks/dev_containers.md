@@ -72,8 +72,8 @@ docker compose up frontend
 docker compose run --rm --no-deps frontend npm run build
 # build the frontend
 
-ruff check backend agent scripts
-ruff format --check backend agent scripts
+ruff check backend agent scripts frontend config
+ruff format --check backend agent scripts frontend config
 # lint checks run host-local (Ruff needs no runtime/services)
 
 docker compose run --rm --no-deps api pytest backend/tests

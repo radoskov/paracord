@@ -231,8 +231,8 @@ make fix     # auto-fix: ruff check --fix + ruff format
 Equivalent explicit commands:
 
 ```bash
-ruff check backend agent scripts
-ruff format --check backend agent scripts
+ruff check backend agent scripts frontend config
+ruff format --check backend agent scripts frontend config
 ```
 
 ## Testing
