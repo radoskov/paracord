@@ -14,7 +14,7 @@ const GRAPH: CitationGraphResponse = {
 };
 
 describe('CitationGraph', () => {
-  it('builds the graph on demand and renders edges with resolved labels', async () => {
+  it('builds on demand and renders edges with resolved labels in list mode', async () => {
     const load = vi.fn(async () => GRAPH);
     render(CitationGraph, { label: '· whole library', load });
 
@@ -24,9 +24,12 @@ describe('CitationGraph', () => {
     await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
 
     expect(load).toHaveBeenCalledWith('local_only');
-    // Edge is rendered using node labels, not raw ids.
+    // Summary renders regardless of render mode.
+    expect(screen.getByText(/2 nodes/)).toBeTruthy();
+
+    // The interactive canvas can't render in jsdom; switch to the list renderer.
+    await fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
     expect(screen.getByText('Citing Paper')).toBeTruthy();
     expect(screen.getByText('Cited Paper')).toBeTruthy();
-    expect(screen.getByText(/2 nodes/)).toBeTruthy();
   });
 });

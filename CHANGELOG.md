@@ -27,6 +27,18 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Stage 3 — PDF.js reader + interactive citation graph (frontend):**
+  `PdfReader.svelte` replaces the `<iframe>` with a `pdfjs-dist` canvas reader: page navigation,
+  thumbnail rail, zoom, in-app full-text search, a citation highlight overlay driven by the
+  `pdf_coordinates` from Stage 2, a References→page **Jump** control, and text-selection capture
+  that prefills the Notes form with a coordinate payload (annotation `coordinates` were always
+  null before). `CitationGraph.svelte` replaces the text edge-list with an interactive `cytoscape`
+  canvas — click a node to open the work, selectable layouts (force/circle/grid/hierarchy), node
+  size by citation degree — plus a **Graph ↔ List** render-mode toggle (the list is also the
+  automatic fallback when no canvas is available). `cytoscape`/`pdfjs-dist` are lazy-loaded chunks,
+  so the initial bundle is unaffected. `CitationContext` gains `pdf_coordinates`/`pdf_x..h`. New
+  `PdfReader.test.ts`; `CitationGraph.test.ts` updated; `src/vite-env.d.ts` added. (WORKPLAN
+  Stage 3; AUDIT B6 reader/graph)
 - **B1 / Stage 2 — GROBID settings + PDF coordinate extraction:** GROBID extraction options
   (consolidation, raw citations, sentence segmentation, and which TEI elements get coordinates)
   are now driven from the `processing.grobid:` YAML block / settings instead of hardcoded flags;

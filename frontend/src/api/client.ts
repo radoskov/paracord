@@ -169,7 +169,20 @@ export interface CitationContext {
   context_sentence: string | null;
   context_after: string | null;
   page: number | null;
+  pdf_coordinates: PdfCoordinateBox[] | null;
+  pdf_x: number | null;
+  pdf_y: number | null;
+  pdf_w: number | null;
+  pdf_h: number | null;
   source_tei_id: string | null;
+}
+
+export interface PdfCoordinateBox {
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface Annotation {

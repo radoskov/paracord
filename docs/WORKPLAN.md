@@ -92,19 +92,25 @@ PDF.js reader, anchored highlights, and citation→mention jumps.
 `pdfjs-dist` and `cytoscape` are already in `package.json` but unused. This stage turns the
 "debug console" into the intended reading application.
 
-4. **PDF.js reader (replaces the `<iframe>`).** Coordinate-anchored highlight overlay, marker→ref
-   and ref→mentions jumps, page thumbnails, in-app text search, and a real selection that captures
-   `coordinates` for annotations (currently always null). Depends on Stage 2 coordinates.
-   *DoD:* highlights round-trip to stored annotation coordinates; clicking a citation marker scrolls
-   to the reference; annotation create captures a real selection.
+4. **PDF.js reader (replaces the `<iframe>`). ✅ DONE (2026-06-29).** `PdfReader.svelte` now
+   renders pages to a canvas via `pdfjs-dist` (lazy-loaded chunk + bundled worker): page
+   navigation, a thumbnail rail, zoom, and in-app full-text search (`getTextContent`, jump between
+   matching pages). Citation contexts with `pdf_coordinates` draw a highlight overlay on their
+   page; the References tab has a **Jump to p.N** control that scrolls the marker into view and
+   flashes its box. Text selection in the page is captured into the Notes form with the page and a
+   bounding-box `coordinates` payload (previously always null). Heavy imports are deferred so jsdom
+   tests never load them; new `PdfReader.test.ts`.
+   *Deferred to Stage 7:* a full ref→all-mentions back-index list (the marker↔reference jump and
+   per-page overlay are in place).
 
-5. **Interactive Cytoscape citation graph.** Replace the text edge-list with an interactive canvas:
-   click-to-open nodes, layout options, version collapse, centrality sizing. **Per maintainer
-   guidance, keep a rendering-mode toggle** (interactive Cytoscape ↔ lightweight list) and do *not*
-   sacrifice the detailed interactive view for graphs of a few thousand nodes; add server-side
-   scope limits + progressive rendering only as a guard for very large graphs.
-   *DoD:* graph renders interactively for a shelf/rack scope; mode toggle works; click-to-open
-   navigates to the work.
+5. **Interactive Cytoscape citation graph. ✅ DONE (2026-06-29).** `CitationGraph.svelte` now
+   renders an interactive `cytoscape` canvas (lazy chunk): click-to-open nodes
+   (`onOpenWork` → `selectWorkById`), selectable layouts (force/circle/grid/hierarchy), and node
+   size ≈ citation degree (centrality proxy). Per maintainer guidance there is a **Graph ↔ List
+   render-mode toggle**; the list renderer is the previous edge list and is also the automatic
+   fallback where a canvas isn't available (jsdom/headless). `CitationGraph.test.ts` updated.
+   *Deferred to Stage 7:* version-collapse and server-side scope limits / progressive rendering for
+   very large (>few-thousand-node) graphs.
 
 ---
 

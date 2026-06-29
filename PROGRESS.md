@@ -244,6 +244,14 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **Stage 3 (DONE) — PDF.js reader + interactive Cytoscape graph:** `PdfReader.svelte` replaces the
+  iframe with a `pdfjs-dist` canvas reader (page nav, thumbnail rail, zoom, in-app text search,
+  citation-coordinate highlight overlay, References→page jump, and text-selection→annotation with a
+  coordinate payload). `CitationGraph.svelte` replaces the text edge-list with an interactive
+  `cytoscape` canvas (click-to-open works, force/circle/grid/hierarchy layouts, degree-based node
+  sizing) and a Graph/List render-mode toggle (list doubles as the headless fallback). Heavy libs
+  are lazy-loaded chunks; frontend tests (10) + `vite build` green. Deferred to Stage 7:
+  ref→all-mentions back-index, graph version-collapse, large-graph progressive rendering.
 - **A3 (DONE):** `make check` now includes `test-migrations`; `make ready` and `make ci` include
   `frontend-check` — so a green `ready` mirrors CI (backend+agent tests, migration parity, frontend
   build/test). WORKPLAN Stage 1, item 2.
@@ -285,8 +293,8 @@ to the last stage**. Summary of the next stages:
 1. **Stage 1 — correctness/CI — DONE:** **A1** managed-path extraction fix + **A3** `ready`/`ci`
    mirror CI.
 2. **Stage 2 — GROBID settings + coordinate extraction (B1) — DONE.**
-3. **Stage 3 — PDF.js reader + interactive Cytoscape graph** (packages already installed, unused)
-   — **in progress**.
+3. **Stage 3 — PDF.js reader + interactive Cytoscape graph — DONE.**
+4. **Next: Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 5. **Stage 5 — agent manifest/teleport vertical (M5).**
 6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**

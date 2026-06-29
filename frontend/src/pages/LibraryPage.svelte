@@ -903,6 +903,7 @@
               : '· whole library'}
           disabled={loading}
           load={loadCitationGraph}
+          onOpenWork={selectWorkById}
         />
       </section>
 

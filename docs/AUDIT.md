@@ -940,7 +940,7 @@ drifting (addresses finding **A2**).
 | A2 | doc drift after fixes | **OPEN → being closed** | this section + WORKPLAN + refreshed PROGRESS/ROADMAP/CHANGELOG |
 | A3 | `make ready` ≠ CI surface | **OPEN** | `ready: fix precommit check`, `check: lint test`, `test: test-api test-agent` — no `frontend-check`/`test-migrations` in `ready`/`ci` → **Stage 1** |
 | B1 | GROBID config/coordinates | **FIXED (2026-06-29)** | options config-driven from `processing.grobid:` YAML; `GrobidClient` sends `teiCoordinates`; `tei_parser` parses `coords` → `CitationMention.pdf_coordinates` JSONB (migration `0013`, replaces 4 scalar cols, §9.3); citation API exposes `pdf_coordinates`/`pdf_x..` |
-| B6 | frontend single-page | **PARTIALLY ADDRESSED** | hash router + Admin UI landed (`94151b4`); PDF.js reader, Cytoscape graph, metadata-review UI still pending → Stages 3–4 |
+| B6 | frontend single-page | **MOSTLY ADDRESSED (2026-06-29)** | hash router + Admin UI (`94151b4`); PDF.js reader (canvas, thumbnails, search, coordinate highlights, selection→annotation) and interactive Cytoscape graph (click-to-open, layouts, Graph/List toggle) landed in Stage 3; **metadata-review UI** still pending → Stage 4 |
 | B5 | agent scaffold only | **OPEN** | enrollment works; manifest/teleport stubs → **Stage 5** |
 | P1/item4 | `arxiv_base_id` + UNIQUE | **FIXED** | migration `0011`, partial unique indexes |
 | P1/item5 | DOI normalization | **FIXED** | normalize-at-write + SQL pushdown, migration `0012` |
@@ -952,7 +952,8 @@ drifting (addresses finding **A2**).
 1. ~~**A1** (HIGH correctness) — managed-path extraction.~~ **FIXED 2026-06-29.**
 2. ~~**A3** (process) — make local readiness mirror CI.~~ **FIXED 2026-06-29.**
 3. ~~**B1** (extraction) — GROBID settings + coordinates.~~ **FIXED 2026-06-29.**
-4. **B6 remainder** — PDF.js reader, Cytoscape graph, metadata-review UI (Stage 3 in progress).
+4. **B6 remainder** — PDF.js reader + Cytoscape graph **DONE (Stage 3)**; **metadata-review UI**
+   pending → Stage 4.
 5. **B5** — agent manifest/teleport vertical.
 6. **H2** — embeddings off the read path; provider interface.
 7. Deferred (Stage 7): H3 perf, C3/C4 remainder, H7 pgvector, export polish, M0 auth hardening,
