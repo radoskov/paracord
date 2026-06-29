@@ -185,6 +185,32 @@ export interface PdfCoordinateBox {
   h: number;
 }
 
+export interface MetadataAssertion {
+  id: string;
+  field_name: string;
+  value: string;
+  source: string;
+  confidence: number | null;
+  selected_as_canonical: boolean;
+}
+
+export interface FieldReview {
+  field_name: string;
+  canonical_value: string | null;
+  has_conflict: boolean;
+  assertions: MetadataAssertion[];
+}
+
+export interface WorkFile {
+  id: string;
+  sha256: string;
+  size_bytes: number;
+  original_filename: string | null;
+  page_count: number | null;
+  text_layer_quality: string;
+  status: string;
+}
+
 export interface Annotation {
   id: string;
   work_id: string;
@@ -215,6 +241,7 @@ export type DuplicateCandidateAction =
   | 'merge_works'
   | 'link_as_version'
   | 'mark_duplicate_file'
+  | 'split_file'
   | 'keep_separate'
   | 'ignore';
 
@@ -346,6 +373,47 @@ export class ApiClient {
 
   async updateWork(id: string, payload: Partial<Work>): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${id}`, { method: 'PATCH', body: payload });
+  }
+
+  async listWorkMetadata(workId: string): Promise<FieldReview[]> {
+    return this.request<FieldReview[]>(`/api/v1/works/${workId}/metadata`);
+  }
+
+  async selectMetadataAssertion(workId: string, assertionId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/metadata/select`, {
+      method: 'POST',
+      body: { assertion_id: assertionId },
+    });
+  }
+
+  async enrichWork(workId: string): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/enrich`, { method: 'POST' });
+  }
+
+  async listWorkFiles(workId: string): Promise<WorkFile[]> {
+    return this.request<WorkFile[]>(`/api/v1/works/${workId}/files`);
+  }
+
+  async uploadWorkFile(workId: string, file: File): Promise<WorkFile> {
+    const form = new FormData();
+    form.append('file', file);
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/v1/works/${workId}/files`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      let detail = `Upload failed: ${response.status}`;
+      try {
+        detail = (await response.json()).detail ?? detail;
+      } catch {
+        /* keep status message */
+      }
+      throw new Error(detail);
+    }
+    return response.json() as Promise<WorkFile>;
   }
 
   async listCitationContexts(workId: string): Promise<CitationContext[]> {
