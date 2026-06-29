@@ -27,6 +27,18 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **§32 agent redesign (in progress)** — server-side foundations:
+  - **S1 — per-agent privileges** (migration `0015`): `can_index`/`can_extract`/`can_be_requested`
+    /`processing_visibility`/`server_status_visibility` (default on) + `can_teleport` (default off,
+    opt-in). `PATCH /admin/agents/{id}/privileges` (owner, audited); enforced on manifest /
+    teleport-content / teleport-request; Admin UI privilege checkboxes.
+  - **S2 — import actions + teleport request/block** (migration `0016`): `agent_files` gains
+    `import_action`, `teleport_policy`, `virtual_path`, `processing_state`, `teleport_blocked`,
+    `preview_text`. New `index_and_extract` flow (`POST /agents/files/{id}/extract`): upload →
+    extract → the worker **discards the PDF** afterwards, keeping the Work, references and a
+    preview. Teleport reject / reject-forever (block) / unblock endpoints; blocked files refuse new
+    requests; an agent file-status endpoint (gated by `processing_visibility`); manifest carries
+    per-item action/policy/virtual-path; deleted source files are kept and marked `source_removed`.
 - **Agent packaging + `serve` daemon:** the agent is now an installable package
   (`pip install -e agent` provides the `paracord-agent` command) — fixes the setuptools
   flat-layout error from the `systemd/` folder by pinning package discovery to

@@ -20,9 +20,12 @@ class AgentManifestItem(BaseModel):
     sha256: str
     size_bytes: int
     display_path: str | None = None
+    virtual_path: str | None = None
     mime_type: str | None = None
     modified_at: str | None = None
     page_count: int | None = None
+    import_action: str = "index_only"
+    teleport_policy: str = "ask"
 
 
 class AgentManifestRequest(BaseModel):
@@ -39,3 +42,18 @@ class PendingTeleportItem(BaseModel):
 class TeleportRequest(BaseModel):
     agent_id: uuid.UUID
     local_file_id: str
+
+
+class RejectTeleportRequest(BaseModel):
+    forever: bool = False
+
+
+class AgentFileStatus(BaseModel):
+    local_file_id: str
+    virtual_path: str | None = None
+    display_path: str | None = None
+    import_action: str
+    processing_state: str
+    teleport_status: str
+    teleport_policy: str
+    teleport_blocked: bool

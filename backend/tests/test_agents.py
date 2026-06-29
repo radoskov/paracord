@@ -245,3 +245,174 @@ def test_request_teleport_requires_can_be_requested(client, auth_headers, db) ->
         json={"agent_id": str(agent.id), "local_file_id": "x"},
     )
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Import actions, teleport reject/block, status (§32 S2)
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib  # noqa: E402
+import io as _io  # noqa: E402
+import secrets as _secrets  # noqa: E402
+from unittest.mock import patch as _patch  # noqa: E402
+
+_PDF = b"%PDF-1.4\n%%EOF\n"
+_PDF_SHA = _hashlib.sha256(_PDF).hexdigest()
+_PREVIEW = {"page_count": 1, "preview_text": "Hello.", "text_layer_quality": "good"}
+
+
+def _agent_with_token(db, **kw):
+    from app.models.agent import Agent
+    from app.services.auth import hash_token
+
+    raw = _secrets.token_urlsafe(16)
+    agent = Agent(name="ws", status="approved", token_hash=hash_token(raw), **kw)
+    db.add(agent)
+    db.commit()
+    return agent, {"Authorization": f"Bearer {raw}"}
+
+
+def test_manifest_stores_action_and_policy(client, db) -> None:
+    from app.models.agent import AgentFile
+
+    agent, headers = _agent_with_token(db)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "local_file_id": "f1",
+                    "sha256": _PDF_SHA,
+                    "size_bytes": len(_PDF),
+                    "virtual_path": "papers/x.pdf",
+                    "import_action": "teleport",
+                    "teleport_policy": "allow",
+                }
+            ]
+        },
+    )
+    row = db.query(AgentFile).filter(AgentFile.local_file_id == "f1").first()
+    assert row.import_action == "teleport"
+    assert row.teleport_policy == "allow"
+    assert row.virtual_path == "papers/x.pdf"
+
+
+def test_extract_endpoint_indexes_and_marks_extracting(client, db) -> None:
+    from app.core.config import get_settings
+    from app.models.agent import AgentFile
+
+    agent, headers = _agent_with_token(db)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={"items": [{"local_file_id": "f1", "sha256": _PDF_SHA, "size_bytes": len(_PDF)}]},
+    )
+    with (
+        _patch("app.services.storage.get_settings", return_value=get_settings()),
+        _patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            "/api/v1/agents/files/f1/extract",
+            headers=headers,
+            files={"file": ("x.pdf", _io.BytesIO(_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    row = db.query(AgentFile).filter(AgentFile.local_file_id == "f1").first()
+    assert row.processing_state == "extracting"
+    assert row.import_action == "index_and_extract"
+
+
+def test_extract_requires_can_extract(client, db) -> None:
+    agent, headers = _agent_with_token(db, can_extract=False)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={"items": [{"local_file_id": "f1", "sha256": _PDF_SHA, "size_bytes": len(_PDF)}]},
+    )
+    r = client.post(
+        "/api/v1/agents/files/f1/extract",
+        headers=headers,
+        files={"file": ("x.pdf", _io.BytesIO(_PDF), "application/pdf")},
+    )
+    assert r.status_code == 403
+
+
+def test_reject_forever_blocks_until_unblocked(client, auth_headers, db) -> None:
+    agent, headers = _agent_with_token(db)
+    owner = auth_headers("owner")
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={"items": [{"local_file_id": "f1", "sha256": _PDF_SHA, "size_bytes": len(_PDF)}]},
+    )
+    body = {"agent_id": str(agent.id), "local_file_id": "f1"}
+    assert client.post("/api/v1/imports/teleport", headers=owner, json=body).status_code == 202
+    # Reject forever -> blocked.
+    rej = client.post("/api/v1/agents/teleports/f1/reject", headers=headers, json={"forever": True})
+    assert rej.status_code == 200 and rej.json()["blocked"] is True
+    # Re-request is refused while blocked.
+    assert client.post("/api/v1/imports/teleport", headers=owner, json=body).status_code == 409
+    # Unblock -> requestable again.
+    assert client.post("/api/v1/agents/teleports/f1/unblock", headers=headers).status_code == 200
+    assert client.post("/api/v1/imports/teleport", headers=owner, json=body).status_code == 202
+
+
+def test_agent_file_status_endpoint(client, db) -> None:
+    agent, headers = _agent_with_token(db)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={"items": [{"local_file_id": "f1", "sha256": _PDF_SHA, "size_bytes": len(_PDF)}]},
+    )
+    rows = client.get("/api/v1/agents/files", headers=headers).json()
+    assert [r["local_file_id"] for r in rows] == ["f1"]
+    assert rows[0]["processing_state"] == "indexed"
+
+    _agent2, no_vis = _agent_with_token(db, processing_visibility=False)
+    assert client.get("/api/v1/agents/files", headers=no_vis).status_code == 403
+
+
+def test_discard_after_extract_removes_file_keeps_work(db, tmp_path) -> None:
+    from app.core.config import get_settings
+    from app.models.agent import Agent, AgentFile
+    from app.models.file import File, Location
+    from app.services.agent_files import discard_after_extract
+    from app.services.storage import content_addressed_path
+
+    managed_root = tmp_path / "library"
+    pdf_path = content_addressed_path(managed_root, _PDF_SHA)
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(_PDF)
+
+    agent = Agent(name="ws", status="approved")
+    file = File(
+        sha256=_PDF_SHA, size_bytes=len(_PDF), mime_type="application/pdf", status="available"
+    )
+    db.add_all([agent, file])
+    db.flush()
+    db.add_all(
+        [
+            Location(file_id=file.id, location_type="managed_path", internal_uri=str(pdf_path)),
+            AgentFile(
+                agent_id=agent.id,
+                local_file_id="f1",
+                sha256=_PDF_SHA,
+                size_bytes=len(_PDF),
+                import_action="index_and_extract",
+                processing_state="extracting",
+                file_id=file.id,
+            ),
+        ]
+    )
+    db.commit()
+
+    settings = get_settings().model_copy(update={"managed_library_root": str(managed_root)})
+    assert discard_after_extract(db, file=file, settings=settings) is True
+    db.commit()
+
+    assert not pdf_path.exists()
+    assert file.status == "extracted_discarded"
+    row = db.query(AgentFile).filter(AgentFile.local_file_id == "f1").first()
+    assert row.processing_state == "extracted"
+    assert row.file_id is None

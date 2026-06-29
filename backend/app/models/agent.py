@@ -8,7 +8,16 @@ scoped agent access token issued. Tokens are stored hashed, never in plaintext.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -85,7 +94,20 @@ class AgentFile(Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     display_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Stable human-readable reference (path relative to monitored root); resolvable to the real
+    # on-disk path only by the local agent (SPEC §32.4).
+    virtual_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Intended import action for this file: index_only | index_and_extract | teleport (§32.4).
+    import_action: Mapped[str] = mapped_column(String(32), default="index_only")
+    # Teleport request policy for this file: ask | allow (§32.6).
+    teleport_policy: Mapped[str] = mapped_column(String(16), default="ask")
+    # Overall disposition: indexed | extracting | extracted | teleported | failed | source_removed.
+    processing_state: Mapped[str] = mapped_column(String(32), default="indexed", index=True)
+    # Reject-forever block: the agent auto-rejects all future teleport requests for this file.
+    teleport_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Lightweight server-side preview kept for index_and_extract (PDF itself is discarded).
+    preview_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     teleport_status: Mapped[str] = mapped_column(String(32), default="none", index=True)
     file_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True

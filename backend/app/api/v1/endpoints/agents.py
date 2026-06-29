@@ -10,16 +10,19 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_agent_token
 from app.db.session import get_db
-from app.models.agent import Agent
+from app.models.agent import Agent, AgentFile
 from app.schemas.agent import (
+    AgentFileStatus,
     AgentManifestRequest,
     AgentRegisterRequest,
     AgentRegisterResponse,
     PendingTeleportItem,
+    RejectTeleportRequest,
 )
 from app.services import agent_files
 from app.services import agents as agent_service
@@ -126,3 +129,86 @@ async def upload_teleport_content(
     db.refresh(stored)
     enqueue_extraction(stored.id)
     return {"file_id": str(stored.id), "sha256": stored.sha256, "status": "complete"}
+
+
+@router.post("/files/{local_file_id}/extract", status_code=status.HTTP_201_CREATED)
+async def upload_for_extraction(
+    local_file_id: str,
+    file: UploadFile,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, str]:
+    """`index_and_extract`: agent uploads a PDF; the server extracts it, keeps a preview, and
+    discards the PDF afterwards (only the reference + metadata remain)."""
+    if not agent.can_extract:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the extract privilege"
+        )
+    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded file exceeds 200 MB limit",
+        )
+    if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
+        )
+    try:
+        stored = agent_files.extract_and_index(
+            db, agent=agent, local_file_id=local_file_id, pdf_bytes=pdf_bytes
+        )
+    except ValueError as exc:
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(stored)
+    enqueue_extraction(stored.id)
+    return {"file_id": str(stored.id), "status": "extracting"}
+
+
+@router.post("/teleports/{local_file_id}/reject", status_code=status.HTTP_200_OK)
+def reject_teleport(
+    local_file_id: str,
+    payload: RejectTeleportRequest,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, str | bool]:
+    """Reject a pending teleport request; `forever` blocks all future requests for the file."""
+    try:
+        agent_files.reject_teleport(
+            db, agent=agent, local_file_id=local_file_id, forever=payload.forever
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
+    return {"local_file_id": local_file_id, "status": "rejected", "blocked": payload.forever}
+
+
+@router.post("/teleports/{local_file_id}/unblock", status_code=status.HTTP_200_OK)
+def unblock_teleport(
+    local_file_id: str,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, str]:
+    """Clear a reject-forever block so the file can be requested again."""
+    try:
+        agent_files.unblock_teleport(db, agent=agent, local_file_id=local_file_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
+    return {"local_file_id": local_file_id, "status": "unblocked"}
+
+
+@router.get("/files", response_model=list[AgentFileStatus])
+def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> list:
+    """Report this agent's files + their processing/teleport state (for the agent's own status view)."""
+    if not agent.processing_visibility:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks processing visibility"
+        )
+    return list(
+        db.scalars(
+            select(AgentFile).where(AgentFile.agent_id == agent.id).order_by(AgentFile.created_at)
+        ).all()
+    )

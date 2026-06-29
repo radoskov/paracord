@@ -14,6 +14,7 @@ def extract_pdf_job(file_id: str) -> None:
     from app.core.config import get_settings
     from app.db.session import SessionLocal
     from app.models.file import File, FileWorkLink
+    from app.services.agent_files import discard_after_extract
     from app.services.extraction import extract_and_store
     from app.services.grobid_client import GrobidClient
     from app.workers.queue import enqueue_enrichment
@@ -28,6 +29,9 @@ def extract_pdf_job(file_id: str) -> None:
         extract_and_store(db, file=file, fetch_tei=client.process_fulltext_document_sync)
         link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
         work_id = str(link.work_id) if link else None
+        # For index_and_extract uploads, discard the PDF now that extraction is stored —
+        # only the Work, references and preview remain (SPEC §32.4).
+        discard_after_extract(db, file=file, settings=settings)
         db.commit()
     # Chain external enrichment (best-effort; no-op when the work has no DOI/arXiv id).
     if work_id:
