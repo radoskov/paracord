@@ -8,7 +8,7 @@ scoped agent access token issued. Tokens are stored hashed, never in plaintext.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -29,6 +29,19 @@ class Agent(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
+    )
+
+    # Per-agent privileges (SPEC §32.8). Least-privilege for permanent storage (teleport off);
+    # indexing, transient extract, being-requested, and visibility are on by default.
+    can_index: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    can_extract: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    can_teleport: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    can_be_requested: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    processing_visibility: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    server_status_visibility: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
     )
 
 

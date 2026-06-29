@@ -3,10 +3,20 @@
     ApiClient,
     type AdminUser,
     type AgentFileRecord,
+    type AgentPrivilege,
     type AgentRecord,
     type AuditEvent,
     type UserRole,
   } from '../api/client';
+
+  const PRIVILEGES: { key: AgentPrivilege; label: string; hint: string }[] = [
+    { key: 'can_index', label: 'index', hint: 'Accept manifests (file listings) from this agent.' },
+    { key: 'can_extract', label: 'extract', hint: 'Accept upload-for-extraction (PDF discarded after, preview kept).' },
+    { key: 'can_teleport', label: 'teleport', hint: 'Accept permanent file uploads into the library.' },
+    { key: 'can_be_requested', label: 'be requested', hint: 'Allow teleport requests to this agent.' },
+    { key: 'processing_visibility', label: 'see processing', hint: 'Agent may see extraction/processing status of its files.' },
+    { key: 'server_status_visibility', label: 'see server', hint: 'Agent may see server up/health status.' },
+  ];
 
   export let client: ApiClient;
 
@@ -86,6 +96,13 @@
       enrollToken = result.token;
       enrollExpiry = result.expires_at;
     }, 'Enrollment token issued — copy it now, it will not be shown again');
+  }
+
+  async function togglePrivilege(agent: AgentRecord, key: AgentPrivilege, value: boolean): Promise<void> {
+    await run(async () => {
+      await client.updateAgentPrivileges(agent.id, { [key]: value });
+      agents = await client.listAgents();
+    }, 'Privileges updated');
   }
 
   async function viewAgentFiles(agent: AgentRecord): Promise<void> {
@@ -256,6 +273,22 @@
                 >
                   {openAgentId === agent.id ? 'Hide files' : 'View files'}
                 </button>
+              {/if}
+
+              {#if agent.status === 'approved'}
+                <div class="privileges" role="group" aria-label="Agent privileges">
+                  {#each PRIVILEGES as priv (priv.key)}
+                    <label class="priv" title={priv.hint}>
+                      <input
+                        type="checkbox"
+                        checked={agent[priv.key]}
+                        on:change={(e) => togglePrivilege(agent, priv.key, e.currentTarget.checked)}
+                        disabled={loading}
+                      />
+                      {priv.label}
+                    </label>
+                  {/each}
+                </div>
               {/if}
 
               {#if openAgentId === agent.id}
@@ -550,5 +583,22 @@
   .agent-files button {
     min-height: 1.8rem;
     padding: 0.15rem 0.5rem;
+  }
+
+  .privileges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.7rem;
+    margin-top: 0.5rem;
+  }
+
+  .priv {
+    align-items: center;
+    color: #44515f;
+    display: flex;
+    flex-direction: row;
+    font-size: 0.75rem;
+    font-weight: 600;
+    gap: 0.25rem;
   }
 </style>

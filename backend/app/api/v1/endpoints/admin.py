@@ -15,6 +15,7 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
 from app.services import agents as agent_service
 from app.services import users as user_service
+from app.services.audit import record_event
 
 router = APIRouter()
 
@@ -28,8 +29,23 @@ class AgentOut(BaseModel):
     id: uuid.UUID
     name: str
     status: str
+    can_index: bool = True
+    can_extract: bool = True
+    can_teleport: bool = False
+    can_be_requested: bool = True
+    processing_visibility: bool = True
+    server_status_visibility: bool = True
 
     model_config = {"from_attributes": True}
+
+
+class AgentPrivilegesUpdate(BaseModel):
+    can_index: bool | None = None
+    can_extract: bool | None = None
+    can_teleport: bool | None = None
+    can_be_requested: bool | None = None
+    processing_visibility: bool | None = None
+    server_status_visibility: bool | None = None
 
 
 class AgentApprovedOut(BaseModel):
@@ -202,6 +218,33 @@ def list_agent_files(
             .order_by(AgentFile.created_at.desc())
         ).all()
     )
+
+
+@router.patch("/agents/{agent_id}/privileges", response_model=AgentOut)
+def update_agent_privileges(
+    agent_id: uuid.UUID,
+    payload: AgentPrivilegesUpdate,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> Agent:
+    """Set an agent's privileges (owner only)."""
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(agent, field, value)
+    record_event(
+        db,
+        "agent.privileges_changed",
+        actor_user_id=owner.id,
+        entity_type="agent",
+        entity_id=str(agent.id),
+        details=changes,
+    )
+    db.commit()
+    db.refresh(agent)
+    return agent
 
 
 @router.post("/agents/{agent_id}/approve", response_model=AgentApprovedOut)

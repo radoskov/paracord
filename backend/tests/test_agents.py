@@ -165,3 +165,83 @@ def test_admin_list_agent_files(client, auth_headers, db) -> None:
         ).status_code
         == 404
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-agent privileges (§32.8)
+# ---------------------------------------------------------------------------
+
+
+def _approved_agent(db):
+    from app.models.agent import Agent
+
+    agent = Agent(name="ws", status="approved")
+    db.add(agent)
+    db.commit()
+    return agent
+
+
+def test_agent_privilege_defaults(client, auth_headers, db) -> None:
+    agent = _approved_agent(db)
+    body = next(
+        a
+        for a in client.get("/api/v1/admin/agents", headers=auth_headers("owner")).json()
+        if a["id"] == str(agent.id)
+    )
+    assert body["can_index"] is True
+    assert body["can_extract"] is True
+    assert body["can_be_requested"] is True
+    assert body["processing_visibility"] is True
+    assert body["server_status_visibility"] is True
+    assert body["can_teleport"] is False  # opt-in
+
+
+def test_update_agent_privileges(client, auth_headers, db) -> None:
+    agent = _approved_agent(db)
+    owner = auth_headers("owner")
+    updated = client.patch(
+        f"/api/v1/admin/agents/{agent.id}/privileges", headers=owner, json={"can_teleport": True}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["can_teleport"] is True
+    # Authz + not-found.
+    assert (
+        client.patch(
+            f"/api/v1/admin/agents/{agent.id}/privileges",
+            headers=auth_headers("editor"),
+            json={"can_teleport": False},
+        ).status_code
+        == 403
+    )
+
+
+def test_manifest_requires_can_index(client, auth_headers, db) -> None:
+    import secrets as _secrets
+
+    from app.models.agent import Agent
+    from app.services.auth import hash_token
+
+    raw = _secrets.token_urlsafe(16)
+    agent = Agent(name="ws", status="approved", token_hash=hash_token(raw), can_index=False)
+    db.add(agent)
+    db.commit()
+    r = client.post(
+        "/api/v1/agents/manifest",
+        headers={"Authorization": f"Bearer {raw}"},
+        json={"items": []},
+    )
+    assert r.status_code == 403
+
+
+def test_request_teleport_requires_can_be_requested(client, auth_headers, db) -> None:
+    from app.models.agent import Agent
+
+    agent = Agent(name="ws", status="approved", can_be_requested=False)
+    db.add(agent)
+    db.commit()
+    r = client.post(
+        "/api/v1/imports/teleport",
+        headers=auth_headers("editor"),
+        json={"agent_id": str(agent.id), "local_file_id": "x"},
+    )
+    assert r.status_code == 403

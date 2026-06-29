@@ -327,7 +327,21 @@ export interface AgentRecord {
   id: string;
   name: string;
   status: string;
+  can_index: boolean;
+  can_extract: boolean;
+  can_teleport: boolean;
+  can_be_requested: boolean;
+  processing_visibility: boolean;
+  server_status_visibility: boolean;
 }
+
+export type AgentPrivilege =
+  | 'can_index'
+  | 'can_extract'
+  | 'can_teleport'
+  | 'can_be_requested'
+  | 'processing_visibility'
+  | 'server_status_visibility';
 
 export interface AuditEvent {
   id: string;
@@ -714,6 +728,16 @@ export class ApiClient {
 
   async listAgentFiles(agentId: string): Promise<AgentFileRecord[]> {
     return this.request<AgentFileRecord[]>(`/api/v1/admin/agents/${agentId}/files`);
+  }
+
+  async updateAgentPrivileges(
+    agentId: string,
+    privileges: Partial<Record<AgentPrivilege, boolean>>,
+  ): Promise<AgentRecord> {
+    return this.request<AgentRecord>(`/api/v1/admin/agents/${agentId}/privileges`, {
+      method: 'PATCH',
+      body: privileges,
+    });
   }
 
   async requestTeleport(agentId: string, localFileId: string): Promise<void> {

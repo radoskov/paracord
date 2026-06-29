@@ -14,6 +14,7 @@ from app.api.deps import require_roles
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.agent import Agent
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.schemas.agent import TeleportRequest
@@ -145,6 +146,14 @@ def request_teleport(
     Marks the manifest entry as requested; the agent then pushes the bytes to
     ``/agents/teleports/{local_file_id}/content``.
     """
+    agent = db.get(Agent, payload.agent_id)
+    if agent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    if not agent.can_be_requested:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This agent does not allow teleport requests",
+        )
     try:
         agent_files.request_teleport(
             db,

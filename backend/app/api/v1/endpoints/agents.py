@@ -71,6 +71,10 @@ def receive_manifest(
     agent: Agent = AGENT_DEP,
 ) -> dict[str, int | str]:
     """Receive a scanned-file manifest from an authenticated agent."""
+    if not agent.can_index:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the index privilege"
+        )
     received = agent_files.ingest_manifest(db, agent=agent, items=payload.items)
     db.commit()
     return {"status": "accepted", "received": received}
@@ -97,6 +101,10 @@ async def upload_teleport_content(
     agent: Agent = AGENT_DEP,
 ) -> dict[str, str]:
     """Agent pushes the bytes for a requested teleport; the server verifies the hash + stores it."""
+    if not agent.can_teleport:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the teleport privilege"
+        )
     pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(

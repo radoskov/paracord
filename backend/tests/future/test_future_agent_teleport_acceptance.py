@@ -29,6 +29,10 @@ def test_agent_manifest_to_server_to_teleport_round_trip(client, auth_headers) -
     approval = client.post(f"/api/v1/admin/agents/{agent_id}/approve", headers=owner)
     assert approval.status_code == 200
     agent = {"Authorization": f"Bearer {approval.json()['agent_token']}"}
+    # Teleport is opt-in (can_teleport defaults off); grant it.
+    client.patch(
+        f"/api/v1/admin/agents/{agent_id}/privileges", headers=owner, json={"can_teleport": True}
+    )
 
     # 2. Agent reports a manifest (opaque identity only — no server-usable path).
     manifest = client.post(
@@ -84,6 +88,9 @@ def test_teleport_rejects_hash_mismatch(client, auth_headers) -> None:
             "agent_token"
         ]
     }
+    client.patch(
+        f"/api/v1/admin/agents/{agent_id}/privileges", headers=owner, json={"can_teleport": True}
+    )
     client.post(
         "/api/v1/agents/manifest",
         headers=agent,
