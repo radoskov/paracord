@@ -27,6 +27,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **A1 — Managed-path extraction fix (HIGH):** uploaded managed-library PDFs are now extractable.
+  Added a shared resolver `app/services/file_paths.py::resolve_backend_readable_pdf_path` that
+  resolves both `server_path` (validated against the server-folder source root) and `managed_path`
+  (validated against `managed_library_root`) locations. `extract_and_store()` previously resolved
+  `server_path` only — so uploaded PDFs (`managed_path`) failed extraction with "No server-path
+  location available." Both `extraction.py` and `files.py::stream_file` now route through the
+  resolver, which also adds server-root validation to extraction (it had none). The resolver
+  raises `FileLocationError` (a `ValueError` subclass with a `kind` flag) so the streaming endpoint
+  still returns 403 on root escapes and 404 when absent. New regression test
+  `test_extract_and_store_reads_managed_path`. (AUDIT A1; WORKPLAN Stage 1)
 - **C5 — Docker dev/prod split repaired:** the H5 production-build work had made `make build`
   produce production images and left misleading `Dockerfile` comments. `docker-compose.yml` now
   pins `target: development` for `api`/`worker`/`frontend`; development is the default build again.

@@ -143,14 +143,17 @@ def test_store_parsed_extraction_is_idempotent(db_session) -> None:
 def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path: Path) -> None:
     work = Work(canonical_title="f", normalized_title="f", canonical_metadata_source="filename")
     file = File(sha256="a" * 64, size_bytes=10, mime_type="application/pdf")
-    db_session.add_all([work, file])
+    source = Source(
+        type="server_folder", name="S", path_alias="s", config={"root_path": str(tmp_path)}
+    )
+    db_session.add_all([work, file, source])
     db_session.flush()
     db_session.add_all(
         [
             FileWorkLink(file_id=file.id, work_id=work.id),
             Location(
                 file_id=file.id,
-                source_id=None,
+                source_id=source.id,
                 location_type="server_path",
                 internal_uri=str(tmp_path / "paper.pdf"),
             ),
@@ -187,7 +190,7 @@ def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path
     ).all()
 
 
-def test_extract_and_store_requires_server_location(db_session) -> None:
+def test_extract_and_store_requires_readable_location(db_session) -> None:
     work = Work(canonical_title="f", normalized_title="f")
     file = File(sha256="b" * 64, size_bytes=10, mime_type="application/pdf")
     db_session.add_all([work, file])
@@ -195,8 +198,51 @@ def test_extract_and_store_requires_server_location(db_session) -> None:
     db_session.add(FileWorkLink(file_id=file.id, work_id=work.id))
     db_session.commit()
 
-    with pytest.raises(ValueError, match="No server-path location"):
+    with pytest.raises(ValueError, match="No readable PDF location"):
         extract_and_store(db_session, file=file, fetch_tei=lambda _p: "")
+
+
+def test_extract_and_store_reads_managed_path(db_session, tmp_path: Path) -> None:
+    """Uploaded managed-library PDFs are extractable, not just server-folder ones (AUDIT A1)."""
+    from app.core.config import get_settings
+    from app.services.storage import content_addressed_path
+
+    managed_root = tmp_path / "library"
+    sha = "e" * 64
+    pdf_path = content_addressed_path(managed_root, sha)
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    work = Work(canonical_title="m", normalized_title="m")
+    file = File(sha256=sha, size_bytes=14, mime_type="application/pdf")
+    db_session.add_all([work, file])
+    db_session.flush()
+    db_session.add_all(
+        [
+            FileWorkLink(file_id=file.id, work_id=work.id),
+            Location(
+                file_id=file.id,
+                source_id=None,
+                location_type="managed_path",
+                internal_uri=str(pdf_path),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    settings = get_settings().model_copy(update={"managed_library_root": str(managed_root)})
+    captured: dict[str, Path] = {}
+
+    def fake_fetch(path: Path) -> str:
+        captured["path"] = path
+        return FIXTURE
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    assert captured["path"] == pdf_path.resolve()
+    assert summary["reference_count"] == 2
+    assert summary["raw_tei_stored"] is True
 
 
 def test_file_ids_pending_extraction(db_session) -> None:

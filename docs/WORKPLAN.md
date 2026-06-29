@@ -45,16 +45,15 @@ upload + identifier import frontend + backend).
 Cheap, high-leverage fixes that protect everything built afterward. A shipped feature (upload)
 is currently broken by A1; fix it before building more on top.
 
-1. **A1 — Managed-path extraction fix.** Add one shared resolver and route both readers through it:
-   ```python
-   # app/services/file_paths.py
-   def resolve_backend_readable_pdf_path(db, file_id, settings) -> Path
-   ```
-   Supports `server_path` (validated against `server_allowed_roots`) and `managed_path` (validated
-   against `managed_library_root`). Replace the `== "server_path"` filter in
-   `extraction.py:163-170` and the bespoke logic in `files.py` `stream_file`.
-   *DoD:* upload a tiny PDF → extraction job reads it and stores TEI/extraction record; new test
-   `test_import_expansion.py::test_uploaded_pdf_is_extractable` green; no raw-path exposure.
+1. **A1 — Managed-path extraction fix. ✅ DONE (2026-06-29).** Added the shared resolver
+   `app/services/file_paths.py::resolve_backend_readable_pdf_path(db, *, file, settings)` —
+   resolves `server_path` (validated against the server-folder source root) and `managed_path`
+   (validated against `managed_library_root`), picking the primary available location and raising
+   `FileLocationError` (a `ValueError` subclass with a `kind` flag → 403/404 at the API layer).
+   `extract_and_store()` (previously `server_path`-only, with no root check) and
+   `files.py::stream_file` both route through it. Regression test
+   `test_extraction.py::test_extract_and_store_reads_managed_path`; full backend suite green
+   (175 passed, 7 skipped).
 
 2. **A3 — `make ready`/`ci` mirror CI.** Make readiness fail on frontend or migration regressions:
    ```makefile

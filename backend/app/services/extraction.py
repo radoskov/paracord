@@ -13,11 +13,13 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.models.citation import CitationMention, RawTeiDocument, Reference
-from app.models.file import File, FileWorkLink, Location
+from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
+from app.services.file_paths import resolve_backend_readable_pdf_path
 from app.services.tei_parser import ParsedPaper, parse_tei
 from app.utils.normalization import normalize_title
 
@@ -151,8 +153,15 @@ def extract_and_store(
     file: File,
     fetch_tei: TeiFetcher,
     actor_user_id=None,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Run extraction for a file: locate its work + path, fetch/parse TEI, persist."""
+    """Run extraction for a file: locate its work + path, fetch/parse TEI, persist.
+
+    The PDF path is resolved through the shared resolver, so both server-folder
+    (``server_path``) and uploaded managed-library (``managed_path``) files are extractable
+    and validated against their configured roots (AUDIT A1).
+    """
+    settings = settings or get_settings()
     link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
     if link is None:
         raise ValueError("File has no linked work to attach extraction to")
@@ -160,16 +169,9 @@ def extract_and_store(
     if work is None:
         raise ValueError("Linked work not found")
 
-    location = db.scalar(
-        select(Location).where(
-            Location.file_id == file.id,
-            Location.location_type == "server_path",
-        )
-    )
-    if location is None or not location.internal_uri:
-        raise ValueError("No server-path location available for extraction")
+    pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
 
-    tei_xml = fetch_tei(Path(location.internal_uri))
+    tei_xml = fetch_tei(pdf_path)
     parsed = parse_tei(tei_xml)
     summary = store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml)
 

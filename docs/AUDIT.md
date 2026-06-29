@@ -936,7 +936,7 @@ drifting (addresses finding **A2**).
 | H5 | no prod build | **FIXED** | multi-stage Dockerfiles + `docker-compose.prod.yml` |
 | H6 | `.env` prefix mismatch | **N/A (operator)** | `.env.example` correct; regenerate local `.env` |
 | H7 | embeddings not pgvector | **BY DESIGN** | JSON vectors documented as portable; pgvector deferred → Stage 7 |
-| A1 | managed-path extraction gap | **OPEN — HIGH** | `extraction.py:163-170` filters `location_type == "server_path"` only; uploaded `managed_path` PDFs fail extraction. No shared resolver exists (`files.py` `stream_file` handles both; extraction does not) → **Stage 1** |
+| A1 | managed-path extraction gap | **FIXED (2026-06-29)** | shared `services/file_paths.py::resolve_backend_readable_pdf_path` resolves `server_path` + `managed_path` with root validation; `extract_and_store()` and `stream_file` both use it; regression test `test_extract_and_store_reads_managed_path` |
 | A2 | doc drift after fixes | **OPEN → being closed** | this section + WORKPLAN + refreshed PROGRESS/ROADMAP/CHANGELOG |
 | A3 | `make ready` ≠ CI surface | **OPEN** | `ready: fix precommit check`, `check: lint test`, `test: test-api test-agent` — no `frontend-check`/`test-migrations` in `ready`/`ci` → **Stage 1** |
 | B1 | GROBID config/coordinates | **OPEN** | flags hardcoded `grobid_client.py:23-26`, TODO `:32`, no coordinate parsing; `config.py` has only `grobid_url` → **Stage 2** |
@@ -945,11 +945,11 @@ drifting (addresses finding **A2**).
 | P1/item4 | `arxiv_base_id` + UNIQUE | **FIXED** | migration `0011`, partial unique indexes |
 | P1/item5 | DOI normalization | **FIXED** | normalize-at-write + SQL pushdown, migration `0012` |
 | P2/item9 | scope summaries | **FIXED** | `POST /ai/summaries` real implementation |
-| P2/item10 | import expansion | **PARTIAL** | upload + identifier done (frontend+backend); RIS/CSL pending → Stage 4; **note A1 currently breaks upload extraction** |
+| P2/item10 | import expansion | **PARTIAL** | upload + identifier done (frontend+backend); upload extraction now works (A1 fixed); RIS/CSL pending → Stage 4 |
 
 ## Confirmed-valid open items, by priority
 
-1. **A1** (HIGH correctness) — managed-path extraction; breaks the already-shipped upload flow.
+1. ~~**A1** (HIGH correctness) — managed-path extraction.~~ **FIXED 2026-06-29.**
 2. **A3** (process) — make local readiness mirror CI.
 3. **B1** (extraction) — GROBID settings + coordinates; gates the PDF.js reader.
 4. **B6 remainder** — PDF.js reader, Cytoscape graph, metadata-review UI.

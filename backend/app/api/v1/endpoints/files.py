@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -14,9 +13,9 @@ from app.api.deps import require_roles
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
-from app.models.file import File, Location
-from app.models.source import Source
+from app.models.file import File
 from app.models.user import User
+from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
@@ -84,33 +83,11 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    location = db.scalar(
-        select(Location)
-        .where(
-            Location.file_id == file_id,
-            Location.location_type.in_(["server_path", "managed_path"]),
-            Location.is_available.is_(True),
-        )
-        .order_by(Location.is_primary.desc(), Location.created_at.desc())
-    )
-    if location is None or not location.internal_uri:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found"
-        )
-
-    if location.location_type == "managed_path":
-        path = _validated_managed_file_path(location.internal_uri)
-    else:
-        if location.source_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Streamable PDF not found"
-            )
-        source = db.get(Source, location.source_id)
-        if source is None or source.type != "server_folder" or not source.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Source not available"
-            )
-        path = _validated_server_file_path(source, location.internal_uri)
+    try:
+        path = resolve_backend_readable_pdf_path(db, file=file, settings=get_settings())
+    except FileLocationError as exc:
+        code = status.HTTP_403_FORBIDDEN if exc.kind == "forbidden" else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
 
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not available")
@@ -119,37 +96,3 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
         media_type=file.mime_type or "application/pdf",
         filename=file.original_filename or path.name,
     )
-
-
-def _validated_managed_file_path(internal_uri: str) -> Path:
-    """Validate that a managed-path location is inside the managed library root."""
-    settings = get_settings()
-    root = Path(settings.managed_library_root).expanduser().resolve()
-    path = Path(internal_uri).expanduser().resolve()
-    try:
-        path.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="File location escapes managed library root",
-        ) from exc
-    return path
-
-
-def _validated_server_file_path(source: Source, internal_uri: str) -> Path:
-    config = source.config or {}
-    raw_root = config.get("root_path")
-    if not raw_root:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Source root not available"
-        )
-    root = Path(str(raw_root)).expanduser().resolve()
-    path = Path(internal_uri).expanduser().resolve()
-    try:
-        path.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="File location escapes configured root",
-        ) from exc
-    return path

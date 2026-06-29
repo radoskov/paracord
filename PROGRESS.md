@@ -166,9 +166,6 @@ What works today (real, tested in-container on Python 3.12):
 
 What still does NOT exist yet:
 
-- **A1 (known bug):** uploaded `managed_path` PDFs are queued for extraction but
-  `extract_and_store()` only resolves `server_path`, so background extraction of uploaded PDFs
-  fails. Fix is Stage 1 in `docs/WORKPLAN.md`.
 - Rich citation-graph rendering (Cytoscape interactive canvas) — the scoped graph API and a
   lightweight summary/edge-list panel exist, but the full interactive graph view and the
   PDF.js reader/reference-panel integration are still pending. Reference resolution is
@@ -247,6 +244,11 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **A1 (DONE, HIGH):** managed-path extraction fix. New shared resolver
+  `services/file_paths.py::resolve_backend_readable_pdf_path` handles both `server_path` and
+  `managed_path` (with root-escape validation); `extract_and_store()` and `files.py::stream_file`
+  both use it. Uploaded PDFs are now extractable (previously failed with "No server-path location").
+  Regression test added. Completes WORKPLAN Stage 1, item 1.
 - **P2/item6 (DONE):** Navigation shell + Admin UI. `App.svelte` now has hash-based routing
   (`#library` / `#admin`) and a nav bar; new `pages/AdminPage.svelte` covers user management
   (create / role-change / disable), agent management (issue enrollment token, approve, reveal
@@ -271,9 +273,9 @@ app. It re-validates every open audit finding against the current code and group
 work into 7 stages, front-loading whole-area unblockers and **deferring minor polish/optimizations
 to the last stage**. Summary of the next stages:
 
-1. **Stage 1 — correctness/CI (now):** **A1** managed-path extraction fix (uploaded PDFs currently
-   can't be extracted — `extraction.py` only resolves `server_path`); **A3** make `ready`/`ci`
-   include `frontend-check` + `test-migrations`.
+1. **Stage 1 — correctness/CI:** **A1** managed-path extraction fix — **DONE** (shared
+   `resolve_backend_readable_pdf_path` resolver; uploaded PDFs now extractable). Remaining: **A3**
+   make `ready`/`ci` include `frontend-check` + `test-migrations`.
 2. **Stage 2 — GROBID settings + coordinate extraction (B1)** — unblocks the reader/graph.
 3. **Stage 3 — PDF.js reader + interactive Cytoscape graph** (packages already installed, unused).
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
