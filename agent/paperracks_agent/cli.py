@@ -296,6 +296,15 @@ def main() -> None:
         "--daemon", action="store_true", help="(reserved) detach; use systemd on Linux"
     )
 
+    web = sub.add_parser("web", help="Local web GUI (up/down/status)")
+    web_sub = web.add_subparsers(dest="web_command")
+    web_up_p = web_sub.add_parser("up", help="Start the local web GUI (prints URL + token)")
+    web_up_p.add_argument("--config", type=Path, default=None)
+    web_up_p.add_argument("--state", type=Path, default=None)
+    web_up_p.add_argument("--port", type=int, default=None, help="Override the configured web port")
+    web_sub.add_parser("down", help="Stop the local web GUI")
+    web_sub.add_parser("status", help="Report whether the web GUI is running")
+
     args = parser.parse_args()
 
     sync_handlers = {
@@ -316,6 +325,21 @@ def main() -> None:
         "request": _request,
         "start": _start,
     }
+
+    if args.command == "web":
+        from paperracks_agent import web_server
+
+        web_handlers = {
+            "up": web_server.web_up,
+            "down": web_server.web_down,
+            "status": web_server.web_status,
+        }
+        handler = web_handlers.get(getattr(args, "web_command", None))
+        if handler is None:
+            web.print_help()
+            return
+        handler(args)
+        return
 
     if args.command in sync_handlers:
         sync_handlers[args.command](args)

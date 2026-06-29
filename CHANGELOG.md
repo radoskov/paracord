@@ -27,7 +27,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
-- **§32 agent redesign (in progress)** — agent core (S3 + S4):
+- **§32 agent redesign (complete)** — local web GUI (S5):
+  - **`paracord-agent web up`/`down`/`status`**: a minimal, self-served Starlette page bound to
+    `127.0.0.1` (default port `8765`, configurable) and gated by a one-time access token printed in
+    the `web up` URL — there is no off-host surface. `web up` spawns a detached process and records
+    its pid/port/token in a runtime file; `web down` stops it; `web status` reports state and clears
+    a stale runtime file.
+  - The page + JSON API wrap the same config/state/agent_ops the CLI uses: connection (set/change
+    server, enroll, save token), managed folders/files (add/remove with action + teleport policy),
+    sync/refresh, per-file processing status, and teleport-request approve / reject / reject-forever
+    / unblock, plus per-file re-extract. `starlette`/`uvicorn` added to the agent's deps.
+- **§32 agent redesign** — agent core (S3 + S4):
   - **Persistent config + state + secrets**: tool-managed `agent.yaml` (server URL, agent id,
     managed folders/files with per-item mode/action/teleport-policy, defaults, refresh interval,
     web port), a SQLite `state.sqlite3` mapping opaque `local_file_id` → real on-disk path
@@ -41,7 +51,7 @@ The format follows Keep a Changelog style conventions, but the project is curren
     auto-fulfils `allow`-policy requests / auto-rejects blocked ones.
   - **Server**: `GET /agents/me` (identity + privileges) and
     `POST /agents/files/source-removed` for the agent's status + removal reporting.
-- **§32 agent redesign (in progress)** — server-side foundations:
+- **§32 agent redesign** — server-side foundations:
   - **S1 — per-agent privileges** (migration `0015`): `can_index`/`can_extract`/`can_be_requested`
     /`processing_visibility`/`server_status_visibility` (default on) + `can_teleport` (default off,
     opt-in). `PATCH /admin/agents/{id}/privileges` (owner, audited); enforced on manifest /

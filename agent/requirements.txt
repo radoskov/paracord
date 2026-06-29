@@ -4,3 +4,5 @@ pydantic-settings>=2.4
 watchfiles>=0.22
 PyYAML>=6.0
 rich>=13.7
+starlette>=0.37
+uvicorn>=0.30

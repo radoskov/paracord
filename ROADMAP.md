@@ -13,11 +13,14 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > mark-dup, split, keep, ignore) with a frontend panel; M6 scoped citation graph; and M7
 > semantic search / extractive + scope summaries / topic modeling. The frontend now has a
 > hash-routed navigation shell, an Admin UI (users / agents / audit), and PDF-upload + arXiv/DOI
-> identifier import. M5 (agent) is still enrollment-only; manifest/teleport are stubs.
+> identifier import. **M5 (agent) is DONE** — manifest + hash-verified agent-push teleport, plus the
+> agent redesign v2 (SPEC §32): persistent tool-managed agent, privileges, import actions, durable
+> state index, CLI, and a local web GUI.
 >
 > Several M3–M7 features are deliberate **lightweight baselines** (iframe reader not PDF.js;
 > text-edge-list not Cytoscape; hash-BOW "semantic" search; TF-IDF topics; extractive summaries)
-> and the reader/graph UI, metadata-review UI, and agent teleport are the largest remaining gaps.
+> ; the reader/graph UI (Stage 3), metadata-review UI (Stage 4), and agent teleport (Stage 5 +
+> SPEC §32) have since been built — the largest remaining gap is the AI provider layer (M6/H2).
 >
 > **The ordered plan to finish the app is `docs/WORKPLAN.md` (2026-06-29)** — it re-validates the
 > audit against current code and sequences the remaining work in 7 stages, front-loading
@@ -88,8 +91,13 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Server receives manifests; remote import strictly by `local_file_id`. (done)
 - Teleport a PDF to the managed store via secure agent-push with SHA-256 verification. (done)
 - Path isolation: the agent never accepts a server-supplied path; the raw-path helper was removed,
-  with security tests. (done) Deferred (M8/polish): durable agent SQLite index, agent revocation
-  UI, admin teleport browser.
+  with security tests. (done)
+- **Agent redesign v2 (SPEC §32) — DONE (2026-06-29):** the agent became a single persistent,
+  tool-managed deployable: per-agent privileges (`can_index`/`can_extract`/`can_teleport`/…,
+  owner-set, audited), three import actions (`index_only` / `index_and_extract` — PDF discarded
+  after extraction, reference + preview kept / `teleport`), teleport request + reject-forever/
+  unblock, a **durable SQLite state index** (the closed M8 deferral), a full CLI, and a token-gated
+  loopback **web GUI** (`paracord-agent web up`). Deferred (M8/polish): admin teleport browser.
 
 ## M6: Citation graph and summaries
 

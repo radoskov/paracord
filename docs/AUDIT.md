@@ -941,7 +941,7 @@ drifting (addresses finding **A2**).
 | A3 | `make ready` ≠ CI surface | **OPEN** | `ready: fix precommit check`, `check: lint test`, `test: test-api test-agent` — no `frontend-check`/`test-migrations` in `ready`/`ci` → **Stage 1** |
 | B1 | GROBID config/coordinates | **FIXED (2026-06-29)** | options config-driven from `processing.grobid:` YAML; `GrobidClient` sends `teiCoordinates`; `tei_parser` parses `coords` → `CitationMention.pdf_coordinates` JSONB (migration `0013`, replaces 4 scalar cols, §9.3); citation API exposes `pdf_coordinates`/`pdf_x..` |
 | B6 | frontend single-page | **ADDRESSED (2026-06-29)** | Stage 4 replaced the single page with a tabbed shell over per-area pages; Library is a master list + WorkDetail (edit, metadata-conflict review, Enrich, attach/open PDFs, embedded reader); explicit shelves/racks managers; reader + Cytoscape graph from Stage 3. Refinements (per-field lock, applied-tags listing, import-queue panel) → Stage 7 |
-| B5 | agent scaffold only | **ADDRESSED (2026-06-29)** | Stage 5 shipped the manifest + hash-verified agent-push teleport vertical (`AgentFile` + migration `0014`, `/agents/manifest`, `/imports/teleport`, `/agents/teleports/{id}/content`); agent `AgentIndex` resolves by opaque id and the raw-path helper is removed. Durable agent SQLite index + admin teleport UI → Stage 7 |
+| B5 | agent scaffold only | **FIXED (2026-06-29)** | Stage 5 shipped the manifest + hash-verified agent-push teleport vertical (`AgentFile` + migration `0014`); **agent redesign v2 (SPEC §32)** then made the agent a single persistent, tool-managed deployable: per-agent privileges (migration `0015`), import actions + teleport request/block (`index_and_extract` discards the PDF post-extraction; migration `0016`), a durable SQLite state index (the deferred item, now closed), full CLI, and a token-gated loopback web GUI (`paracord-agent web up`). The server never handles a host path; the agent resolves opaque ids locally. |
 | P1/item4 | `arxiv_base_id` + UNIQUE | **FIXED** | migration `0011`, partial unique indexes |
 | P1/item5 | DOI normalization | **FIXED** | normalize-at-write + SQL pushdown, migration `0012` |
 | P2/item9 | scope summaries | **FIXED** | `POST /ai/summaries` real implementation |
@@ -954,7 +954,9 @@ drifting (addresses finding **A2**).
 3. ~~**B1** (extraction) — GROBID settings + coordinates.~~ **FIXED 2026-06-29.**
 4. ~~**B6** — frontend overhaul (reader, graph, metadata-review UI, tabbed shell).~~ **DONE
    (Stages 3–4, 2026-06-29).**
-5. ~~**B5** — agent manifest/teleport vertical.~~ **DONE (Stage 5, 2026-06-29).**
+5. ~~**B5** — agent manifest/teleport vertical + redesign.~~ **DONE (Stage 5 + agent redesign v2
+   / SPEC §32, 2026-06-29):** persistent tool-managed agent, privileges, import actions, durable
+   state index, CLI, and a local web GUI.
 6. **H2** — embeddings off the read path; provider interface (**next**).
 7. Deferred (Stage 7): H3 perf, C3/C4 remainder, H7 pgvector, export polish, M0 auth hardening,
    security-doc truthfulness (M2/M3/M4/M5), backups, prod smoke.

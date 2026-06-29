@@ -1,20 +1,24 @@
 # PaRacORD Local Agent
 
 The local agent runs on a workstation that owns local PDFs (it can be a different machine from
-the server). It indexes configured folders, reports a manifest of **opaque file IDs** (content
-hashes) to the server, and — when you request a teleport from the server UI — pushes the bytes to
-the server's managed library. The server never learns a filesystem path on your machine, and the
-agent only ever acts on IDs it has itself indexed.
+the server). It indexes managed folders/files, reports a manifest of **opaque file IDs** (content
+hashes) to the server, and applies a per-item *import action*. The server never learns a
+filesystem path on your machine — it addresses files only by `local_file_id`, and the agent
+resolves an ID back to a real path **locally only**.
 
-There is **no separate agent GUI**: you manage the agent from the *server* UI (Admin → Agents:
-approve it, browse its files, click Teleport) plus this CLI/daemon. Folders to index are listed in
-the agent config file — edit it to add/remove folders.
+There is a single, persistent agent per machine with a tool-managed config
+(`~/.config/paracord/agent.yaml`) and a small SQLite state index. You drive it from this CLI or
+from a **local-only web GUI** (`paracord-agent web up`); server-side management (approve the
+agent, set its privileges, browse its files, request a teleport) lives in the server UI under
+Admin → Agents.
 
 ## Install
 
 ```bash
 cd agent
 python -m pip install -e .          # provides the `paracord-agent` command
+# optional: OS keyring for secret storage (else a 0600 file is used)
+python -m pip install -e ".[keyring]"
 ```
 
 ## Enroll & run
@@ -24,29 +28,60 @@ python -m pip install -e .          # provides the `paracord-agent` command
    ```bash
    paracord-agent enroll --server http://SERVER:8000 --token <ENROLLMENT_TOKEN> --name my-workstation
    ```
-3. The owner **approves** it in Admin → Agents and copies the agent bearer token (shown once):
+3. The owner **approves** it in Admin → Agents, sets its privileges, and copies the agent bearer
+   token (shown once):
    ```bash
-   export PARACORD_AGENT_TOKEN=<AGENT_TOKEN>
+   paracord-agent set-token <AGENT_TOKEN>
    ```
-4. Run the daemon — it keeps the manifest fresh and auto-fulfils teleports requested in the UI:
+4. Add what to index and start monitoring:
    ```bash
-   paracord-agent serve --config ~/.config/paracord/agent.yaml ~/papers
+   paracord-agent add-folder ~/papers --action index_only
+   paracord-agent start          # monitor + sync on the refresh interval (Ctrl-C to stop)
    ```
 
-Config file (see `config/agent.example.yaml`): `filesystem.allowed_roots` lists the folders to
-index; `agent.server_url`, `agent.poll_interval_seconds`, and `agent.token_file` configure the
-rest. CLI flags (`--server`, `--token`, positional roots) override the config.
+## Import actions
+
+Each managed folder/file carries an **action** (default `index_only`) and a **teleport policy**
+(default `ask`):
+
+- `index_only` — only the opaque reference + metadata reach the server; the PDF stays local.
+- `index_and_extract` — the PDF is uploaded for extraction, then **discarded** server-side; only
+  the reference, extracted metadata, and a short preview are kept (it can be re-teleported later).
+- `teleport` — the PDF is uploaded and kept in the server's managed library.
+
+Teleport policy controls server-initiated requests: `ask` requires explicit approval (CLI/GUI),
+`allow` auto-fulfils them. A `reject --forever` blocks all future requests for a file until
+`unblock`.
 
 ## Commands
 
 ```bash
-paracord-agent scan [folders...]      # list indexed PDFs locally (no server)
-paracord-agent sync [folders...]      # send the manifest to the server once
-paracord-agent teleport [folders...]  # upload any files the server has requested, once
-paracord-agent serve                  # run continuously: sync + auto-teleport
+paracord-agent enroll --token <T> --server <URL> --name <NAME>   # one-time enrollment
+paracord-agent set-token <AGENT_TOKEN>                           # store approved bearer token
+paracord-agent set-server <URL>                                  # change the server URL
+paracord-agent add-folder <PATH> [--once] [--action ...] [--teleport ask|allow]
+paracord-agent add-file <PATH> [--action ...] [--teleport ask|allow]
+paracord-agent remove <PATH>                                     # stop managing an item
+paracord-agent list                                              # show managed items + defaults
+paracord-agent status                                            # connection, approval, privileges, counts
+paracord-agent sync | refresh                                    # scan + manifest + apply actions once
+paracord-agent start [--interval N]                              # run continuously: monitor + sync
+paracord-agent request --list | --approve <ID> | --reject [--forever] <ID> | --unblock <ID>
+paracord-agent web up | down | status                            # local-only web GUI
 ```
+
+## Web GUI
+
+`paracord-agent web up` starts a self-served page bound to `127.0.0.1` (default port `8765`,
+configurable via the config's `web_port` or `--port`) and prints a one-time access URL containing
+a token. Every request is token-gated; the GUI never listens off-host. It covers connection
+(set/change server, enroll, save token), managed folders/files (add/remove with action + policy),
+sync/refresh, per-file processing status, and teleport-request approval. Stop it with
+`paracord-agent web down`.
 
 ## Security boundary
 
 The agent never exposes arbitrary filesystem paths. The server addresses files only by
-`local_file_id`, and the agent refuses any ID it has not indexed within its configured roots.
+`local_file_id`, and the agent refuses any ID it has not indexed within its managed items. Secrets
+(the server bearer token, the web access token) live in the OS keyring when available, otherwise
+in a `0600` file. The web GUI is bound to loopback and token-gated.

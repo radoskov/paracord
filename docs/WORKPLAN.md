@@ -266,6 +266,26 @@ focused vertical (audit "Agent M1").
    extractable via the Stage 1 resolver. *Deferred (Stage 7):* a durable agent-side SQLite index
    (currently rebuilt per run) and an admin "browse agent files / request teleport" UI.
 
+9. **Agent redesign v2 (SPEC §32). ✅ DONE (2026-06-29).** Reworked the agent into a single,
+   persistent, tool-managed deployable and closed both Stage-5 deferrals:
+   - **S1 — per-agent privileges** (migration `0015`): `can_index`/`can_extract`/`can_teleport`
+     (off by default)/`can_be_requested`/`processing_visibility`/`server_status_visibility`;
+     `PATCH /admin/agents/{id}/privileges` (owner, audited) + Admin UI; enforced server-side.
+   - **S2 — import actions + teleport request/block** (migration `0016`): `index_only` /
+     `index_and_extract` (PDF discarded after extraction, reference + preview kept) / `teleport`;
+     `virtual_path`, `processing_state`, `teleport_blocked`, `preview_text`; reject / reject-forever
+     / unblock; a `processing_visibility`-gated file-status endpoint; removed-source flagging.
+   - **S3 — durable agent state**: tool-managed `agent.yaml`, a SQLite `state.sqlite3` mapping
+     opaque `local_file_id` → real path (local-only) + per-file state/blocks, secrets via OS keyring
+     or `0600` file. (This is the Stage-5 "durable agent-side SQLite index" deferral, now closed.)
+   - **S4 — CLI**: enroll/set-token/set-server/add-folder/add-file/remove/list/status/sync/refresh/
+     teleport/`request`/`start` (monitor + periodic sync, per-item action applied).
+   - **S5 — local web GUI**: `paracord-agent web up`/`down`/`status`, a token-gated, loopback-only
+     Starlette page covering all agent management (the in-vivo "how do I manage the agent" gap).
+   *DoD met:* backend suite green (privilege + import-action + teleport-request coverage), 22 agent
+   tests green, migration parity green; the agent is installable and the web GUI starts, gates by
+   token, and stops cleanly.
+
 ---
 
 ## Stage 6 — AI pipeline hardening  *(provider architecture; keep lexical baselines)*

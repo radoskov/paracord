@@ -244,6 +244,21 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **Agent redesign v2 (SPEC §32, DONE) — single persistent, tool-managed agent:** the agent is now
+  one durable deployable rather than per-run scaffold, and both Stage-5 deferrals are closed.
+  **Server:** per-agent privileges (migration `0015`: `can_index`/`can_extract`/`can_teleport`
+  [off by default]/`can_be_requested`/`processing_visibility`/`server_status_visibility`,
+  `PATCH /admin/agents/{id}/privileges` + Admin UI, enforced server-side) and import actions +
+  teleport request/block (migration `0016`: `import_action`/`teleport_policy`/`virtual_path`/
+  `processing_state`/`teleport_blocked`/`preview_text`). New `index_and_extract` action uploads,
+  extracts, then **discards** the PDF, keeping the Work + references + a preview; teleport
+  reject/reject-forever/unblock; removed-source flagging. **Agent:** tool-managed `agent.yaml`, a
+  durable SQLite `state.sqlite3` mapping opaque `local_file_id` → real path (local-only, the closed
+  Stage-5 deferral), secrets via OS keyring or `0600` file; a full CLI (enroll/set-token/add-folder
+  /list/status/sync/refresh/teleport/`request`/`start`); and a token-gated, loopback-only Starlette
+  **web GUI** (`paracord-agent web up`/`down`/`status`) covering all agent management — the in-vivo
+  "how do I run/manage the agent" gap. 22 agent tests + backend privilege/import-action/teleport
+  coverage + migration parity green.
 - **Stage 5 (DONE) — Agent manifest + teleport (M5):** the remote-workstation feature now works as
   a secure **agent-push** flow. `AgentFile` (migration `0014`) records manifest entries; an agent
   posts its manifest (`POST /agents/manifest`), a user requests a teleport (`POST /imports/teleport`),

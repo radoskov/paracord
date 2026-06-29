@@ -14,6 +14,8 @@ dependencies = [
     "watchfiles>=0.22",
     "PyYAML>=6.0",
     "rich>=13.7",
+    "starlette>=0.37",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
