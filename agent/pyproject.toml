@@ -1,10 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperracks-agent"
+version = "0.1.0"
+description = "PaRacORD local workstation agent: index PDFs and teleport them to the server."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx2==2.4.0",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "watchfiles>=0.22",
+    "PyYAML>=6.0",
+    "rich>=13.7",
+]
+
+[project.scripts]
+paracord-agent = "paperracks_agent.cli:main"
+
+# Only the agent package ships; systemd/ and tests/ are not importable packages, so pin
+# discovery to paperracks_agent to avoid setuptools' flat-layout multi-package error.
+[tool.setuptools.packages.find]
+include = ["paperracks_agent*"]
+
 # Pytest configuration for the standalone agent component.
 #
 # The agent ships as its own image/deployable, so its tests run in the agent container
 # (not the server image). Lint/format for the whole repo is configured by the root
 # pyproject.toml and run host-local; this file intentionally contains no [tool.ruff]
 # section so Ruff keeps using the repo-root configuration for agent sources.
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

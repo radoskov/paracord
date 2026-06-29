@@ -27,6 +27,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Agent packaging + `serve` daemon:** the agent is now an installable package
+  (`pip install -e agent` provides the `paracord-agent` command) — fixes the setuptools
+  flat-layout error from the `systemd/` folder by pinning package discovery to
+  `paperracks_agent`. New `serve` command runs continuously (sync manifest + auto-fulfil
+  teleports requested from the server UI) and a YAML config loader (`filesystem.allowed_roots`
+  lists folders to index; token via `--token`/`$PARACORD_AGENT_TOKEN`/`token_file`). The agent has
+  no separate GUI by design — it's managed from the server's Admin → Agents UI plus this
+  CLI/daemon. Agent README rewritten with real install/run steps.
 - **Stage 4.5 (batch 2) — operational visibility & management:** a **Jobs** tab backed by
   `GET /jobs` (RQ queue counts, worker count, recent jobs with errors; `available:false` when
   Redis/worker is down) — the fix for "enrichment queued but nothing happens" and "abstract not
