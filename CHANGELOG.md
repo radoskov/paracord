@@ -27,6 +27,19 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Stage 5 — Local-agent manifest + teleport (M5):** the remote-workstation feature now works as
+  a secure **agent-push** vertical. New `AgentFile` model + migration `0014_agent_files`.
+  `POST /agents/manifest` (agent token) ingests opaque file identity (`local_file_id`, sha256,
+  size, display label — never a server-usable path). `POST /imports/teleport` (owner/editor) marks
+  an entry requested; `GET /agents/teleports/pending` (agent token) lists them; and
+  `POST /agents/teleports/{local_file_id}/content` (agent token, multipart) **verifies the uploaded
+  bytes against the manifest SHA-256**, stores the file content-addressed in the managed library,
+  creates a Work + FileWorkLink, and enqueues extraction (hash mismatch → `teleport.failed` + 400).
+  Audit events `agent.manifest_received` and `teleport.requested/completed/failed`. Agent side: an
+  `AgentIndex` resolves files strictly by opaque `local_file_id`, and the raw-path
+  `open_file_for_teleport` helper was **removed** — the server never sees a path and the agent
+  never accepts one. CLI gains `sync` and `teleport` commands. The future acceptance test is
+  rewritten to the real flow and enabled. (AUDIT B5 / H4; ROADMAP M5; WORKPLAN Stage 5)
 - **Stage 4 — Frontend information architecture & UX overhaul:** the single ~10-section operator
   page is replaced by a hash-routed **tabbed shell** (`App.svelte`: Library / Import / Shelves /
   Racks / Tags / Duplicates / Insights / Admin), each tab a focused page with a one-line hint.

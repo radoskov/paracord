@@ -82,12 +82,14 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Review UI (merge / link as version / split / keep separate / ignore). (initial real-action UI
   exists, including split controls)
 
-## M5: Local agent and teleport (remote machines)
+## M5: Local agent and teleport (remote machines) — DONE (2026-06-29)
 
-- Agent registers with server and scans configured roots.
-- Server receives manifests; remote import by file ID.
-- Teleport a PDF to the server managed store with checksum verification.
-- File streaming; agent revocation; path-isolation security tests.
+- Agent registers (owner-gated enrollment) and scans configured roots into an opaque-id index. (done)
+- Server receives manifests; remote import strictly by `local_file_id`. (done)
+- Teleport a PDF to the managed store via secure agent-push with SHA-256 verification. (done)
+- Path isolation: the agent never accepts a server-supplied path; the raw-path helper was removed,
+  with security tests. (done) Deferred (M8/polish): durable agent SQLite index, agent revocation
+  UI, admin teleport browser.
 
 ## M6: Citation graph and summaries
 

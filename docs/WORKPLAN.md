@@ -35,9 +35,11 @@ upload + identifier import frontend + backend).
   metadata review + attach/open PDFs, explicit shelves/racks managers, RIS/CSL import,
   attach-file-to-work backend, tooltips/disabled-reasons/help → Stage 4
 
+- **Agent manifest/teleport** ✅ — secure agent-push: manifest + hash-verified teleport into the
+  managed library; raw-path helper removed → Stage 5
+
 **Still open and scheduled below:**
-- **Agent manifest/teleport** — the distinctive remote feature; still scaffold. → **Stage 5 (next)**
-- **H2** (AI read-path writes), embedding/topic/summary **provider interface**. → Stage 6
+- **H2** (AI read-path writes), embedding/topic/summary **provider interface**. → **Stage 6 (next)**
 - **H3** fuzzy-title perf, **C3/C4** remaining edges, **H7** pgvector, export polish, auth
   hardening, security-doc truthfulness, backups, prod smoke, plus Stage-4 refinements
   (per-field `user_confirmed`, applied-tags listing, import-queue panel). → Stage 7 (deferred)
@@ -216,17 +218,22 @@ and master–detail selection; existing tests stay green; no backend capability 
 The agent is the project's differentiator and is still mostly enrollment scaffold. Build it as one
 focused vertical (audit "Agent M1").
 
-8. **Agent manifest + teleport.**
-   - Agent: durable local index (SQLite) of scanned files under allowed roots.
-   - Server: `AgentFile` model/table; token-authenticated manifest ingestion; user-authorized
-     teleport session; chunked or one-shot upload with SHA-256 verification into the
-     content-addressed managed store.
-   - Audit events for manifest / teleport-requested / teleport-completed|failed.
-   - **Remove the raw-path teleport helper** (`agent/teleport.py` TODO) before exposing any command —
-     resolve strictly by opaque `local_file_id`.
-   *DoD:* enable `backend/tests/future/test_future_agent_teleport_acceptance.py`; server never asks
-   for and agent never exposes a raw path; a teleported file becomes a managed-library file and is
-   extractable (via the Stage 1 resolver).
+8. **Agent manifest + teleport. ✅ DONE (2026-06-29).** Implemented as a secure agent-push flow:
+   - Agent: `AgentIndex` maps opaque `local_file_id` (content hash) → path within configured
+     roots; built by scanning. The raw-path `open_file_for_teleport` helper (the M5 security TODO)
+     is **gone** — teleport resolves strictly through the index, so there is no code path that
+     opens a server-supplied path.
+   - Server: `AgentFile` model + migration `0014`; `POST /agents/manifest` (agent token) ingests
+     entries; `POST /imports/teleport` (owner/editor) marks an entry requested;
+     `GET /agents/teleports/pending` (agent token) lists them; `POST /agents/teleports/{id}/content`
+     (agent token, multipart) verifies the uploaded bytes against the manifest SHA-256, stores
+     content-addressed in the managed library, creates Work+FileWorkLink, and enqueues extraction.
+   - Audit: `agent.manifest_received`, `teleport.requested/completed/failed`.
+   *DoD met:* the rewritten `test_future_agent_teleport_acceptance.py` is enabled (real enroll →
+   approve → manifest → request → push → file-present flow + hash-mismatch rejection); the server
+   never sees a path and the agent never accepts one; a teleported file is a managed file
+   extractable via the Stage 1 resolver. *Deferred (Stage 7):* a durable agent-side SQLite index
+   (currently rebuilt per run) and an admin "browse agent files / request teleport" UI.
 
 ---
 
@@ -282,12 +289,12 @@ Stage 1 ✅ ──► Stage 2 ✅ GROBID coords ──► Stage 3 ✅ reader + g
 Stage 4 ✅ frontend IA & UX overhaul  ◄───────────┘   (tabbed shell, master–detail
           (metadata-edit UI + RIS/CSL folded in)        library w/ editing, organize
                                                          fix, affordances/help)
-Stage 5  agent vertical (NEXT; independent)
-Stage 6  AI provider hardening (independent; after 1)
+Stage 5 ✅ agent manifest + teleport vertical (secure agent-push)
+Stage 6  AI provider hardening (NEXT; independent; after 1)
 Stage 7  deferred polish (last)
 ```
 
-Stages 1–4 are done — the app is now navigable and editable end-to-end. **Stage 5 (agent
-manifest/teleport) is next**: the distinctive remote-machine feature, still enrollment-only.
-Stage 5 and Stage 6 (AI) are independent and can run in parallel per `WORK_SPLIT.md` (Agent C owns
-the agent; Agent I owns AI). Everything in Stage 7 is intentionally last.
+Stages 1–5 are done — the single-machine loop, the reader/graph, the full UI, and the
+remote-workstation agent teleport all work. **Stage 6 (AI provider hardening) is next**: move
+embeddings off the read path and put summaries/topics/search behind provider interfaces (keeping
+the lexical baselines as defaults). Everything in Stage 7 is intentionally last.

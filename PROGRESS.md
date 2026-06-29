@@ -124,9 +124,9 @@ What works today (real, tested in-container on Python 3.12):
   (`POST /api/v1/agents/enroll-request` → 202, pending); the owner approves
   (`POST /api/v1/admin/agents/{id}/approve`) which mints the agent's scoped access token, returned
   once. New `agents` / `agent_enrollment_tokens` tables (migration `0009_agents`), all tokens
-  stored hashed, every step audit-logged (`services/agents.py`). Manifest/teleport remain stubs.
-  Covered by `test_agents.py` and the now-enabled forward-looking
-  `test_agent_enrollment_requires_owner_approval`.
+  stored hashed, every step audit-logged (`services/agents.py`). **Manifest ingestion + teleport
+  are now implemented** (Stage 5, see the 2026-06-29 entry above). Covered by `test_agents.py` and
+  the now-enabled forward-looking `test_agent_enrollment_requires_owner_approval`.
 - **M7 topic modeling (lightweight, no ML dep):** `POST /api/v1/ai/topics` clusters a
   library/shelf/rack scope's works into keyword-labelled topics (`services/topic_modeling.py`,
   TF-IDF + a small deterministic k-means, fully local) and persists `TopicAssignment` rows
@@ -244,6 +244,16 @@ P1 items addressed (2026-06-26):
   Migration `0012_normalize_dois` patches any existing rows. Tests updated.
 
 P2 / P0 items addressed (2026-06-29):
+- **Stage 5 (DONE) — Agent manifest + teleport (M5):** the remote-workstation feature now works as
+  a secure **agent-push** flow. `AgentFile` (migration `0014`) records manifest entries; an agent
+  posts its manifest (`POST /agents/manifest`), a user requests a teleport (`POST /imports/teleport`),
+  the agent polls `GET /agents/teleports/pending` and pushes the bytes to
+  `POST /agents/teleports/{local_file_id}/content`, where the server **verifies the SHA-256** before
+  storing the file content-addressed in the managed library (then creates a Work + enqueues
+  extraction). The agent resolves files only through an opaque-`local_file_id` `AgentIndex`; the
+  raw-path teleport helper is removed, so neither side ever handles a server-supplied path. Audit
+  events at each step. Acceptance test enabled. Deferred to Stage 7: durable agent SQLite index +
+  an admin teleport-browser UI.
 - **Stage 4 (DONE) — Frontend IA & UX overhaul:** the single ~10-section page was replaced with a
   hash-routed **tabbed shell** (`App.svelte`) over per-area pages — Library, Import, Shelves, Racks,
   Tags, Duplicates, Insights, Admin. The **Library** is now a searchable master list + a
@@ -305,11 +315,13 @@ to the last stage**. Summary of the next stages:
 2. **Stage 2 — GROBID settings + coordinate extraction (B1) — DONE.**
 3. **Stage 3 — PDF.js reader + interactive Cytoscape graph — DONE.**
 4. **Stage 4 — Frontend IA & UX overhaul — DONE.**
-5. **Next: Stage 5 — Local agent manifest/teleport vertical (M5).** The distinctive
-   remote-machine feature is still enrollment-only; build the agent local index, server
-   `AgentFile`/manifest ingestion (token-auth), user-authorized teleport with checksum + audit,
-   and remove the raw-path teleport helper. See `docs/WORKPLAN.md` Stage 5; the acceptance
-   contract is `backend/tests/future/test_future_agent_teleport_acceptance.py`.
+5. **Stage 5 — Agent manifest + teleport vertical (M5) — DONE.**
+6. **Next: Stage 6 — AI pipeline hardening.** Move embedding creation off the `POST /search/semantic`
+   read path to import/background with upsert (H2); put embeddings/summaries/topics behind provider
+   interfaces (keep the hash-BOW / TF-IDF / extractive baselines as defaults; add opt-in
+   sentence-transformers/Ollama/BERTopic seams) and offer a lexical-vs-embedding semantic mode.
+   See `docs/WORKPLAN.md` Stage 6; acceptance scaffolds `test_future_local_llm_acceptance.py` and
+   `test_future_topic_modeling_acceptance.py`.
 4. **Stage 4 — metadata review/edit UI (P2/item8) + RIS/CSL import (P2/item10 remainder).**
 5. **Stage 5 — agent manifest/teleport vertical (M5).**
 6. **Stage 6 — AI provider hardening (H2 off read path; embedding/topic/summary provider seams).**
