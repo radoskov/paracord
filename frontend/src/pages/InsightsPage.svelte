@@ -63,7 +63,7 @@
         maxTopics: 6,
       });
       topics = response.topics;
-      message = `Modelled ${response.topics.length} topics over ${response.work_count} works`;
+      message = `Modelled ${response.topics.length} topics over ${response.work_count} papers`;
     });
   }
 
@@ -124,14 +124,14 @@
       <div class="head">
         <h2>Topics</h2>
         <button type="button" on:click={modelTopics} disabled={loading || !scopeReady}
-          title="Cluster the scope's works into keyword topics">Model topics</button>
+          title="Cluster the scope's papers into keyword topics">Model topics</button>
       </div>
       {#if topics.length === 0}
         <p class="empty">No topics yet — click “Model topics”.</p>
       {:else}
         <ul class="plain">
           {#each topics as topic (topic.topic_id)}
-            <li><strong>{topic.keywords.join(', ')}</strong><small class="muted"> · {topic.work_count} works</small></li>
+            <li><strong>{topic.keywords.join(', ')}</strong><small class="muted"> · {topic.work_count} papers</small></li>
           {/each}
         </ul>
       {/if}
@@ -147,14 +147,14 @@
         <p class="empty">No summary yet — click “Summarise”.</p>
       {:else}
         <p class="summary-text">{summary.text}</p>
-        <p class="hintline">{summary.summary_type} · {summary.work_count} works · {summary.model_name ?? 'local'}</p>
+        <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}</p>
       {/if}
     </div>
   </div>
 
   <div class="card">
     <h2>Semantic search</h2>
-    <p class="muted">Find works by meaning across the whole library (lexical baseline embedder).</p>
+    <p class="muted">Find papers by meaning across the whole library (lexical baseline embedder).</p>
     <form on:submit|preventDefault={semanticSearch} class="row">
       <input bind:value={semanticQuery} placeholder="e.g. attention mechanisms for translation" aria-label="Semantic query" />
       <button type="submit" disabled={!semanticQuery.trim() || loading}>Search</button>

@@ -18,7 +18,7 @@
   ];
 
   function titleFor(work: Work): string {
-    return work.canonical_title?.trim() || 'Untitled work';
+    return work.canonical_title?.trim() || 'Untitled paper';
   }
 </script>
 
@@ -37,7 +37,7 @@
   <tbody>
     {#if works.length === 0}
       <tr>
-        <td colspan={compact ? 4 : 5} class="empty">No works</td>
+        <td colspan={compact ? 4 : 5} class="empty">No papers</td>
       </tr>
     {:else}
       {#each works as work}

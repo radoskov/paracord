@@ -165,7 +165,7 @@
 
 <div class="detail">
   <div class="bar">
-    <h2>{form.canonical_title || 'Untitled work'}</h2>
+    <h2>{form.canonical_title || 'Untitled paper'}</h2>
     <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
   </div>
   {#if message}<p class="muted">{message}</p>{/if}
@@ -229,7 +229,7 @@
     <div class="attach">
       <input type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
       <button type="button" on:click={upload} disabled={!attachFile || loading}
-        title={attachFile ? 'Attach this PDF to the work' : 'Choose a PDF to attach'}>Attach PDF</button>
+        title={attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
     </div>
     {#if files.length === 0}
       <p class="empty">No files attached. Attach a PDF above to read and extract it.</p>

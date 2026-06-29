@@ -83,7 +83,7 @@
       showNew = false;
       await loadWorks();
       selected = work;
-    }, 'Work created — add files and metadata on the right');
+    }, 'Paper created — add files and metadata on the right');
   }
 
   function onUpdated(work: Work): void {
@@ -121,13 +121,13 @@
         <button type="submit" disabled={loading} title="Apply search and filters">Search</button>
       </form>
       <div class="bar">
-        <span class="muted">{works.length} works{message ? ` · ${message}` : ''}</span>
+        <span class="muted">{works.length} papers{message ? ` · ${message}` : ''}</span>
         <button type="button" class="secondary" on:click={() => (showNew = !showNew)}
-          title="Create a work by hand (you can attach a PDF afterwards)">+ New work</button>
+          title="Create a paper by hand (you can attach a PDF afterwards)">+ New paper</button>
       </div>
       {#if showNew}
         <form class="new" on:submit|preventDefault={createWork}>
-          <input bind:value={newTitle} placeholder="Working title" aria-label="New work title" />
+          <input bind:value={newTitle} placeholder="Paper title" aria-label="New paper title" />
           <button type="submit" disabled={!newTitle.trim() || loading}>Create</button>
         </form>
       {/if}
@@ -136,8 +136,8 @@
     <div class="card">
       {#if works.length === 0}
         <p class="empty">
-          No works match. Import PDFs or add by arXiv/DOI on the <strong>Import</strong> tab, or use
-          “+ New work”.
+          No papers match. Import PDFs or add by arXiv/DOI on the <strong>Import</strong> tab, or use
+          “+ New paper”.
         </p>
       {:else}
         <PaperTable
@@ -158,7 +158,7 @@
         <WorkDetail {client} work={selected} {onUpdated} onClose={() => (selected = null)} />
       {/key}
     {:else}
-      <p class="empty">Select a work from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>
+      <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>
     {/if}
   </div>
 </section>

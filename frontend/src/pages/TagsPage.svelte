@@ -49,7 +49,7 @@
   <div class="card">
     <h2>New tag</h2>
     <p class="muted">
-      Tags are applied to a work from its detail panel in the Library (and to shelves/racks from
+      Tags are applied to a paper from its detail panel in the Library (and to shelves/racks from
       their pages). Here you create and review the available tags.
     </p>
     <form on:submit|preventDefault={createTag} class="new-tag">

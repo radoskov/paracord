@@ -69,7 +69,7 @@
       await client.addWorkToShelf(shelf.id, pickWorkId);
       pickWorkId = '';
       shelfWorks = await client.listShelfWorks(shelf.id);
-    }, 'Work added to shelf');
+    }, 'Paper added to shelf');
   }
 
   async function removeWork(workId: string): Promise<void> {
@@ -78,7 +78,7 @@
     await run(async () => {
       await client.removeWorkFromShelf(shelf.id, workId);
       shelfWorks = await client.listShelfWorks(shelf.id);
-    }, 'Work removed');
+    }, 'Paper removed');
   }
 
   async function archive(): Promise<void> {
@@ -107,7 +107,7 @@
       </button>
     </form>
     {#if shelves.length === 0}
-      <p class="empty">No shelves yet. Create one to group related works.</p>
+      <p class="empty">No shelves yet. Create one to group related papers.</p>
     {:else}
       <ul class="shelf-list">
         {#each shelves as shelf (shelf.id)}
@@ -130,7 +130,7 @@
 
   <div class="card detail">
     {#if !selected}
-      <p class="empty">Select a shelf on the left to see its works and add or remove members.</p>
+      <p class="empty">Select a shelf on the left to see its papers and add or remove members.</p>
     {:else}
       <div class="head">
         <div>
@@ -142,31 +142,31 @@
       </div>
 
       <div class="add-work">
-        <h3>Add a work to this shelf</h3>
-        <input bind:value={workFilter} placeholder="Filter works by title…" aria-label="Filter works" />
+        <h3>Add a paper to this shelf</h3>
+        <input bind:value={workFilter} placeholder="Filter papers by title…" aria-label="Filter papers" />
         <div class="row">
-          <select bind:value={pickWorkId} aria-label="Choose a work">
-            <option value="">Choose a work…</option>
+          <select bind:value={pickWorkId} aria-label="Choose a paper">
+            <option value="">Choose a paper…</option>
             {#each filteredWorks.slice(0, 200) as work (work.id)}
               <option value={work.id}>{work.canonical_title ?? 'Untitled'}{work.year ? ` (${work.year})` : ''}</option>
             {/each}
           </select>
-          <button type="button" on:click={addWork} disabled={!pickWorkId || loading}
-            title={pickWorkId ? 'Add the chosen work' : 'Choose a work first'}>Add work</button>
+          <button type=”button” on:click={addWork} disabled={!pickWorkId || loading}
+            title={pickWorkId ? 'Add the chosen paper' : 'Choose a paper first'}>Add paper</button>
         </div>
-        {#if !pickWorkId}<p class="hintline">Pick a work above to enable “Add work”.</p>{/if}
+        {#if !pickWorkId}<p class=”hintline”>Pick a paper above to enable “Add paper”.</p>{/if}
       </div>
 
-      <h3>Works in this shelf ({shelfWorks.length})</h3>
+      <h3>Papers in this shelf ({shelfWorks.length})</h3>
       {#if shelfWorks.length === 0}
-        <p class="empty">This shelf is empty. Use “Add a work” above.</p>
+        <p class=”empty”>This shelf is empty. Use “Add a paper” above.</p>
       {:else}
         <ul class="member-list">
           {#each shelfWorks as work (work.id)}
             <li>
               <span>{work.canonical_title ?? 'Untitled'}{work.year ? ` · ${work.year}` : ''}</span>
               <button type="button" class="secondary small" on:click={() => removeWork(work.id)}
-                disabled={loading} title="Remove this work from the shelf">Remove</button>
+                disabled={loading} title="Remove this paper from the shelf">Remove</button>
             </li>
           {/each}
         </ul>

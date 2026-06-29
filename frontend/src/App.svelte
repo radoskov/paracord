@@ -15,10 +15,10 @@
 
   const TABS = [
     { id: 'library', label: 'Library', hint: 'Search, read, edit and organise your papers.' },
-    { id: 'import', label: 'Import', hint: 'Add works from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.' },
-    { id: 'shelves', label: 'Shelves', hint: 'Group related works into shelves.' },
+    { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.' },
+    { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
-    { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to works, shelves or racks.' },
+    { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.' },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents, and view the audit log.' },

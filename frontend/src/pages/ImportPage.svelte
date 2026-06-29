@@ -57,7 +57,7 @@
     if (!selectedSourceId) return;
     await run(async () => {
       const batch = await client.importFolder(selectedSourceId);
-      message = `Folder import ${batch.status}: ${batch.stats?.seen ?? 0} PDFs scanned, ${batch.stats?.created_works ?? 0} works created`;
+      message = `Folder import ${batch.status}: ${batch.stats?.seen ?? 0} PDFs scanned, ${batch.stats?.created_works ?? 0} papers created`;
     });
   }
 
@@ -127,7 +127,7 @@
 
   <div class="card">
     <h2>Import by identifier</h2>
-    <p class="muted">Fetch metadata for an arXiv id or DOI and create a work (idempotent).</p>
+    <p class="muted">Fetch metadata for an arXiv id or DOI and create a paper (idempotent).</p>
     <form on:submit|preventDefault={importIdentifier} class="row">
       <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
       <button type="submit" disabled={!identifierValue.trim() || loading}>Import</button>

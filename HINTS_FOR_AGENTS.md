@@ -43,6 +43,10 @@ import batch
 
 Build a reusable `ScopeResolver` service rather than duplicating SQL in every feature.
 
+## UI says "paper", code says "work"
+
+The primary library entity is called a **paper** in all user-visible text (button labels, toasts, error messages, tooltips, hint text). In code it is **work**: `Work` model, `works` table, `/api/v1/works` prefix, `WorkCreate`/`WorkRead` schemas, `createWork()`/`listWorks()` client methods, `entity_type="work"` DB discriminator. When adding new UI strings, write "paper". When adding code, write "work". Never rename the DB discriminator `entity_type="work"` — it is already stored in production rows.
+
 ## Keep file identity separate from paper identity
 
 Never assume one PDF equals one paper. The model must allow:

@@ -43,7 +43,7 @@
     await run(async () => {
       const result = await client.scanDuplicateCandidates();
       candidates = await client.listDuplicateCandidates(statusFilter);
-      message = `Scan complete: ${result.candidate_count} candidates across ${result.scanned_works} works and ${result.scanned_files} files`;
+      message = `Scan complete: ${result.candidate_count} candidates across ${result.scanned_works} papers and ${result.scanned_files} files`;
     });
   }
 
@@ -155,7 +155,7 @@
             <div class="actions">
               {#if canResolveAsWork(c)}
                 <button type="button" on:click={() => apply(c, 'merge_works')} disabled={loading || c.status !== 'open'}
-                  title="Merge these two works into one canonical work">Merge</button>
+                  title="Merge these two papers into one canonical paper">Merge</button>
                 <button type="button" class="secondary" on:click={() => apply(c, 'link_as_version')} disabled={loading || c.status !== 'open'}
                   title="Keep both but link one as a version of the other">Link version</button>
               {/if}
@@ -174,7 +174,7 @@
             </div>
             {#if canSplit(c)}
               <div class="split">
-                <label for={`split-${c.id}`}>Split this file into separate works</label>
+                <label for={`split-${c.id}`}>Split this file into separate papers</label>
                 <textarea
                   id={`split-${c.id}`}
                   value={splitDrafts[c.id] ?? ''}
@@ -183,7 +183,7 @@
                   disabled={loading || c.status !== 'open'}
                 ></textarea>
                 <button type="button" on:click={() => split(c)} disabled={loading || c.status !== 'open'}
-                  title="Create separate works from the page ranges above">Split file</button>
+                  title="Create separate papers from the page ranges above">Split file</button>
               </div>
             {/if}
           </article>

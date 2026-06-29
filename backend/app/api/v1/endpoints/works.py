@@ -140,7 +140,7 @@ def get_work(work_id: uuid.UUID, db: Session = DB_DEP) -> Work:
     """Return one work."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return work
 
 
@@ -154,7 +154,7 @@ def update_work(
     """Edit a work manually."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(work, key, value)
@@ -264,7 +264,7 @@ def get_work_citation_contexts(
 ) -> list[CitationContextRead]:
     """Return in-text citation contexts for one work."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     rows = db.execute(
         select(CitationMention, Reference)
         .join(Reference, Reference.id == CitationMention.reference_id)
@@ -316,7 +316,7 @@ class WorkFileRead(BaseModel):
 def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[File]:
     """List the files attached to a work (via FileWorkLink)."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return list(
         db.scalars(
             select(File)
@@ -337,7 +337,7 @@ async def upload_work_file(
     """Upload a PDF and attach it to an existing work (so a manual work isn't a dead end)."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     if file.content_type and file.content_type not in (
         "application/pdf",
         "application/octet-stream",
@@ -371,7 +371,7 @@ def list_work_annotations(
 ) -> list[Annotation]:
     """List annotations stored separately from a work's PDFs."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return list(
         db.scalars(
             select(Annotation)
@@ -394,7 +394,7 @@ def create_work_annotation(
 ) -> Annotation:
     """Create a reader annotation without modifying the source PDF."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     annotation = Annotation(
         work_id=work_id,
         file_id=payload.file_id,
@@ -416,7 +416,7 @@ def create_work_annotation(
 def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP) -> list:
     """List stored summaries for a work (newest first)."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return list_work_summaries(db, work_id)
 
 
@@ -434,7 +434,7 @@ def create_summary(
     """Generate a local (no-LLM) summary for a work and store it with provenance."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     try:
         summary = summarize_work(
             db,
@@ -468,7 +468,7 @@ def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: st
 def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldReview]:
     """Return metadata assertions for a work, grouped by field, flagging conflicts."""
     if db.get(Work, work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     rows = db.scalars(
         select(MetadataAssertion)
         .where(MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work_id)
@@ -500,11 +500,11 @@ def enrich_work_endpoint(
     """Queue external metadata enrichment for a work (needs a DOI or arXiv id)."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     if not work.doi and not work.arxiv_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Work has no DOI or arXiv id to enrich from",
+            detail="Paper has no DOI or arXiv id to enrich from",
         )
     job_id = enqueue_enrichment(work_id)
     if job_id is None:
@@ -525,7 +525,7 @@ def select_metadata_assertion(
     """Choose an assertion as the canonical value for its field (a review action)."""
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     assertion = db.get(MetadataAssertion, payload.assertion_id)
     if assertion is None or assertion.entity_type != "work" or assertion.entity_id != work_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assertion not found")

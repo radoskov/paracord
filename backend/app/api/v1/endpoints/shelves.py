@@ -129,7 +129,7 @@ def add_work_to_shelf(
     if db.get(Shelf, shelf_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
     if db.get(Work, payload.work_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": payload.work_id})
     if link is None:
         db.add(

@@ -198,7 +198,7 @@ def _selected_works(db: Session, work_id: uuid.UUID | None) -> list[Work]:
         return list(db.scalars(select(Work)).all())
     work = db.get(Work, work_id)
     if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return [work]
 
 

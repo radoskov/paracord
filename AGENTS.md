@@ -2,6 +2,14 @@
 
 This file is for coding agents that will work on PaRacORD in parallel. Treat `SPECIFICATION.md` as the product contract and `WORK_SPLIT.md` as the recommended implementation partition.
 
+## Terminology: "paper" in the UI, "work" in code
+
+The user-facing term for the primary library entity is **"paper"** (e.g., buttons say "New paper", toasts say "Paper added to shelf", error messages say "Paper not found").
+
+In code, the same entity is consistently called **"work"**: the Python model is `Work`, the DB table is `works`, API URL prefix is `/api/v1/works`, schema classes are `WorkCreate`/`WorkRead`/`WorkUpdate`, client methods are `createWork()`/`listWorks()`, and `entity_type="work"` is stored as a discriminator in TagLink, MetadataAssertion, Embedding, Summary, and Annotation rows.
+
+**Rule:** When writing new user-visible strings (button labels, toasts, error messages, placeholder text, tooltips, hint text, docstrings shown in Swagger), use "paper"/"papers". When writing code (variable names, function names, class names, DB columns, API path segments, JSON field names), use "work"/"works". Do not rename the code-level identifiers or DB discriminators to "paper".
+
 ## Global rules
 
 1. Do not remove security boundaries to make development easier.
