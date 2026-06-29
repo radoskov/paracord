@@ -118,6 +118,30 @@ def disable_user(
     return user
 
 
+def enable_user(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> User:
+    """Re-enable a disabled user account and record a ``user.enabled`` audit event."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise LookupError(f"User {user_id} not found")
+
+    if user.disabled_at is not None:
+        user.disabled_at = None
+        db.flush()
+        record_event(
+            db,
+            "user.enabled",
+            actor_user_id=actor_user_id,
+            entity_type="user",
+            entity_id=str(user.id),
+        )
+    return user
+
+
 def _active_owner_count(db: Session) -> int:
     return (
         db.scalar(

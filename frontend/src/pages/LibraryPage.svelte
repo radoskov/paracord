@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   import {
     ApiClient,
@@ -9,8 +10,10 @@
     type Tag,
     type Work,
   } from '../api/client';
+  import Modal from '../components/Modal.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
+  import { selectedWorkId } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -27,8 +30,13 @@
   let rackFilter = '';
   let tagFilter = '';
 
-  let newTitle = '';
+  // New-paper dialog
   let showNew = false;
+  let newTitle = '';
+  let newDoi = '';
+  let newArxiv = '';
+  let newUrl = '';
+
   let loading = false;
   let message = '';
 
@@ -41,6 +49,9 @@
       ]);
     });
     await loadWorks();
+    // Restore the previously-open paper when returning to this tab.
+    const remembered = get(selectedWorkId);
+    if (remembered) selected = works.find((w) => w.id === remembered) ?? null;
   });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
@@ -69,6 +80,11 @@
     });
   }
 
+  function selectWork(work: Work | null): void {
+    selected = work;
+    selectedWorkId.set(work?.id ?? null);
+  }
+
   async function updateStatus(work: Work, status: ReadingStatus): Promise<void> {
     await run(async () => {
       await client.updateWork(work.id, { reading_status: status });
@@ -76,14 +92,30 @@
     });
   }
 
+  function parseIdentifierUrl(url: string): { doi?: string; arxiv_id?: string } {
+    const value = url.trim();
+    const arxiv = value.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?)/i);
+    if (arxiv) return { arxiv_id: arxiv[1] };
+    const doi = value.match(/(?:doi\.org\/|doi:)?(10\.\d{4,9}\/\S+)/i);
+    if (doi) return { doi: doi[1] };
+    return {};
+  }
+
+  $: canCreate = !!(newTitle.trim() || newDoi.trim() || newArxiv.trim() || newUrl.trim());
+
   async function createWork(): Promise<void> {
+    const fromUrl = newUrl.trim() ? parseIdentifierUrl(newUrl) : {};
     await run(async () => {
-      const work = await client.createWork({ canonical_title: newTitle });
-      newTitle = '';
+      const work = await client.createWork({
+        canonical_title: newTitle.trim() || null,
+        doi: newDoi.trim() || fromUrl.doi || null,
+        arxiv_id: newArxiv.trim() || fromUrl.arxiv_id || null,
+      });
+      newTitle = newDoi = newArxiv = newUrl = '';
       showNew = false;
       await loadWorks();
-      selected = work;
-    }, 'Paper created — add files and metadata on the right');
+      selectWork(work);
+    }, 'Paper created — attach a PDF or Enrich it on the right');
   }
 
   function onUpdated(work: Work): void {
@@ -122,15 +154,9 @@
       </form>
       <div class="bar">
         <span class="muted">{works.length} papers{message ? ` · ${message}` : ''}</span>
-        <button type="button" class="secondary" on:click={() => (showNew = !showNew)}
+        <button type="button" class="secondary" on:click={() => (showNew = true)}
           title="Create a paper by hand (you can attach a PDF afterwards)">+ New paper</button>
       </div>
-      {#if showNew}
-        <form class="new" on:submit|preventDefault={createWork}>
-          <input bind:value={newTitle} placeholder="Paper title" aria-label="New paper title" />
-          <button type="submit" disabled={!newTitle.trim() || loading}>Create</button>
-        </form>
-      {/if}
     </div>
 
     <div class="card">
@@ -143,9 +169,7 @@
         <PaperTable
           {works}
           selectedWorkId={selected?.id ?? null}
-          onSelect={(w) => {
-            selected = w;
-          }}
+          onSelect={selectWork}
           onStatusChange={updateStatus}
         />
       {/if}
@@ -155,13 +179,30 @@
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
-        <WorkDetail {client} work={selected} {onUpdated} onClose={() => (selected = null)} />
+        <WorkDetail {client} work={selected} {onUpdated} onClose={() => selectWork(null)} />
       {/key}
     {:else}
       <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>
     {/if}
   </div>
 </section>
+
+{#if showNew}
+  <Modal title="New paper" onClose={() => (showNew = false)}>
+    <form class="new-form" on:submit|preventDefault={createWork}>
+      <p class="muted">Give any of these — title, a DOI, an arXiv id, or a URL. You can attach a PDF and Enrich afterwards.</p>
+      <label>Title<input bind:value={newTitle} placeholder="Paper title" /></label>
+      <label>DOI<input bind:value={newDoi} placeholder="10.1145/3292500" /></label>
+      <label>arXiv id<input bind:value={newArxiv} placeholder="1706.03762" /></label>
+      <label>URL<input bind:value={newUrl} placeholder="https://arxiv.org/abs/… or https://doi.org/…" /></label>
+      <div class="actions">
+        <button type="submit" disabled={!canCreate || loading}>Create paper</button>
+        <button type="button" class="secondary" on:click={() => (showNew = false)}>Cancel</button>
+      </div>
+      {#if !canCreate}<p class="hintline">Enter at least one identifier to enable “Create paper”.</p>{/if}
+    </form>
+  </Modal>
+{/if}
 
 <style>
   .layout {
@@ -189,17 +230,20 @@
     margin-top: 0.6rem;
   }
 
-  .new {
+  .new-form {
     display: grid;
+    gap: 0.6rem;
+  }
+
+  .actions {
+    display: flex;
     gap: 0.5rem;
-    grid-template-columns: minmax(0, 1fr) auto;
-    margin-top: 0.5rem;
   }
 
   .detail-col {
     min-height: 12rem;
     position: sticky;
-    top: 1rem;
+    top: 5rem;
   }
 
   @media (max-width: 1000px) {

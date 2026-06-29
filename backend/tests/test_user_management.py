@@ -132,6 +132,21 @@ def test_disable_user_sets_timestamp_and_audits(db_session) -> None:
     ).all()
 
 
+def test_enable_user_clears_timestamp_and_audits(db_session) -> None:
+    owner = _add_user(db_session, "owner", "owner")
+    alice = _add_user(db_session, "alice", "reader")
+
+    user_service.disable_user(db_session, user_id=alice.id, actor_user_id=owner.id)
+    db_session.commit()
+    user_service.enable_user(db_session, user_id=alice.id, actor_user_id=owner.id)
+    db_session.commit()
+
+    assert db_session.get(User, alice.id).disabled_at is None
+    assert db_session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == "user.enabled")
+    ).all()
+
+
 def test_set_role_unknown_user_raises_lookup(db_session) -> None:
     owner = _add_user(db_session, "owner", "owner")
     with pytest.raises(LookupError):

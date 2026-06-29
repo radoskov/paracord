@@ -650,6 +650,10 @@ export class ApiClient {
     return this.request<AdminUser>(`/api/v1/admin/users/${userId}/disable`, { method: 'POST' });
   }
 
+  async enableUser(userId: string): Promise<AdminUser> {
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/enable`, { method: 'POST' });
+  }
+
   async listAgents(): Promise<AgentRecord[]> {
     return this.request<AgentRecord[]>('/api/v1/admin/agents');
   }
@@ -663,7 +667,11 @@ export class ApiClient {
   }
 
   async listAuditEvents(limit = 50): Promise<AuditEvent[]> {
-    return this.request<AuditEvent[]>(`/api/v1/admin/audit-events?limit=${limit}`);
+    // The endpoint returns a paginated envelope { items, total, ... }, not a bare array.
+    const page = await this.request<{ items: AuditEvent[] }>(
+      `/api/v1/admin/audit-events?limit=${limit}`,
+    );
+    return page.items ?? [];
   }
 
   async listFiles(): Promise<FileRecord[]> {

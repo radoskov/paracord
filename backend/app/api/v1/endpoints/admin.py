@@ -107,6 +107,22 @@ def disable_user(
     return user
 
 
+@router.post("/users/{user_id}/enable", response_model=UserOut)
+def enable_user(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> User:
+    """Re-enable a disabled user account (owner only)."""
+    try:
+        user = user_service.enable_user(db, user_id=user_id, actor_user_id=owner.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.get("/audit-events")
 def list_audit_events(
     db: Session = Depends(get_db),

@@ -63,6 +63,13 @@
     }, 'User disabled');
   }
 
+  async function enableUser(user: AdminUser): Promise<void> {
+    await run(async () => {
+      await client.enableUser(user.id);
+      users = await client.listAdminUsers();
+    }, 'User re-enabled');
+  }
+
   async function issueEnrollToken(): Promise<void> {
     await run(async () => {
       const result = await client.issueEnrollToken();
@@ -133,11 +140,21 @@
                   <option value="editor">editor</option>
                   <option value="owner">owner</option>
                 </select>
-                {#if !user.disabled_at}
+                {#if user.disabled_at}
+                  <button
+                    type="button"
+                    on:click={() => enableUser(user)}
+                    disabled={loading}
+                    title="Re-enable this account"
+                  >
+                    Re-enable
+                  </button>
+                {:else}
                   <button
                     type="button"
                     on:click={() => disableUser(user)}
                     disabled={loading}
+                    title="Disable this account (sign-in blocked; can be re-enabled)"
                   >
                     Disable
                   </button>

@@ -13,6 +13,7 @@
     type WorkFile,
   } from '../api/client';
   import { errorMessage, formatBytes } from '../lib/ui';
+  import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
 
   export let client: ApiClient;
@@ -40,6 +41,7 @@
 
   let readerFile: WorkFile | null = null;
   let readerUrl: string | null = null;
+  let showReader = false;
 
   $: if (work && work.id !== loadedId) void loadDetail(work);
 
@@ -99,7 +101,9 @@
   async function enrich(): Promise<void> {
     await run(async () => {
       const result = await client.enrichWork(work.id);
-      message = `Enrichment ${result.status}`;
+      message =
+        `Enrichment ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab for progress.';
     });
   }
 
@@ -127,7 +131,22 @@
       clearReader();
       readerUrl = URL.createObjectURL(blob);
       readerFile = file;
+      showReader = true;
     });
+  }
+
+  async function openInNewTab(file: WorkFile): Promise<void> {
+    await run(async () => {
+      const blob = await client.getFileBlob(file.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    });
+  }
+
+  function closeReader(): void {
+    showReader = false;
+    clearReader();
   }
 
   async function applyTag(): Promise<void> {
@@ -238,8 +257,12 @@
         {#each files as file (file.id)}
           <li>
             <span>{file.original_filename ?? file.id.slice(0, 8)} · {formatBytes(file.size_bytes)} · {file.status}</span>
-            <button type="button" class="secondary small" on:click={() => openInReader(file)} disabled={loading}
-              title="Open this PDF in the reader">Open</button>
+            <span class="file-actions">
+              <button type="button" class="secondary small" on:click={() => openInReader(file)} disabled={loading}
+                title="Open in the in-app reader (annotations + citation overlay)">Read</button>
+              <button type="button" class="secondary small" on:click={() => openInNewTab(file)} disabled={loading}
+                title="Open the raw PDF in a new browser tab">New tab ↗</button>
+            </span>
           </li>
         {/each}
       </ul>
@@ -259,18 +282,7 @@
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
 
-  {#if readerUrl}
-    <div class="reader-host">
-      <PdfReader
-        fileId={readerFile?.id ?? ''}
-        fileName={readerFile?.original_filename ?? 'PDF'}
-        fileUrl={readerUrl}
-        {contexts}
-        {annotations}
-        onCreateAnnotation={createAnnotation}
-      />
-    </div>
-  {:else if summaries.length || contexts.length}
+  {#if summaries.length || contexts.length}
     <details>
       <summary>References &amp; summaries</summary>
       {#if summaries.length}
@@ -279,11 +291,24 @@
       {/if}
       {#if contexts.length}
         <h4>Citation contexts ({contexts.length})</h4>
-        <p class="hintline">Open a PDF above to see anchored references in the reader.</p>
+        <p class="hintline">Open a PDF with “Read” to see anchored references in the reader.</p>
       {/if}
     </details>
   {/if}
 </div>
+
+{#if showReader && readerUrl}
+  <Modal title={readerFile?.original_filename ?? 'PDF reader'} wide onClose={closeReader}>
+    <PdfReader
+      fileId={readerFile?.id ?? ''}
+      fileName={readerFile?.original_filename ?? 'PDF'}
+      fileUrl={readerUrl}
+      {contexts}
+      {annotations}
+      onCreateAnnotation={createAnnotation}
+    />
+  </Modal>
+{/if}
 
 <style>
   .detail {
@@ -418,8 +443,9 @@
     padding: 0.2rem 0.5rem;
   }
 
-  .reader-host {
-    border-top: 2px solid #e1e7ee;
-    padding-top: 0.6rem;
+  .file-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.35rem;
   }
 </style>

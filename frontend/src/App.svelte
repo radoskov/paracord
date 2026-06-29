@@ -69,22 +69,25 @@
 
 <main>
   <header>
-    <div class="brand">
-      <h1>PaRacORD</h1>
-      {#if token}<p>{activeTab.label}</p>{/if}
+    <div class="header-inner">
+      <div class="brand">
+        <h1>PaRacORD</h1>
+        {#if token}<p>{activeTab.label}</p>{/if}
+      </div>
+      {#if token}
+        <nav aria-label="Sections">
+          {#each TABS as tab}
+            <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
+          {/each}
+          <button type="button" class="signout" on:click={logout} title="Sign out of PaRacORD">
+            Sign out
+          </button>
+        </nav>
+      {/if}
     </div>
-    {#if token}
-      <nav aria-label="Sections">
-        {#each TABS as tab}
-          <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
-        {/each}
-        <button type="button" class="signout" on:click={logout} title="Sign out of PaRacORD">
-          Sign out
-        </button>
-      </nav>
-    {/if}
   </header>
 
+  <div class="content">
   {#if !token}
     <section class="login card">
       <h2>Sign in</h2>
@@ -122,6 +125,7 @@
       <AdminPage {client} />
     {/if}
   {/if}
+  </div>
 </main>
 
 <style>
@@ -139,17 +143,29 @@
 
   main {
     min-height: 100vh;
-    padding: 1.25rem;
   }
 
   header {
+    background: #fbfcfd;
+    border-bottom: 1px solid #d8dee6;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+  }
+
+  .header-inner {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
     justify-content: space-between;
-    margin: 0 auto 0.75rem;
+    margin: 0 auto;
     max-width: 96rem;
+    padding: 0.6rem 1.25rem;
+  }
+
+  .content {
+    padding: 1rem 1.25rem 1.5rem;
   }
 
   .brand {
