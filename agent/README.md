@@ -74,10 +74,21 @@ paracord-agent web up | down | status                            # local-only we
 
 `paracord-agent web up` starts a self-served page bound to `127.0.0.1` (default port `8765`,
 configurable via the config's `web_port` or `--port`) and prints a one-time access URL containing
-a token. Every request is token-gated; the GUI never listens off-host. It covers connection
-(set/change server, enroll, save token), managed folders/files (add/remove with action + policy),
-sync/refresh, per-file processing status, and teleport-request approval. Stop it with
+a token. Every request is token-gated; the GUI never listens off-host. Stop it with
 `paracord-agent web down`.
+
+The page is a tabbed layout (**Connection / Folders &amp; files / Indexed / Requests**) so a long
+file list scrolls without stretching the window:
+
+- **Connection** — set/change the server, enroll, and save the agent token after approval.
+- **Folders &amp; files** — add items via a **file/folder picker** (browses the agent's own
+  filesystem; pasting a path still works), edit each item's action / teleport policy / monitored↔once
+  mode in place, **pause/resume** monitoring, and see per-folder stats (PDFs + subfolders found).
+- **Indexed** — `Sync now`, per-file processing state, re-extract/unblock, and **forget** (drops the
+  index row; the file on disk is untouched).
+- **Requests** — approve / reject / reject-forever pending teleport requests.
+
+Every action shows a success/error toast, so a failed call is visible rather than silent.
 
 ## Security boundary
 

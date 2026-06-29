@@ -100,6 +100,12 @@ class AgentState:
         )
         self._conn.commit()
 
+    def forget(self, local_file_id: str) -> bool:
+        """Drop a file from the local index (the on-disk file is untouched). Returns True if a row went."""
+        cur = self._conn.execute("DELETE FROM files WHERE local_file_id=?", (local_file_id,))
+        self._conn.commit()
+        return cur.rowcount > 0
+
     def resolve_path(self, local_file_id: str) -> Path | None:
         """Return the real on-disk path for an indexed id (local-only resolution), or None."""
         row = self._conn.execute(

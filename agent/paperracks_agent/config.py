@@ -22,12 +22,14 @@ class ManagedFolder(BaseModel):
     mode: str = "monitored"  # monitored | once
     action: str = "index_only"
     teleport_policy: str = "ask"
+    enabled: bool = True  # paused folders are kept in config but skipped on scan
 
 
 class ManagedFile(BaseModel):
     path: Path
     action: str = "index_only"
     teleport_policy: str = "ask"
+    enabled: bool = True
 
 
 class AgentConfig(BaseModel):

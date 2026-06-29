@@ -7,6 +7,19 @@ import httpx2 as httpx
 from app.core.config import Settings, get_settings
 
 
+class GrobidUnavailableError(RuntimeError):
+    """GROBID could not be reached — almost always because the service isn't running."""
+
+
+def _unavailable(base_url: str, exc: Exception) -> GrobidUnavailableError:
+    return GrobidUnavailableError(
+        f"GROBID is unreachable at {base_url} ({exc.__class__.__name__}). "
+        "The extraction service is not part of the default stack — start it with "
+        "`make up-extraction` (or `docker compose --profile extraction up -d grobid`) "
+        "and confirm GROBID_URL points at it."
+    )
+
+
 class GrobidClient:
     """Minimal GROBID client wrapper.
 
@@ -44,25 +57,31 @@ class GrobidClient:
 
     async def process_fulltext_document(self, pdf_path: Path) -> str:
         """Extract TEI XML from a PDF."""
-        async with httpx.AsyncClient(timeout=120) as client:
-            with pdf_path.open("rb") as handle:
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                with pdf_path.open("rb") as handle:
+                    files = {"input": (pdf_path.name, handle, "application/pdf")}
+                    response = await client.post(
+                        f"{self.base_url}/api/processFulltextDocument",
+                        files=files,
+                        data=self._form_data(),
+                    )
+                response.raise_for_status()
+                return response.text
+        except httpx.ConnectError as exc:
+            raise _unavailable(self.base_url, exc) from exc
+
+    def process_fulltext_document_sync(self, pdf_path: Path) -> str:
+        """Synchronous TEI extraction for use inside RQ workers."""
+        try:
+            with httpx.Client(timeout=120) as client, pdf_path.open("rb") as handle:
                 files = {"input": (pdf_path.name, handle, "application/pdf")}
-                response = await client.post(
+                response = client.post(
                     f"{self.base_url}/api/processFulltextDocument",
                     files=files,
                     data=self._form_data(),
                 )
             response.raise_for_status()
             return response.text
-
-    def process_fulltext_document_sync(self, pdf_path: Path) -> str:
-        """Synchronous TEI extraction for use inside RQ workers."""
-        with httpx.Client(timeout=120) as client, pdf_path.open("rb") as handle:
-            files = {"input": (pdf_path.name, handle, "application/pdf")}
-            response = client.post(
-                f"{self.base_url}/api/processFulltextDocument",
-                files=files,
-                data=self._form_data(),
-            )
-        response.raise_for_status()
-        return response.text
+        except httpx.ConnectError as exc:
+            raise _unavailable(self.base_url, exc) from exc

@@ -740,6 +740,17 @@ export class ApiClient {
     });
   }
 
+  async renameAgent(agentId: string, name: string): Promise<AgentRecord> {
+    return this.request<AgentRecord>(`/api/v1/admin/agents/${agentId}`, {
+      method: 'PATCH',
+      body: { name },
+    });
+  }
+
+  async deleteAgent(agentId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/agents/${agentId}`, { method: 'DELETE' });
+  }
+
   async requestTeleport(agentId: string, localFileId: string): Promise<void> {
     await this.request<void>('/api/v1/imports/teleport', {
       method: 'POST',

@@ -132,6 +132,33 @@
     }, 'Agent approved — copy the token now');
   }
 
+  async function renameAgent(agent: AgentRecord): Promise<void> {
+    const name = window.prompt('Rename agent', agent.name);
+    if (name === null || name.trim() === '' || name.trim() === agent.name) return;
+    await run(async () => {
+      await client.renameAgent(agent.id, name.trim());
+      agents = await client.listAgents();
+    }, 'Agent renamed');
+  }
+
+  async function removeAgent(agent: AgentRecord): Promise<void> {
+    if (
+      !window.confirm(
+        `Remove agent “${agent.name}”? Its token is revoked and its indexed-file records are deleted. ` +
+          'Files it already teleported or extracted stay in the library.',
+      )
+    )
+      return;
+    await run(async () => {
+      await client.deleteAgent(agent.id);
+      if (openAgentId === agent.id) {
+        openAgentId = '';
+        agentFiles = [];
+      }
+      agents = await client.listAgents();
+    }, 'Agent removed');
+  }
+
   $: void refresh();
 
   function formatDate(iso: string): string {
@@ -255,6 +282,26 @@
               <header>
                 <strong>{agent.name}</strong>
                 <span class="role-badge role-{agent.status}">{agent.status}</span>
+                <span class="agent-actions">
+                  <button
+                    type="button"
+                    class="link-btn"
+                    on:click={() => renameAgent(agent)}
+                    disabled={loading}
+                    title="Rename this agent"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    class="link-btn danger"
+                    on:click={() => removeAgent(agent)}
+                    disabled={loading}
+                    title="Remove this agent and revoke its token"
+                  >
+                    Remove
+                  </button>
+                </span>
               </header>
               {#if agent.status === 'pending'}
                 <button
@@ -470,6 +517,31 @@
     border-radius: 0.25rem;
     background: #e2e8f0;
     font-weight: 600;
+  }
+
+  .agent-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.78rem;
+    color: #2563eb;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .link-btn.danger {
+    color: #b3261e;
+  }
+
+  .link-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .role-owner { background: #fde68a; color: #78350f; }

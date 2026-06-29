@@ -13,20 +13,33 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 
 
-def _request(path: str, *, query: bytes = b"", cookies: dict | None = None) -> Request:
+def _request(
+    path: str,
+    *,
+    query: bytes = b"",
+    cookies: dict | None = None,
+    method: str = "GET",
+    body: bytes | None = None,
+) -> Request:
     headers = []
     if cookies:
         cookie = "; ".join(f"{k}={v}" for k, v in cookies.items())
         headers.append((b"cookie", cookie.encode()))
     scope = {
         "type": "http",
-        "method": "GET",
+        "method": method,
         "path": path,
         "raw_path": path.encode(),
         "query_string": query,
         "headers": headers,
     }
-    return Request(scope)
+    if body is None:
+        return Request(scope)
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(scope, receive=receive)
 
 
 def _route(app: Starlette, path: str):
@@ -62,6 +75,72 @@ def test_status_api_rejects_bad_token() -> None:
     status_api = _route(app, "/api/status")
     denied = asyncio.run(status_api(_request("/api/status", query=b"token=wrong")))
     assert denied.status_code == 401
+
+
+def test_browse_lists_dirs_and_pdfs(tmp_path) -> None:
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "notes.txt").write_text("ignore me")
+    app = create_app("tok")
+    browse = _route(app, "/api/browse")
+    res = asyncio.run(
+        browse(_request("/api/browse", query=b"token=tok&path=" + str(tmp_path).encode()))
+    )
+    assert res.status_code == 200
+    import json
+
+    payload = json.loads(res.body)
+    names = {e["name"] for e in payload["entries"]}
+    assert names == {"sub", "paper.pdf"}  # .txt excluded
+    assert payload["path"] == str(tmp_path)
+
+
+def test_update_and_pause_managed_item(tmp_path) -> None:
+    import json
+
+    from paperracks_agent.config import AgentConfig, ManagedFolder, load_config, save_config
+
+    config_path = tmp_path / "agent.yaml"
+    save_config(AgentConfig(folders=[ManagedFolder(path=tmp_path / "papers")]), config_path)
+    app = create_app("tok", config_path=config_path)
+    update = _route(app, "/api/items/update")
+    body = json.dumps(
+        {"path": str(tmp_path / "papers"), "action": "teleport", "enabled": False}
+    ).encode()
+    res = asyncio.run(
+        update(_request("/api/items/update", query=b"token=tok", method="POST", body=body))
+    )
+    assert res.status_code == 200
+    updated = load_config(config_path)
+    assert updated.folders[0].action == "teleport"
+    assert updated.folders[0].enabled is False
+
+
+def test_forget_removes_indexed_file(tmp_path) -> None:
+    import json
+
+    from paperracks_agent.state import AgentState
+
+    state_path = tmp_path / "state.sqlite3"
+    state = AgentState(state_path)
+    state.upsert(
+        local_file_id="abc", real_path="/x/y.pdf", sha256="d", size_bytes=1, virtual_path="y.pdf"
+    )
+    state.close()
+    app = create_app("tok", state_path=state_path)
+    forget = _route(app, "/api/forget")
+    res = asyncio.run(
+        forget(
+            _request(
+                "/api/forget",
+                query=b"token=tok",
+                method="POST",
+                body=json.dumps({"local_file_id": "abc"}).encode(),
+            )
+        )
+    )
+    assert json.loads(res.body)["forgotten"] is True
+    assert AgentState(state_path).all_files() == []
 
 
 def test_web_runtime_lifecycle(monkeypatch, tmp_path) -> None:

@@ -48,6 +48,10 @@ class AgentPrivilegesUpdate(BaseModel):
     server_status_visibility: bool | None = None
 
 
+class AgentRenameRequest(BaseModel):
+    name: str
+
+
 class AgentApprovedOut(BaseModel):
     agent_id: uuid.UUID
     status: str
@@ -245,6 +249,39 @@ def update_agent_privileges(
     db.commit()
     db.refresh(agent)
     return agent
+
+
+@router.patch("/agents/{agent_id}", response_model=AgentOut)
+def rename_agent(
+    agent_id: uuid.UUID,
+    payload: AgentRenameRequest,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> Agent:
+    """Rename an agent (owner only)."""
+    try:
+        agent = agent_service.rename_agent(db, agent_id=agent_id, name=payload.name, owner=owner)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+
+@router.delete("/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_agent(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> None:
+    """Remove an agent and its indexed-file records, revoking its token (owner only)."""
+    try:
+        agent_service.delete_agent(db, agent_id=agent_id, owner=owner)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
 
 
 @router.post("/agents/{agent_id}/approve", response_model=AgentApprovedOut)

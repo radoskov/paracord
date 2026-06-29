@@ -167,6 +167,71 @@ def test_admin_list_agent_files(client, auth_headers, db) -> None:
     )
 
 
+def test_admin_rename_agent(client, auth_headers, db) -> None:
+    from app.models.agent import Agent
+
+    agent = Agent(name="old-name", status="approved")
+    db.add(agent)
+    db.commit()
+    owner = auth_headers("owner")
+
+    renamed = client.patch(
+        f"/api/v1/admin/agents/{agent.id}", json={"name": "new-name"}, headers=owner
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "new-name"
+
+    # Blank names rejected; non-owner forbidden.
+    assert (
+        client.patch(
+            f"/api/v1/admin/agents/{agent.id}", json={"name": "  "}, headers=owner
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(
+            f"/api/v1/admin/agents/{agent.id}",
+            json={"name": "x"},
+            headers=auth_headers("editor"),
+        ).status_code
+        == 403
+    )
+
+
+def test_admin_delete_agent_removes_files(client, auth_headers, db) -> None:
+    import uuid as _uuid
+
+    from app.models.agent import Agent, AgentFile
+
+    agent = Agent(name="doomed", status="approved")
+    db.add(agent)
+    db.flush()
+    db.add(
+        AgentFile(
+            agent_id=agent.id, local_file_id="l1", sha256="b" * 64, size_bytes=1, display_path="p"
+        )
+    )
+    db.commit()
+    agent_id = agent.id
+    owner = auth_headers("owner")
+
+    deleted = client.delete(f"/api/v1/admin/agents/{agent_id}", headers=owner)
+    assert deleted.status_code == 204
+
+    db.expire_all()
+    assert db.get(Agent, agent_id) is None
+    assert db.scalar(select(AgentFile).where(AgentFile.agent_id == agent_id)) is None
+
+    # Already gone → 404; non-owner forbidden.
+    assert client.delete(f"/api/v1/admin/agents/{agent_id}", headers=owner).status_code == 404
+    assert (
+        client.delete(
+            f"/api/v1/admin/agents/{_uuid.uuid4()}", headers=auth_headers("editor")
+        ).status_code
+        == 403
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-agent privileges (§32.8)
 # ---------------------------------------------------------------------------

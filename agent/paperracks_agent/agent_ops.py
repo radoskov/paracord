@@ -31,6 +31,8 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
     """Scan all managed folders + files into a flat list of PDFs with their action/policy."""
     found: dict[str, ScannedFile] = {}
     for folder in config.folders:
+        if not folder.enabled:
+            continue
         root = folder.path.expanduser().resolve(strict=False)
         if not root.exists():
             continue
@@ -51,6 +53,8 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
                 teleport_policy=folder.teleport_policy,
             )
     for managed in config.files:
+        if not managed.enabled:
+            continue
         path = managed.path.expanduser()
         if path.exists() and path.suffix.lower() == ".pdf":
             item = build_manifest_item(path)
@@ -64,6 +68,29 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
                 teleport_policy=managed.teleport_policy,
             )
     return list(found.values())
+
+
+def folder_stats(config: AgentConfig) -> dict[str, dict]:
+    """Per-folder filesystem stats for the GUI, keyed by the configured path string.
+
+    Reports whether the path currently exists, the number of PDFs found (recursively), and the
+    number of subdirectories — a cheap scan that lets the user see at a glance what a managed
+    folder actually covers. Disabled folders are reported as ``enabled: False`` without scanning.
+    """
+    stats: dict[str, dict] = {}
+    for folder in config.folders:
+        key = str(folder.path)
+        root = folder.path.expanduser().resolve(strict=False)
+        if not folder.enabled:
+            stats[key] = {"enabled": False, "exists": root.exists(), "pdfs": 0, "subfolders": 0}
+            continue
+        if not root.exists():
+            stats[key] = {"enabled": True, "exists": False, "pdfs": 0, "subfolders": 0}
+            continue
+        pdfs = sum(1 for _ in iter_pdf_files([root]))
+        subfolders = sum(1 for p in root.rglob("*") if p.is_dir())
+        stats[key] = {"enabled": True, "exists": True, "pdfs": pdfs, "subfolders": subfolders}
+    return stats
 
 
 def _manifest_payload(scanned: list[ScannedFile]) -> dict:

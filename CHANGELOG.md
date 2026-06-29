@@ -27,6 +27,26 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Agent web GUI usability pass** (`agent/paperracks_agent/web.py`): the page is now a
+  frozen-header **tabbed** layout (Connection / Folders &amp; files / Indexed / Requests) so a long
+  file list scrolls on its own instead of stretching the page. Added a **file/folder picker** that
+  browses the agent's own filesystem (`GET /api/browse`, loopback + token-gated only) — kind is
+  inferred from the selection, no paste required (paste-a-path still works). Managed items can be
+  **edited in place** (action / teleport policy / monitored↔once) and **paused/resumed**
+  (`enabled` flag, skipped on scan) via `POST /api/items/update`; folders show live **stats**
+  (PDFs + subfolders found, or *missing*). Indexed files gain a **forget** action
+  (`POST /api/forget`, removes the index row, leaves the on-disk file). Every action now surfaces a
+  **toast** on success/error and an unhandled-handler error returns JSON (`exception_handlers`)
+  instead of a silent HTML 500 — fixing the "buttons do nothing / no feedback" reports.
+- **Owner can remove and rename agents** (`DELETE`/`PATCH /admin/agents/{id}`,
+  `agents.delete_agent`/`rename_agent`, both audited as `agent.deleted`/`agent.renamed`): removal
+  revokes the token and deletes the agent's manifest rows while leaving already-teleported/extracted
+  library files intact (`file_id` is `SET NULL`). Admin UI gains Rename/Remove controls; previously
+  agents could only be approved and have privileges toggled.
+- **Clear error when GROBID is unreachable** (`grobid_client.GrobidUnavailableError`): a connection
+  failure during extraction now reports *"GROBID is unreachable at &lt;url&gt; … start it with
+  `make up-extraction`"* instead of a raw `httpx2.ConnectError: Temporary failure in name
+  resolution`. The extraction profile is not part of `make up` by design.
 - **§32 agent redesign (complete)** — local web GUI (S5):
   - **`paracord-agent web up`/`down`/`status`**: a minimal, self-served Starlette page bound to
     `127.0.0.1` (default port `8765`, configurable) and gated by a one-time access token printed in

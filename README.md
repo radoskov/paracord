@@ -160,6 +160,7 @@ make build                 Build Docker Compose images
 make up                    Build and start the full development stack
 make up-api                Start Postgres, Redis, and API
 make up-infra              Start only Postgres and Redis
+make up-extraction         Start GROBID (required for PDF extraction; not started by `make up`)
 make ps                    Show service status
 make logs                  Follow all logs
 make down                  Stop containers but keep volumes/data

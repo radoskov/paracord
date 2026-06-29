@@ -9,10 +9,10 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models.agent import Agent, AgentEnrollmentToken
+from app.models.agent import Agent, AgentEnrollmentToken, AgentFile
 from app.models.user import User
 from app.services.audit import record_event
 from app.services.auth import hash_token
@@ -100,6 +100,52 @@ def approve_agent(db: Session, *, agent_id: uuid.UUID, owner: User) -> tuple[str
         entity_id=str(agent.id),
     )
     return raw_token, agent
+
+
+def rename_agent(db: Session, *, agent_id: uuid.UUID, name: str, owner: User) -> Agent:
+    """Rename an agent (owner only)."""
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise LookupError("Agent not found")
+    name = name.strip()
+    if not name:
+        raise ValueError("Agent name must not be empty")
+    old = agent.name
+    agent.name = name
+    db.flush()
+    record_event(
+        db,
+        "agent.renamed",
+        actor_user_id=owner.id,
+        entity_type="agent",
+        entity_id=str(agent.id),
+        details={"from": old, "to": name},
+    )
+    return agent
+
+
+def delete_agent(db: Session, *, agent_id: uuid.UUID, owner: User) -> None:
+    """Remove an agent and its indexed-file records, revoking its token (owner only).
+
+    The agent's manifest rows (``agent_files``) are deleted explicitly; any managed files those
+    rows had already produced (teleported/extracted) are left intact — only the agent's reference
+    to them is dropped (``file_id`` is ``SET NULL`` at the DB level).
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise LookupError("Agent not found")
+    name = agent.name
+    db.execute(delete(AgentFile).where(AgentFile.agent_id == agent_id))
+    db.delete(agent)
+    db.flush()
+    record_event(
+        db,
+        "agent.deleted",
+        actor_user_id=owner.id,
+        entity_type="agent",
+        entity_id=str(agent_id),
+        details={"name": name},
+    )
 
 
 def list_agents(db: Session) -> list[Agent]:
