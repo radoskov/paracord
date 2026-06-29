@@ -1,0 +1,234 @@
+<script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
+
+  import { ApiClient, type QueueStatus } from '../api/client';
+  import { errorMessage } from '../lib/ui';
+
+  export let client: ApiClient;
+
+  let status: QueueStatus | null = null;
+  let message = '';
+  let auto = true;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const COUNT_ORDER = ['queued', 'started', 'finished', 'failed', 'scheduled', 'deferred'];
+
+  onMount(() => {
+    void refresh();
+    startAuto();
+  });
+
+  onDestroy(stopAuto);
+
+  function startAuto(): void {
+    stopAuto();
+    if (auto) timer = setInterval(() => void refresh(), 4000);
+  }
+
+  function stopAuto(): void {
+    if (timer) clearInterval(timer);
+    timer = null;
+  }
+
+  function toggleAuto(): void {
+    auto = !auto;
+    startAuto();
+  }
+
+  async function refresh(): Promise<void> {
+    try {
+      status = await client.getJobs(40);
+      message = '';
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
+  function fmt(iso: string | null): string {
+    return iso ? new Date(iso).toLocaleTimeString() : '—';
+  }
+</script>
+
+<section class="layout">
+  <div class="card">
+    <div class="head">
+      <h2>Background jobs</h2>
+      <div class="controls">
+        <label class="auto"><input type="checkbox" checked={auto} on:change={toggleAuto} /> Auto-refresh</label>
+        <button type="button" class="secondary" on:click={refresh} title="Refresh now">Refresh</button>
+      </div>
+    </div>
+    <p class="muted">
+      PDF extraction (GROBID) and metadata enrichment run here in the background worker. If a task
+      seems stuck, check that the worker is available below.
+    </p>
+
+    {#if message}<p class="danger">{message}</p>{/if}
+
+    {#if status}
+      {#if !status.available}
+        <p class="empty warn">
+          ⚠ Background worker / Redis is <strong>unavailable</strong> — queued tasks won’t run.
+          Start the stack with <code>make up</code> (it launches the <code>worker</code> service),
+          then refresh. {status.error ? `(${status.error})` : ''}
+        </p>
+      {:else}
+        <p class="muted">
+          {status.workers} worker{status.workers === 1 ? '' : 's'} connected.
+          {#if status.workers === 0}
+            <strong class="danger">No worker is consuming the queue — start the <code>worker</code> service.</strong>
+          {/if}
+        </p>
+        <div class="counts">
+          {#each COUNT_ORDER as key (key)}
+            <div class="count count-{key}">
+              <span class="n">{status.counts[key] ?? 0}</span>
+              <span class="k">{key}</span>
+            </div>
+          {/each}
+        </div>
+
+        {#if status.jobs.length === 0}
+          <p class="empty">No recent jobs. Import a PDF or click Enrich on a paper to create one.</p>
+        {:else}
+          <ul class="jobs">
+            {#each status.jobs as job (job.id)}
+              <li>
+                <span class="badge badge-{job.status}">{job.status}</span>
+                <strong>{job.task}</strong>
+                <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
+                {#if job.error}<code class="err" title={job.error}>{job.error.slice(0, 120)}</code>{/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
+    {:else}
+      <p class="empty">Loading…</p>
+    {/if}
+  </div>
+</section>
+
+<style>
+  .head {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  h2 {
+    font-size: 1.05rem;
+    margin: 0;
+  }
+
+  .controls {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .auto {
+    align-items: center;
+    color: #44515f;
+    display: flex;
+    flex-direction: row;
+    font-weight: 600;
+    gap: 0.3rem;
+  }
+
+  .warn {
+    background: #fff7ed;
+    border-color: #fdba74;
+    color: #7c2d12;
+    text-align: left;
+  }
+
+  .counts {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+    margin: 0.8rem 0;
+  }
+
+  .count {
+    background: #f4f6f9;
+    border: 1px solid #e1e7ee;
+    border-radius: 8px;
+    padding: 0.6rem;
+    text-align: center;
+  }
+
+  .count .n {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  .count .k {
+    color: #64717f;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+  }
+
+  .count-failed .n {
+    color: #b3261e;
+  }
+
+  .count-started .n {
+    color: #1d4ed8;
+  }
+
+  .jobs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .jobs li {
+    align-items: center;
+    border-bottom: 1px solid #eef1f4;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+  }
+
+  .badge {
+    border-radius: 0.25rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    text-transform: uppercase;
+  }
+
+  .badge-queued {
+    background: #e2e8f0;
+    color: #334155;
+  }
+
+  .badge-started {
+    background: #bfdbfe;
+    color: #1e3a5f;
+  }
+
+  .badge-finished {
+    background: #bbf7d0;
+    color: #14532d;
+  }
+
+  .badge-failed {
+    background: #fecaca;
+    color: #7f1d1d;
+  }
+
+  .err {
+    color: #b3261e;
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>

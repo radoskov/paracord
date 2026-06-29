@@ -333,6 +333,23 @@ export interface EnrollTokenOut {
   expires_at: string;
 }
 
+export interface JobRecord {
+  id: string;
+  task: string;
+  status: string;
+  enqueued_at: string | null;
+  ended_at: string | null;
+  error: string | null;
+}
+
+export interface QueueStatus {
+  available: boolean;
+  error?: string;
+  workers: number;
+  counts: Record<string, number>;
+  jobs: JobRecord[];
+}
+
 export class ApiClient {
   constructor(
     private readonly baseUrl: string,
@@ -664,6 +681,10 @@ export class ApiClient {
 
   async issueEnrollToken(): Promise<EnrollTokenOut> {
     return this.request<EnrollTokenOut>('/api/v1/admin/agents/enroll-token', { method: 'POST' });
+  }
+
+  async getJobs(limit = 25): Promise<QueueStatus> {
+    return this.request<QueueStatus>(`/api/v1/jobs?limit=${limit}`);
   }
 
   async listAuditEvents(limit = 50): Promise<AuditEvent[]> {

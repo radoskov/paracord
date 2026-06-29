@@ -6,6 +6,7 @@
   import DuplicatesPage from './pages/DuplicatesPage.svelte';
   import ImportPage from './pages/ImportPage.svelte';
   import InsightsPage from './pages/InsightsPage.svelte';
+  import JobsPage from './pages/JobsPage.svelte';
   import LibraryPage from './pages/LibraryPage.svelte';
   import RacksPage from './pages/RacksPage.svelte';
   import ShelvesPage from './pages/ShelvesPage.svelte';
@@ -20,6 +21,7 @@
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
     { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.' },
+    { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).' },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents, and view the audit log.' },
   ];
@@ -119,6 +121,8 @@
       <TagsPage {client} />
     {:else if active === 'duplicates'}
       <DuplicatesPage {client} />
+    {:else if active === 'jobs'}
+      <JobsPage {client} />
     {:else if active === 'insights'}
       <InsightsPage {client} />
     {:else if active === 'admin'}
