@@ -236,24 +236,44 @@
     gap: 0.6rem;
   }
 
-  /* ---- Shared control + utility styling used by every page ----------------- */
+  /* ---- Design tokens + shared control styling (consistent + WCAG-AA readable) -----
+     Palette: slate-ish neutrals with a dark primary; every foreground/background pair
+     here has sufficient contrast. Components should use these instead of bare colours. */
+  :global(:root) {
+    --pg-bg: #eef1f4;
+    --pg-surface: #fbfcfd;
+    --pg-border: #cbd5e1;
+    --pg-text: #1f2a36;
+    --pg-muted: #64717f;
+    --pg-primary: #2d3e50; /* primary button background (white text on it = ~9:1) */
+    --pg-primary-hover: #1f2a36;
+    --pg-on-primary: #ffffff;
+    --pg-secondary-bg: #ffffff;
+    --pg-secondary-hover: #eef2f6;
+    --pg-secondary-text: #21303d; /* dark text for light buttons (never white-on-white) */
+    --pg-danger: #b3261e;
+  }
+
   :global(section) {
     margin: 0 auto;
     max-width: 96rem;
   }
 
   :global(.card) {
-    background: #fbfcfd;
+    background: var(--pg-surface);
     border: 1px solid #d8dee6;
     border-radius: 8px;
     padding: 1rem;
   }
 
+  /* Primary button: dark fill, white label. (No blanket :hover — some components style
+     their own light buttons as bare `button`, and a global dark hover would put dark text
+     on a dark hover. Light buttons use .secondary, which has its own safe hover below.) */
   :global(button) {
-    background: #203142;
-    border: 1px solid #203142;
+    background: var(--pg-primary);
+    border: 1px solid var(--pg-primary);
     border-radius: 6px;
-    color: white;
+    color: var(--pg-on-primary);
     cursor: pointer;
     font: inherit;
     font-weight: 600;
@@ -261,10 +281,16 @@
     padding: 0.4rem 0.7rem;
   }
 
+  /* Secondary button: light fill, dark label, light hover. */
   :global(button.secondary) {
-    background: white;
-    border-color: #bcc7d2;
-    color: #21303d;
+    background: var(--pg-secondary-bg);
+    border-color: var(--pg-border);
+    color: var(--pg-secondary-text);
+  }
+
+  :global(button.secondary:hover:not(:disabled)) {
+    background: var(--pg-secondary-hover);
+    border-color: var(--pg-border);
   }
 
   :global(button:disabled) {
@@ -276,7 +302,7 @@
   :global(select),
   :global(textarea) {
     background: white;
-    border: 1px solid #bcc7d2;
+    border: 1px solid var(--pg-border);
     border-radius: 6px;
     font: inherit;
     min-height: 2.3rem;

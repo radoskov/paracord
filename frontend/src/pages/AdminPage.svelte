@@ -385,18 +385,21 @@
     width: 100%;
   }
 
+  /* Light "secondary"-style buttons; the explicit color avoids inheriting the global
+     primary's white text (which previously rendered white-on-white here). */
   button {
     padding: 0.4rem 0.75rem;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--pg-border, #cbd5e1);
     border-radius: 0.375rem;
-    background: white;
+    background: var(--pg-secondary-bg, #ffffff);
+    color: var(--pg-secondary-text, #21303d);
     font-size: 0.85rem;
     cursor: pointer;
     white-space: nowrap;
   }
 
   button:hover:not(:disabled) {
-    background: #f1f5f9;
+    background: var(--pg-secondary-hover, #eef2f6);
   }
 
   button:disabled {
