@@ -111,6 +111,13 @@
     });
   }
 
+  async function importReference(referenceId: string): Promise<void> {
+    await run(async () => {
+      await client.importReferenceAsWork(referenceId);
+      references = await client.listWorkReferences(work.id);
+    }, 'Reference imported into the library');
+  }
+
   async function exportNotes(): Promise<void> {
     await run(async () => {
       const r = await client.exportAnnotations(work.id, 'markdown');
@@ -423,6 +430,10 @@
                 : ''}
               {#if ref.resolved_work_id}<span class="ref-badge">in library</span>{/if}
             </small>
+            {#if !ref.resolved_work_id}
+              <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
+                disabled={loading} title="Create a library paper from this reference">Import</button>
+            {/if}
           </li>
         {/each}
       </ol>

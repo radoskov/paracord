@@ -109,3 +109,38 @@ def test_model_foreign_keys_exist_after_migration(migrated_postgres) -> None:
             if cols not in db_fk_cols:
                 missing.append(f"{table_name}({', '.join(cols)})")
     assert not missing, f"model foreign keys absent from the migrated Postgres schema: {missing}"
+
+
+# Columns that live in the DB by design but not on a model (managed via raw SQL).
+_DB_ONLY_COLUMNS = {("embeddings", "vector_pg")}
+
+
+def test_autogenerate_has_no_table_or_column_drift(migrated_postgres) -> None:
+    """No table/column add or drop is needed to match the models (C2 autogenerate-clean follow-up).
+
+    Tolerates type/default/index/FK *modifications* (gated off / covered by the FK test); asserts
+    only that no table or column is missing or extra — the structural parity that would have caught
+    the original C1 (a model table with no migration).
+    """
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    with migrated_postgres.connect() as conn:
+        ctx = MigrationContext.configure(
+            conn, opts={"compare_type": False, "compare_server_default": False}
+        )
+        diffs = compare_metadata(ctx, Base.metadata)
+
+    structural: list[str] = []
+    for diff in diffs:
+        items = diff if isinstance(diff, list) else [diff]
+        for d in items:
+            op = d[0]
+            if op in ("add_table", "remove_table"):
+                structural.append(f"{op}:{d[1].name}")
+            elif op in ("add_column", "remove_column"):
+                col = d[3]
+                if (d[2], col.name) in _DB_ONLY_COLUMNS:
+                    continue
+                structural.append(f"{op}:{d[2]}.{col.name}")
+    assert not structural, f"schema drift vs models: {structural}"

@@ -963,3 +963,36 @@ drifting (addresses finding **A2**).
 
 The audit's own top-3 priorities (managed-upload extraction, `make ready`/doc parity, then
 GROBID coordinates) are preserved as Stages 1–2 of `docs/WORKPLAN.md`.
+
+---
+
+# AUDIT Re-validation — 2026-06-30 (functional-gap closure)
+
+A focused pass implemented the remaining functional-fidelity gaps from §2/§3/§4 (those not already
+closed by Stages 1–9 / WORKPLAN_NEXT). Status of the previously-open items:
+
+| Area (audit ref) | Status @ 2026-06-30 | Evidence |
+|---|---|---|
+| Auth: `/auth/me`, change-password, session-revoke | **DONE** | `/auth/me`; change-password (Stage 7) revokes other sessions |
+| Read/view audit events (§7.6) | **DONE** | `paper.viewed`, `file.downloaded` (Stage 7) |
+| §9.3 users (display_name/email/last_login_at/password_changed_at) | **DONE** | migration `0020`; login/change stamps |
+| §9.3 agents (host_alias/capabilities/last_seen_at/created_by/revoked_at) | **DONE** | migration `0020`; enroll attribution + last_seen |
+| Keyword search → structured query (§8.7/§14) | **DONE** | `search_query` parser: author:/year:/has:/tag:/venue:/type:/title: + abstract/author search |
+| Annotation search + export (§8.8.7/§8.17.4) | **DONE** | `GET /works/annotations/search`, `…/annotations/export` |
+| Metadata per-field `user_confirmed` (§8.12) | **DONE** | `works.confirmed_fields` (migration `0021`); per-field lock toggle; enrichment respects it |
+| Reading-queue reordering (§8.17.1) | **DONE** | `works.queue_position` (migration `0022`); `/works/reading-queue[/reorder]` |
+| Tags color/description in UI | **DONE** | backend already had them; TagsPage description input added |
+| Keyword extraction (§8.15.1) | **DONE** | deterministic RAKE-style `keyword_extraction`; `works.keywords` (migration `0023`) |
+| OCR-needed detection (§8.3) | **DONE (signal)** | extraction sets `file.text_layer_quality` good/poor; full OCRmyPDF run is a follow-up |
+| Topics accept-as-tag / shelf-from-topic (§8.15.3) | **DONE** | `POST /ai/topics/accept-as-tag`, `…/create-shelf` |
+| Related papers (§8.17.2) | **DONE** | `GET /works/{id}/related` (embedding neighborhood) |
+| Graph import-missing-reference (§8.9) | **DONE** | `POST /works/from-reference/{id}` |
+| Export CSL styles / key overrides (§8.17.3) | **DONE** | `styled` format (APA/IEEE/Chicago); per-work `citation_keys` override |
+| C2 follow-up — autogenerate-clean parity | **DONE** | `test_autogenerate_has_no_table_or_column_drift` (structural parity on Postgres) |
+| M2/M3/M4/M5/L security & docs | **DONE** | Stage 7 (SSRF, guest-flag removal, SECURITY.md, GROBID config, egress copy) |
+
+**Remaining (by design / heavy follow-ups, see `FOLLOWUPS.md`):** full citeproc CSL style files
+(only a built-in 3-style approximation ships); a real Nougat/Marker OCR/ML extractor (only the
+config + needs-OCR signal ship); pgvector ANN index + default-on (exact `<=>`, gated, ships);
+topic-model table split (`topic_models`/`topics`/`work_topics`); `metadata_assertions.value` as typed
+JSONB; graph version-collapse; a browser-level (Playwright) E2E.

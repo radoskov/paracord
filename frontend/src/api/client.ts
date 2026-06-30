@@ -467,6 +467,10 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/${workId}`);
   }
 
+  async importReferenceAsWork(referenceId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/from-reference/${referenceId}`, { method: 'POST' });
+  }
+
   async getRelatedWorks(workId: string, limit = 8): Promise<Work[]> {
     return this.request<Work[]>(`/api/v1/works/${workId}/related?limit=${limit}`);
   }

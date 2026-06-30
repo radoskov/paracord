@@ -51,11 +51,13 @@ def export_bibliography(
     scope_id: str | None = None,
     work_ids: list[str] | None = None,
     style: str | None = None,
+    citation_keys: dict[str, str] | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> str:
     """Export bibliography content for a scope.
 
-    When ``actor_user_id`` is given, a ``paper.exported`` audit event is recorded in the
+    ``citation_keys`` maps ``work_id`` → a user-chosen citation key, overriding the auto-assigned
+    one. When ``actor_user_id`` is given, a ``paper.exported`` audit event is recorded in the
     current transaction (the caller is responsible for committing).
     """
     if output_format not in SUPPORTED_FORMATS:
@@ -63,6 +65,11 @@ def export_bibliography(
     works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids)
     entries = [_Entry(work=work, authors=_work_authors(db, work)) for work in works]
     _assign_keys(entries)
+    if citation_keys:
+        for entry in entries:
+            override = citation_keys.get(str(entry.work.id))
+            if override:
+                entry.key = override
     if output_format == "styled":
         content = render_styled(entries, style or "apa")
     else:

@@ -31,6 +31,7 @@ def export_scope(
             work_ids=payload.work_ids,
             output_format=payload.format,
             style=payload.style,
+            citation_keys=payload.citation_keys,
             actor_user_id=actor.id,
         )
         extension, content_type = media_for(payload.format)

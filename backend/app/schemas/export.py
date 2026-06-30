@@ -11,6 +11,8 @@ class ExportRequest(BaseModel):
     work_ids: list[str] | None = None
     format: str
     style: str | None = None
+    # Optional per-work citation-key overrides: {work_id: key}.
+    citation_keys: dict[str, str] | None = None
 
 
 class ExportResponse(BaseModel):

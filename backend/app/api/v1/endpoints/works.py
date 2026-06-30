@@ -226,6 +226,42 @@ def reorder_reading_queue(
     return reading_queue(db=db)
 
 
+@router.post(
+    "/from-reference/{reference_id}", response_model=WorkRead, status_code=status.HTTP_201_CREATED
+)
+def import_reference_as_work(
+    reference_id: uuid.UUID, db: Session = DB_DEP, _: User = EDITOR_DEP
+) -> Work:
+    """Create a library work from an unresolved citation reference (SPEC §8.9 import-missing-ref).
+
+    Idempotent: if the reference already resolves to a work, that work is returned.
+    """
+    reference = db.get(Reference, reference_id)
+    if reference is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
+    if reference.resolved_work_id is not None:
+        existing = db.get(Work, reference.resolved_work_id)
+        if existing is not None:
+            return existing
+    title = reference.title or reference.raw_citation or "Imported reference"
+    work = Work(
+        canonical_title=title,
+        normalized_title=normalize_title(title),
+        doi=normalize_doi(reference.doi) if reference.doi else None,
+        arxiv_id=reference.arxiv_id,
+        year=reference.year,
+        canonical_metadata_source="reference",
+    )
+    db.add(work)
+    db.flush()
+    reference.resolved_work_id = work.id
+    reference.resolution_status = "local_match"
+    db.commit()
+    db.refresh(work)
+    enqueue_embedding(work.id)
+    return work
+
+
 @router.post("", response_model=WorkRead, status_code=status.HTTP_201_CREATED)
 def create_work(
     payload: WorkCreate,
