@@ -209,6 +209,7 @@ export interface FieldReview {
   field_name: string;
   canonical_value: string | null;
   has_conflict: boolean;
+  confirmed?: boolean;
   assertions: MetadataAssertion[];
 }
 
@@ -484,6 +485,13 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/${workId}/metadata/select`, {
       method: 'POST',
       body: { assertion_id: assertionId },
+    });
+  }
+
+  async confirmMetadataField(workId: string, fieldName: string, confirmed: boolean): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/metadata/confirm`, {
+      method: 'POST',
+      body: { field_name: fieldName, confirmed },
     });
   }
 

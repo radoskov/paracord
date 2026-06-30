@@ -276,7 +276,9 @@ def _apply_field(work: Work, field_name: str, value: str, source: str) -> None:
 
 def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str]:
     """Record assertions for an external record and promote trusted fields."""
-    locked = work.user_confirmed
+    # Per-field locking (SPEC §8.12): a field the user confirmed is never overwritten; the legacy
+    # all-or-nothing flag still locks every field when set.
+    confirmed = set(work.confirmed_fields or [])
     promoted: list[str] = []
     fields = {
         "title": meta.title,
@@ -299,8 +301,9 @@ def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str
                 MetadataAssertion.source == meta.source,
             )
         )
+        field_locked = work.user_confirmed or field_name in confirmed
         promote = field_name in PROMOTABLE_FIELDS and should_replace_canonical_field(
-            meta.source, field_name, locked
+            meta.source, field_name, field_locked
         )
         if promote:
             db.execute(

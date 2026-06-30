@@ -3,10 +3,13 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Work(Base):
@@ -27,6 +30,9 @@ class Work(Base):
     canonical_metadata_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reading_status: Mapped[str] = mapped_column(String(64), default="unread", index=True)
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-field user confirmation (SPEC §8.12): names of fields the user has locked so enrichment
+    # never overwrites them (e.g. ["title", "year"]). Supersedes the all-or-nothing user_confirmed.
+    confirmed_fields: Mapped[list | None] = mapped_column(_JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

@@ -134,6 +134,13 @@
     });
   }
 
+  async function toggleLock(fieldName: string, confirmed: boolean): Promise<void> {
+    await run(async () => {
+      await client.confirmMetadataField(work.id, fieldName, confirmed);
+      fields = await client.listWorkMetadata(work.id);
+    }, confirmed ? 'Field locked' : 'Field unlocked');
+  }
+
   async function selectCanonical(assertionId: string): Promise<void> {
     await run(async () => {
       const updated = await client.selectMetadataAssertion(work.id, assertionId);
@@ -285,6 +292,16 @@
         {#each fields as field (field.field_name)}
           <div class="review" class:has-conflict={field.has_conflict}>
             <strong>{field.field_name}</strong>
+            <button
+              type="button"
+              class="lock"
+              class:locked={field.confirmed}
+              on:click={() => toggleLock(field.field_name, !field.confirmed)}
+              disabled={loading}
+              title={field.confirmed
+                ? 'Locked — enrichment will not overwrite this field. Click to unlock.'
+                : 'Unlocked — click to lock so enrichment cannot overwrite it.'}
+            >{field.confirmed ? '🔒 locked' : '🔓 lock'}</button>
             {#each field.assertions as a (a.id)}
               <div class="assertion">
                 <span class="src">{a.source}</span>
@@ -610,6 +627,20 @@
   .danger-btn {
     border-color: #f1b0a8;
     color: #b3261e;
+  }
+
+  .lock {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.72rem;
+    margin-left: 0.4rem;
+    padding: 0;
+  }
+
+  .lock.locked {
+    color: #14532d;
+    font-weight: 700;
   }
 
   .refs {

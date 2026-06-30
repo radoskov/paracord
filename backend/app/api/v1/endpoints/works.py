@@ -36,6 +36,14 @@ AUTH_DEP = Depends(require_authenticated_user)
 
 # Work columns a metadata assertion can be promoted into (mirrors the enrichment service).
 _PROMOTABLE_FIELDS = {"title", "abstract", "year", "venue", "doi"}
+# Map editable Work attribute names → metadata-assertion field names (for per-field locking).
+_WORK_FIELD_TO_ASSERTION = {
+    "canonical_title": "title",
+    "abstract": "abstract",
+    "year": "year",
+    "venue": "venue",
+    "doi": "doi",
+}
 
 
 class WorkCreate(BaseModel):
@@ -68,6 +76,7 @@ class WorkRead(BaseModel):
     year: int | None = None
     reading_status: str
     canonical_metadata_source: str | None = None
+    confirmed_fields: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -249,7 +258,10 @@ def update_work(
     if "canonical_title" in updates:
         work.normalized_title = normalize_title(work.canonical_title or "")
     work.updated_at = datetime.now(UTC)
-    work.user_confirmed = True
+    # Lock the specific fields the user edited (SPEC §8.12) so enrichment won't overwrite them.
+    edited = {_WORK_FIELD_TO_ASSERTION[k] for k in updates if k in _WORK_FIELD_TO_ASSERTION}
+    if edited:
+        work.confirmed_fields = sorted(set(work.confirmed_fields or []) | edited)
     db.commit()
     db.refresh(work)
     return work
@@ -340,7 +352,13 @@ class FieldReview(BaseModel):
     field_name: str
     canonical_value: str | None
     has_conflict: bool
+    confirmed: bool = False  # user-locked field (§8.12): enrichment won't overwrite it
     assertions: list[MetadataAssertionRead]
+
+
+class ConfirmFieldRequest(BaseModel):
+    field_name: str
+    confirmed: bool = True
 
 
 class SelectAssertion(BaseModel):
@@ -719,11 +737,36 @@ def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: st
         work.doi = normalize_doi(value)
 
 
+@router.post("/{work_id}/metadata/confirm", response_model=WorkRead)
+def confirm_metadata_field(
+    work_id: uuid.UUID,
+    payload: ConfirmFieldRequest,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> Work:
+    """Lock or unlock a single field so enrichment won't overwrite it (SPEC §8.12)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    locked = set(work.confirmed_fields or [])
+    if payload.confirmed:
+        locked.add(payload.field_name)
+    else:
+        locked.discard(payload.field_name)
+    work.confirmed_fields = sorted(locked)
+    work.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(work)
+    return work
+
+
 @router.get("/{work_id}/metadata", response_model=list[FieldReview])
 def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldReview]:
     """Return metadata assertions for a work, grouped by field, flagging conflicts."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    confirmed = set(work.confirmed_fields or [])
     rows = db.scalars(
         select(MetadataAssertion)
         .where(MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work_id)
@@ -740,6 +783,7 @@ def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldRev
                 field_name=field_name,
                 canonical_value=canonical,
                 has_conflict=len({a.value for a in assertions}) > 1,
+                confirmed=field_name in confirmed,
                 assertions=assertions,
             )
         )
@@ -797,7 +841,8 @@ def select_metadata_assertion(
     assertion.selected_as_canonical = True
     if assertion.field_name in _PROMOTABLE_FIELDS:
         _apply_assertion_to_work(work, assertion.field_name, assertion.value, assertion.source)
-    work.user_confirmed = True
+    # Picking a canonical value locks that one field (SPEC §8.12), not the whole work.
+    work.confirmed_fields = sorted(set(work.confirmed_fields or []) | {assertion.field_name})
     work.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(work)
