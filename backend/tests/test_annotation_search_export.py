@@ -47,3 +47,32 @@ def test_annotation_export_markdown(client, auth_headers):
     assert body["filename"].endswith(".md")
     assert "Annotations — Exportable" in body["content"]
     assert "note body" in body["content"]
+
+
+def test_annotation_delete(client, auth_headers):
+    h = auth_headers("editor")
+    w = _work(client, h, "Deletable")
+    ann = _annotate(client, h, w, annotation_type="note", content_markdown="to remove", page=1)
+    assert ann.status_code == 201
+    ann_id = ann.json()["id"]
+
+    deleted = client.delete(f"/api/v1/works/{w}/annotations/{ann_id}", headers=h)
+    assert deleted.status_code == 204
+
+    # Re-deleting the now-missing annotation is a 404.
+    again = client.delete(f"/api/v1/works/{w}/annotations/{ann_id}", headers=h)
+    assert again.status_code == 404
+
+
+def test_annotation_delete_cross_work_404(client, auth_headers):
+    h = auth_headers("editor")
+    w1 = _work(client, h, "Owner Paper")
+    w2 = _work(client, h, "Other Paper")
+    ann = _annotate(client, h, w1, annotation_type="note", content_markdown="belongs to w1", page=1)
+    ann_id = ann.json()["id"]
+
+    # Deleting via the wrong work_id must 404 and leave the annotation intact.
+    wrong = client.delete(f"/api/v1/works/{w2}/annotations/{ann_id}", headers=h)
+    assert wrong.status_code == 404
+    still = client.delete(f"/api/v1/works/{w1}/annotations/{ann_id}", headers=h)
+    assert still.status_code == 204

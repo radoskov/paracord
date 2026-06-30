@@ -602,6 +602,12 @@ export class ApiClient {
     });
   }
 
+  async deleteAnnotation(workId: string, annotationId: string): Promise<void> {
+    await this.request<void>(`/api/v1/works/${workId}/annotations/${annotationId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async listDuplicateCandidates(
     status: DuplicateCandidateStatus | '' = 'open',
   ): Promise<DuplicateCandidate[]> {

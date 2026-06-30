@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -881,6 +881,25 @@ def create_work_annotation(
     db.commit()
     db.refresh(annotation)
     return annotation
+
+
+@router.delete(
+    "/{work_id}/annotations/{annotation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_work_annotation(
+    work_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> Response:
+    """Delete a reader annotation (404 when it belongs to a different paper)."""
+    annotation = db.get(Annotation, annotation_id)
+    if annotation is None or annotation.work_id != work_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
+    db.delete(annotation)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{work_id}/summaries", response_model=list[SummaryRead])

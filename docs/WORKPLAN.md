@@ -438,15 +438,15 @@ Files: `agent/paperracks_agent/{web.py,client.py,state.py,agent_ops.py,config.py
 Files: `frontend/src/components/PdfReader.svelte`, `frontend/src/components/WorkDetail.svelte`,
 `frontend/src/api/client.ts`, `backend/app/api/v1/endpoints/works.py`,
 `backend/app/models/annotation.py` (+ DELETE endpoint).
-- [ ] 18. **PDF.js text layer** (foundation) — selectable text layer over each page. Unblocks 19–21.
-- [ ] 19. **Working search** — highlight matches in the text layer; next/prev across all pages;
+- [x] 18. **PDF.js text layer** (foundation) — selectable text layer over each page. Unblocks 19–21.
+- [x] 19. **Working search** — highlight matches in the text layer; next/prev across all pages;
   Ctrl+F on rendered pages.
-- [ ] 20. **Annotations that work** — selection → highlight/note/copy with accurate coords; persist +
+- [x] 20. **Annotations that work** — selection → highlight/note/copy with accurate coords; persist +
   render highlight boxes; **delete** (new backend DELETE + client + per-note button); click a note
   jumps to its page/anchor.
-- [ ] 21. **Citation ↔ reference navigation** — citation-overlay click switches tab **and scrolls to +
+- [x] 21. **Citation ↔ reference navigation** — citation-overlay click switches tab **and scrolls to +
   flashes** the matching entry (both directions).
-- [ ] 22. **View ergonomics** — paged ↔ smooth-scroll toggle (remembered) + drag-to-pan the zoomed
+- [x] 22. **View ergonomics** — paged ↔ smooth-scroll toggle (remembered) + drag-to-pan the zoomed
   page.
 
 ## Dependencies

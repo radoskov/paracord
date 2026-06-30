@@ -47,8 +47,20 @@
   let readerFile: WorkFile | null = null;
   let readerUrl: string | null = null;
   let showReader = false;
+  // When the reader is opened to jump straight to a reference's in-text mentions.
+  let readerJumpReferenceId: string | null = null;
+  // Reference entry to scroll-to + flash when a citation overlay is clicked in the reader.
+  let flashRefId = '';
 
   $: if (work && work.id !== loadedId) void loadDetail(work);
+
+  // Reference ids that have at least one in-text mention with page coordinates — these can
+  // be located in the reader via "Find in text".
+  $: locatableReferenceIds = new Set(
+    contexts
+      .filter((c) => c.reference_id && (c.pdf_coordinates?.length ?? 0) > 0)
+      .map((c) => c.reference_id),
+  );
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -208,14 +220,35 @@
     }
   }
 
-  async function openInReader(file: WorkFile): Promise<void> {
+  async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
       clearReader();
       readerUrl = URL.createObjectURL(blob);
       readerFile = file;
+      readerJumpReferenceId = jumpReferenceId;
       showReader = true;
     });
+  }
+
+  // Reference "Find in text" → open the reader and jump to the reference's first in-text mention.
+  function findReferenceInText(referenceId: string): void {
+    const file = readerFile ?? files[0];
+    if (file) void openInReader(file, referenceId);
+  }
+
+  // Citation overlay clicked in the reader → reveal + flash the matching reference entry.
+  function navigateToReference(referenceId: string): void {
+    const detailsEl = document.querySelector('details.references-block') as HTMLDetailsElement | null;
+    if (detailsEl) detailsEl.open = true;
+    flashRefId = referenceId;
+    window.setTimeout(() => {
+      const el = document.getElementById(`ref-${referenceId}`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 0);
+    window.setTimeout(() => {
+      if (flashRefId === referenceId) flashRefId = '';
+    }, 2000);
   }
 
   async function openInNewTab(file: WorkFile): Promise<void> {
@@ -256,10 +289,18 @@
     }, 'Annotation added');
   }
 
+  async function deleteAnnotation(annotationId: string): Promise<void> {
+    await run(async () => {
+      await client.deleteAnnotation(work.id, annotationId);
+      annotations = await client.listAnnotations(work.id);
+    }, 'Annotation deleted');
+  }
+
   function clearReader(): void {
     if (readerUrl) URL.revokeObjectURL(readerUrl);
     readerUrl = null;
     readerFile = null;
+    readerJumpReferenceId = null;
   }
 
   onDestroy(clearReader);
@@ -440,7 +481,7 @@
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
 
-  <details open={references.length > 0}>
+  <details class="references-block" open={references.length > 0}>
     <summary>References ({references.length})</summary>
     {#if references.length === 0}
       <p class="empty">
@@ -450,7 +491,7 @@
     {:else}
       <ol class="refs">
         {#each references as ref (ref.id)}
-          <li class="entry-card">
+          <li class="entry-card" id={`ref-${ref.id}`} class:flash-ref={flashRefId === ref.id}>
             <div class="ref-head">
               {#if ref.shorthand}<span class="ref-marker" title="In-text citation marker for this reference">{ref.shorthand}</span>{/if}
               <span class="ref-title">{ref.title ?? ref.raw_citation ?? 'Untitled reference'}</span>
@@ -461,11 +502,17 @@
                 : ''}
               {#if ref.resolved_work_id}<span class="ref-badge">in library</span>{/if}
             </small>
-            {#if !ref.resolved_work_id}
-              <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
-                disabled={loading || !$canEdit}
-                title={$canEdit ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
-            {/if}
+            <div class="ref-actions">
+              {#if locatableReferenceIds.has(ref.id)}
+                <button type="button" class="secondary small" on:click={() => findReferenceInText(ref.id)}
+                  title="Open the reader and jump to where this reference is cited">Find in text</button>
+              {/if}
+              {#if !ref.resolved_work_id}
+                <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
+                  disabled={loading || !$canEdit}
+                  title={$canEdit ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
+              {/if}
+            </div>
           </li>
         {/each}
       </ol>
@@ -475,7 +522,7 @@
   {#if contexts.length}
     <details>
       <summary>In-text citations ({contexts.length})</summary>
-      <p class="hintline">Open a PDF with “Read” to jump to each citation in the reader.</p>
+      <p class="hintline">Open this paper with “Read”, then click a citation highlight to reveal its reference (or use a reference’s “Find in text”).</p>
       <ul class="ctx">
         {#each contexts as c (c.id)}
           <li class="entry-card">
@@ -504,6 +551,9 @@
       {contexts}
       {annotations}
       onCreateAnnotation={createAnnotation}
+      onDeleteAnnotation={deleteAnnotation}
+      onNavigateToReference={navigateToReference}
+      initialJumpReferenceId={readerJumpReferenceId}
     />
   </Modal>
 {/if}
@@ -806,6 +856,23 @@
     font-size: 0.68rem;
     margin-left: 0.3rem;
     padding: 0.03rem 0.3rem;
+  }
+
+  .ref-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
+  }
+
+  .flash-ref {
+    animation: flash-ref 0.6s ease-in-out 2;
+  }
+
+  @keyframes flash-ref {
+    50% {
+      background: rgba(255, 200, 90, 0.6);
+    }
   }
 
   .ctx {
