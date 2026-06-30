@@ -86,7 +86,17 @@
   // (the full privilege ladder is intentionally not advertised to every user).
   const ROLE_INFO: Record<string, { label: string; blurb: string }> = {
     reader: { label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
-    editor: { label: 'Editor', blurb: 'Browse, search and read papers; import, edit, enrich and delete papers.' },
+    contributor: {
+      label: 'Contributor',
+      blurb:
+        'Browse, search and read papers; import, edit, enrich and delete your own papers (papers you created).',
+    },
+    editor: { label: 'Editor', blurb: 'Browse, search and read papers; import, edit, enrich and delete any paper you can see.' },
+    librarian: {
+      label: 'Librarian',
+      blurb:
+        'Everything an editor can do, plus create, edit and organise racks and shelves and manage their membership and access.',
+    },
     admin: {
       label: 'Admin',
       blurb:
@@ -280,9 +290,17 @@
     background: #ede9fe;
     color: #5b21b6;
   }
+  .role-librarian {
+    background: #d1fae5;
+    color: #065f46;
+  }
   .role-editor {
     background: #dbeafe;
     color: #1e40af;
+  }
+  .role-contributor {
+    background: #fef3c7;
+    color: #92400e;
   }
   .role-reader {
     background: #e2e8f0;

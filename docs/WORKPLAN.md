@@ -636,7 +636,7 @@ Batch of 10 findings. Resolved decisions:
 
 ## Phases (sequential impl; design pipelined read-only; commit to `main`, no branch)
 
-- [ ] **Phase H — Access-control foundation (items 1, 2, 3).** Groups + personal-group lifecycle +
+- [x] **Phase H — Access-control foundation (items 1, 2, 3).** Groups + personal-group lifecycle +
   group↔rack/shelf grants + rack/shelf `access_level` + roles `contributor`/`librarian` + the full
   permission matrix (visibility filtering on list endpoints + modify guards) + admin UI
   (groups/membership/grants/defaults, role assignment) + frontend gating. Migrations. **Design first.**

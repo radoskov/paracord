@@ -2,18 +2,27 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
-  import { ApiClient, type Shelf, type Work } from '../api/client';
+  import { ApiClient, type AccessLevel, type Shelf, type Work } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
   import { selectedShelfId } from '../lib/selection';
+  import { canManageStructure, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // Access levels offered in the create form and per-shelf select (mirrors the backend).
+  const ACCESS_LEVELS: { value: AccessLevel; label: string }[] = [
+    { value: 'open', label: 'Open — anyone may see; structure editors may modify' },
+    { value: 'visible', label: 'Visible — anyone may see; needs a grant to modify' },
+    { value: 'private', label: 'Private — only granted groups may see or modify' },
+  ];
 
   let shelves: Shelf[] = [];
   let selected: Shelf | null = null;
   let shelfWorks: Work[] = [];
   let allWorks: Work[] = [];
   let newShelfName = '';
+  let newShelfAccess: AccessLevel = 'open';
   let pickWorkId = '';
   let workFilter = '';
   let loading = false;
@@ -64,11 +73,21 @@
 
   async function createShelf(): Promise<void> {
     await run(async () => {
-      const shelf = await client.createShelf({ name: newShelfName });
+      const shelf = await client.createShelf({ name: newShelfName, access_level: newShelfAccess });
       newShelfName = '';
+      newShelfAccess = 'open';
       shelves = await client.listShelves();
       await select(shelf);
     }, 'Shelf created');
+  }
+
+  async function changeAccess(shelf: Shelf, accessLevel: AccessLevel): Promise<void> {
+    if (accessLevel === shelf.access_level) return;
+    await run(async () => {
+      const updated = await client.updateShelf(shelf.id, { access_level: accessLevel });
+      shelves = shelves.map((s) => (s.id === updated.id ? updated : s));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Shelf access level updated');
   }
 
   async function addWork(): Promise<void> {
@@ -110,11 +129,20 @@
 
   <div class="card list">
     <h2>Shelves</h2>
-    <form on:submit|preventDefault={createShelf} class="row">
-      <input bind:value={newShelfName} placeholder="New shelf name" aria-label="New shelf name" />
-      <button type="submit" disabled={!newShelfName.trim() || loading} title="Create a new shelf">
-        Add
-      </button>
+    <form on:submit|preventDefault={createShelf} class="create">
+      <div class="row">
+        <input bind:value={newShelfName} placeholder="New shelf name" aria-label="New shelf name"
+          disabled={!$canManageStructure} />
+        <button type="submit" disabled={!newShelfName.trim() || loading || !$canManageStructure}
+          title={$canManageStructure ? 'Create a new shelf' : INSUFFICIENT_ROLE}>
+          Add
+        </button>
+      </div>
+      <select bind:value={newShelfAccess} aria-label="New shelf access level" disabled={!$canManageStructure}
+        title={$canManageStructure ? 'Who may see and modify the new shelf' : INSUFFICIENT_ROLE}>
+        {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
+      </select>
+      {#if !$canManageStructure}<p class="hintline">{INSUFFICIENT_ROLE} — only librarians and admins can create shelves.</p>{/if}
     </form>
     {#if shelves.length === 0}
       <p class="empty">No shelves yet. Create one to group related papers.</p>
@@ -147,24 +175,40 @@
           <span class="muted">Shelf</span>
           <h2>{selected.name}</h2>
         </div>
-        <button type="button" class="secondary" on:click={archive} disabled={loading}
-          title="Archive this shelf (asks for confirmation)">Archive shelf</button>
+        <div class="head-actions">
+          <label class="access-inline">
+            <span class="muted">Access</span>
+            <select
+              value={selected.access_level}
+              on:change={(e) => changeAccess(selected!, e.currentTarget.value as AccessLevel)}
+              disabled={loading || !$canManageStructure}
+              aria-label="Shelf access level"
+              title={$canManageStructure ? 'Who may see and modify this shelf' : INSUFFICIENT_ROLE}
+            >
+              {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
+            </select>
+          </label>
+          <button type="button" class="secondary" on:click={archive} disabled={loading || !$canManageStructure}
+            title={$canManageStructure ? 'Archive this shelf (asks for confirmation)' : INSUFFICIENT_ROLE}>Archive shelf</button>
+        </div>
       </div>
 
       <div class="add-work">
         <h3>Add a paper to this shelf</h3>
-        <input bind:value={workFilter} placeholder="Filter papers by title…" aria-label="Filter papers" />
+        <input bind:value={workFilter} placeholder="Filter papers by title…" aria-label="Filter papers"
+          disabled={!$canManageStructure} />
         <div class="row">
-          <select bind:value={pickWorkId} aria-label="Choose a paper" title="Choose a paper to add to this shelf">
+          <select bind:value={pickWorkId} aria-label="Choose a paper" title="Choose a paper to add to this shelf"
+            disabled={!$canManageStructure}>
             <option value="">Choose a paper…</option>
             {#each filteredWorks.slice(0, 200) as work (work.id)}
               <option value={work.id}>{work.canonical_title ?? 'Untitled'}{work.year ? ` (${work.year})` : ''}</option>
             {/each}
           </select>
-          <button type="button" on:click={addWork} disabled={!pickWorkId || loading}
-            title={pickWorkId ? 'Add the chosen paper' : 'Choose a paper first'}>Add paper</button>
+          <button type="button" on:click={addWork} disabled={!pickWorkId || loading || !$canManageStructure}
+            title={!$canManageStructure ? INSUFFICIENT_ROLE : pickWorkId ? 'Add the chosen paper' : 'Choose a paper first'}>Add paper</button>
         </div>
-        {#if !pickWorkId}<p class="hintline">Pick a paper above to enable “Add paper”.</p>{/if}
+        {#if !$canManageStructure}<p class="hintline">{INSUFFICIENT_ROLE} — only librarians and admins can change a shelf’s papers.</p>{:else if !pickWorkId}<p class="hintline">Pick a paper above to enable “Add paper”.</p>{/if}
       </div>
 
       <h3>Papers in this shelf ({shelfWorks.length})</h3>
@@ -176,7 +220,8 @@
             <li>
               <span>{work.canonical_title ?? 'Untitled'}{work.year ? ` · ${work.year}` : ''}</span>
               <button type="button" class="secondary small" on:click={() => removeWork(work.id)}
-                disabled={loading} title="Remove this paper from the shelf">Remove</button>
+                disabled={loading || !$canManageStructure}
+                title={$canManageStructure ? 'Remove this paper from the shelf' : INSUFFICIENT_ROLE}>Remove</button>
             </li>
           {/each}
         </ul>
@@ -218,6 +263,31 @@
     display: grid;
     gap: 0.5rem;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .create {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .head-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .access-inline {
+    align-items: center;
+    display: flex;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  .hintline {
+    color: #b45309;
+    font-size: 0.8rem;
+    margin: 0;
   }
 
   .shelf-list,

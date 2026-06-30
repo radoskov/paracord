@@ -1,11 +1,19 @@
 <script lang="ts">
   import {
     ApiClient,
+    type AccessLevel,
     type AdminUser,
     type AgentFileRecord,
     type AgentPrivilege,
     type AgentRecord,
+    type DefaultGrant,
+    type Grant,
+    type GrantTargetType,
+    type Group,
+    type GroupMember,
+    type Rack,
     type ServerImportRoot,
+    type Shelf,
     type UserRole,
     type WebFindAllowedHost,
     type WebFindDownloadPolicy,
@@ -20,11 +28,21 @@
   // before assigning it. Kept in sync with ProfilePage's own-role description.
   const ROLE_GUIDE: { role: UserRole; label: string; blurb: string }[] = [
     { role: 'reader', label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
-    { role: 'editor', label: 'Editor', blurb: 'Everything a reader can do, plus import, edit, enrich and delete papers.' },
+    {
+      role: 'contributor',
+      label: 'Contributor',
+      blurb: 'Everything a reader can do, plus import, edit, enrich and delete their OWN papers (papers they created).',
+    },
+    { role: 'editor', label: 'Editor', blurb: 'Everything a contributor can do, but may edit and delete any paper they can see (not just their own).' },
+    {
+      role: 'librarian',
+      label: 'Librarian',
+      blurb: 'Everything an editor can do, plus create, edit and organise racks and shelves and manage their membership and access.',
+    },
     {
       role: 'admin',
       label: 'Admin',
-      blurb: 'Everything an editor can do, plus manage editors/readers, agents, AI settings and the audit log. Cannot manage other admins or the owner.',
+      blurb: 'Everything a librarian can do, plus manage users (reader/contributor/editor/librarian), groups, agents, AI settings and the audit log. Cannot manage other admins or the owner.',
     },
     {
       role: 'owner',
@@ -36,8 +54,8 @@
   // Roles an admin/owner may assign. The owner role is never assignable (it is the immutable
   // bootstrap account); the admin role is offered to the owner only.
   $: assignableRoles = ($isOwner
-    ? (['reader', 'editor', 'admin'] as UserRole[])
-    : (['reader', 'editor'] as UserRole[]));
+    ? (['reader', 'contributor', 'editor', 'librarian', 'admin'] as UserRole[])
+    : (['reader', 'contributor', 'editor', 'librarian'] as UserRole[]));
 
   // The signed-in user's id, for blocking self-disable / self-delete in the UI (the server also
   // enforces this).
@@ -111,6 +129,41 @@
   ];
   let downloadPolicy: WebFindDownloadPolicy | null = null;
 
+  // --- Access-control groups (admin-or-owner; Phase H) ---
+  const ACCESS_LEVELS: { value: AccessLevel; label: string }[] = [
+    { value: 'open', label: 'Open — visible to everyone by default' },
+    { value: 'visible', label: 'Visible — listed to everyone; modify needs a grant' },
+    { value: 'private', label: 'Private — only granted groups may see it' },
+  ];
+
+  let groups: Group[] = [];
+  let racks: Rack[] = [];
+  let shelves: Shelf[] = [];
+  let newGroupName = '';
+
+  // The currently-expanded group + its loaded members and grants.
+  let openGroupId = '';
+  let groupMembers: GroupMember[] = [];
+  let groupGrants: Grant[] = [];
+  let pickMemberId = '';
+  let grantTargetType: GrantTargetType = 'shelf';
+  let pickGrantTargetId = '';
+
+  // Defaults subsection: default access level + the default-grant list.
+  let defaultGrants: DefaultGrant[] = [];
+  let defaultAccessLevel: AccessLevel | null = null;
+  let defaultGrantType: GrantTargetType = 'shelf';
+  let pickDefaultTargetId = '';
+
+  // Target label lookup for grant rows (rack/shelf name from the loaded lists).
+  function targetLabel(type: GrantTargetType, id: string): string {
+    const list = type === 'rack' ? racks : shelves;
+    return list.find((t) => t.id === id)?.name ?? `${type} ${id.slice(0, 8)}`;
+  }
+
+  // Users not already in the open group, offered in the "add member" select.
+  $: nonMemberUsers = users.filter((u) => !groupMembers.some((m) => m.id === u.id));
+
   async function run(action: () => Promise<void>, success?: string): Promise<void> {
     loading = true;
     message = '';
@@ -136,7 +189,124 @@
       if (get(canManageUsers)) allowedHosts = await client.listWebFindAllowedHosts();
       // The download policy is owner-only (the endpoint 403s for admins).
       if (get(isOwner)) downloadPolicy = (await client.getWebFindDownloadPolicy()).policy;
+      // Groups, racks/shelves (for grant pickers) and default settings are admin-or-owner.
+      if (get(canManageUsers)) {
+        [groups, racks, shelves, defaultGrants] = await Promise.all([
+          client.listGroups(),
+          client.listRacks(),
+          client.listShelves(),
+          client.listDefaultGrants(),
+        ]);
+        defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
+      }
     });
+  }
+
+  // --- Groups ---
+  async function createGroup(): Promise<void> {
+    const name = newGroupName.trim();
+    if (!name) return;
+    await run(async () => {
+      await client.createGroup(name);
+      newGroupName = '';
+      groups = await client.listGroups();
+    }, 'Group created');
+  }
+
+  async function deleteGroup(group: Group): Promise<void> {
+    if (group.is_personal) return;
+    if (!window.confirm(`Delete group “${group.name}”? Its members and access grants are removed.`)) return;
+    await run(async () => {
+      await client.deleteGroup(group.id);
+      if (openGroupId === group.id) closeGroup();
+      groups = await client.listGroups();
+    }, 'Group deleted');
+  }
+
+  function closeGroup(): void {
+    openGroupId = '';
+    groupMembers = [];
+    groupGrants = [];
+    pickMemberId = '';
+    pickGrantTargetId = '';
+  }
+
+  async function openGroup(group: Group): Promise<void> {
+    if (openGroupId === group.id) {
+      closeGroup();
+      return;
+    }
+    await run(async () => {
+      [groupMembers, groupGrants] = await Promise.all([
+        client.listGroupMembers(group.id),
+        client.listGroupGrants(group.id),
+      ]);
+      openGroupId = group.id;
+      pickMemberId = '';
+      pickGrantTargetId = '';
+    });
+  }
+
+  async function addMember(): Promise<void> {
+    if (!openGroupId || !pickMemberId) return;
+    const groupId = openGroupId;
+    await run(async () => {
+      await client.addGroupMember(groupId, pickMemberId);
+      pickMemberId = '';
+      groupMembers = await client.listGroupMembers(groupId);
+    }, 'Member added');
+  }
+
+  async function removeMember(member: GroupMember): Promise<void> {
+    if (!openGroupId) return;
+    const groupId = openGroupId;
+    await run(async () => {
+      await client.removeGroupMember(groupId, member.id);
+      groupMembers = await client.listGroupMembers(groupId);
+    }, 'Member removed');
+  }
+
+  async function addGrant(): Promise<void> {
+    if (!openGroupId || !pickGrantTargetId) return;
+    const groupId = openGroupId;
+    await run(async () => {
+      await client.addGroupGrant(groupId, grantTargetType, pickGrantTargetId);
+      pickGrantTargetId = '';
+      groupGrants = await client.listGroupGrants(groupId);
+    }, 'Grant added');
+  }
+
+  async function removeGrant(grant: Grant): Promise<void> {
+    if (!openGroupId) return;
+    const groupId = openGroupId;
+    await run(async () => {
+      await client.removeGrant(grant.id);
+      groupGrants = await client.listGroupGrants(groupId);
+    }, 'Grant removed');
+  }
+
+  // --- Defaults ---
+  async function changeDefaultAccess(level: AccessLevel): Promise<void> {
+    if (level === defaultAccessLevel) return;
+    await run(async () => {
+      defaultAccessLevel = (await client.setAccessSettings(level)).default_access_level;
+    }, 'Default access level updated');
+  }
+
+  async function addDefaultGrant(): Promise<void> {
+    if (!pickDefaultTargetId) return;
+    await run(async () => {
+      await client.addDefaultGrant(defaultGrantType, pickDefaultTargetId);
+      pickDefaultTargetId = '';
+      defaultGrants = await client.listDefaultGrants();
+    }, 'Default grant added');
+  }
+
+  async function removeDefaultGrant(grant: DefaultGrant): Promise<void> {
+    await run(async () => {
+      await client.removeDefaultGrant(grant.id);
+      defaultGrants = await client.listDefaultGrants();
+    }, 'Default grant removed');
   }
 
   async function changeDownloadPolicy(policy: WebFindDownloadPolicy): Promise<void> {
@@ -749,6 +919,165 @@
       </fieldset>
     </section>
   {/if}
+
+  <!-- Access-control groups (admin-or-owner; Phase H) -->
+  {#if $canManageUsers}
+    <section class="surface admin-section groups">
+      <h2>Groups &amp; access</h2>
+      <p class="muted">
+        Groups gate who can <strong>see</strong> and <strong>modify</strong> private/visible racks and
+        shelves. Each user has a permanent <strong>personal group</strong> (named after them); create
+        shared groups to grant several users access at once. Grant a group access to a rack or shelf
+        below, then add the users who should have it.
+      </p>
+
+      <form class="add-group" on:submit|preventDefault={createGroup}>
+        <input bind:value={newGroupName} placeholder="New group name (e.g. nlp-team)" aria-label="New group name" />
+        <button type="submit" disabled={loading || !newGroupName.trim()}
+          title={newGroupName.trim() ? 'Create a shared group' : 'Enter a group name first'}>Create group</button>
+      </form>
+
+      {#if groups.length === 0}
+        <p class="empty">No groups loaded</p>
+      {:else}
+        <div class="group-list">
+          {#each groups as group (group.id)}
+            <article>
+              <header>
+                <strong>{group.name}</strong>
+                {#if group.is_personal}
+                  <span class="lock-badge" title="Each user has one permanent personal group; it cannot be deleted">personal</span>
+                {/if}
+                <span class="group-actions">
+                  <button type="button" class="link-btn" on:click={() => openGroup(group)} disabled={loading}
+                    title="Manage this group's members and access grants">
+                    {openGroupId === group.id ? 'Hide' : 'Manage'}
+                  </button>
+                  {#if group.is_personal}
+                    <button type="button" class="link-btn danger" disabled
+                      title="Personal groups cannot be deleted">Delete</button>
+                  {:else}
+                    <button type="button" class="link-btn danger" on:click={() => deleteGroup(group)} disabled={loading}
+                      title="Delete this group (members and grants are removed)">Delete</button>
+                  {/if}
+                </span>
+              </header>
+
+              {#if openGroupId === group.id}
+                <div class="group-detail">
+                  <!-- Members -->
+                  <div class="subgroup">
+                    <h4>Members ({groupMembers.length})</h4>
+                    <div class="picker">
+                      <select bind:value={pickMemberId} aria-label="Choose a user to add" title="Choose a user to add to this group">
+                        <option value="">Choose a user…</option>
+                        {#each nonMemberUsers as u (u.id)}<option value={u.id}>{u.username}</option>{/each}
+                      </select>
+                      <button type="button" on:click={addMember} disabled={loading || !pickMemberId}
+                        title={pickMemberId ? 'Add the chosen user' : 'Choose a user first'}>Add member</button>
+                    </div>
+                    {#if groupMembers.length === 0}
+                      <p class="empty">No members yet.</p>
+                    {:else}
+                      <ul class="row-list">
+                        {#each groupMembers as member (member.id)}
+                          <li>
+                            <span>{member.username} <span class="role-badge role-{member.role}">{member.role}</span></span>
+                            <button type="button" class="link-btn danger" on:click={() => removeMember(member)} disabled={loading}
+                              title="Remove this user from the group">Remove</button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  </div>
+
+                  <!-- Grants -->
+                  <div class="subgroup">
+                    <h4>Access grants ({groupGrants.length})</h4>
+                    <div class="picker">
+                      <select bind:value={grantTargetType} aria-label="Grant target type" title="Grant access to a rack or a shelf">
+                        <option value="shelf">Shelf</option>
+                        <option value="rack">Rack</option>
+                      </select>
+                      <select bind:value={pickGrantTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant">
+                        <option value="">Choose a {grantTargetType}…</option>
+                        {#each (grantTargetType === 'rack' ? racks : shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+                      </select>
+                      <button type="button" on:click={addGrant} disabled={loading || !pickGrantTargetId}
+                        title={pickGrantTargetId ? 'Grant this group access' : 'Choose a target first'}>Add grant</button>
+                    </div>
+                    {#if groupGrants.length === 0}
+                      <p class="empty">No grants yet.</p>
+                    {:else}
+                      <ul class="row-list">
+                        {#each groupGrants as grant (grant.id)}
+                          <li>
+                            <span><span class="type-badge">{grant.target_type}</span> {targetLabel(grant.target_type, grant.target_id)}</span>
+                            <button type="button" class="link-btn danger" on:click={() => removeGrant(grant)} disabled={loading}
+                              title="Revoke this access grant">Remove</button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </article>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Defaults -->
+      <div class="defaults">
+        <h3>Defaults</h3>
+        <p class="muted small-help">
+          The <strong>default access level</strong> applies to new racks and shelves that don't set
+          their own. <strong>Default grants</strong> are applied to every new user's personal group,
+          so new users get access to these racks/shelves automatically.
+        </p>
+
+        <label class="access-inline">
+          <span>Default access level</span>
+          <select
+            value={defaultAccessLevel}
+            on:change={(e) => changeDefaultAccess(e.currentTarget.value as AccessLevel)}
+            disabled={loading || defaultAccessLevel === null}
+            aria-label="Default access level"
+            title={defaultAccessLevel === null ? 'Loading…' : 'Access level for new racks and shelves'}
+          >
+            {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
+          </select>
+        </label>
+
+        <h4>Default grants ({defaultGrants.length})</h4>
+        <div class="picker">
+          <select bind:value={defaultGrantType} aria-label="Default grant target type" title="A rack or a shelf">
+            <option value="shelf">Shelf</option>
+            <option value="rack">Rack</option>
+          </select>
+          <select bind:value={pickDefaultTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant to new users">
+            <option value="">Choose a {defaultGrantType}…</option>
+            {#each (defaultGrantType === 'rack' ? racks : shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+          </select>
+          <button type="button" on:click={addDefaultGrant} disabled={loading || !pickDefaultTargetId}
+            title={pickDefaultTargetId ? 'Add this default grant' : 'Choose a target first'}>Add default grant</button>
+        </div>
+        {#if defaultGrants.length === 0}
+          <p class="empty">No default grants — new users only get their personal group.</p>
+        {:else}
+          <ul class="row-list">
+            {#each defaultGrants as grant (grant.id)}
+              <li>
+                <span><span class="type-badge">{grant.target_type}</span> {targetLabel(grant.target_type, grant.target_id)}</span>
+                <button type="button" class="link-btn danger" on:click={() => removeDefaultGrant(grant)} disabled={loading}
+                  title="Remove this default grant (existing users keep their access)">Remove</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    </section>
+  {/if}
 </div>
 
 {#if resetTarget}
@@ -934,7 +1263,9 @@
 
   .role-owner { background: #fde68a; color: #78350f; }
   .role-admin { background: #ddd6fe; color: #4c1d95; }
+  .role-librarian { background: #a7f3d0; color: #065f46; }
   .role-editor { background: #bfdbfe; color: #1e3a5f; }
+  .role-contributor { background: #fde9b8; color: #92400e; }
   .role-reader { background: #e2e8f0; color: #44515f; }
 
   .role-guide {
@@ -1253,5 +1584,116 @@
   .download-policy .policy-text {
     display: grid;
     gap: 0.15rem;
+  }
+
+  .groups {
+    margin-top: 1rem;
+  }
+
+  .groups .add-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0.75rem;
+  }
+
+  .groups .add-group input {
+    flex: 1 1 14rem;
+  }
+
+  .groups .group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .groups .group-actions {
+    display: flex;
+    gap: 0.6rem;
+    margin-left: auto;
+  }
+
+  .group-detail {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+  }
+
+  @media (min-width: 720px) {
+    .group-detail {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .subgroup h4,
+  .defaults h4 {
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+    color: #44515f;
+  }
+
+  .picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .picker select {
+    flex: 1 1 8rem;
+  }
+
+  .row-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .row-list li {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    font-size: 0.85rem;
+  }
+
+  .type-badge {
+    background: #e0e7ff;
+    border-radius: 0.25rem;
+    color: #3730a3;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.05rem 0.35rem;
+    text-transform: uppercase;
+  }
+
+  .defaults {
+    border-top: 1px solid #e2e8f0;
+    margin-top: 0.9rem;
+    padding-top: 0.75rem;
+  }
+
+  .defaults h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+  }
+
+  .access-inline {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .access-inline select {
+    flex: 1 1 16rem;
+    width: auto;
   }
 </style>

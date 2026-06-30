@@ -2,18 +2,27 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
-  import { ApiClient, type Rack, type Shelf } from '../api/client';
+  import { ApiClient, type AccessLevel, type Rack, type Shelf } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
   import { selectedRackId } from '../lib/selection';
+  import { canManageStructure, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // Access levels offered in the create form and per-row selects (mirrors the backend).
+  const ACCESS_LEVELS: { value: AccessLevel; label: string }[] = [
+    { value: 'open', label: 'Open — anyone may see; structure editors may modify' },
+    { value: 'visible', label: 'Visible — anyone may see; needs a grant to modify' },
+    { value: 'private', label: 'Private — only granted groups may see or modify' },
+  ];
 
   let racks: Rack[] = [];
   let selected: Rack | null = null;
   let rackShelves: Shelf[] = [];
   let allShelves: Shelf[] = [];
   let newRackName = '';
+  let newRackAccess: AccessLevel = 'open';
   let pickShelfId = '';
   let loading = false;
   let message = '';
@@ -58,11 +67,21 @@
 
   async function createRack(): Promise<void> {
     await run(async () => {
-      const rack = await client.createRack({ name: newRackName });
+      const rack = await client.createRack({ name: newRackName, access_level: newRackAccess });
       newRackName = '';
+      newRackAccess = 'open';
       racks = await client.listRacks();
       await select(rack);
     }, 'Rack created');
+  }
+
+  async function changeAccess(rack: Rack, accessLevel: AccessLevel): Promise<void> {
+    if (accessLevel === rack.access_level) return;
+    await run(async () => {
+      const updated = await client.updateRack(rack.id, { access_level: accessLevel });
+      racks = racks.map((r) => (r.id === updated.id ? updated : r));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Rack access level updated');
   }
 
   async function addShelf(): Promise<void> {
@@ -103,11 +122,20 @@
 
   <div class="card list">
     <h2>Racks</h2>
-    <form on:submit|preventDefault={createRack} class="row">
-      <input bind:value={newRackName} placeholder="New rack name" aria-label="New rack name" />
-      <button type="submit" disabled={!newRackName.trim() || loading} title="Create a new rack">
-        Add
-      </button>
+    <form on:submit|preventDefault={createRack} class="create">
+      <div class="row">
+        <input bind:value={newRackName} placeholder="New rack name" aria-label="New rack name"
+          disabled={!$canManageStructure} />
+        <button type="submit" disabled={!newRackName.trim() || loading || !$canManageStructure}
+          title={$canManageStructure ? 'Create a new rack' : INSUFFICIENT_ROLE}>
+          Add
+        </button>
+      </div>
+      <select bind:value={newRackAccess} aria-label="New rack access level" disabled={!$canManageStructure}
+        title={$canManageStructure ? 'Who may see and modify the new rack' : INSUFFICIENT_ROLE}>
+        {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
+      </select>
+      {#if !$canManageStructure}<p class="hintline">{INSUFFICIENT_ROLE} — only librarians and admins can create racks.</p>{/if}
     </form>
     {#if racks.length === 0}
       <p class="empty">No racks yet. A rack groups several shelves together.</p>
@@ -140,21 +168,36 @@
           <span class="muted">Rack</span>
           <h2>{selected.name}</h2>
         </div>
-        <button type="button" class="secondary" on:click={archive} disabled={loading}
-          title="Archive this rack (asks for confirmation)">Archive rack</button>
+        <div class="head-actions">
+          <label class="access-inline">
+            <span class="muted">Access</span>
+            <select
+              value={selected.access_level}
+              on:change={(e) => changeAccess(selected!, e.currentTarget.value as AccessLevel)}
+              disabled={loading || !$canManageStructure}
+              aria-label="Rack access level"
+              title={$canManageStructure ? 'Who may see and modify this rack' : INSUFFICIENT_ROLE}
+            >
+              {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
+            </select>
+          </label>
+          <button type="button" class="secondary" on:click={archive} disabled={loading || !$canManageStructure}
+            title={$canManageStructure ? 'Archive this rack (asks for confirmation)' : INSUFFICIENT_ROLE}>Archive rack</button>
+        </div>
       </div>
 
       <div class="add-shelf">
         <h3>Add a shelf to this rack</h3>
         <div class="row">
-          <select bind:value={pickShelfId} aria-label="Choose a shelf" title="Choose a shelf to add to this rack">
+          <select bind:value={pickShelfId} aria-label="Choose a shelf" title="Choose a shelf to add to this rack"
+            disabled={!$canManageStructure}>
             <option value="">Choose a shelf…</option>
             {#each availableShelves as shelf (shelf.id)}
               <option value={shelf.id}>{shelf.name}</option>
             {/each}
           </select>
-          <button type="button" on:click={addShelf} disabled={!pickShelfId || loading}
-            title={pickShelfId ? 'Add the chosen shelf' : 'Choose a shelf first'}>Add shelf</button>
+          <button type="button" on:click={addShelf} disabled={!pickShelfId || loading || !$canManageStructure}
+            title={!$canManageStructure ? INSUFFICIENT_ROLE : pickShelfId ? 'Add the chosen shelf' : 'Choose a shelf first'}>Add shelf</button>
         </div>
         {#if availableShelves.length === 0}
           <p class="hintline">Every shelf is already in this rack (or none exist yet).</p>
@@ -172,7 +215,8 @@
             <li>
               <span>{shelf.name}</span>
               <button type="button" class="secondary small" on:click={() => removeShelf(shelf.id)}
-                disabled={loading} title="Remove this shelf from the rack">Remove</button>
+                disabled={loading || !$canManageStructure}
+                title={$canManageStructure ? 'Remove this shelf from the rack' : INSUFFICIENT_ROLE}>Remove</button>
             </li>
           {/each}
         </ul>
@@ -214,6 +258,31 @@
     display: grid;
     gap: 0.5rem;
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .create {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .head-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .access-inline {
+    align-items: center;
+    display: flex;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  .hintline {
+    color: #b45309;
+    font-size: 0.8rem;
+    margin: 0;
   }
 
   .rack-list,

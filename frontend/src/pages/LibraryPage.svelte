@@ -25,7 +25,7 @@
     visibleColumnDefs,
   } from '../lib/columns';
   import { pendingLibrarySearch, selectedWorkId } from '../lib/selection';
-  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canEdit, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -339,6 +339,17 @@
 
   $: canCreate = !!(newTitle.trim() || newDoi.trim() || newArxiv.trim() || newUrl.trim());
   $: allSelected = works.length > 0 && selectedIds.length === works.length;
+  // Batch actions modify papers, so only enable them when the user may modify EVERY selected paper
+  // (contributor → own papers only; editor+ → any visible paper). The server enforces this too.
+  $: canModifySelected =
+    selectedIds.length > 0 &&
+    selectedIds.every((id) => {
+      const w = works.find((work) => work.id === id);
+      return !!w && canModifyWork($currentUser, w);
+    });
+  $: batchHint = canModifySelected
+    ? null
+    : 'You can only run this on papers you may modify (your own papers, or any paper if you are an editor or higher).';
 
   async function createWork(): Promise<void> {
     const fromUrl = newUrl.trim() ? parseIdentifierUrl(newUrl) : {};
@@ -470,13 +481,13 @@
       {#if selectedIds.length > 0}
         <div class="batch">
           <strong>{selectedIds.length} selected</strong>
-          <button type="button" class="secondary danger-btn" on:click={batchDelete} disabled={loading || !$canEdit}
-            title={$canEdit ? 'Delete the selected papers (their files stay in the library)' : INSUFFICIENT_ROLE}>Delete</button>
-          <button type="button" class="secondary" on:click={batchReextract} disabled={loading || !$canEdit}
-            title={$canEdit ? 'Queue GROBID extraction for every attached file of the selected papers' : INSUFFICIENT_ROLE}>Re-extract</button>
+          <button type="button" class="secondary danger-btn" on:click={batchDelete} disabled={loading || !canModifySelected}
+            title={canModifySelected ? 'Delete the selected papers (their files stay in the library)' : batchHint}>Delete</button>
+          <button type="button" class="secondary" on:click={batchReextract} disabled={loading || !canModifySelected}
+            title={canModifySelected ? 'Queue GROBID extraction for every attached file of the selected papers' : batchHint}>Re-extract</button>
           <label class="inline">Set status
-            <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading || !$canEdit}
-              title={$canEdit ? 'Set the reading status for all selected papers' : INSUFFICIENT_ROLE}>
+            <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading || !canModifySelected}
+              title={canModifySelected ? 'Set the reading status for all selected papers' : batchHint}>
               <option value="">…</option>
               {#each ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'] as s}
                 <option value={s}>{s}</option>

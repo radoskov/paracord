@@ -22,12 +22,12 @@
 
   const TABS: Tab[] = [
     { id: 'library', label: 'Library', hint: 'Search, read, edit and organise your papers.' },
-    { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.', roles: ['owner', 'admin', 'editor'] },
+    { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
     { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
-    { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'admin', 'editor'] },
-    { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'editor'] },
+    { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
+    { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner', 'admin'] },
     { id: 'events', label: 'Events', hint: 'Browse the audit log of activity across the library.', roles: ['owner', 'admin'] },

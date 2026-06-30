@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ReadingStatus, Work, WorkSortKey } from '../api/client';
   import { type ColumnDef, type ColumnId, LIBRARY_COLUMNS } from '../lib/columns';
-  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { formatDate } from '../lib/ui';
 
   export let works: Work[] = [];
@@ -122,11 +122,12 @@
             {:else if col.id === 'venue'}
               <td>{work.venue ?? '-'}</td>
             {:else if col.id === 'status'}
+              {@const canModify = canModifyWork($currentUser, work)}
               <td on:click|stopPropagation>
                 <select
                   value={work.reading_status}
-                  disabled={!$canEdit}
-                  title={$canEdit ? 'Change this paper’s reading status' : INSUFFICIENT_ROLE}
+                  disabled={!canModify}
+                  title={canModify ? 'Change this paper’s reading status' : INSUFFICIENT_ROLE}
                   on:change={(event) =>
                     onStatusChange(work, event.currentTarget.value as ReadingStatus)}
                 >

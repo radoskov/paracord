@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, tick } from 'svelte';
+  import { get } from 'svelte/store';
 
   import type { Annotation, CitationContext, PdfCoordinateBox } from '../api/client';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
@@ -23,6 +24,10 @@
   export let onNavigateToReference: ((referenceId: string) => void) | null = null;
   // When set, the reader opens and jumps to the first in-text mention of this reference.
   export let initialJumpReferenceId: string | null = null;
+  // Whether the viewer may add/delete annotations on this paper. Defaults to the global edit floor
+  // (contributor+); the host passes the per-paper "can modify this paper" decision so a contributor
+  // can only annotate their own papers.
+  export let canAnnotate: boolean = get(canEdit);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type PdfModule = any;
@@ -419,7 +424,7 @@
 
   // --- selection → annotation --------------------------------------------
   function captureSelection(): void {
-    if (!$canEdit) return;
+    if (!canAnnotate) return;
     const selection = window.getSelection();
     const text = selection?.toString().trim() ?? '';
     if (!text) return;
@@ -702,8 +707,8 @@
           type="button"
           class="select-btn"
           on:click={captureSelection}
-          disabled={!$canEdit}
-          title={$canEdit
+          disabled={!canAnnotate}
+          title={canAnnotate
             ? 'Capture the selected text as a highlight annotation'
             : INSUFFICIENT_ROLE}
         >
@@ -831,19 +836,19 @@
     {/if}
   {:else}
     <form class="annotation-form" on:submit|preventDefault={createAnnotation}>
-      <select bind:value={annotationType} disabled={!$canEdit || !onCreateAnnotation}
-        title={$canEdit ? 'Choose the kind of annotation to add' : INSUFFICIENT_ROLE}>
+      <select bind:value={annotationType} disabled={!canAnnotate || !onCreateAnnotation}
+        title={canAnnotate ? 'Choose the kind of annotation to add' : INSUFFICIENT_ROLE}>
         <option value="note">Note</option>
         <option value="highlight">Highlight</option>
         <option value="page_anchor">Page anchor</option>
         <option value="citation_note">Citation note</option>
       </select>
-      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" disabled={!$canEdit}
-        title={$canEdit ? 'Page this note refers to' : INSUFFICIENT_ROLE} />
-      <input bind:value={selectedText} placeholder="Selected text" disabled={!$canEdit}
-        title={$canEdit ? 'Text this note refers to (filled in by Highlight selection)' : INSUFFICIENT_ROLE} />
-      <textarea bind:value={annotationContent} placeholder="Note" disabled={!$canEdit}
-        title={$canEdit ? 'Your note text' : INSUFFICIENT_ROLE}></textarea>
+      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" disabled={!canAnnotate}
+        title={canAnnotate ? 'Page this note refers to' : INSUFFICIENT_ROLE} />
+      <input bind:value={selectedText} placeholder="Selected text" disabled={!canAnnotate}
+        title={canAnnotate ? 'Text this note refers to (filled in by Highlight selection)' : INSUFFICIENT_ROLE} />
+      <textarea bind:value={annotationContent} placeholder="Note" disabled={!canAnnotate}
+        title={canAnnotate ? 'Your note text' : INSUFFICIENT_ROLE}></textarea>
       {#if selectionBoxes?.length}
         <small class="coord-note">
           Anchored at p.{selectionBoxes[0].page} ({selectionBoxes.length} box{selectionBoxes.length >
@@ -854,12 +859,12 @@
       {/if}
       <button
         type="submit"
-        disabled={!$canEdit || !onCreateAnnotation || (!selectedText && !annotationContent)}
-        title={$canEdit ? 'Save this note/highlight' : INSUFFICIENT_ROLE}
+        disabled={!canAnnotate || !onCreateAnnotation || (!selectedText && !annotationContent)}
+        title={canAnnotate ? 'Save this note/highlight' : INSUFFICIENT_ROLE}
       >
         Add
       </button>
-      {#if !$canEdit}<small class="role-hint">{INSUFFICIENT_ROLE} — reading is read-only.</small>{/if}
+      {#if !canAnnotate}<small class="role-hint">{INSUFFICIENT_ROLE} — reading is read-only.</small>{/if}
     </form>
 
     {#if annotations.length === 0}
@@ -879,8 +884,8 @@
                   type="button"
                   class="ann-delete"
                   aria-label="Delete annotation"
-                  title={$canEdit ? 'Delete this note' : INSUFFICIENT_ROLE}
-                  disabled={!$canEdit}
+                  title={canAnnotate ? 'Delete this note' : INSUFFICIENT_ROLE}
+                  disabled={!canAnnotate}
                   on:click={() => removeAnnotation(annotation.id)}
                 >
                   ✕

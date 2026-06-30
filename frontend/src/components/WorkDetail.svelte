@@ -19,7 +19,7 @@
     type WorkFile,
   } from '../api/client';
   import { pendingLibrarySearch } from '../lib/selection';
-  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
@@ -80,6 +80,10 @@
   let flashRefId = '';
 
   $: if (work && work.id !== loadedId) void loadDetail(work);
+
+  // Whether the signed-in user may modify THIS paper (contributor → own only; editor+ → any
+  // visible paper). Gates every mutating affordance below; the server is the source of truth.
+  $: canModify = canModifyWork($currentUser, work);
 
   // Authors for the find-on-web header: the Work has no author column, so take them from the
   // 'authors' metadata-review field (canonical value, else the selected/first assertion).
@@ -544,8 +548,8 @@
     <div class="bar-actions">
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
-      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading || !$canEdit}
-        title={$canEdit ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
+      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading || !canModify}
+        title={canModify ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
     </div>
   </div>
@@ -576,31 +580,31 @@
       </div>
       <label>Abstract<textarea bind:value={form.abstract} rows="4"></textarea></label>
       <div class="actions">
-        <button type="submit" disabled={loading || !$canEdit}
-          title={$canEdit ? 'Save edits to this paper’s details' : INSUFFICIENT_ROLE}>Save changes</button>
+        <button type="submit" disabled={loading || !canModify}
+          title={canModify ? 'Save edits to this paper’s details' : INSUFFICIENT_ROLE}>Save changes</button>
       </div>
       <div class="actions">
-        <button type="button" class="secondary" on:click={enrich} disabled={loading || !$canEdit || (!form.doi && !form.arxiv_id)}
-          title={!$canEdit
+        <button type="button" class="secondary" on:click={enrich} disabled={loading || !canModify || (!form.doi && !form.arxiv_id)}
+          title={!canModify
             ? INSUFFICIENT_ROLE
             : form.doi || form.arxiv_id
               ? 'Fetch external metadata & references'
               : 'Needs a DOI or arXiv id to enrich'}>Enrich</button>
-        <button type="button" class="secondary" on:click={extract} disabled={loading || !$canEdit || !hasReadableFile}
-          title={!$canEdit
+        <button type="button" class="secondary" on:click={extract} disabled={loading || !canModify || !hasReadableFile}
+          title={!canModify
             ? INSUFFICIENT_ROLE
             : hasReadableFile
               ? 'Run GROBID extraction on this paper’s PDFs (text, references, citations)'
               : 'Attach a PDF to extract'}>Extract</button>
-        <button type="button" class="secondary" on:click={findOnWeb} disabled={loading || !$canEdit}
-          title={$canEdit
+        <button type="button" class="secondary" on:click={findOnWeb} disabled={loading || !canModify}
+          title={canModify
             ? 'Search legitimate scholarly sources for this paper’s PDF and attach it'
             : INSUFFICIENT_ROLE}>Find on web</button>
         <!-- future: Extract topics / Summarize buttons go here (same Actions sub-row). -->
       </div>
-      {#if $canEdit && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
-      {#if $canEdit && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
-      {#if !$canEdit}<p class="hintline">{INSUFFICIENT_ROLE} — your role is read-only for library content.</p>{/if}
+      {#if canModify && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
+      {#if canModify && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
+      {#if !canModify}<p class="hintline">{INSUFFICIENT_ROLE} — you can only edit papers you created (or any paper as an editor or higher).</p>{/if}
     </form>
   </details>
 
@@ -618,8 +622,8 @@
               class="lock"
               class:locked={field.confirmed}
               on:click={() => toggleLock(field.field_name, !field.confirmed)}
-              disabled={loading || !$canEdit}
-              title={!$canEdit
+              disabled={loading || !canModify}
+              title={!canModify
                 ? INSUFFICIENT_ROLE
                 : field.confirmed
                   ? 'Locked — enrichment will not overwrite this field. Click to unlock.'
@@ -632,8 +636,8 @@
                 {#if a.selected_as_canonical}
                   <span class="canon">canonical</span>
                 {:else}
-                  <button type="button" class="secondary small" on:click={() => selectCanonical(a.id)} disabled={loading || !$canEdit}
-                    title={$canEdit ? 'Use this value as the canonical one' : INSUFFICIENT_ROLE}>Use this</button>
+                  <button type="button" class="secondary small" on:click={() => selectCanonical(a.id)} disabled={loading || !canModify}
+                    title={canModify ? 'Use this value as the canonical one' : INSUFFICIENT_ROLE}>Use this</button>
                 {/if}
               </div>
             {/each}
@@ -647,8 +651,8 @@
     <summary>Files ({files.length})</summary>
     <div class="attach">
       <input id="attach-pdf-input" type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
-      <button type="button" on:click={upload} disabled={!attachFile || loading || !$canEdit}
-        title={!$canEdit ? INSUFFICIENT_ROLE : attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
+      <button type="button" on:click={upload} disabled={!attachFile || loading || !canModify}
+        title={!canModify ? INSUFFICIENT_ROLE : attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
     </div>
     {#if files.length === 0}
       <p class="empty">No files attached. Attach a PDF above to read and extract it.</p>
@@ -676,8 +680,8 @@
                   title={file.content_available
                     ? 'Open the raw PDF in a new browser tab'
                     : 'PDF not available on the server.'}>New tab ↗</button>
-                <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !$canEdit}
-                  title={$canEdit ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
+                <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !canModify}
+                  title={canModify ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
               </span>
             </div>
             <span class="note-count" title="Notes (annotations) on this file">
@@ -732,10 +736,10 @@
         <option value="">Choose a tag…</option>
         {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
-      <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !$canEdit}
-        title={!$canEdit ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>
-      <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading || !$canEdit}
-        title={!$canEdit ? INSUFFICIENT_ROLE : applyTagId ? 'Remove the chosen tag from this paper' : 'Choose a tag first'}>Remove</button>
+      <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !canModify}
+        title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>
+      <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading || !canModify}
+        title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Remove the chosen tag from this paper' : 'Choose a tag first'}>Remove</button>
     </div>
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
@@ -768,8 +772,8 @@
               {/if}
               {#if !ref.resolved_work_id}
                 <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
-                  disabled={loading || !$canEdit}
-                  title={$canEdit ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
+                  disabled={loading || !canModify}
+                  title={canModify ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
               {/if}
             </div>
           </li>
@@ -965,6 +969,7 @@
       fileId={readerFile?.id ?? ''}
       fileName={readerFile?.original_filename ?? 'PDF'}
       fileUrl={readerUrl}
+      canAnnotate={canModify}
       {contexts}
       {annotations}
       onCreateAnnotation={createAnnotation}

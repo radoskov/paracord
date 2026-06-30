@@ -11,6 +11,9 @@ export interface Work {
   reading_status: ReadingStatus;
   confirmed_fields?: string[];
   keywords?: string[];
+  // The user who created this paper (null for system/loose-imported papers). Drives the
+  // "can I modify this paper" gate: a contributor may only edit their own papers.
+  created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -116,11 +119,15 @@ export interface ExportResponse {
   content: string;
 }
 
+// Access level governing who may see / modify a rack or shelf (and, transitively, papers).
+export type AccessLevel = 'open' | 'visible' | 'private';
+
 export interface Shelf {
   id: string;
   name: string;
   description: string | null;
   status: string;
+  access_level: AccessLevel;
   created_at: string;
   updated_at: string;
 }
@@ -130,6 +137,7 @@ export interface Rack {
   name: string;
   description: string | null;
   status: string;
+  access_level: AccessLevel;
   created_at: string;
   updated_at: string;
 }
@@ -486,8 +494,53 @@ export interface AiModel {
   size_bytes: number | null;
 }
 
-// Privilege ladder, highest first: owner > admin > editor > reader.
-export type UserRole = 'owner' | 'admin' | 'editor' | 'reader';
+// Privilege ladder, highest first: owner > admin > librarian > editor > contributor > reader.
+export type UserRole =
+  | 'owner'
+  | 'admin'
+  | 'librarian'
+  | 'editor'
+  | 'contributor'
+  | 'reader';
+
+// --- Access control: groups, grants, default grants and access settings (admin-or-owner) ---
+export interface Group {
+  id: string;
+  name: string;
+  is_personal: boolean;
+  personal_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupMember {
+  id: string;
+  username: string;
+  role: string;
+  display_name: string | null;
+}
+
+export type GrantTargetType = 'rack' | 'shelf';
+
+export interface Grant {
+  id: string;
+  group_id: string;
+  target_type: GrantTargetType;
+  target_id: string;
+  created_at: string;
+}
+
+export interface DefaultGrant {
+  id: string;
+  target_type: GrantTargetType;
+  target_id: string;
+  created_at: string;
+}
+
+export interface AccessSettings {
+  default_access_level: AccessLevel;
+  allowed: AccessLevel[];
+}
 
 export interface AdminUser {
   id: string;
@@ -870,7 +923,11 @@ export class ApiClient {
     return this.request<Shelf[]>('/api/v1/shelves');
   }
 
-  async createShelf(payload: { name: string; description?: string }): Promise<Shelf> {
+  async createShelf(payload: {
+    name: string;
+    description?: string;
+    access_level?: AccessLevel;
+  }): Promise<Shelf> {
     return this.request<Shelf>('/api/v1/shelves', { method: 'POST', body: payload });
   }
 
@@ -899,7 +956,11 @@ export class ApiClient {
     return this.request<Rack[]>('/api/v1/racks');
   }
 
-  async createRack(payload: { name: string; description?: string }): Promise<Rack> {
+  async createRack(payload: {
+    name: string;
+    description?: string;
+    access_level?: AccessLevel;
+  }): Promise<Rack> {
     return this.request<Rack>('/api/v1/racks', { method: 'POST', body: payload });
   }
 
@@ -1226,6 +1287,86 @@ export class ApiClient {
     return this.request(`/api/v1/admin/users/${userId}/reset-password`, {
       method: 'POST',
       body: { new_password: newPassword },
+    });
+  }
+
+  // --- Access control: groups, members, grants, default grants, access settings (admin-or-owner) ---
+  async listGroups(): Promise<Group[]> {
+    return this.request<Group[]>('/api/v1/admin/groups');
+  }
+
+  async createGroup(name: string): Promise<Group> {
+    return this.request<Group>('/api/v1/admin/groups', { method: 'POST', body: { name } });
+  }
+
+  async deleteGroup(groupId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/groups/${groupId}`, { method: 'DELETE' });
+  }
+
+  async listGroupMembers(groupId: string): Promise<GroupMember[]> {
+    return this.request<GroupMember[]>(`/api/v1/admin/groups/${groupId}/members`);
+  }
+
+  async addGroupMember(groupId: string, userId: string): Promise<GroupMember> {
+    return this.request<GroupMember>(`/api/v1/admin/groups/${groupId}/members`, {
+      method: 'POST',
+      body: { user_id: userId },
+    });
+  }
+
+  async removeGroupMember(groupId: string, userId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/groups/${groupId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async listGroupGrants(groupId: string): Promise<Grant[]> {
+    return this.request<Grant[]>(`/api/v1/admin/groups/${groupId}/grants`);
+  }
+
+  async addGroupGrant(
+    groupId: string,
+    targetType: GrantTargetType,
+    targetId: string,
+  ): Promise<Grant> {
+    return this.request<Grant>(`/api/v1/admin/groups/${groupId}/grants`, {
+      method: 'POST',
+      body: { target_type: targetType, target_id: targetId },
+    });
+  }
+
+  async removeGrant(grantId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/grants/${grantId}`, { method: 'DELETE' });
+  }
+
+  async listDefaultGrants(): Promise<DefaultGrant[]> {
+    return this.request<DefaultGrant[]>('/api/v1/admin/default-grants');
+  }
+
+  async addDefaultGrant(
+    targetType: GrantTargetType,
+    targetId: string,
+  ): Promise<DefaultGrant> {
+    return this.request<DefaultGrant>('/api/v1/admin/default-grants', {
+      method: 'POST',
+      body: { target_type: targetType, target_id: targetId },
+    });
+  }
+
+  async removeDefaultGrant(defaultGrantId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/default-grants/${defaultGrantId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getAccessSettings(): Promise<AccessSettings> {
+    return this.request<AccessSettings>('/api/v1/admin/access-settings');
+  }
+
+  async setAccessSettings(defaultAccessLevel: AccessLevel): Promise<AccessSettings> {
+    return this.request<AccessSettings>('/api/v1/admin/access-settings', {
+      method: 'PUT',
+      body: { default_access_level: defaultAccessLevel },
     });
   }
 
