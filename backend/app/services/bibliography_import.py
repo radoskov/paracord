@@ -161,19 +161,38 @@ def import_records(
     actor: User,
     input_type: str,
     event_type: str,
+    target_shelf_id=None,
 ) -> ImportBatch:
-    """Upsert records into works (dedup by DOI/title) and record an import batch."""
+    """Upsert records into works (dedup by DOI/title) and record an import batch.
+
+    ``target_shelf_id`` (additive — Phase J item 6) optionally adds every created/matched work to a
+    shelf through the shared ACL-checked helper, so a missing shelf (404) or lack of modify access
+    (403) aborts the whole import before any partial state.
+    """
     created = 0
     matched = 0
     skipped = 0
+    added_to_shelf = 0
+
+    def _add_to_shelf(work_id) -> None:
+        nonlocal added_to_shelf
+        if target_shelf_id is None:
+            return
+        from app.services.shelf_membership import add_work_to_shelf_checked
+
+        add_work_to_shelf_checked(db, shelf_id=target_shelf_id, work_id=work_id, actor=actor)
+        added_to_shelf += 1
+
     for record in records:
         if not record.title:
             skipped += 1
             continue
         doi = normalize_doi(record.doi) if record.doi else None
         normalized = normalize_title(record.title)
-        if _find_existing(db, doi=doi, normalized_title=normalized) is not None:
+        existing = _find_existing(db, doi=doi, normalized_title=normalized)
+        if existing is not None:
             matched += 1
+            _add_to_shelf(existing.id)
             continue
         work = Work(
             canonical_title=record.title,
@@ -184,6 +203,7 @@ def import_records(
             abstract=record.abstract,
             work_type=record.work_type,
             canonical_metadata_source=input_type,
+            created_by_user_id=actor.id,
         )
         db.add(work)
         db.flush()
@@ -200,9 +220,13 @@ def import_records(
                 )
             )
         created += 1
+        _add_to_shelf(work.id)
 
     now = datetime.now(UTC)
     stats = {"entries": len(records), "created": created, "matched": matched, "skipped": skipped}
+    if target_shelf_id is not None:
+        stats["added_to_shelf"] = added_to_shelf
+        stats["target_shelf_id"] = str(target_shelf_id)
     batch = ImportBatch(
         created_by_user_id=actor.id,
         input_type=input_type,
@@ -224,15 +248,25 @@ def import_records(
     return batch
 
 
-def import_ris(db: Session, content: str, *, actor: User) -> ImportBatch:
+def import_ris(db: Session, content: str, *, actor: User, target_shelf_id=None) -> ImportBatch:
     """Create works from RIS content."""
     return import_records(
-        db, parse_ris(content), actor=actor, input_type="ris", event_type="import.ris"
+        db,
+        parse_ris(content),
+        actor=actor,
+        input_type="ris",
+        event_type="import.ris",
+        target_shelf_id=target_shelf_id,
     )
 
 
-def import_csl(db: Session, content: str, *, actor: User) -> ImportBatch:
+def import_csl(db: Session, content: str, *, actor: User, target_shelf_id=None) -> ImportBatch:
     """Create works from CSL-JSON content."""
     return import_records(
-        db, parse_csl(content), actor=actor, input_type="csl", event_type="import.csl"
+        db,
+        parse_csl(content),
+        actor=actor,
+        input_type="csl",
+        event_type="import.csl",
+        target_shelf_id=target_shelf_id,
     )

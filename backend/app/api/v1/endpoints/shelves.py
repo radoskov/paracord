@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.access_settings import get_default_access_level
+from app.services.shelf_membership import add_work_to_shelf_checked
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -171,29 +172,21 @@ def add_work_to_shelf(
     actor: User = LIBRARIAN_DEP,
 ) -> None:
     """Add a work to a shelf (requires modify access to the shelf)."""
-    shelf = db.get(Shelf, shelf_id)
-    if shelf is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
-    _guard_modify_shelf(db, actor, shelf)
     work = db.get(Work, payload.work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     if not access.can_see_work(db, actor, work):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": payload.work_id})
-    if link is None:
-        db.add(
-            ShelfWork(
-                shelf_id=shelf_id,
-                work_id=payload.work_id,
-                added_by_user_id=actor.id,
-                position=payload.position,
-                note=payload.note,
-            )
-        )
-    else:
-        link.position = payload.position
-        link.note = payload.note
+    # The shelf 404 + modify-access (403) check + upsert live in the shared helper so every import
+    # path enforces the same rule.
+    add_work_to_shelf_checked(
+        db,
+        shelf_id=shelf_id,
+        work_id=payload.work_id,
+        actor=actor,
+        position=payload.position,
+        note=payload.note,
+    )
     db.commit()
 
 

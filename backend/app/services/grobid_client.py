@@ -87,3 +87,52 @@ class GrobidClient:
             return response.text
         except httpx.ConnectError as exc:
             raise _unavailable(self.base_url, exc) from exc
+
+    def _citation_form_data(self, citations: str | list[str]) -> dict[str, str | list[str]]:
+        """Build the form fields for the citation-parse endpoints.
+
+        ``citations`` is sent as a (possibly repeated) ``citations`` field — a list yields one
+        repeated part per raw string, which is the shape ``/api/processCitationList`` expects for a
+        batch. ``consolidateCitations`` is driven from settings (same privacy/egress knob as the
+        full-text path).
+        """
+        return {
+            "citations": citations,
+            "consolidateCitations": "1" if self._settings.grobid_consolidate_citations else "0",
+            "includeRawCitations": "1" if self._settings.grobid_include_raw_citations else "0",
+        }
+
+    def process_citation_sync(self, raw_citation: str) -> str:
+        """Parse a single raw citation string into TEI (``/api/processCitation``).
+
+        Synchronous — intended for the batch-import request path (timeboxed, never inside the
+        async event loop). Raises :class:`GrobidUnavailableError` when GROBID is unreachable.
+        """
+        try:
+            with httpx.Client(timeout=60) as client:
+                response = client.post(
+                    f"{self.base_url}/api/processCitation",
+                    data=self._citation_form_data(raw_citation),
+                )
+            response.raise_for_status()
+            return response.text
+        except httpx.ConnectError as exc:
+            raise _unavailable(self.base_url, exc) from exc
+
+    def process_citation_list_sync(self, raw_citations: list[str]) -> str:
+        """Parse many raw citation strings in ONE call (``/api/processCitationList``).
+
+        The strings are sent as repeated ``citations`` form fields (preferred for batch — a single
+        HTTP round-trip). Returns a TEI document whose ``listBibl`` holds one ``biblStruct`` per
+        parsed citation. Raises :class:`GrobidUnavailableError` when GROBID is unreachable.
+        """
+        try:
+            with httpx.Client(timeout=120) as client:
+                response = client.post(
+                    f"{self.base_url}/api/processCitationList",
+                    data=self._citation_form_data(list(raw_citations)),
+                )
+            response.raise_for_status()
+            return response.text
+        except httpx.ConnectError as exc:
+            raise _unavailable(self.base_url, exc) from exc

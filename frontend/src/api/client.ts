@@ -456,6 +456,51 @@ export interface IdentifierImportResponse {
   enriched_sources: string[];
 }
 
+// Batch citation import (Phase J item 5).
+export type EngineKind = 'lookup' | 'grobid';
+export type BatchMatchStatus = 'matched' | 'title_only' | 'no_match';
+
+export interface DraftCandidate {
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  venue: string | null;
+  source: string;
+  sources: string[];
+  confidence: number;
+}
+
+export interface ParsedDraft {
+  line_index: number;
+  raw_line: string;
+  engine: EngineKind;
+  suggested_title: string | null;
+  suggested_authors: string[];
+  suggested_year: number | null;
+  suggested_doi: string | null;
+  suggested_venue: string | null;
+  suggested_abstract: string | null;
+  match_status: BatchMatchStatus;
+  candidates: DraftCandidate[];
+}
+
+export interface BatchPreviewResponse {
+  drafts: ParsedDraft[];
+  degraded: boolean;
+  grobid_unavailable: boolean;
+}
+
+export interface BatchCommitDraft {
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  venue: string | null;
+  abstract: string | null;
+  include: boolean;
+}
+
 export interface ScopeSummaryResponse {
   entity_type: string;
   entity_id: string;
@@ -1073,24 +1118,31 @@ export class ApiClient {
     });
   }
 
-  async importBibtex(content: string): Promise<ImportBatch> {
+  async importBibtex(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
     return this.request<ImportBatch>('/api/v1/imports/bibtex', {
       method: 'POST',
-      body: { content },
+      body: { content, target_shelf_id: targetShelfId ?? null },
     });
   }
 
-  async importRis(content: string): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/ris', { method: 'POST', body: { content } });
+  async importRis(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/ris', {
+      method: 'POST',
+      body: { content, target_shelf_id: targetShelfId ?? null },
+    });
   }
 
-  async importCsl(content: string): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/csl', { method: 'POST', body: { content } });
+  async importCsl(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/csl', {
+      method: 'POST',
+      body: { content, target_shelf_id: targetShelfId ?? null },
+    });
   }
 
-  async uploadPdf(file: File): Promise<ImportBatch> {
+  async uploadPdf(file: File, targetShelfId?: string | null): Promise<ImportBatch> {
     const form = new FormData();
     form.append('file', file);
+    if (targetShelfId) form.append('target_shelf_id', targetShelfId);
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     const response = await fetch(`${this.baseUrl}/api/v1/imports/upload`, {
@@ -1112,10 +1164,36 @@ export class ApiClient {
   async importByIdentifier(
     identifierType: 'arxiv' | 'doi',
     value: string,
+    targetShelfId?: string | null,
   ): Promise<IdentifierImportResponse> {
     return this.request<IdentifierImportResponse>('/api/v1/imports/identifier', {
       method: 'POST',
-      body: { identifier_type: identifierType, value },
+      body: { identifier_type: identifierType, value, target_shelf_id: targetShelfId ?? null },
+    });
+  }
+
+  async batchImportPreview(
+    lines: string[],
+    engine: EngineKind,
+  ): Promise<BatchPreviewResponse> {
+    return this.request<BatchPreviewResponse>('/api/v1/imports/batch/preview', {
+      method: 'POST',
+      body: { lines, engine },
+    });
+  }
+
+  async batchImportCommit(
+    drafts: BatchCommitDraft[],
+    options: { engine: EngineKind; targetShelfId?: string | null; enrich?: boolean },
+  ): Promise<ImportBatch> {
+    return this.request<ImportBatch>('/api/v1/imports/batch/commit', {
+      method: 'POST',
+      body: {
+        drafts,
+        engine: options.engine,
+        target_shelf_id: options.targetShelfId ?? null,
+        enrich: options.enrich ?? true,
+      },
     });
   }
 

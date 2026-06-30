@@ -70,12 +70,27 @@ def parse_bibtex_authors(value: str | None) -> list[str]:
     return authors
 
 
-def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
-    """Create works from BibTeX content and record an import batch + audit event."""
+def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=None) -> ImportBatch:
+    """Create works from BibTeX content and record an import batch + audit event.
+
+    ``target_shelf_id`` (additive — Phase J item 6) optionally adds every created/matched work to a
+    shelf through the shared ACL-checked helper (404/403 abort the whole import before partial state).
+    """
     entries = parse_bibtex(content)
     created = 0
     matched = 0
     skipped = 0
+    added_to_shelf = 0
+
+    def _add_to_shelf(work_id) -> None:
+        nonlocal added_to_shelf
+        if target_shelf_id is None:
+            return
+        from app.services.shelf_membership import add_work_to_shelf_checked
+
+        add_work_to_shelf_checked(db, shelf_id=target_shelf_id, work_id=work_id, actor=actor)
+        added_to_shelf += 1
+
     for entry in entries:
         title = entry.fields.get("title")
         if not title:
@@ -84,8 +99,10 @@ def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
         raw_doi = entry.fields.get("doi")
         doi = normalize_doi(raw_doi) if raw_doi else None
         normalized = normalize_title(title)
-        if _find_existing(db, doi=doi, normalized_title=normalized) is not None:
+        existing = _find_existing(db, doi=doi, normalized_title=normalized)
+        if existing is not None:
             matched += 1
+            _add_to_shelf(existing.id)
             continue
         raw_arxiv_id = _arxiv_id(entry.fields)
         work = Work(
@@ -99,6 +116,7 @@ def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
             abstract=entry.fields.get("abstract"),
             work_type=entry.entry_type,
             canonical_metadata_source="bibtex",
+            created_by_user_id=actor.id,
         )
         db.add(work)
         db.flush()
@@ -116,9 +134,13 @@ def import_bibtex(db: Session, content: str, *, actor: User) -> ImportBatch:
                 )
             )
         created += 1
+        _add_to_shelf(work.id)
 
     now = datetime.now(UTC)
     stats = {"entries": len(entries), "created": created, "matched": matched, "skipped": skipped}
+    if target_shelf_id is not None:
+        stats["added_to_shelf"] = added_to_shelf
+        stats["target_shelf_id"] = str(target_shelf_id)
     batch = ImportBatch(
         created_by_user_id=actor.id,
         input_type="bibtex",

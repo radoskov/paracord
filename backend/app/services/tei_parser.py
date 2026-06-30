@@ -20,6 +20,9 @@ class ParsedReference:
     title: str | None = None
     doi: str | None = None
     year: int | None = None
+    # Additive (Phase J batch import): the citation's authors and venue, when GROBID resolves them.
+    authors: list[str] = field(default_factory=list)
+    venue: str | None = None
 
 
 @dataclass
@@ -80,6 +83,69 @@ def _year(date_element) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _persname_to_name(pers) -> str | None:
+    """Render a TEI ``persName`` element to a "Forename Surname" string, or None."""
+    forenames = " ".join(_text(f) or "" for f in pers.findall("t:forename", TEI_NS)).strip()
+    surname = _text(pers.find("t:surname", TEI_NS)) or ""
+    name = " ".join(part for part in (forenames, surname) if part).strip()
+    return name or None
+
+
+def _biblstruct_authors(bibl) -> list[str]:
+    """Extract author display names from a ``biblStruct`` (analytic authors, else monogr)."""
+    persons = bibl.findall(".//t:analytic/t:author/t:persName", TEI_NS)
+    if not persons:
+        persons = bibl.findall(".//t:author/t:persName", TEI_NS)
+    names = [_persname_to_name(p) for p in persons]
+    return [n for n in names if n]
+
+
+def _biblstruct_to_reference(bibl, index: int) -> ParsedReference:
+    """Convert one TEI ``biblStruct`` element into a :class:`ParsedReference`.
+
+    Shared by the full-text reference list (``parse_tei``) and the citation-list parser
+    (``parse_citation_list``). The venue is the monograph title when an analytic (article) title is
+    present (so the analytic title stays the reference title and the monograph is the journal/book).
+    """
+    analytic_title = bibl.find(".//t:analytic/t:title", TEI_NS)
+    monogr_title = bibl.find(".//t:monogr/t:title", TEI_NS)
+    title = _text(_first(analytic_title, monogr_title))
+    # Only treat the monograph title as the venue when it isn't itself the reference title.
+    venue = _text(monogr_title) if analytic_title is not None else None
+    return ParsedReference(
+        key=bibl.get(XML_ID) or bibl.get("id") or f"b{index}",
+        raw_citation=_text(bibl.find('.//t:note[@type="raw_reference"]', TEI_NS)),
+        title=title,
+        doi=_text(bibl.find('.//t:idno[@type="DOI"]', TEI_NS)),
+        year=_year(
+            _first(
+                bibl.find(".//t:monogr//t:date", TEI_NS),
+                bibl.find(".//t:date", TEI_NS),
+            )
+        ),
+        authors=_biblstruct_authors(bibl),
+        venue=venue,
+    )
+
+
+def parse_citation_list(tei_xml: str) -> list[ParsedReference]:
+    """Parse the TEI returned by GROBID's ``/api/processCitation[List]`` into references.
+
+    Walks every ``biblStruct`` in the document (the citation endpoints emit one per input string)
+    and returns a :class:`ParsedReference` for each — empty on malformed/empty TEI.
+    """
+    if not tei_xml or not tei_xml.strip():
+        return []
+    try:
+        root = etree.fromstring(tei_xml.encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return []
+    return [
+        _biblstruct_to_reference(bibl, index)
+        for index, bibl in enumerate(root.findall(".//t:biblStruct", TEI_NS))
+    ]
+
+
 def parse_tei(tei_xml: str) -> ParsedPaper:
     """Parse GROBID TEI into PaRacORD structures."""
     paper = ParsedPaper()
@@ -102,23 +168,7 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
             paper.authors.append(name)
 
     for index, bibl in enumerate(root.findall(".//t:listBibl/t:biblStruct", TEI_NS)):
-        reference = ParsedReference(
-            key=bibl.get(XML_ID) or bibl.get("id") or f"b{index}",
-            raw_citation=_text(bibl.find('.//t:note[@type="raw_reference"]', TEI_NS)),
-            title=_text(
-                _first(
-                    bibl.find(".//t:analytic/t:title", TEI_NS),
-                    bibl.find(".//t:monogr/t:title", TEI_NS),
-                )
-            ),
-            doi=_text(bibl.find('.//t:idno[@type="DOI"]', TEI_NS)),
-            year=_year(
-                _first(
-                    bibl.find(".//t:monogr//t:date", TEI_NS),
-                    bibl.find(".//t:date", TEI_NS),
-                )
-            ),
-        )
+        reference = _biblstruct_to_reference(bibl, index)
         if reference.raw_citation or reference.title or reference.doi:
             paper.references.append(reference)
 

@@ -5,12 +5,12 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_min_role
+from app.api.deps import require_contributor, require_min_role
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
@@ -18,11 +18,12 @@ from app.models.agent import Agent
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.schemas.agent import TeleportRequest
-from app.services import agent_files
+from app.services import agent_files, batch_import
 from app.services.bibliography_import import import_csl, import_ris
 from app.services.bibtex import import_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.services.metadata_enrichment import enrich_work
+from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.storage import (
     file_ids_pending_extraction,
     import_server_folder,
@@ -34,6 +35,8 @@ from app.workers.queue import enqueue_extraction
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
+# Paper-creation floor (Phase H/J): contributor+ may import (per-object scoping still applies).
+CONTRIBUTOR_DEP = Depends(require_contributor)
 
 
 class FolderImportCreate(BaseModel):
@@ -43,6 +46,9 @@ class FolderImportCreate(BaseModel):
 
 class BibtexImportCreate(BaseModel):
     content: str
+    # Optional import-to-shelf (Phase J item 6): add every created/matched work to this shelf
+    # (404/403 via the shared ACL helper if missing / not modifiable).
+    target_shelf_id: uuid.UUID | None = None
 
 
 class ImportBatchRead(BaseModel):
@@ -94,7 +100,7 @@ def import_bibtex_entries(
     """Create works from pasted/uploaded BibTeX content."""
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty BibTeX content")
-    batch = import_bibtex(db, payload.content, actor=actor)
+    batch = import_bibtex(db, payload.content, actor=actor, target_shelf_id=payload.target_shelf_id)
     db.commit()
     db.refresh(batch)
     return batch
@@ -109,7 +115,7 @@ def import_ris_entries(
     """Create works from pasted/uploaded RIS content."""
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty RIS content")
-    batch = import_ris(db, payload.content, actor=actor)
+    batch = import_ris(db, payload.content, actor=actor, target_shelf_id=payload.target_shelf_id)
     db.commit()
     db.refresh(batch)
     return batch
@@ -125,7 +131,9 @@ def import_csl_entries(
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty CSL content")
     try:
-        batch = import_csl(db, payload.content, actor=actor)
+        batch = import_csl(
+            db, payload.content, actor=actor, target_shelf_id=payload.target_shelf_id
+        )
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSL JSON: {exc}"
@@ -178,10 +186,19 @@ _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit
 @router.post("/upload", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
 async def upload_pdf(
     file: UploadFile,
+    target_shelf_id: uuid.UUID | None = Form(default=None),
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> ImportBatch:
-    """Upload a single PDF to the managed library (content-addressed, auto-deduped)."""
+    """Upload a single PDF to the managed library (content-addressed, auto-deduped).
+
+    ``target_shelf_id`` (Phase J item 6) optionally adds the uploaded paper to a shelf. The work is
+    minted by ``import_uploaded_pdf`` at request time (a new FileWorkLink, or the pre-existing one
+    for a deduped upload), so we resolve it and add it through the shared ACL-checked helper *here*
+    — synchronous-at-upload rather than the design's worker-deferred option, since the work id is
+    already available and we keep the actor's request/ACL context (see report deviation note). A
+    missing shelf / lack of modify access (404/403) aborts the upload via the helper.
+    """
     if file.content_type and file.content_type not in (
         "application/pdf",
         "application/octet-stream",
@@ -210,6 +227,15 @@ async def upload_pdf(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if target_shelf_id is not None:
+        from app.models.file import FileWorkLink
+
+        link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file_obj.id))
+        if link is not None:
+            # ACL-checked add (404/403 abort the upload before commit) via the shared helper.
+            add_work_to_shelf_checked(
+                db, shelf_id=target_shelf_id, work_id=link.work_id, actor=actor
+            )
     db.commit()
     db.refresh(batch)
     enqueue_extraction(file_obj.id)
@@ -219,6 +245,8 @@ async def upload_pdf(
 class IdentifierImportCreate(BaseModel):
     identifier_type: Literal["arxiv", "doi"]
     value: str
+    # Optional import-to-shelf (Phase J item 6).
+    target_shelf_id: uuid.UUID | None = None
 
 
 class IdentifierImportResponse(BaseModel):
@@ -259,6 +287,10 @@ def import_by_identifier(
         if existing is not None:
             settings = get_settings()
             result = enrich_work(db, existing, settings=settings, actor_user_id=actor.id)
+            if payload.target_shelf_id is not None:
+                add_work_to_shelf_checked(
+                    db, shelf_id=payload.target_shelf_id, work_id=existing.id, actor=actor
+                )
             db.commit()
             return IdentifierImportResponse(
                 work_id=existing.id, created=False, enriched_sources=result["sources"]
@@ -269,6 +301,7 @@ def import_by_identifier(
             canonical_metadata_source="identifier",
             arxiv_id=value,
             arxiv_base_id=base,
+            created_by_user_id=actor.id,
         )
     else:
         doi = value.removeprefix("https://doi.org/").removeprefix("http://doi.org/").strip()
@@ -278,6 +311,10 @@ def import_by_identifier(
         if existing is not None:
             settings = get_settings()
             result = enrich_work(db, existing, settings=settings, actor_user_id=actor.id)
+            if payload.target_shelf_id is not None:
+                add_work_to_shelf_checked(
+                    db, shelf_id=payload.target_shelf_id, work_id=existing.id, actor=actor
+                )
             db.commit()
             return IdentifierImportResponse(
                 work_id=existing.id, created=False, enriched_sources=result["sources"]
@@ -287,6 +324,7 @@ def import_by_identifier(
             normalized_title=normalize_title(f"doi {doi}"),
             canonical_metadata_source="identifier",
             doi=doi,
+            created_by_user_id=actor.id,
         )
 
     db.add(work)
@@ -301,10 +339,167 @@ def import_by_identifier(
     )
     settings = get_settings()
     result = enrich_work(db, work, settings=settings, actor_user_id=actor.id)
+    if payload.target_shelf_id is not None:
+        add_work_to_shelf_checked(
+            db, shelf_id=payload.target_shelf_id, work_id=work.id, actor=actor
+        )
     db.commit()
     return IdentifierImportResponse(
         work_id=work.id, created=True, enriched_sources=result["sources"]
     )
+
+
+# --- batch citation import (Phase J item 5) --------------------------------
+
+
+class BatchPreviewRequest(BaseModel):
+    # Either pass ``lines`` (already split) or ``text`` (split on newlines). ``lines`` wins.
+    lines: list[str] | None = None
+    text: str | None = None
+    engine: Literal["lookup", "grobid"] = "lookup"
+
+    def resolved_lines(self) -> list[str]:
+        if self.lines is not None:
+            return self.lines
+        if self.text is not None:
+            return self.text.splitlines()
+        return []
+
+
+class DraftCandidateRead(BaseModel):
+    title: str | None = None
+    authors: list[str] = []
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+    source: str
+    sources: list[str] = []
+    confidence: float
+
+
+class ParsedDraftRead(BaseModel):
+    line_index: int
+    raw_line: str
+    engine: Literal["lookup", "grobid"]
+    suggested_title: str | None = None
+    suggested_authors: list[str] = []
+    suggested_year: int | None = None
+    suggested_doi: str | None = None
+    suggested_venue: str | None = None
+    suggested_abstract: str | None = None
+    match_status: Literal["matched", "title_only", "no_match"]
+    candidates: list[DraftCandidateRead] = []
+
+
+class BatchPreviewResponse(BaseModel):
+    drafts: list[ParsedDraftRead]
+    degraded: bool = False
+    grobid_unavailable: bool = False
+
+
+class BatchCommitDraft(BaseModel):
+    title: str | None = None
+    authors: list[str] = []
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+    abstract: str | None = None
+    include: bool = True
+
+
+class BatchCommitRequest(BaseModel):
+    drafts: list[BatchCommitDraft]
+    engine: Literal["lookup", "grobid"] = "lookup"
+    target_shelf_id: uuid.UUID | None = None
+    enrich: bool = True
+
+
+def _draft_to_read(draft: batch_import.ParsedDraft) -> ParsedDraftRead:
+    return ParsedDraftRead(
+        line_index=draft.line_index,
+        raw_line=draft.raw_line,
+        engine=draft.engine,
+        suggested_title=draft.suggested_title,
+        suggested_authors=draft.suggested_authors,
+        suggested_year=draft.suggested_year,
+        suggested_doi=draft.suggested_doi,
+        suggested_venue=draft.suggested_venue,
+        suggested_abstract=draft.suggested_abstract,
+        match_status=draft.match_status,
+        candidates=[
+            DraftCandidateRead(
+                title=c.title,
+                authors=c.authors,
+                year=c.year,
+                doi=c.doi,
+                venue=c.venue,
+                source=c.source,
+                sources=c.sources,
+                confidence=c.confidence,
+            )
+            for c in draft.candidates
+        ],
+    )
+
+
+@router.post("/batch/preview", response_model=BatchPreviewResponse)
+def batch_preview(
+    payload: BatchPreviewRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> BatchPreviewResponse:
+    """Preview a batch of raw citation lines (NO writes). Returns 200 even on a partial/degraded run.
+
+    ``engine="lookup"`` searches Crossref/OpenAlex/Semantic Scholar per line (timeboxed by the
+    web_find wall-clock budget); ``engine="grobid"`` parses every line in one processCitationList
+    call and degrades to title-only (with ``grobid_unavailable``) when GROBID is down.
+    """
+    _ = db  # no DB access for preview; kept for dependency symmetry
+    preview = batch_import.preview_lines(
+        payload.resolved_lines(), engine=payload.engine, settings=get_settings()
+    )
+    return BatchPreviewResponse(
+        drafts=[_draft_to_read(d) for d in preview.drafts],
+        degraded=preview.degraded,
+        grobid_unavailable=preview.grobid_unavailable,
+    )
+
+
+@router.post("/batch/commit", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
+def batch_commit(
+    payload: BatchCommitRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> ImportBatch:
+    """Commit confirmed batch drafts into works (deduped) and optionally add them to a shelf.
+
+    Gated at the contributor floor; import-to-shelf additionally requires shelf modify access
+    (enforced inside the shared ACL helper — a 404/403 there rolls the whole commit back).
+    """
+    confirmed = [
+        batch_import.ConfirmedDraft(
+            title=d.title,
+            authors=d.authors,
+            year=d.year,
+            doi=d.doi,
+            venue=d.venue,
+            abstract=d.abstract,
+            include=d.include,
+        )
+        for d in payload.drafts
+    ]
+    batch = batch_import.commit_drafts(
+        db,
+        confirmed,
+        actor=actor,
+        engine=payload.engine,
+        target_shelf_id=payload.target_shelf_id,
+        enrich=payload.enrich,
+        settings=get_settings(),
+    )
+    db.commit()
+    db.refresh(batch)
+    return batch
 
 
 @router.get("/{batch_id}", response_model=ImportBatchRead)

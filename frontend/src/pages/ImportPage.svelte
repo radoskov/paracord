@@ -3,10 +3,19 @@
   import { get } from 'svelte/store';
 
   import { ApiClient, type ServerImportRoot, type Source } from '../api/client';
+  import BatchImport from '../components/BatchImport.svelte';
+  import ShelfPicker from '../components/ShelfPicker.svelte';
   import { isOwner } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // Optional import-to-shelf targets per card (Phase J item 6); '' means no shelf.
+  let uploadShelfId = '';
+  let identifierShelfId = '';
+  let bibtexShelfId = '';
+  let risShelfId = '';
+  let cslShelfId = '';
 
   let sources: Source[] = [];
   // The merged (yaml + owner-managed DB) import-root whitelist. Owner-only to list, so it stays
@@ -78,7 +87,7 @@
     if (!uploadFile) return;
     const file = uploadFile;
     await run(async () => {
-      const batch = await client.uploadPdf(file);
+      const batch = await client.uploadPdf(file, uploadShelfId || null);
       uploadFile = null;
       message = `Uploaded “${file.name}” (batch ${batch.status}); extraction queued`;
     });
@@ -89,7 +98,11 @@
     if (!value) return;
     await run(async () => {
       const isArxiv = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/i.test(value);
-      const result = await client.importByIdentifier(isArxiv ? 'arxiv' : 'doi', value);
+      const result = await client.importByIdentifier(
+        isArxiv ? 'arxiv' : 'doi',
+        value,
+        identifierShelfId || null,
+      );
       identifierValue = '';
       message = result.created
         ? `Imported as ${isArxiv ? 'arXiv' : 'DOI'} (${result.enriched_sources.join(', ') || 'no enrichment'})`
@@ -100,7 +113,7 @@
   async function importBibtex(): Promise<void> {
     if (!bibtexContent.trim()) return;
     await run(async () => {
-      const batch = await client.importBibtex(bibtexContent);
+      const batch = await client.importBibtex(bibtexContent, bibtexShelfId || null);
       bibtexContent = '';
       message = `BibTeX import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
@@ -109,7 +122,7 @@
   async function importRis(): Promise<void> {
     if (!risContent.trim()) return;
     await run(async () => {
-      const batch = await client.importRis(risContent);
+      const batch = await client.importRis(risContent, risShelfId || null);
       risContent = '';
       message = `RIS import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
@@ -118,7 +131,7 @@
   async function importCsl(): Promise<void> {
     if (!cslContent.trim()) return;
     await run(async () => {
-      const batch = await client.importCsl(cslContent);
+      const batch = await client.importCsl(cslContent, cslShelfId || null);
       cslContent = '';
       message = `CSL import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
@@ -133,6 +146,7 @@
     <p class="muted">Store a PDF in the managed library; GROBID extraction runs in the background.</p>
     <input type="file" accept=".pdf,application/pdf"
       on:change={(e) => (uploadFile = e.currentTarget.files?.[0] ?? null)} aria-label="PDF file" />
+    <ShelfPicker {client} bind:value={uploadShelfId} label="Add to shelf (optional)" />
     <button type="button" on:click={upload} disabled={!uploadFile || loading}
       title={uploadFile ? 'Upload the chosen PDF' : 'Choose a PDF file first'}>Upload PDF</button>
     {#if !uploadFile}<p class="hintline">Choose a PDF to enable “Upload PDF”.</p>{/if}
@@ -141,10 +155,13 @@
   <div class="card">
     <h2>Import by identifier</h2>
     <p class="muted">Fetch metadata for an arXiv id or DOI and create a paper (idempotent).</p>
-    <form on:submit|preventDefault={importIdentifier} class="row">
-      <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
-      <button type="submit" disabled={!identifierValue.trim() || loading}
-        title={identifierValue.trim() ? 'Fetch metadata and create the paper' : 'Enter an arXiv id or DOI first'}>Import</button>
+    <form on:submit|preventDefault={importIdentifier} class="stack">
+      <div class="row">
+        <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
+        <button type="submit" disabled={!identifierValue.trim() || loading}
+          title={identifierValue.trim() ? 'Fetch metadata and create the paper' : 'Enter an arXiv id or DOI first'}>Import</button>
+      </div>
+      <ShelfPicker {client} bind:value={identifierShelfId} label="Add to shelf (optional)" />
     </form>
   </div>
 
@@ -199,6 +216,7 @@
     <p class="muted">Paste one or more BibTeX entries; duplicates (by DOI/title) are skipped.</p>
     <form on:submit|preventDefault={importBibtex} class="stack">
       <textarea bind:value={bibtexContent} rows="5" placeholder="@article&#123;...&#125;" aria-label="BibTeX"></textarea>
+      <ShelfPicker {client} bind:value={bibtexShelfId} label="Add to shelf (optional)" />
       <button type="submit" disabled={!bibtexContent.trim() || loading}
         title={bibtexContent.trim() ? 'Import the pasted BibTeX entries' : 'Paste BibTeX first'}>Import BibTeX</button>
     </form>
@@ -209,6 +227,7 @@
     <p class="muted">Reference Manager / EndNote format (tagged lines, one record per <code>ER</code>).</p>
     <form on:submit|preventDefault={importRis} class="stack">
       <textarea bind:value={risContent} rows="5" placeholder="TY  - JOUR&#10;TI  - Title&#10;ER  -" aria-label="RIS"></textarea>
+      <ShelfPicker {client} bind:value={risShelfId} label="Add to shelf (optional)" />
       <button type="submit" disabled={!risContent.trim() || loading}
         title={risContent.trim() ? 'Import the pasted RIS records' : 'Paste RIS first'}>Import RIS</button>
     </form>
@@ -219,9 +238,14 @@
     <p class="muted">Citation Style Language JSON (an array of items, as exported by Zotero).</p>
     <form on:submit|preventDefault={importCsl} class="stack">
       <textarea bind:value={cslContent} rows="5" placeholder={'[{"title": "…", "DOI": "…"}]'} aria-label="CSL JSON"></textarea>
+      <ShelfPicker {client} bind:value={cslShelfId} label="Add to shelf (optional)" />
       <button type="submit" disabled={!cslContent.trim() || loading}
         title={cslContent.trim() ? 'Import the pasted CSL JSON items' : 'Paste CSL JSON first'}>Import CSL JSON</button>
     </form>
+  </div>
+
+  <div class="card wide">
+    <BatchImport {client} />
   </div>
 </section>
 

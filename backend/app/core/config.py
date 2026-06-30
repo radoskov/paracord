@@ -173,6 +173,12 @@ class Settings(BaseSettings):
     # (display-only "platform"). Short, best-effort, concurrent; never downloads a body.
     web_find_resolve_enabled: bool = True
     web_find_resolve_timeout: float = 4.0
+    # Batch citation import (Phase J item 5): cap how many raw lines a single batch preview/commit
+    # will process (protects the lookup engine's per-line fan-out from an unbounded paste).
+    web_find_batch_max_lines: int = 200
+    # Score at/above which a lookup-engine batch line is auto-treated as a confident "matched"
+    # (its top candidate prefills the draft); below it the line is "title_only".
+    web_find_batch_match_threshold: float = 0.6
     # AI provider seams (Stage 6). Defaults keep the dependency-free lexical baselines; the
     # heavier providers are opt-in and degrade gracefully when their lib/daemon is absent.
     embedding_provider: str = "hash_bow"  # hash_bow | sentence_transformers | ollama
