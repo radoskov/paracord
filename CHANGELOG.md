@@ -27,6 +27,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **C3/C4 — schema hardening (migration `0017`).** Added the previously-weak foreign keys
+  (`locations.agent_id` → `agents`; `references.citing_work_id`/`resolved_work_id`/`source_tei_id`
+  and `citation_mentions.citing_work_id`/`reference_id`/`resolved_cited_work_id`/`source_tei_id` →
+  `works`/`references`/`raw_tei_documents`, with `CASCADE`/`SET NULL`) and converted the remaining
+  document JSON columns (`sources.config`, `import_batches.settings`/`stats`,
+  `duplicate_candidates.signals`, `annotations.coordinates`) to **JSONB** on Postgres. The migration
+  no-ops on non-Postgres dialects; the migration-parity test now also asserts every model foreign key
+  is present in the migrated schema.
 - **Stage 7 — dedup performance + ops.**
   - **Fuzzy-title dedup (H3):** normalized-title **blocking** (only works sharing the first title
     token are compared) bounds the former all-pairs scan; the similarity ratio uses `rapidfuzz`

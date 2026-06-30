@@ -4,9 +4,13 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# A JSON column that becomes JSONB on Postgres (for @>/-> queries) and plain JSON on SQLite.
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Source(Base):
@@ -29,7 +33,7 @@ class Source(Base):
     )
     path_alias: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     canonical_root_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
-    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -60,8 +64,8 @@ class ImportBatch(Base):
     )
     input_type: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(64), default="queued", index=True)
-    settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    settings: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
+    stats: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

@@ -332,14 +332,18 @@ a rewrite. **Keep the hash-BOW / TF-IDF / extractive providers as the default + 
 - **Ops. ✅ (core).** `make prod-smoke` (build prod stack + assert `/api/v1/health`); `make backup`
   / `make restore` + `docs/runbooks/backup_restore.md` (§8.16).
 
-**Genuinely-remaining tail** (non-blocking; pull forward only if needed):
-- **C3/C4 remainder** — add the weak FKs (`Location.agent_id`, `Reference`, `CitationMention`) and
-  extend the `JSONB` variant to the remaining JSON columns via a migration, then assert
-  autogenerate-clean parity. *(schema migration; deferred to avoid risk in the autonomous sweep)*
-- **H7** — pgvector column + index + `CREATE EXTENSION vector`. Ships with a *real* embedding model
-  (Stage 6 left `hash_bow` as the default), so it is intentionally not enabled yet.
-- **CSL citeproc styles**, a Postgres-backed FK-cascade/timestamptz/JSONB integration suite, and the
-  graph-scope export.
+**Genuinely-remaining tail** (now planned in **`docs/WORKPLAN_NEXT.md`**, 2026-06-30):
+- **C3/C4 remainder. ✅ DONE (2026-06-30, migration `0017`).** Added the weak FKs
+  (`locations.agent_id` → agents; `references.*` and `citation_mentions.*` → works/references/
+  raw_tei_documents with CASCADE / SET NULL) and converted the remaining document JSON columns
+  (`sources.config`, `import_batches.settings/stats`, `duplicate_candidates.signals`,
+  `annotations.coordinates`) to JSONB on Postgres. The parity test now also asserts every model FK
+  exists in the migrated schema.
+- **Headline next: runtime, GUI-managed AI providers + model download** (Stage 8 of
+  `WORKPLAN_NEXT.md`) — move provider selection out of static config into an owner-editable web UI
+  with in-GUI model pulls.
+- **H7 pgvector**, **CSL citeproc styles**, a **Postgres FK-cascade/timestamptz/JSONB integration
+  suite**, the **graph-scope export**, and an **ML extraction path** — Stage 9 of `WORKPLAN_NEXT.md`.
 
 ---
 

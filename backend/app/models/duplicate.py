@@ -5,9 +5,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, String, UniqueConstraint, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class DuplicateCandidate(Base):
@@ -32,7 +35,7 @@ class DuplicateCandidate(Base):
     entity_b_type: Mapped[str] = mapped_column(String(64), index=True)
     entity_b_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     score: Mapped[float] = mapped_column(Float)
-    signals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    signals: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(32), default="open", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

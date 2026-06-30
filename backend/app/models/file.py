@@ -51,6 +51,7 @@ class Location(Base):
     path_alias: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

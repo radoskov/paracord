@@ -5,9 +5,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, Integer, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Annotation(Base):
@@ -24,7 +27,7 @@ class Annotation(Base):
         index=True,
     )
     page: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    coordinates: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    coordinates: Mapped[dict[str, Any] | None] = mapped_column(_JSONB, nullable=True)
     selected_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     annotation_type: Mapped[str] = mapped_column(String(64), index=True)
     content_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)

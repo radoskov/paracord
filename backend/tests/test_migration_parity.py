@@ -91,3 +91,21 @@ def test_every_model_column_exists_after_migration(migrated_postgres) -> None:
         db_columns = {col["name"] for col in inspector.get_columns(table_name)}
         missing += [f"{table_name}.{c.name}" for c in table.columns if c.name not in db_columns]
     assert not missing, f"model columns absent from the migrated Postgres schema: {sorted(missing)}"
+
+
+def test_model_foreign_keys_exist_after_migration(migrated_postgres) -> None:
+    """Every FK declared on a model is present in the migrated schema (C3 — no weak FKs)."""
+    inspector = inspect(migrated_postgres)
+    db_tables = set(inspector.get_table_names())
+    missing: list[str] = []
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in db_tables:
+            continue
+        db_fk_cols = {
+            tuple(fk["constrained_columns"]) for fk in inspector.get_foreign_keys(table_name)
+        }
+        for fk in table.foreign_key_constraints:
+            cols = tuple(c.name for c in fk.columns)
+            if cols not in db_fk_cols:
+                missing.append(f"{table_name}({', '.join(cols)})")
+    assert not missing, f"model foreign keys absent from the migrated Postgres schema: {missing}"
