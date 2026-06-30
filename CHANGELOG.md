@@ -27,6 +27,29 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **WORKPLAN_NEXT Stage 8 — runtime, GUI-managed AI providers.** The heavier semantic engines are
+  now configured from the web UI instead of a config file. `ai_config` single-row table (migration
+  `0018`) overlays the static `Settings` defaults (empty row == today's lexical baselines);
+  `get_embedding_provider(db=…)`, summaries, and topics read the effective config. Owner API
+  (`/admin/ai-config`, `/admin/ai/providers`, `/admin/ai/models[/pull]`, `/admin/ai/reindex[/status]`)
+  + an Admin **"AI & Models"** panel: pick embedding/summary/topic providers + models (unavailable
+  ones disabled with how-to-enable hints), set the Ollama URL, **pull/delete models** (Ollama pull /
+  sentence-transformers download as RQ jobs), and **reindex** with an indexed/total readout.
+  Changing the embedding model auto-queues a reindex. `docs/runbooks/ai_providers.md` documents it.
+- **WORKPLAN_NEXT Stage 9 — roadmap tail.**
+  - **pgvector ANN (H7), gated:** migration `0019` adds the `vector` extension + an unconstrained
+    `embeddings.vector_pg` column (Postgres-only); when `pgvector_enabled` (default off) the index
+    path dual-writes it and search ranks via the `<=>` operator, falling back to JSON + Python cosine
+    otherwise. No new Python dependency.
+  - **Postgres integration suite** (PG-gated): FK CASCADE, `timestamptz`, JSONB `@>`, and the
+    pgvector ranking path end-to-end.
+  - **Citation styles:** a `styled` export format renders APA / IEEE / Chicago reference lists (via
+    the `style` field); surfaced in the export dialog with Preview/Copy/Download.
+  - **Library-scope export** + an **Insights/graph-scope export** control.
+  - **ML-extraction seam:** `extraction_backend` setting + provider detection for `nougat`/`marker`
+    (opt-in; full extractor integration is a documented follow-up).
+  - **API happy-path E2E** test (login → create → reindex + search → styled export → audit).
+
 - **C3/C4 — schema hardening (migration `0017`).** Added the previously-weak foreign keys
   (`locations.agent_id` → `agents`; `references.citing_work_id`/`resolved_work_id`/`source_tei_id`
   and `citation_mentions.citing_work_id`/`reference_id`/`resolved_cited_work_id`/`source_tei_id` →

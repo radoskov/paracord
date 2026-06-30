@@ -62,6 +62,21 @@ def detect_providers(*, ollama_url: str) -> dict:
             "embedding": {"available": True, "note": "Uses the active embedding provider."},
             "bertopic": {"available": True, "note": "Deterministic embedding-clustered backend."},
         },
+        "extraction": {
+            "grobid": {"available": True, "note": "Default TEI extractor (GROBID service)."},
+            "nougat": {
+                "available": _module_available("nougat"),
+                "note": None
+                if _module_available("nougat")
+                else "Opt-in ML extractor for hard/scanned PDFs — install in the AI image extra.",
+            },
+            "marker": {
+                "available": _module_available("marker"),
+                "note": None
+                if _module_available("marker")
+                else "Opt-in ML extractor — install in the AI image extra.",
+            },
+        },
         "ollama_reachable": ollama_models is not None,
     }
 

@@ -30,6 +30,7 @@ def export_scope(
             scope_id=scope_id,
             work_ids=payload.work_ids,
             output_format=payload.format,
+            style=payload.style,
             actor_user_id=actor.id,
         )
         extension, content_type = media_for(payload.format)

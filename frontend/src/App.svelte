@@ -157,7 +157,15 @@
   </div>
 
   {#if token && showChangePw}
-    <div class="pw-overlay" role="dialog" aria-modal="true" on:click|self={() => (showChangePw = false)}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+    <div
+      class="pw-overlay"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      on:click|self={() => (showChangePw = false)}
+      on:keydown={(e) => e.key === 'Escape' && (showChangePw = false)}
+    >
       <div class="pw-box card">
         <h2>Change password</h2>
         <form on:submit|preventDefault={submitChangePassword}>

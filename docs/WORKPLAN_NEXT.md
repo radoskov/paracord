@@ -1,5 +1,10 @@
 # PaRacORD — Work Plan, next phase (2026-06-30)
 
+> **Status: Stage 8 ✅ and Stage 9 ✅ implemented (2026-06-30).** This document is retained as the
+> design record; see the per-section ✅ notes. Remaining genuinely-future items are called out
+> inline (full citeproc CSL style files, a real Nougat/Marker extractor integration, a browser-level
+> Playwright E2E).
+
 Continues `docs/WORKPLAN.md` (Stages 1–7 done). It re-prioritizes the remaining roadmap around a
 maintainer directive:
 
@@ -19,7 +24,7 @@ the base install.
 
 ---
 
-## Stage 8 — Runtime, GUI-managed AI providers & model management  *(headline)*
+## Stage 8 — Runtime, GUI-managed AI providers & model management  ✅ DONE (2026-06-30)
 
 Make AI behavior a first-class, owner-managed runtime concern.
 
@@ -88,7 +93,7 @@ previous model until the new index is ready (no blank window). Triggered by 8B m
 
 ---
 
-## Stage 9 — Deferred roadmap tail  *(after Stage 8; mostly independent)*
+## Stage 9 — Deferred roadmap tail  ✅ DONE (2026-06-30; follow-ups noted inline)
 
 - **H7 — pgvector.** Now first-class (real fixed-dim embeddings arrive via Stage 8). Add a `vector`
   column + ANN index + `CREATE EXTENSION vector`, used **only** when the active provider yields a

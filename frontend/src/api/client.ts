@@ -77,8 +77,16 @@ export interface CitationGraphResponse {
   summary: Record<string, number>;
 }
 
-export type ExportScopeType = 'work' | 'shelf' | 'rack' | 'selection' | 'search';
-export type ExportFormat = 'bibtex' | 'biblatex' | 'ris' | 'csl-json' | 'markdown' | 'html' | 'text';
+export type ExportScopeType = 'work' | 'shelf' | 'rack' | 'library' | 'selection' | 'search';
+export type ExportFormat =
+  | 'bibtex'
+  | 'biblatex'
+  | 'ris'
+  | 'csl-json'
+  | 'markdown'
+  | 'html'
+  | 'text'
+  | 'styled';
 
 export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'bibtex', label: 'BibTeX' },
@@ -88,7 +96,10 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'markdown', label: 'Markdown' },
   { value: 'html', label: 'HTML' },
   { value: 'text', label: 'Plain text' },
+  { value: 'styled', label: 'Styled (APA/IEEE/…)' },
 ];
+
+export const CITATION_STYLES = ['apa', 'ieee', 'chicago'] as const;
 
 export interface ExportResponse {
   filename: string;
@@ -922,6 +933,7 @@ export class ApiClient {
     scope_id?: string | null;
     work_ids?: string[];
     format: ExportFormat;
+    style?: string;
   }): Promise<ExportResponse> {
     return this.request<ExportResponse>('/api/v1/exports', { method: 'POST', body: payload });
   }

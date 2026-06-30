@@ -107,12 +107,10 @@ def ensure_work_embeddings(db: Session, *, provider: EmbeddingProvider | None = 
     for work in db.scalars(select(Work)).all():
         if work.id in indexed:
             continue
-        text = _work_text(work)
-        if not text:
+        doc = _work_text(work)
+        if not doc:
             continue
-        if _store_embedding(
-            db, work_id=work.id, model_name=model_name, vector=provider.embed(text)
-        ):
+        if _store_embedding(db, work_id=work.id, model_name=model_name, vector=provider.embed(doc)):
             added += 1
     if added:
         db.flush()

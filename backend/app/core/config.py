@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (the JSON-array +
     # Python-cosine path stays the default + the SQLite path). Additive; default off.
     pgvector_enabled: bool = False
+    # PDF extraction backend: grobid (default) | nougat | marker (opt-in ML extractors for hard/
+    # scanned PDFs; detected + selectable like the other providers, full impl is a follow-up).
+    extraction_backend: str = "grobid"
     # At-rest field encryption key (Fernet). When unset, sensitive fields are stored in clear and
     # SECURITY.md's at-rest claim is downgraded accordingly (Stage 7).
     secret_key: str | None = Field(default=None, alias="PARACORD_SECRET_KEY")

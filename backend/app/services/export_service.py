@@ -22,6 +22,7 @@ FORMAT_MEDIA: dict[str, tuple[str, str]] = {
     "markdown": ("md", "text/markdown"),
     "html": ("html", "text/html"),
     "text": ("txt", "text/plain"),
+    "styled": ("txt", "text/plain"),  # rendered in a named citation style (see `style`)
 }
 SUPPORTED_FORMATS = set(FORMAT_MEDIA)
 
@@ -49,6 +50,7 @@ def export_bibliography(
     output_format: str,
     scope_id: str | None = None,
     work_ids: list[str] | None = None,
+    style: str | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> str:
     """Export bibliography content for a scope.
@@ -61,7 +63,10 @@ def export_bibliography(
     works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids)
     entries = [_Entry(work=work, authors=_work_authors(db, work)) for work in works]
     _assign_keys(entries)
-    content = _RENDERERS[output_format](entries)
+    if output_format == "styled":
+        content = render_styled(entries, style or "apa")
+    else:
+        content = _RENDERERS[output_format](entries)
     if actor_user_id is not None:
         record_event(
             db,
@@ -84,6 +89,9 @@ def _resolve_works(
         ids = [uuid.UUID(w) for w in work_ids]
         found = {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(ids))).all()}
         return [found[i] for i in ids if i in found]  # preserve caller order
+    if scope_type == "library":
+        # Whole-library export (also the library-scoped graph/insights view).
+        return list(db.scalars(select(Work).order_by(Work.year, Work.canonical_title)).all())
     if scope_type == "work":
         if not scope_id:
             raise ValueError("scope_id is required for work export")
@@ -257,6 +265,49 @@ def _render_html(entries: list[_Entry]) -> str:
 
 def _render_text(entries: list[_Entry]) -> str:
     return "\n".join(_work_to_text(entry.work) for entry in entries)
+
+
+# Built-in citation styles (a lightweight approximation; full CSL/citeproc style files are a
+# documented follow-up). Keyed by the ``style`` request field.
+STYLES = ("apa", "ieee", "chicago")
+
+
+def render_styled(entries: list[_Entry], style: str) -> str:
+    """Render a numbered, human-readable reference list in a named style."""
+    style = (style or "apa").lower()
+    if style not in STYLES:
+        raise ValueError(f"Unsupported citation style: {style} (allowed: {STYLES})")
+    return "\n".join(_styled_entry(i, e, style) for i, e in enumerate(entries, start=1))
+
+
+def _styled_entry(index: int, entry: _Entry, style: str) -> str:
+    work = entry.work
+    authors = entry.authors
+    title = (work.canonical_title or "Untitled").strip()
+    venue = (work.venue or "").strip()
+    year = work.year
+    doi = f" https://doi.org/{work.doi}" if work.doi else ""
+    if style == "ieee":
+        who = ", ".join(authors) if authors else ""
+        bits = [f"[{index}]"]
+        if who:
+            bits.append(who + ",")
+        bits.append(f'"{title},"')
+        if venue:
+            bits.append(f"{venue},")
+        if year:
+            bits.append(f"{year}.")
+        return " ".join(bits).strip() + doi
+    if style == "chicago":
+        who = ", ".join(authors) if authors else ""
+        head = f"{who}. " if who else ""
+        return f'{head}"{title}." {venue}{f" ({year})" if year else ""}.'.strip() + doi
+    # apa (default)
+    who = ", ".join(authors) if authors else ""
+    head = f"{who} " if who else ""
+    yr = f"({year}). " if year else ""
+    ven = f" {venue}." if venue else ""
+    return f"{head}{yr}{title}.{ven}".strip() + doi
 
 
 def _entry_inline(entry: _Entry, *, markdown: bool) -> str:

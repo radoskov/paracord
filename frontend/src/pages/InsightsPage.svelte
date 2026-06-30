@@ -12,6 +12,7 @@
     type Topic,
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
+  import ExportDialog from '../components/ExportDialog.svelte';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -109,6 +110,20 @@
       {/if}
     </div>
     {#if !scopeReady}<p class="hintline">Pick a {scopeType} to run analyses on it.</p>{/if}
+    {#if scopeReady}
+      <div style="margin-top:0.6rem">
+        <ExportDialog
+          label={`this ${scopeType}`}
+          fetchExport={(format, style) =>
+            client.exportCitations({
+              scope_type: scopeType,
+              scope_id: scopeId || undefined,
+              format,
+              style,
+            })}
+        />
+      </div>
+    {/if}
   </div>
 
   <div class="card">

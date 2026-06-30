@@ -333,8 +333,13 @@
           </label>
           <ExportDialog
             label="selection"
-            fetchExport={(format) =>
-              client.exportCitations({ scope_type: 'selection', work_ids: selectedIds, format })}
+            fetchExport={(format, style) =>
+              client.exportCitations({
+                scope_type: 'selection',
+                work_ids: selectedIds,
+                format,
+                style,
+              })}
           />
           <button type="button" class="link" on:click={() => (selectedIds = [])}>Clear</button>
         </div>

@@ -37,6 +37,34 @@ def test_selection_export_requires_work_ids(client, auth_headers):
     assert r.status_code == 400
 
 
+def test_styled_export_apa_and_ieee(client, auth_headers):
+    editor = auth_headers("editor")
+    wid = _make_work(client, editor, "Deep Nets")
+    apa = client.post(
+        "/api/v1/exports",
+        headers=editor,
+        json={"scope_type": "selection", "work_ids": [wid], "format": "styled", "style": "apa"},
+    )
+    assert apa.status_code == 200
+    assert "Deep Nets" in apa.json()["content"]
+    ieee = client.post(
+        "/api/v1/exports",
+        headers=editor,
+        json={"scope_type": "selection", "work_ids": [wid], "format": "styled", "style": "ieee"},
+    )
+    assert ieee.json()["content"].lstrip().startswith("[1]")
+
+
+def test_library_scope_export(client, auth_headers):
+    editor = auth_headers("editor")
+    _make_work(client, editor, "Library Wide Paper")
+    r = client.post(
+        "/api/v1/exports", headers=editor, json={"scope_type": "library", "format": "bibtex"}
+    )
+    assert r.status_code == 200
+    assert "Library Wide Paper" in r.json()["content"]
+
+
 def test_get_work_records_paper_viewed(client, auth_headers, db):
     editor = auth_headers("editor")
     work_id = _make_work(client, editor, "Viewed Paper")

@@ -185,8 +185,8 @@
       <ExportDialog
         label={`shelf "${selected.name}"`}
         disabled={loading}
-        fetchExport={(format) =>
-          client.exportCitations({ scope_type: 'shelf', scope_id: selected!.id, format })}
+        fetchExport={(format, style) =>
+          client.exportCitations({ scope_type: 'shelf', scope_id: selected!.id, format, style })}
       />
     {/if}
   </div>

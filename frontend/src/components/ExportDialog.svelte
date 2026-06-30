@@ -1,14 +1,21 @@
 <script lang="ts">
-  import { EXPORT_FORMATS, type ExportFormat, type ExportResponse } from '../api/client';
+  import {
+    CITATION_STYLES,
+    EXPORT_FORMATS,
+    type ExportFormat,
+    type ExportResponse,
+  } from '../api/client';
 
   export let label = '';
   export let disabled = false;
   // Legacy mode: parent performs the export/download itself.
   export let onExport: (format: ExportFormat) => void | Promise<void> = () => {};
   // Rich mode: when provided, this dialog fetches and offers Preview / Copy / Download.
-  export let fetchExport: ((format: ExportFormat) => Promise<ExportResponse>) | null = null;
+  export let fetchExport: ((format: ExportFormat, style?: string) => Promise<ExportResponse>) | null =
+    null;
 
   let format: ExportFormat = 'bibtex';
+  let style = 'apa';
   let preview = '';
   let status = '';
   let busy = false;
@@ -18,7 +25,7 @@
     busy = true;
     status = '';
     try {
-      return await fetchExport(format);
+      return await fetchExport(format, style);
     } catch (error) {
       status = error instanceof Error ? error.message : 'Export failed';
       return null;
@@ -75,6 +82,13 @@
         {/each}
       </select>
     </label>
+    {#if format === 'styled'}
+      <label>Style
+        <select bind:value={style} disabled={disabled || busy}>
+          {#each CITATION_STYLES as s}<option value={s}>{s.toUpperCase()}</option>{/each}
+        </select>
+      </label>
+    {/if}
     {#if fetchExport}
       <button type="button" class="secondary" on:click={doPreview} disabled={disabled || busy}>Preview</button>
       <button type="button" class="secondary" on:click={doCopy} disabled={disabled || busy}>Copy</button>

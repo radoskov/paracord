@@ -181,8 +181,8 @@
       <ExportDialog
         label={`rack "${selected.name}"`}
         disabled={loading}
-        fetchExport={(format) =>
-          client.exportCitations({ scope_type: 'rack', scope_id: selected!.id, format })}
+        fetchExport={(format, style) =>
+          client.exportCitations({ scope_type: 'rack', scope_id: selected!.id, format, style })}
       />
     {/if}
   </div>

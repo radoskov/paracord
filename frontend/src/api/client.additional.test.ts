@@ -82,6 +82,7 @@ describe('ApiClient request contracts', () => {
       'html',
       'markdown',
       'ris',
+      'styled',
       'text',
     ]);
   });
