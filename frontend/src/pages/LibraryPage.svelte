@@ -245,7 +245,7 @@
             bind:value={search}
             placeholder={searchMode === 'semantic'
               ? 'Describe the topic / keywords…'
-              : 'Search title, DOI, arXiv, venue'}
+              : 'Search… e.g. transformer author:doe year:>=2020 has:pdf tag:ml'}
             aria-label="Search"
           />
           <select bind:value={searchMode} title="Search mode" aria-label="Search mode">

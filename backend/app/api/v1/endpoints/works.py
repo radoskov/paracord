@@ -17,10 +17,11 @@ from app.models.citation import CitationMention, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
-from app.models.organization import RackShelf, ShelfWork, TagLink
+from app.models.organization import RackShelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services.audit import record_event
+from app.services.search_query import parse_search_query
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_doi, normalize_title
@@ -97,18 +98,63 @@ def list_works(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
 ) -> list[Work]:
-    """List/search works by basic metadata and extraction/metadata completeness."""
+    """List/search works by basic metadata and extraction/metadata completeness.
+
+    ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
+    ``has:pdf`` ``has:references`` ``title:``); the leftover free text matches title/abstract/DOI/
+    arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take precedence.
+    """
+    parsed = parse_search_query(q)
     stmt = select(Work)
-    if q:
-        like = f"%{q.strip()}%"
+    if parsed.text:
+        like = f"%{parsed.text}%"
         stmt = stmt.where(
             or_(
                 Work.canonical_title.ilike(like),
+                Work.abstract.ilike(like),
                 Work.doi.ilike(like),
                 Work.arxiv_id.ilike(like),
                 Work.venue.ilike(like),
             )
         )
+    if parsed.title:
+        stmt = stmt.where(Work.canonical_title.ilike(f"%{parsed.title}%"))
+    if parsed.venue:
+        stmt = stmt.where(Work.venue.ilike(f"%{parsed.venue}%"))
+    if parsed.work_type:
+        stmt = stmt.where(Work.work_type == parsed.work_type)
+    if parsed.year_min is not None:
+        stmt = stmt.where(Work.year >= parsed.year_min)
+    if parsed.year_max is not None:
+        stmt = stmt.where(Work.year <= parsed.year_max)
+    if parsed.author:
+        author_match = (
+            select(MetadataAssertion.id)
+            .where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == Work.id,
+                MetadataAssertion.field_name == "authors",
+                MetadataAssertion.value.ilike(f"%{parsed.author}%"),
+            )
+            .exists()
+        )
+        stmt = stmt.where(author_match)
+    if parsed.tag:
+        stmt = stmt.where(
+            select(Tag.id)
+            .join(TagLink, TagLink.tag_id == Tag.id)
+            .where(
+                TagLink.entity_type == "work",
+                TagLink.entity_id == Work.id,
+                Tag.name.ilike(f"%{parsed.tag}%"),
+            )
+            .exists()
+        )
+    # Operator-derived has:* unless the caller passed explicit query params (those win).
+    if has_pdf is None:
+        has_pdf = parsed.has_pdf
+    if has_references is None:
+        has_references = parsed.has_references
     if reading_status:
         stmt = stmt.where(Work.reading_status == reading_status)
     if shelf_id or rack_id:
