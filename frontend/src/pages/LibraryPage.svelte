@@ -15,6 +15,7 @@
   import PaperTable from '../components/PaperTable.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
   import { selectedWorkId } from '../lib/selection';
+  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -314,17 +315,19 @@
       </form>
       <div class="bar">
         <span class="muted">{works.length} papers{message ? ` · ${message}` : ''}</span>
-        <button type="button" class="secondary" on:click={() => (showNew = true)}
-          title="Create a paper by hand (you can attach a PDF afterwards)">+ New paper</button>
+        <button type="button" class="secondary" on:click={() => (showNew = true)} disabled={!$canEdit}
+          title={$canEdit ? 'Create a paper by hand (you can attach a PDF afterwards)' : INSUFFICIENT_ROLE}>+ New paper</button>
       </div>
       {#if selectedIds.length > 0}
         <div class="batch">
           <strong>{selectedIds.length} selected</strong>
-          <button type="button" class="secondary danger-btn" on:click={batchDelete} disabled={loading}>Delete</button>
-          <button type="button" class="secondary" on:click={batchReextract} disabled={loading}
-            title="Queue GROBID extraction for every attached file of the selected papers">Re-extract</button>
+          <button type="button" class="secondary danger-btn" on:click={batchDelete} disabled={loading || !$canEdit}
+            title={$canEdit ? 'Delete the selected papers (their files stay in the library)' : INSUFFICIENT_ROLE}>Delete</button>
+          <button type="button" class="secondary" on:click={batchReextract} disabled={loading || !$canEdit}
+            title={$canEdit ? 'Queue GROBID extraction for every attached file of the selected papers' : INSUFFICIENT_ROLE}>Re-extract</button>
           <label class="inline">Set status
-            <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading}>
+            <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading || !$canEdit}
+              title={$canEdit ? '' : INSUFFICIENT_ROLE}>
               <option value="">…</option>
               {#each ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'] as s}
                 <option value={s}>{s}</option>
@@ -388,7 +391,8 @@
       <label>arXiv id<input bind:value={newArxiv} placeholder="1706.03762" /></label>
       <label>URL<input bind:value={newUrl} placeholder="https://arxiv.org/abs/… or https://doi.org/…" /></label>
       <div class="actions">
-        <button type="submit" disabled={!canCreate || loading}>Create paper</button>
+        <button type="submit" disabled={!canCreate || loading || !$canEdit}
+          title={$canEdit ? '' : INSUFFICIENT_ROLE}>Create paper</button>
         <button type="button" class="secondary" on:click={() => (showNew = false)}>Cancel</button>
       </div>
       {#if !canCreate}<p class="hintline">Enter at least one identifier to enable “Create paper”.</p>{/if}

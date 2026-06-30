@@ -39,20 +39,22 @@ class GrobidClient:
             response = await client.get(f"{self.base_url}/api/isalive")
             return response.status_code == 200
 
-    def _form_data(self) -> list[tuple[str, str]]:
+    def _form_data(self) -> dict[str, str | list[str]]:
         """Build the multipart form fields for processFulltextDocument.
 
-        Returned as a list of pairs so ``teiCoordinates`` can repeat once per element — the
-        shape the GROBID REST API expects for a multi-element coordinate request.
+        Returned as a dict; ``teiCoordinates`` is a **list** so httpx emits one repeated part per
+        element (the shape GROBID expects for a multi-element coordinate request). A list of
+        ``(key, value)`` tuples is *not* used here — httpx2's multipart encoder mishandles it.
         """
         settings = self._settings
-        data: list[tuple[str, str]] = [
-            ("consolidateHeader", "1" if settings.grobid_consolidate_header else "0"),
-            ("consolidateCitations", "1" if settings.grobid_consolidate_citations else "0"),
-            ("includeRawCitations", "1" if settings.grobid_include_raw_citations else "0"),
-            ("segmentSentences", "1" if settings.grobid_segment_sentences else "0"),
-        ]
-        data.extend(("teiCoordinates", element) for element in settings.grobid_coordinate_elements)
+        data: dict[str, str | list[str]] = {
+            "consolidateHeader": "1" if settings.grobid_consolidate_header else "0",
+            "consolidateCitations": "1" if settings.grobid_consolidate_citations else "0",
+            "includeRawCitations": "1" if settings.grobid_include_raw_citations else "0",
+            "segmentSentences": "1" if settings.grobid_segment_sentences else "0",
+        }
+        if settings.grobid_coordinate_elements:
+            data["teiCoordinates"] = list(settings.grobid_coordinate_elements)
         return data
 
     async def process_fulltext_document(self, pdf_path: Path) -> str:

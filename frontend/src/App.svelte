@@ -4,17 +4,23 @@
   import { ApiClient } from './api/client';
   import AdminPage from './pages/AdminPage.svelte';
   import DuplicatesPage from './pages/DuplicatesPage.svelte';
+  import EventsPage from './pages/EventsPage.svelte';
   import ImportPage from './pages/ImportPage.svelte';
   import InsightsPage from './pages/InsightsPage.svelte';
   import JobsPage from './pages/JobsPage.svelte';
   import LibraryPage from './pages/LibraryPage.svelte';
+  import ProfilePage from './pages/ProfilePage.svelte';
   import RacksPage from './pages/RacksPage.svelte';
   import ShelvesPage from './pages/ShelvesPage.svelte';
   import TagsPage from './pages/TagsPage.svelte';
+  import { currentUser } from './lib/session';
+  import type { UserRole } from './api/client';
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
-  const TABS = [
+  type Tab = { id: string; label: string; hint: string; roles?: UserRole[] };
+
+  const TABS: Tab[] = [
     { id: 'library', label: 'Library', hint: 'Search, read, edit and organise your papers.' },
     { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.' },
     { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
@@ -23,8 +29,13 @@
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.' },
     { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).' },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
-    { id: 'admin', label: 'Admin', hint: 'Manage users and agents, and view the audit log.' },
+    { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner'] },
+    { id: 'events', label: 'Events', hint: 'Browse the audit log of activity across the library.', roles: ['owner'] },
+    { id: 'profile', label: 'Profile', hint: 'Your account, appearance name and password.' },
   ];
+
+  // Tabs visible to the current role (owner-only tabs are hidden from everyone else).
+  $: visibleTabs = TABS.filter((tab) => !tab.roles || ($currentUser != null && tab.roles.includes($currentUser.role)));
 
   let token = '';
   let username = '';
@@ -32,9 +43,35 @@
   let loginError = '';
   let loggingIn = false;
   let active = 'library';
+  // Explanation shown on the login screen after an involuntary sign-out (session expired / disabled).
+  let sessionEndedMessage = '';
 
-  $: client = new ApiClient(apiBaseUrl, token || null);
-  $: activeTab = TABS.find((tab) => tab.id === active) ?? TABS[0];
+  // A 401 on an authenticated call means the session ended server-side (expired, signed out, or the
+  // account was disabled). Force a clean logout and explain why, on the next interaction.
+  function onUnauthorized(detail: string): void {
+    if (!token) return;
+    sessionEndedMessage = detail || 'Your session has ended. Please sign in again.';
+    clearSession();
+  }
+
+  $: client = new ApiClient(apiBaseUrl, token || null, onUnauthorized);
+  $: activeTab = visibleTabs.find((tab) => tab.id === active) ?? visibleTabs[0] ?? TABS[0];
+
+  // Load the signed-in profile whenever the token changes; a failure clears the session.
+  let loadedFor = '';
+  $: if (token && token !== loadedFor) {
+    loadedFor = token;
+    void loadMe();
+  }
+
+  async function loadMe(): Promise<void> {
+    try {
+      currentUser.set(await client.getMe());
+    } catch {
+      // onUnauthorized already handled a 401; any other failure also means we can't proceed.
+      currentUser.set(null);
+    }
+  }
 
   onMount(() => {
     token = window.localStorage.getItem('paracord_token') ?? '';
@@ -49,9 +86,17 @@
     active = TABS.some((tab) => tab.id === id) ? id : 'library';
   }
 
+  // If the active tab becomes unavailable for this role (e.g. an owner-only tab after a role
+  // change), fall back to Library rather than rendering nothing.
+  $: if ($currentUser && active && !visibleTabs.some((tab) => tab.id === active)) {
+    active = 'library';
+    if (typeof window !== 'undefined') window.location.hash = '#library';
+  }
+
   async function login(): Promise<void> {
     loggingIn = true;
     loginError = '';
+    sessionEndedMessage = '';
     try {
       token = await new ApiClient(apiBaseUrl).login(username, password);
       window.localStorage.setItem('paracord_token', token);
@@ -63,30 +108,21 @@
     }
   }
 
-  function logout(): void {
+  function clearSession(): void {
     token = '';
+    loadedFor = '';
+    currentUser.set(null);
     window.localStorage.removeItem('paracord_token');
   }
 
-  // Change-password modal
-  let showChangePw = false;
-  let curPw = '';
-  let newPw = '';
-  let pwMsg = '';
-  let pwBusy = false;
-
-  async function submitChangePassword(): Promise<void> {
-    pwBusy = true;
-    pwMsg = '';
+  async function logout(): Promise<void> {
+    // Best-effort server-side revoke; the local session is cleared regardless.
     try {
-      const result = await client.changePassword(curPw, newPw);
-      pwMsg = `Password changed (${result.sessions_revoked} other session(s) signed out).`;
-      curPw = newPw = '';
-    } catch (error) {
-      pwMsg = error instanceof Error ? error.message : 'Change failed';
-    } finally {
-      pwBusy = false;
+      await client.logout();
+    } catch {
+      /* token may already be invalid */
     }
+    clearSession();
   }
 </script>
 
@@ -99,13 +135,14 @@
       </div>
       {#if token}
         <nav aria-label="Sections">
-          {#each TABS as tab}
+          {#each visibleTabs as tab}
             <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
           {/each}
-          <button type="button" class="signout secondary" on:click={() => { showChangePw = true; pwMsg = ''; }}
-            title="Change your password">
-            Password
-          </button>
+          {#if $currentUser}
+            <span class="whoami" title={`Signed in as ${$currentUser.username} (${$currentUser.role})`}>
+              {$currentUser.display_name || $currentUser.username}
+            </span>
+          {/if}
           <button type="button" class="signout" on:click={logout} title="Sign out of PaRacORD">
             Sign out
           </button>
@@ -118,6 +155,7 @@
   {#if !token}
     <section class="login card">
       <h2>Sign in</h2>
+      {#if sessionEndedMessage}<p class="session-ended">{sessionEndedMessage}</p>{/if}
       <p class="muted">Sign in with the account created on the server console.</p>
       <form on:submit|preventDefault={login}>
         <label>
@@ -152,35 +190,13 @@
       <InsightsPage {client} />
     {:else if active === 'admin'}
       <AdminPage {client} />
+    {:else if active === 'events'}
+      <EventsPage {client} />
+    {:else if active === 'profile'}
+      <ProfilePage {client} />
     {/if}
   {/if}
   </div>
-
-  {#if token && showChangePw}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-    <div
-      class="pw-overlay"
-      role="dialog"
-      aria-modal="true"
-      tabindex="-1"
-      on:click|self={() => (showChangePw = false)}
-      on:keydown={(e) => e.key === 'Escape' && (showChangePw = false)}
-    >
-      <div class="pw-box card">
-        <h2>Change password</h2>
-        <form on:submit|preventDefault={submitChangePassword}>
-          <label>Current password<input type="password" bind:value={curPw} autocomplete="current-password" /></label>
-          <label>New password<input type="password" bind:value={newPw} autocomplete="new-password" /></label>
-          <div class="pw-actions">
-            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}>Change</button>
-            <button type="button" class="secondary" on:click={() => (showChangePw = false)}>Close</button>
-          </div>
-          {#if newPw && newPw.length < 8}<p class="hintline">New password must be at least 8 characters.</p>{/if}
-          {#if pwMsg}<p class="muted">{pwMsg}</p>{/if}
-        </form>
-      </div>
-    </div>
-  {/if}
 </main>
 
 <style>
@@ -270,6 +286,17 @@
     margin-left: 0.4rem;
   }
 
+  .whoami {
+    color: #44515f;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .tab-hint {
     color: #64717f;
     font-size: 0.9rem;
@@ -282,30 +309,14 @@
     max-width: 26rem;
   }
 
-  .pw-overlay {
-    align-items: center;
-    background: rgba(20, 28, 38, 0.5);
-    display: flex;
-    inset: 0;
-    justify-content: center;
-    position: fixed;
-    z-index: 50;
-  }
-
-  .pw-box {
-    max-width: 22rem;
-    width: 92vw;
-  }
-
-  .pw-box form {
-    display: grid;
-    gap: 0.6rem;
-    margin-top: 0.6rem;
-  }
-
-  .pw-actions {
-    display: flex;
-    gap: 0.5rem;
+  .session-ended {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 0.375rem;
+    color: #92400e;
+    font-size: 0.875rem;
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
   }
 
   .login form {

@@ -24,11 +24,23 @@ def require_authenticated_user(
 
     session = get_active_session(db, raw_token.strip())
     if session is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your session has expired or was signed out. Please sign in again.",
+        )
 
     user = db.get(User, session.user_id)
-    if user is None or user.disabled_at is not None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token")
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your session is no longer valid. Please sign in again.",
+        )
+    if user.disabled_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your account has been disabled by an administrator. "
+            "Contact them to regain access.",
+        )
     return user
 
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ReadingStatus, Work } from '../api/client';
+  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
 
   export let works: Work[] = [];
   export let selectedWorkId: string | null = null;
@@ -88,6 +89,8 @@
           <td on:click|stopPropagation>
             <select
               value={work.reading_status}
+              disabled={!$canEdit}
+              title={$canEdit ? '' : INSUFFICIENT_ROLE}
               on:change={(event) =>
                 onStatusChange(work, event.currentTarget.value as ReadingStatus)}
             >

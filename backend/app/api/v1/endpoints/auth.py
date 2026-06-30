@@ -7,8 +7,14 @@ from app.api.deps import require_authenticated_user
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    ProfileUpdateRequest,
+    TokenResponse,
+)
 from app.services import login_throttle
+from app.services import users as user_service
 from app.services.audit import record_event
 from app.services.auth import (
     authenticate_user,
@@ -86,9 +92,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     return TokenResponse(access_token=token)
 
 
-@router.get("/me")
-def whoami(user: User = Depends(require_authenticated_user)) -> dict:
-    """Return the authenticated caller's identity and profile (SPEC §9.3)."""
+def _profile_payload(user: User) -> dict:
     return {
         "id": str(user.id),
         "username": user.username,
@@ -98,6 +102,33 @@ def whoami(user: User = Depends(require_authenticated_user)) -> dict:
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
     }
+
+
+@router.get("/me")
+def whoami(user: User = Depends(require_authenticated_user)) -> dict:
+    """Return the authenticated caller's identity and profile (SPEC §9.3)."""
+    return _profile_payload(user)
+
+
+@router.patch("/me")
+def update_me(
+    payload: ProfileUpdateRequest,
+    user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update the caller's own editable profile (display name, email)."""
+    try:
+        user_service.update_profile(
+            db,
+            user=user,
+            changes=payload.model_dump(exclude_unset=True),
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return _profile_payload(user)
 
 
 @router.post("/change-password")

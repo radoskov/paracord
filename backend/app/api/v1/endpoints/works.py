@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -107,6 +107,13 @@ class WorkRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("confirmed_fields", "keywords", mode="before")
+    @classmethod
+    def _none_to_list(cls, value: object) -> object:
+        # Pre-migration rows have NULL for these JSONB columns; treat NULL as an empty list so the
+        # response stays a list rather than failing validation (would 500 the whole works list).
+        return value or []
 
 
 # Work columns that the `missing` filter can test for absence (NULL or empty string).

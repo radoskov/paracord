@@ -368,6 +368,16 @@ export interface AdminUser {
   disabled_at: string | null;
 }
 
+export interface CurrentUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  display_name: string | null;
+  email: string | null;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
@@ -434,10 +444,13 @@ export class ApiClient {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string | null = null,
+    // Called when an *authenticated* request is rejected with 401 (session expired, signed out,
+    // or the account was disabled). The argument is the server's human-readable explanation.
+    private readonly onUnauthorized?: (detail: string) => void,
   ) {}
 
   withToken(token: string | null): ApiClient {
-    return new ApiClient(this.baseUrl, token);
+    return new ApiClient(this.baseUrl, token, this.onUnauthorized);
   }
 
   async login(username: string, password: string): Promise<string> {
@@ -810,6 +823,10 @@ export class ApiClient {
     return this.request<AdminUser>(`/api/v1/admin/users/${userId}/enable`, { method: 'POST' });
   }
 
+  async deleteUser(userId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' });
+  }
+
   async listAgents(): Promise<AgentRecord[]> {
     return this.request<AgentRecord[]>('/api/v1/admin/agents');
   }
@@ -913,6 +930,31 @@ export class ApiClient {
     return this.request('/api/v1/auth/change-password', {
       method: 'POST',
       body: { current_password: currentPassword, new_password: newPassword },
+    });
+  }
+
+  async getMe(): Promise<CurrentUser> {
+    return this.request<CurrentUser>('/api/v1/auth/me');
+  }
+
+  async logout(): Promise<void> {
+    await this.request<void>('/api/v1/auth/logout', { method: 'POST' });
+  }
+
+  async updateProfile(changes: {
+    display_name?: string | null;
+    email?: string | null;
+  }): Promise<CurrentUser> {
+    return this.request<CurrentUser>('/api/v1/auth/me', { method: 'PATCH', body: changes });
+  }
+
+  async resetUserPassword(
+    userId: string,
+    newPassword: string,
+  ): Promise<{ status: string; sessions_revoked: number }> {
+    return this.request(`/api/v1/admin/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: { new_password: newPassword },
     });
   }
 
@@ -1025,6 +1067,11 @@ export class ApiClient {
       } catch {
         // Keep the status-based message when the response is not JSON.
       }
+      // A 401 on an authenticated request means the session ended (expired/signed out/disabled):
+      // hand the explanation to the app so it can force a clean logout.
+      if (response.status === 401 && options.auth !== false && this.token) {
+        this.onUnauthorized?.(detail);
+      }
       throw new Error(detail);
     }
     if (response.status === 204) return undefined as T;
@@ -1035,7 +1082,18 @@ export class ApiClient {
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     const response = await fetch(`${this.baseUrl}${path}`, { headers });
-    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 401 && this.token) {
+        let detail = 'Your session has ended. Please sign in again.';
+        try {
+          detail = (await response.json()).detail ?? detail;
+        } catch {
+          /* non-JSON body */
+        }
+        this.onUnauthorized?.(detail);
+      }
+      throw new Error(`Request failed: ${response.status}`);
+    }
     return response.blob();
   }
 }

@@ -5,10 +5,10 @@
     type AgentFileRecord,
     type AgentPrivilege,
     type AgentRecord,
-    type AuditEvent,
     type UserRole,
   } from '../api/client';
   import AiModelsPanel from '../components/AiModelsPanel.svelte';
+  import Modal from '../components/Modal.svelte';
 
   const PRIVILEGES: { key: AgentPrivilege; label: string; hint: string }[] = [
     { key: 'can_index', label: 'index', hint: 'Accept manifests (file listings) from this agent.' },
@@ -23,7 +23,6 @@
 
   let users: AdminUser[] = [];
   let agents: AgentRecord[] = [];
-  let auditEvents: AuditEvent[] = [];
   let message = '';
   let loading = false;
 
@@ -52,10 +51,9 @@
 
   async function refresh(): Promise<void> {
     await run(async () => {
-      [users, agents, auditEvents] = await Promise.all([
+      [users, agents] = await Promise.all([
         client.listAdminUsers(),
         client.listAgents(),
-        client.listAuditEvents(50),
       ]);
     });
   }
@@ -84,11 +82,54 @@
     }, 'User disabled');
   }
 
+  async function removeUser(user: AdminUser): Promise<void> {
+    if (
+      !window.confirm(
+        `Permanently delete “${user.username}”? This cannot be undone (the account is already disabled).`,
+      )
+    )
+      return;
+    await run(async () => {
+      await client.deleteUser(user.id);
+      users = await client.listAdminUsers();
+    }, 'User deleted');
+  }
+
   async function enableUser(user: AdminUser): Promise<void> {
     await run(async () => {
       await client.enableUser(user.id);
       users = await client.listAdminUsers();
     }, 'User re-enabled');
+  }
+
+  // --- Reset another user's password ---
+  let resetTarget: AdminUser | null = null;
+  let resetPw = '';
+  let resetMsg = '';
+
+  function openReset(user: AdminUser): void {
+    resetTarget = user;
+    resetPw = '';
+    resetMsg = '';
+  }
+
+  function closeReset(): void {
+    resetTarget = null;
+    resetPw = '';
+    resetMsg = '';
+  }
+
+  async function submitReset(): Promise<void> {
+    const target = resetTarget;
+    if (!target) return;
+    resetMsg = '';
+    await run(async () => {
+      const result = await client.resetUserPassword(target.id, resetPw);
+      resetMsg = `Password reset (${result.sessions_revoked} session(s) signed out).`;
+      resetPw = '';
+    });
+    // run() set `message` on failure; keep the dialog open so the owner can retry.
+    if (!message) closeReset();
   }
 
   async function issueEnrollToken(): Promise<void> {
@@ -221,6 +262,14 @@
                   <option value="editor">editor</option>
                   <option value="owner">owner</option>
                 </select>
+                <button
+                  type="button"
+                  on:click={() => openReset(user)}
+                  disabled={loading}
+                  title="Set a new password for this user (signs out their sessions)"
+                >
+                  Reset password
+                </button>
                 {#if user.disabled_at}
                   <button
                     type="button"
@@ -229,6 +278,15 @@
                     title="Re-enable this account"
                   >
                     Re-enable
+                  </button>
+                  <button
+                    type="button"
+                    class="link-btn danger"
+                    on:click={() => removeUser(user)}
+                    disabled={loading}
+                    title="Permanently delete this disabled account"
+                  >
+                    Delete
                   </button>
                 {:else}
                   <button
@@ -377,34 +435,32 @@
     <div class="surface admin-section">
       <AiModelsPanel {client} />
     </div>
-
-    <!-- Audit Events -->
-    <section class="surface admin-section audit-section">
-      <div class="section-head">
-        <h2>Audit Events</h2>
-        <span>{auditEvents.length}</span>
-      </div>
-
-      {#if auditEvents.length === 0}
-        <p class="empty">No audit events</p>
-      {:else}
-        <div class="audit-list">
-          {#each auditEvents as event}
-            <article>
-              <header>
-                <strong>{event.event_type}</strong>
-                <small>{formatDate(event.created_at)}</small>
-              </header>
-              {#if event.entity_type}
-                <span>{event.entity_type}{event.entity_id ? ` · ${event.entity_id.slice(0, 8)}` : ''}</span>
-              {/if}
-            </article>
-          {/each}
-        </div>
-      {/if}
-    </section>
   </div>
 </div>
+
+{#if resetTarget}
+  <Modal title={`Reset password — ${resetTarget.username}`} onClose={closeReset}>
+    <form class="stack" on:submit|preventDefault={submitReset}>
+      <p class="muted">
+        Set a new password for <strong>{resetTarget.username}</strong>. This signs out all of their
+        active sessions. Share the new password with them over a trusted channel.
+      </p>
+      <input
+        type="password"
+        bind:value={resetPw}
+        placeholder="New password (min 8 characters)"
+        autocomplete="new-password"
+      />
+      <div class="reset-actions">
+        <button type="submit" disabled={loading || resetPw.length < 8}>Reset password</button>
+        <button type="button" class="secondary" on:click={closeReset}>Cancel</button>
+      </div>
+      {#if resetPw && resetPw.length < 8}<p class="small-help">Must be at least 8 characters.</p>{/if}
+      {#if resetMsg}<p class="muted">{resetMsg}</p>{/if}
+      {#if message}<p class="danger">{message}</p>{/if}
+    </form>
+  </Modal>
+{/if}
 
 <style>
   .admin-layout {
@@ -429,6 +485,11 @@
     padding: 1rem;
     background: white;
     border-radius: 0.5rem;
+  }
+
+  .reset-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .surface {
@@ -598,22 +659,6 @@
     font-family: monospace;
     margin: 0.25rem 0;
     font-size: 0.75rem;
-  }
-
-  .audit-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    max-height: 600px;
-    overflow-y: auto;
-  }
-
-  .audit-list article {
-    padding: 0.4rem 0.6rem;
-  }
-
-  .audit-list header {
-    margin-bottom: 0.15rem;
   }
 
   .empty {

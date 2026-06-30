@@ -26,6 +26,10 @@ class EnrollTokenOut(BaseModel):
     expires_at: str
 
 
+class PasswordResetRequest(BaseModel):
+    new_password: str
+
+
 class AgentOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -157,6 +161,42 @@ def enable_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/users/{user_id}/reset-password")
+def reset_user_password(
+    user_id: uuid.UUID,
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> dict[str, str | int]:
+    """Set a new password for another user and sign out all their sessions (owner only)."""
+    try:
+        revoked = user_service.reset_user_password(
+            db, user_id=user_id, new_password=payload.new_password, actor_user_id=owner.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    return {"status": "ok", "sessions_revoked": revoked}
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    owner: User = Depends(require_owner),
+) -> None:
+    """Permanently delete a disabled user (owner only). The account must be disabled first."""
+    try:
+        user_service.delete_user(db, user_id=user_id, actor_user_id=owner.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
 
 
 @router.get("/audit-events")

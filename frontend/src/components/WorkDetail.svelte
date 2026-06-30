@@ -13,6 +13,7 @@
     type Work,
     type WorkFile,
   } from '../api/client';
+  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
@@ -265,8 +266,8 @@
     <div class="bar-actions">
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
-      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading}
-        title="Delete this paper (files are kept)">Delete</button>
+      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading || !$canEdit}
+        title={$canEdit ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
     </div>
   </div>
@@ -296,11 +297,17 @@
       </div>
       <label>Abstract<textarea bind:value={form.abstract} rows="4"></textarea></label>
       <div class="actions">
-        <button type="submit" disabled={loading}>Save changes</button>
-        <button type="button" class="secondary" on:click={enrich} disabled={loading || (!form.doi && !form.arxiv_id)}
-          title={form.doi || form.arxiv_id ? 'Fetch external metadata' : 'Needs a DOI or arXiv id to enrich'}>Enrich</button>
+        <button type="submit" disabled={loading || !$canEdit}
+          title={$canEdit ? '' : INSUFFICIENT_ROLE}>Save changes</button>
+        <button type="button" class="secondary" on:click={enrich} disabled={loading || !$canEdit || (!form.doi && !form.arxiv_id)}
+          title={!$canEdit
+            ? INSUFFICIENT_ROLE
+            : form.doi || form.arxiv_id
+              ? 'Fetch external metadata'
+              : 'Needs a DOI or arXiv id to enrich'}>Enrich</button>
       </div>
-      {#if !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
+      {#if $canEdit && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
+      {#if !$canEdit}<p class="hintline">{INSUFFICIENT_ROLE} — your role is read-only for library content.</p>{/if}
     </form>
   </details>
 
@@ -318,10 +325,12 @@
               class="lock"
               class:locked={field.confirmed}
               on:click={() => toggleLock(field.field_name, !field.confirmed)}
-              disabled={loading}
-              title={field.confirmed
-                ? 'Locked — enrichment will not overwrite this field. Click to unlock.'
-                : 'Unlocked — click to lock so enrichment cannot overwrite it.'}
+              disabled={loading || !$canEdit}
+              title={!$canEdit
+                ? INSUFFICIENT_ROLE
+                : field.confirmed
+                  ? 'Locked — enrichment will not overwrite this field. Click to unlock.'
+                  : 'Unlocked — click to lock so enrichment cannot overwrite it.'}
             >{field.confirmed ? '🔒 locked' : '🔓 lock'}</button>
             {#each field.assertions as a (a.id)}
               <div class="assertion">
@@ -330,8 +339,8 @@
                 {#if a.selected_as_canonical}
                   <span class="canon">canonical</span>
                 {:else}
-                  <button type="button" class="secondary small" on:click={() => selectCanonical(a.id)} disabled={loading}
-                    title="Use this value as the canonical one">Use this</button>
+                  <button type="button" class="secondary small" on:click={() => selectCanonical(a.id)} disabled={loading || !$canEdit}
+                    title={$canEdit ? 'Use this value as the canonical one' : INSUFFICIENT_ROLE}>Use this</button>
                 {/if}
               </div>
             {/each}
@@ -345,8 +354,8 @@
     <summary>Files ({files.length})</summary>
     <div class="attach">
       <input type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
-      <button type="button" on:click={upload} disabled={!attachFile || loading}
-        title={attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
+      <button type="button" on:click={upload} disabled={!attachFile || loading || !$canEdit}
+        title={!$canEdit ? INSUFFICIENT_ROLE : attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
     </div>
     {#if files.length === 0}
       <p class="empty">No files attached. Attach a PDF above to read and extract it.</p>
@@ -370,8 +379,8 @@
                 title="Open in the in-app reader (annotations + citation overlay)">Read</button>
               <button type="button" class="secondary small" on:click={() => openInNewTab(file)} disabled={loading}
                 title="Open the raw PDF in a new browser tab">New tab ↗</button>
-              <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading}
-                title="Queue GROBID extraction again for this file">Re-extract</button>
+              <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !$canEdit}
+                title={$canEdit ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
             </span>
           </li>
         {/each}
@@ -406,8 +415,10 @@
         <option value="">Choose a tag…</option>
         {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
-      <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading}>Apply</button>
-      <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading}>Remove</button>
+      <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !$canEdit}
+        title={$canEdit ? '' : INSUFFICIENT_ROLE}>Apply</button>
+      <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading || !$canEdit}
+        title={$canEdit ? '' : INSUFFICIENT_ROLE}>Remove</button>
     </div>
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
@@ -432,7 +443,8 @@
             </small>
             {#if !ref.resolved_work_id}
               <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
-                disabled={loading} title="Create a library paper from this reference">Import</button>
+                disabled={loading || !$canEdit}
+                title={$canEdit ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
             {/if}
           </li>
         {/each}

@@ -103,10 +103,12 @@ def test_grobid_form_data_reflects_settings() -> None:
     settings = get_settings().model_copy(
         update={"grobid_consolidate_header": False, "grobid_coordinate_elements": ["ref", "s"]}
     )
+    # _form_data returns a dict (repeated fields as lists) — the shape httpx2's multipart
+    # encoder needs; a list of (key, value) tuples gets mangled into bytes errors.
     data = GrobidClient("http://grobid:8070", settings=settings)._form_data()
-    assert ("consolidateHeader", "0") in data
-    assert ("consolidateCitations", "1") in data
-    assert [value for key, value in data if key == "teiCoordinates"] == ["ref", "s"]
+    assert data["consolidateHeader"] == "0"
+    assert data["consolidateCitations"] == "1"
+    assert data["teiCoordinates"] == ["ref", "s"]
 
 
 def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) -> None:

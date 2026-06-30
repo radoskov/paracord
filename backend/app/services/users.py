@@ -7,7 +7,7 @@ owner-only admin API and write audit events for every change.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import Role, hash_password
@@ -140,6 +140,110 @@ def enable_user(
             entity_id=str(user.id),
         )
     return user
+
+
+def delete_user(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> None:
+    """Permanently delete a **disabled** user and its sessions (owner only).
+
+    The account must be disabled first (a deliberate two-step: disable → re-enable or delete), and
+    the last active owner can never be the target (it can't be disabled in the first place).
+    """
+    from app.models.session import UserSession
+
+    user = db.get(User, user_id)
+    if user is None:
+        raise LookupError(f"User {user_id} not found")
+    if user.disabled_at is None:
+        raise ValueError("Disable the user before deleting it")
+    db.execute(delete(UserSession).where(UserSession.user_id == user_id))
+    username = user.username
+    db.delete(user)
+    db.flush()
+    record_event(
+        db,
+        "user.deleted",
+        actor_user_id=actor_user_id,
+        entity_type="user",
+        entity_id=str(user_id),
+        details={"username": username},
+    )
+
+
+_PROFILE_FIELDS = {"display_name", "email"}
+
+
+def update_profile(
+    db: Session,
+    *,
+    user: User,
+    changes: dict[str, str | None],
+    actor_user_id: uuid.UUID,
+) -> User:
+    """Update a user's own editable profile fields (display name, email).
+
+    The username and role are intentionally immutable here. Only keys in ``changes`` are
+    touched, so an absent key is left unchanged while ``None``/"" clears the field.
+    """
+    applied: dict[str, str | None] = {}
+    for key, value in changes.items():
+        if key not in _PROFILE_FIELDS:
+            raise ValueError(f"Field {key!r} is not editable")
+        cleaned = value.strip() if isinstance(value, str) else value
+        cleaned = cleaned or None
+        if getattr(user, key) != cleaned:
+            setattr(user, key, cleaned)
+            applied[key] = cleaned
+    if applied:
+        db.flush()
+        record_event(
+            db,
+            "user.profile_updated",
+            actor_user_id=actor_user_id,
+            entity_type="user",
+            entity_id=str(user.id),
+            details=applied,
+        )
+    return user
+
+
+def reset_user_password(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    new_password: str,
+    actor_user_id: uuid.UUID,
+) -> int:
+    """Owner action: set a new password for another user and sign out all their sessions.
+
+    Returns the number of sessions revoked. Distinct from self-service ``change_password``: no
+    current-password check (the owner is acting on behalf of the account).
+    """
+    from app.services.auth import revoke_all_user_sessions
+
+    if len(new_password or "") < 8:
+        raise ValueError("New password must be at least 8 characters")
+    user = db.get(User, user_id)
+    if user is None:
+        raise LookupError(f"User {user_id} not found")
+
+    user.password_hash = hash_password(new_password)
+    user.password_changed_at = datetime.now(UTC)
+    revoked = revoke_all_user_sessions(db, user_id)
+    db.flush()
+    record_event(
+        db,
+        "user.password_reset",
+        actor_user_id=actor_user_id,
+        entity_type="user",
+        entity_id=str(user.id),
+        details={"sessions_revoked": revoked},
+    )
+    return revoked
 
 
 def _active_owner_count(db: Session) -> int:

@@ -150,8 +150,10 @@ def complete_teleport(
     file, created_file = storage._ensure_managed_file(
         db, filename=name, pdf_bytes=pdf_bytes, settings=settings
     )
-    # Give a freshly-teleported file a work to attach extraction to (mirrors upload).
-    if created_file:
+    # Ensure a linked Work exists (mirrors upload) — not only on first creation, so a re-teleport
+    # of a file whose work was removed still has something to attach extraction to.
+    has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
+    if not has_link:
         title = storage._title_from_filename(Path(name))
         raw_arxiv = storage._arxiv_id_from_filename(Path(name))
         work = Work(
@@ -265,7 +267,11 @@ def extract_and_index(
         db, filename=name, pdf_bytes=pdf_bytes, settings=settings
     )
     agent_file.preview_text = (file.preview_text or "")[:2000] or None
-    if created_file:
+    # Ensure a linked Work exists — not just when the File is newly created. On a **re-extract**
+    # the File already exists (same sha256), and its prior Work may have been deleted or the PDF
+    # discarded; without this the extraction worker fails with "File has no linked work".
+    has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
+    if not has_link:
         title = storage._title_from_filename(Path(name))
         raw_arxiv = storage._arxiv_id_from_filename(Path(name))
         work = Work(
