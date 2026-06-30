@@ -339,3 +339,74 @@ cd docs
 ```
 
 The script uses `latexmk` when available and falls back to repeated `pdflatex` runs.
+
+## Credits & Acknowledgements
+
+PaRacORD is built on the work of the open-source community, and we are grateful to the
+maintainers and contributors of every project below.
+
+Special thanks to **[GROBID](https://github.com/kermitt2/grobid)** (Apache-2.0): it does
+the heavy lifting of turning PDFs into structured TEI — metadata, full text, references,
+citation mentions, citation contexts, and PDF coordinates. PaRacORD's literature-graph and
+citation features rest directly on it.
+
+### Backend & API
+
+* **[FastAPI](https://fastapi.tiangolo.com/)** (MIT) — HTTP API framework.
+* **[Starlette](https://www.starlette.io/)** (BSD-3-Clause) — ASGI toolkit underlying FastAPI and the agent.
+* **[Uvicorn](https://www.uvicorn.org/)** (BSD-3-Clause) — ASGI server.
+* **[Gunicorn](https://gunicorn.org/)** (MIT) — production process manager for the API.
+* **[Pydantic](https://docs.pydantic.dev/)** / **pydantic-settings** (MIT) — request/response models and settings.
+* **[httpx2](https://pypi.org/project/httpx2/)** — HTTP client (the Pydantic-maintained, security-patched fork of httpx) used for the GROBID client, agent communication, and outbound calls.
+* **[python-multipart](https://github.com/Kludex/python-multipart)** — multipart/form-data parsing for uploads.
+* **[python-jose](https://github.com/mpdavis/python-jose)** — JWT handling for authenticated sessions.
+* **[bcrypt](https://github.com/pyca/bcrypt)** — password hashing.
+
+### Data & storage
+
+* **[SQLAlchemy](https://www.sqlalchemy.org/)** (MIT) — ORM and database toolkit.
+* **[Alembic](https://alembic.sqlalchemy.org/)** (MIT) — database migrations.
+* **[psycopg](https://www.psycopg.org/psycopg3/)** (LGPL-3.0) — PostgreSQL driver.
+* **[Redis (Python client)](https://github.com/redis/redis-py)** (MIT) — connection to the Redis instance.
+* **[RQ](https://python-rq.org/)** (BSD-2-Clause) — background job queue for extraction and modeling work.
+
+### PDF extraction & ML
+
+* **[GROBID](https://github.com/kermitt2/grobid)** (Apache-2.0) — PDF-to-TEI extraction service (see above).
+* **[PyMuPDF](https://pymupdf.readthedocs.io/)** (AGPL-3.0) — PDF rendering and coordinate handling.
+* **[lxml](https://lxml.de/)** (BSD-3-Clause) — parsing GROBID TEI output.
+* **[NetworkX](https://networkx.org/)** (BSD-3-Clause) — citation-graph construction and analysis.
+* **[bibtexparser](https://github.com/sciunto-org/python-bibtexparser)**, **[pybtex](https://pybtex.org/)**, **[citeproc-py](https://github.com/brechtm/citeproc-py)** — citation parsing and export (BibTeX, BibLaTeX, RIS, CSL JSON, and more).
+* Optional, when enabled: **[sentence-transformers](https://www.sbert.net/)** (Apache-2.0) for local embeddings, **[RapidFuzz](https://github.com/rapidfuzz/RapidFuzz)** (MIT) for faster fuzzy dedup, and **[Ollama](https://ollama.com/)** (run as an external service) for local summaries and embeddings.
+
+### Frontend
+
+* **[Svelte](https://svelte.dev/)** (MIT) — UI framework.
+* **[Vite](https://vite.dev/)** (MIT) — build tool and dev server, with **[@sveltejs/vite-plugin-svelte](https://github.com/sveltejs/vite-plugin-svelte)** (MIT).
+* **[pdf.js (pdfjs-dist)](https://mozilla.github.io/pdf.js/)** (Apache-2.0) — in-browser PDF rendering.
+* **[Cytoscape.js](https://js.cytoscape.org/)** (MIT) — citation-graph visualization.
+* **[TypeScript](https://www.typescriptlang.org/)** (Apache-2.0) — typed frontend sources.
+* **[Vitest](https://vitest.dev/)** (MIT), **[@testing-library/svelte](https://testing-library.com/docs/svelte-testing-library/intro/)** (MIT), and **[jsdom](https://github.com/jsdom/jsdom)** (MIT) — frontend testing.
+
+### Agent
+
+* **[Starlette](https://www.starlette.io/)** / **[Uvicorn](https://www.uvicorn.org/)** — ASGI app and server for the local workstation agent.
+* **[httpx2](https://pypi.org/project/httpx2/)** — communication with the server.
+* **[watchfiles](https://github.com/samuelcolvin/watchfiles)** (MIT) — filesystem watching for indexed roots.
+* **[Rich](https://github.com/Textualize/rich)** (MIT) — CLI output.
+* Optional: **[keyring](https://github.com/jaraco/keyring)** (MIT) — OS-keyring credential storage (falls back to a 0600 file when absent).
+
+### Shared & tooling
+
+* **[PyYAML](https://pyyaml.org/)** (MIT) — configuration parsing.
+* **[Ruff](https://docs.astral.sh/ruff/)** (MIT) — linting and formatting.
+* **[pytest](https://pytest.org/)** (MIT) — backend and agent tests.
+* **[pre-commit](https://pre-commit.com/)** (MIT) — local source-hygiene hooks.
+
+### Services & infrastructure
+
+* **[GROBID](https://github.com/kermitt2/grobid)** (Apache-2.0) — PDF extraction service.
+* **[PostgreSQL](https://www.postgresql.org/)** (PostgreSQL License) — primary datastore, with the **[pgvector](https://github.com/pgvector/pgvector)** (PostgreSQL License) extension for semantic search.
+* **[Redis](https://redis.io/)** — in-memory store backing the job queue.
+* **[Docker](https://www.docker.com/)** & **[Docker Compose](https://docs.docker.com/compose/)** — the runtime source of truth for development, migrations, tests, and deployment.
+* **[Node.js](https://nodejs.org/)** (MIT) — frontend build and tooling runtime.
