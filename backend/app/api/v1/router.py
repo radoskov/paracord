@@ -30,9 +30,10 @@ auth_required = [Depends(require_authenticated_user)]
 
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-# Admin routes enforce owner role per-endpoint via require_owner.
+# Admin routes enforce {owner, admin} per-endpoint via require_admin; the privileged
+# admin-management subset is owner-only, enforced in the user-management service layer.
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
-# AI provider config + model management (owner-only; WORKPLAN_NEXT Stage 8).
+# AI provider config + model management (owner or admin; WORKPLAN_NEXT Stage 8).
 api_router.include_router(ai_admin.router, prefix="/admin", tags=["admin", "ai"])
 # Agent routes authenticate via the enrollment/agent token, not a user session, so the
 # router is not behind the user-session dependency.

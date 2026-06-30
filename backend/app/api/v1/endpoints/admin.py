@@ -1,4 +1,10 @@
-"""Owner-only admin endpoints: user management and audit-log access (SPEC 10.2)."""
+"""Administration endpoints: user management, agents and audit-log access (SPEC 10.2).
+
+Authorization model (batch 2 #20): general administration is open to {owner, admin}; the privileged
+subset — creating/disabling/deleting/role-changing an admin, and any action targeting the owner — is
+owner-only and enforced in the user-management service layer. No account may disable or delete
+itself.
+"""
 
 import uuid
 from datetime import datetime
@@ -8,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_owner
+from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.agent import Agent, AgentFile
 from app.models.audit import AuditEvent
@@ -17,6 +23,7 @@ from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
 from app.services import agents as agent_service
 from app.services import users as user_service
 from app.services.audit import record_event
+from app.services.users import PermissionError403
 
 router = APIRouter()
 
@@ -80,9 +87,9 @@ class AgentFileOut(BaseModel):
 @router.get("/users", response_model=list[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    _owner: User = Depends(require_owner),
+    _admin: User = Depends(require_admin),
 ) -> list[User]:
-    """List all user accounts (owner only)."""
+    """List all user accounts (owner or admin)."""
     return user_service.list_users(db)
 
 
@@ -90,17 +97,19 @@ def list_users(
 def create_user(
     payload: UserCreate,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> User:
-    """Create a user account (owner only)."""
+    """Create a user account. Admins may create editors/readers; only the owner creates admins."""
     try:
         user = user_service.create_user(
             db,
             username=payload.username,
             password=payload.password,
             role=payload.role,
-            actor_user_id=owner.id,
+            actor=actor,
         )
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
@@ -113,13 +122,13 @@ def update_user_role(
     user_id: uuid.UUID,
     payload: UserRoleUpdate,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> User:
-    """Change a user's role (owner only)."""
+    """Change a user's role. The owner cannot be changed; admin changes are owner-only."""
     try:
-        user = user_service.set_user_role(
-            db, user_id=user_id, role=payload.role, actor_user_id=owner.id
-        )
+        user = user_service.set_user_role(db, user_id=user_id, role=payload.role, actor=actor)
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -133,11 +142,13 @@ def update_user_role(
 def disable_user(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> User:
-    """Disable a user account (owner only)."""
+    """Disable a user account. No self-disable; owner is never disablable; admins are owner-only."""
     try:
-        user = user_service.disable_user(db, user_id=user_id, actor_user_id=owner.id)
+        user = user_service.disable_user(db, user_id=user_id, actor=actor)
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -151,11 +162,13 @@ def disable_user(
 def enable_user(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> User:
-    """Re-enable a disabled user account (owner only)."""
+    """Re-enable a disabled user account. Re-enabling an admin is owner-only."""
     try:
-        user = user_service.enable_user(db, user_id=user_id, actor_user_id=owner.id)
+        user = user_service.enable_user(db, user_id=user_id, actor=actor)
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     db.commit()
@@ -168,13 +181,18 @@ def reset_user_password(
     user_id: uuid.UUID,
     payload: PasswordResetRequest,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> dict[str, str | int]:
-    """Set a new password for another user and sign out all their sessions (owner only)."""
+    """Set a new password for another user and sign out their sessions.
+
+    The owner's password is never resettable here; resetting an admin's is owner-only.
+    """
     try:
         revoked = user_service.reset_user_password(
-            db, user_id=user_id, new_password=payload.new_password, actor_user_id=owner.id
+            db, user_id=user_id, new_password=payload.new_password, actor=actor
         )
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -187,11 +205,16 @@ def reset_user_password(
 def delete_user(
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> None:
-    """Permanently delete a disabled user (owner only). The account must be disabled first."""
+    """Permanently delete a disabled user (must be disabled first).
+
+    No self-delete; the owner is never deletable; deleting an admin is owner-only.
+    """
     try:
-        user_service.delete_user(db, user_id=user_id, actor_user_id=owner.id)
+        user_service.delete_user(db, user_id=user_id, actor=actor)
+    except PermissionError403 as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -202,11 +225,11 @@ def delete_user(
 @router.get("/audit-events")
 def list_audit_events(
     db: Session = Depends(get_db),
-    _owner: User = Depends(require_owner),
+    _admin: User = Depends(require_admin),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """Return a paginated, newest-first view of audit events (owner only)."""
+    """Return a paginated, newest-first view of audit events (owner or admin)."""
     total = db.scalar(select(func.count()).select_from(AuditEvent)) or 0
     events = db.scalars(
         select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(limit).offset(offset)
@@ -232,10 +255,10 @@ def list_audit_events(
 )
 def issue_agent_enroll_token(
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> EnrollTokenOut:
-    """Mint a single-use agent enrollment token (owner only)."""
-    raw_token, token = agent_service.mint_enrollment_token(db, owner=owner)
+    """Mint a single-use agent enrollment token (owner or admin)."""
+    raw_token, token = agent_service.mint_enrollment_token(db, owner=actor)
     db.commit()
     return EnrollTokenOut(token=raw_token, expires_at=token.expires_at.isoformat())
 
@@ -243,9 +266,9 @@ def issue_agent_enroll_token(
 @router.get("/agents", response_model=list[AgentOut])
 def list_agents(
     db: Session = Depends(get_db),
-    _owner: User = Depends(require_owner),
+    _actor: User = Depends(require_admin),
 ) -> list:
-    """List enrolled/pending agents (owner only)."""
+    """List enrolled/pending agents (owner or admin)."""
     return agent_service.list_agents(db)
 
 
@@ -253,9 +276,9 @@ def list_agents(
 def list_agent_files(
     agent_id: uuid.UUID,
     db: Session = Depends(get_db),
-    _owner: User = Depends(require_owner),
+    _actor: User = Depends(require_admin),
 ) -> list:
-    """List the files an agent has reported via its manifest (owner only)."""
+    """List the files an agent has reported via its manifest (owner or admin)."""
     if db.get(Agent, agent_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     return list(
@@ -272,9 +295,9 @@ def update_agent_privileges(
     agent_id: uuid.UUID,
     payload: AgentPrivilegesUpdate,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> Agent:
-    """Set an agent's privileges (owner only)."""
+    """Set an agent's privileges (owner or admin)."""
     agent = db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
@@ -284,7 +307,7 @@ def update_agent_privileges(
     record_event(
         db,
         "agent.privileges_changed",
-        actor_user_id=owner.id,
+        actor_user_id=actor.id,
         entity_type="agent",
         entity_id=str(agent.id),
         details=changes,
@@ -299,11 +322,11 @@ def rename_agent(
     agent_id: uuid.UUID,
     payload: AgentRenameRequest,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> Agent:
-    """Rename an agent (owner only)."""
+    """Rename an agent (owner or admin)."""
     try:
-        agent = agent_service.rename_agent(db, agent_id=agent_id, name=payload.name, owner=owner)
+        agent = agent_service.rename_agent(db, agent_id=agent_id, name=payload.name, owner=actor)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -317,11 +340,11 @@ def rename_agent(
 def delete_agent(
     agent_id: uuid.UUID,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> None:
-    """Remove an agent and its indexed-file records, revoking its token (owner only)."""
+    """Remove an agent and its indexed-file records, revoking its token (owner or admin)."""
     try:
-        agent_service.delete_agent(db, agent_id=agent_id, owner=owner)
+        agent_service.delete_agent(db, agent_id=agent_id, owner=actor)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     db.commit()
@@ -331,11 +354,11 @@ def delete_agent(
 def approve_agent(
     agent_id: uuid.UUID,
     db: Session = Depends(get_db),
-    owner: User = Depends(require_owner),
+    actor: User = Depends(require_admin),
 ) -> AgentApprovedOut:
-    """Approve a pending agent and return its scoped access token once (owner only)."""
+    """Approve a pending agent and return its scoped access token once (owner or admin)."""
     try:
-        raw_token, agent = agent_service.approve_agent(db, agent_id=agent_id, owner=owner)
+        raw_token, agent = agent_service.approve_agent(db, agent_id=agent_id, owner=actor)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

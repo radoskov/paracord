@@ -37,10 +37,89 @@ def test_write_role_matrix(client, auth_headers):
     assert client.post("/api/v1/shelves", headers=reader, json={"name": "r"}).status_code == 403
     assert client.post("/api/v1/shelves", headers=editor, json={"name": "e"}).status_code == 201
     assert client.post("/api/v1/shelves", headers=owner, json={"name": "o"}).status_code == 201
-    # User management is owner-only.
+    # User management requires owner or admin; editors/readers are rejected.
     payload = {"username": "newbie", "password": "test-pass-1234", "role": "reader"}
     assert client.post("/api/v1/admin/users", headers=editor, json=payload).status_code == 403
     assert client.post("/api/v1/admin/users", headers=owner, json=payload).status_code == 201
+
+
+def test_admin_role_management_matrix_over_http(client, auth_headers, make_user):
+    """End-to-end (#20): admins administer editors/readers but never admins/the owner."""
+    owner = auth_headers("owner")
+    admin = auth_headers("admin")
+
+    # Admins can create readers/editors.
+    r = client.post(
+        "/api/v1/admin/users",
+        headers=admin,
+        json={"username": "by-admin", "password": "test-pass-1234", "role": "editor"},
+    )
+    assert r.status_code == 201
+
+    # Admins cannot create another admin (owner-only).
+    r = client.post(
+        "/api/v1/admin/users",
+        headers=admin,
+        json={"username": "rogue-admin", "password": "test-pass-1234", "role": "admin"},
+    )
+    assert r.status_code == 403
+
+    # The owner can create an admin; that admin cannot then be managed by a different admin.
+    target_admin = make_user("target-admin", role="admin")
+    assert (
+        client.post(f"/api/v1/admin/users/{target_admin.id}/disable", headers=admin).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/admin/users/{target_admin.id}", headers=admin, json={"role": "reader"}
+        ).status_code
+        == 403
+    )
+    # ...but the owner can.
+    assert (
+        client.patch(
+            f"/api/v1/admin/users/{target_admin.id}", headers=owner, json={"role": "reader"}
+        ).status_code
+        == 200
+    )
+
+    # The owner role can never be created or assigned (schema rejects unknown enum value
+    # downgrades to a 4xx; the explicit owner value is rejected by the service as 400).
+    assert (
+        client.post(
+            "/api/v1/admin/users",
+            headers=owner,
+            json={"username": "second-owner", "password": "test-pass-1234", "role": "owner"},
+        ).status_code
+        == 400
+    )
+
+
+def test_owner_account_is_locked_over_http(client, auth_headers, make_user, db):
+    """The owner (any owner-role account) cannot be disabled/role-changed by anyone, incl. self."""
+    owner_user = make_user("the-owner", role="owner")
+    from app.services.auth import create_user_session
+
+    token, _ = create_user_session(db, owner_user, ttl_minutes=60)
+    db.commit()
+    owner = {"Authorization": f"Bearer {token}"}
+
+    # Self-disable is blocked.
+    assert (
+        client.post(f"/api/v1/admin/users/{owner_user.id}/disable", headers=owner).status_code
+        == 400
+    )
+    # A second owner-role account cannot be disabled either.
+    other = make_user("other-owner", role="owner")
+    assert client.post(f"/api/v1/admin/users/{other.id}/disable", headers=owner).status_code == 403
+    # ...nor role-changed.
+    assert (
+        client.patch(
+            f"/api/v1/admin/users/{other.id}", headers=owner, json={"role": "reader"}
+        ).status_code
+        == 403
+    )
 
 
 def test_no_guest_role_assertion():

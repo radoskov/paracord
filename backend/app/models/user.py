@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, Uuid
+from sqlalchemy import Boolean, DateTime, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -18,6 +18,10 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(512))
     role: Mapped[str] = mapped_column(String(32), default="reader")
+    # The single immutable owner (provisioned by ``make bootstrap-admin``) carries this marker.
+    # It can never be disabled, deleted or role-changed, and is the only account that may manage
+    # ``admin`` accounts. Exactly one row has this set to True.
+    is_bootstrap: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Profile + account metadata (SPEC §9.3).
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)

@@ -9,18 +9,46 @@
   } from '../api/client';
   import AiModelsPanel from '../components/AiModelsPanel.svelte';
   import Modal from '../components/Modal.svelte';
+  import { currentUser, isOwner } from '../lib/session';
 
-  // Static reference shown under the Users widget so an owner can understand each role
+  // Static reference shown under the Users widget so an admin/owner can understand each role
   // before assigning it. Kept in sync with ProfilePage's own-role description.
   const ROLE_GUIDE: { role: UserRole; label: string; blurb: string }[] = [
     { role: 'reader', label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
     { role: 'editor', label: 'Editor', blurb: 'Everything a reader can do, plus import, edit, enrich and delete papers.' },
     {
+      role: 'admin',
+      label: 'Admin',
+      blurb: 'Everything an editor can do, plus manage editors/readers, agents, AI settings and the audit log. Cannot manage other admins or the owner.',
+    },
+    {
       role: 'owner',
       label: 'Owner',
-      blurb: 'Everything an editor can do, plus manage users, agents, AI settings and the audit log.',
+      blurb: 'The single, permanent account. Everything an admin can do, plus manage admins. Cannot be disabled, deleted or role-changed.',
     },
   ];
+
+  // Roles an admin/owner may assign. The owner role is never assignable (it is the immutable
+  // bootstrap account); the admin role is offered to the owner only.
+  $: assignableRoles = ($isOwner
+    ? (['reader', 'editor', 'admin'] as UserRole[])
+    : (['reader', 'editor'] as UserRole[]));
+
+  // The signed-in user's id, for blocking self-disable / self-delete in the UI (the server also
+  // enforces this).
+  $: meId = $currentUser?.id ?? null;
+
+  /** The owner row is fully locked: no role-change, disable, delete or password reset. */
+  function isOwnerRow(user: AdminUser): boolean {
+    return user.role === 'owner' || user.is_bootstrap;
+  }
+
+  /** Admin rows may only be managed by the owner; everyone-else rows are managed by any admin. */
+  function canManageRow(user: AdminUser): boolean {
+    if (isOwnerRow(user)) return false;
+    if (user.role === 'admin') return $isOwner;
+    return true;
+  }
 
   const PRIVILEGES: { key: AgentPrivilege; label: string; hint: string }[] = [
     { key: 'can_index', label: 'index', hint: 'Accept manifests (file listings) from this agent.' },
@@ -244,9 +272,9 @@
         <input bind:value={newUsername} placeholder="Username" autocomplete="off" />
         <input bind:value={newPassword} type="password" placeholder="Password" autocomplete="new-password" />
         <select bind:value={newRole}>
-          <option value="reader">reader</option>
-          <option value="editor">editor</option>
-          <option value="owner">owner</option>
+          {#each assignableRoles as r}
+            <option value={r}>{r}</option>
+          {/each}
         </select>
         <button type="submit" disabled={!newUsername || !newPassword || loading}>Create user</button>
       </form>
@@ -256,61 +284,81 @@
       {:else}
         <div class="user-list">
           {#each users as user}
-            <article class:disabled={!!user.disabled_at}>
+            {@const owned = isOwnerRow(user)}
+            {@const manageable = canManageRow(user)}
+            {@const isSelf = user.id === meId}
+            <article class:disabled={!!user.disabled_at} class:locked={owned}>
               <header>
                 <strong>{user.username}</strong>
                 <span class="role-badge role-{user.role}">{user.role}</span>
+                {#if owned}
+                  <span class="lock-badge" title="The owner account is permanent and cannot be changed">owner · locked</span>
+                {:else if isSelf}
+                  <span class="self-badge" title="This is you">you</span>
+                {/if}
                 {#if user.disabled_at}
                   <span class="disabled-badge">disabled</span>
                 {/if}
               </header>
-              <div class="user-actions">
-                <select
-                  value={user.role}
-                  on:change={(e) => changeRole(user, e.currentTarget.value as UserRole)}
-                  disabled={loading || !!user.disabled_at}
-                >
-                  <option value="reader">reader</option>
-                  <option value="editor">editor</option>
-                  <option value="owner">owner</option>
-                </select>
-                <button
-                  type="button"
-                  on:click={() => openReset(user)}
-                  disabled={loading}
-                  title="Set a new password for this user (signs out their sessions)"
-                >
-                  Reset password
-                </button>
-                {#if user.disabled_at}
+              {#if owned}
+                <p class="muted small-help">
+                  The owner is the single permanent account and cannot be disabled, deleted or
+                  role-changed.
+                </p>
+              {:else if !manageable}
+                <p class="muted small-help">
+                  Only the owner can manage administrator accounts.
+                </p>
+              {:else}
+                <div class="user-actions">
+                  <select
+                    value={user.role}
+                    on:change={(e) => changeRole(user, e.currentTarget.value as UserRole)}
+                    disabled={loading || !!user.disabled_at}
+                    title={$isOwner ? 'Change this user’s role' : 'Admins can set reader or editor; only the owner grants admin'}
+                  >
+                    {#each assignableRoles as r}
+                      <option value={r}>{r}</option>
+                    {/each}
+                  </select>
                   <button
                     type="button"
-                    on:click={() => enableUser(user)}
+                    on:click={() => openReset(user)}
                     disabled={loading}
-                    title="Re-enable this account"
+                    title="Set a new password for this user (signs out their sessions)"
                   >
-                    Re-enable
+                    Reset password
                   </button>
-                  <button
-                    type="button"
-                    class="link-btn danger"
-                    on:click={() => removeUser(user)}
-                    disabled={loading}
-                    title="Permanently delete this disabled account"
-                  >
-                    Delete
-                  </button>
-                {:else}
-                  <button
-                    type="button"
-                    on:click={() => disableUser(user)}
-                    disabled={loading}
-                    title="Disable this account (sign-in blocked; can be re-enabled)"
-                  >
-                    Disable
-                  </button>
-                {/if}
-              </div>
+                  {#if user.disabled_at}
+                    <button
+                      type="button"
+                      on:click={() => enableUser(user)}
+                      disabled={loading}
+                      title="Re-enable this account"
+                    >
+                      Re-enable
+                    </button>
+                    <button
+                      type="button"
+                      class="link-btn danger"
+                      on:click={() => removeUser(user)}
+                      disabled={loading || isSelf}
+                      title={isSelf ? 'You cannot delete your own account' : 'Permanently delete this disabled account'}
+                    >
+                      Delete
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      on:click={() => disableUser(user)}
+                      disabled={loading || isSelf}
+                      title={isSelf ? 'You cannot disable your own account' : 'Disable this account (sign-in blocked; can be re-enabled)'}
+                    >
+                      Disable
+                    </button>
+                  {/if}
+                </div>
+              {/if}
               <small>Created {formatDate(user.created_at)}</small>
             </article>
           {/each}
@@ -641,6 +689,7 @@
   }
 
   .role-owner { background: #fde68a; color: #78350f; }
+  .role-admin { background: #ddd6fe; color: #4c1d95; }
   .role-editor { background: #bfdbfe; color: #1e3a5f; }
   .role-reader { background: #e2e8f0; color: #44515f; }
 
@@ -679,6 +728,28 @@
     background: #fecaca;
     color: #7f1d1d;
     font-weight: 600;
+  }
+
+  .lock-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: #fef3c7;
+    color: #78350f;
+    font-weight: 600;
+  }
+
+  .self-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: #e0f2fe;
+    color: #075985;
+    font-weight: 600;
+  }
+
+  .user-list article.locked {
+    border-left: 3px solid #f59e0b;
   }
 
   .user-actions {

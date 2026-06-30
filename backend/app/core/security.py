@@ -15,9 +15,20 @@ _BCRYPT_MAX_BYTES = 72
 
 
 class Role(StrEnum):
-    """Allowed authenticated roles."""
+    """Allowed authenticated roles, highest privilege first.
+
+    Privilege ladder: ``owner`` > ``admin`` > ``editor`` > ``reader``.
+
+    - ``owner``: single, immutable bootstrap account (``make bootstrap-admin``). It can never be
+      disabled, deleted, role-changed, or disable itself, and is the only account that may manage
+      ``admin`` accounts. There is exactly one owner.
+    - ``admin``: full administration (users/agents/AI settings/audit log) EXCEPT creating,
+      disabling, deleting or role-changing another ``admin`` or the ``owner``. Admins manage only
+      editors/readers.
+    """
 
     OWNER = "owner"
+    ADMIN = "admin"
     EDITOR = "editor"
     READER = "reader"
 

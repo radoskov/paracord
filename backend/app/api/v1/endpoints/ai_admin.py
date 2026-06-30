@@ -1,6 +1,6 @@
-"""Owner-managed AI provider configuration + model management (WORKPLAN_NEXT Stage 8B/8C/8F).
+"""Admin-managed AI provider configuration + model management (WORKPLAN_NEXT Stage 8B/8C/8F).
 
-Lets the owner choose the embedding/summary/topic providers and models, detect what can run, pull
+Lets an owner or admin choose the embedding/summary/topic providers and models, detect what can run, pull
 or delete model weights, and reindex embeddings — all from the web UI rather than a config file.
 """
 
@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_owner
+from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.user import User
 from app.services.ai_config import (
@@ -26,7 +26,7 @@ from app.workers.queue import enqueue_model_pull, enqueue_reindex
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-OWNER_DEP = Depends(require_owner)
+ADMIN_DEP = Depends(require_admin)
 
 
 class AIConfigUpdate(BaseModel):
@@ -45,7 +45,7 @@ class ModelRef(BaseModel):
 
 
 @router.get("/ai-config")
-def read_ai_config(db: Session = DB_DEP, _: User = OWNER_DEP) -> dict:
+def read_ai_config(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Return the effective AI config + the allowed values for each provider field."""
     return {
         "config": get_ai_config(db).as_dict(),
@@ -58,7 +58,7 @@ def read_ai_config(db: Session = DB_DEP, _: User = OWNER_DEP) -> dict:
 
 
 @router.put("/ai-config")
-def write_ai_config(payload: AIConfigUpdate, db: Session = DB_DEP, owner: User = OWNER_DEP) -> dict:
+def write_ai_config(payload: AIConfigUpdate, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
     """Update AI provider config (owner). Changing the embedding model queues a reindex."""
     changes = payload.model_dump(exclude_unset=True)
     try:
@@ -74,19 +74,19 @@ def write_ai_config(payload: AIConfigUpdate, db: Session = DB_DEP, owner: User =
 
 
 @router.get("/ai/providers")
-def ai_providers(db: Session = DB_DEP, _: User = OWNER_DEP) -> dict:
+def ai_providers(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Detect which providers can run here (and how to enable those that can't)."""
     return detect_providers(ollama_url=get_ai_config(db).ollama_url)
 
 
 @router.get("/ai/models")
-def ai_models(db: Session = DB_DEP, _: User = OWNER_DEP) -> dict:
+def ai_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """List locally-available downloadable models."""
     return {"models": list_models(ollama_url=get_ai_config(db).ollama_url)}
 
 
 @router.post("/ai/models/pull", status_code=status.HTTP_202_ACCEPTED)
-def pull_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User = OWNER_DEP) -> dict:
+def pull_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
     """Queue a model download/pull (tracked as a background job)."""
     job_id = enqueue_model_pull(payload.provider, payload.model)
     if job_id is None:
@@ -105,7 +105,7 @@ def pull_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User = O
 
 
 @router.delete("/ai/models")
-def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User = OWNER_DEP) -> dict:
+def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
     """Remove a locally-pulled model (Ollama)."""
     try:
         result = delete_model(
@@ -127,7 +127,7 @@ def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User =
 
 
 @router.post("/ai/reindex", status_code=status.HTTP_202_ACCEPTED)
-def reindex_endpoint(db: Session = DB_DEP, owner: User = OWNER_DEP) -> dict:
+def reindex_endpoint(db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
     """Queue a full embedding reindex for the active provider."""
     job_id = enqueue_reindex()
     if job_id is None:
@@ -140,6 +140,6 @@ def reindex_endpoint(db: Session = DB_DEP, owner: User = OWNER_DEP) -> dict:
 
 
 @router.get("/ai/reindex/status")
-def reindex_status_endpoint(db: Session = DB_DEP, _: User = OWNER_DEP) -> dict:
+def reindex_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Embedding-index coverage for the active model (indexed / total)."""
     return reindex_status(db, provider=get_embedding_provider(db=db))

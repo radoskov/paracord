@@ -484,7 +484,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
 
 ## Phases (sequential impl; design pipelined read-only; commit to `main`, no branch)
 
-- [ ] **Phase A — Security role redesign (#20).** TOP PRIORITY. Add `Role.ADMIN`; Alembic migration
+- [x] **Phase A — Security role redesign (#20).** TOP PRIORITY. Add `Role.ADMIN`; Alembic migration
   (bootstrap owner immutable; other owners → admin); permission deps (owner-only admin management;
   admin manages editors/readers; block self-disable/self-delete; block disabling/removing owner;
   admin cannot touch admins/owner); AdminPage UI (assignable roles = reader/editor/admin; owner

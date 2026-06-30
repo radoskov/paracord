@@ -26,3 +26,4 @@ class UserOut(BaseModel):
     role: str
     created_at: datetime
     disabled_at: datetime | None = None
+    is_bootstrap: bool = False

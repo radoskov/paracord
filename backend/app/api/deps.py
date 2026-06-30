@@ -62,8 +62,23 @@ def require_roles(*allowed_roles: str) -> Callable[..., User]:
     return dependency
 
 
+def require_admin(user: User = Depends(require_authenticated_user)) -> User:
+    """Allow owner or admin accounts (general administration endpoints).
+
+    Both can manage users (editors/readers), agents, AI settings and the audit log. The narrower
+    owner-only gate (``require_owner``) plus the service-layer checks restrict the privileged
+    subset (managing admins/owner) to the owner.
+    """
+    if user.role not in (Role.OWNER, Role.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator role required",
+        )
+    return user
+
+
 def require_owner(user: User = Depends(require_authenticated_user)) -> User:
-    """Allow only owner accounts (admin operations)."""
+    """Allow only the owner account (owner-exclusive operations, e.g. managing admins)."""
     if user.role != Role.OWNER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -87,10 +87,15 @@
   const ROLE_INFO: Record<string, { label: string; blurb: string }> = {
     reader: { label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
     editor: { label: 'Editor', blurb: 'Browse, search and read papers; import, edit, enrich and delete papers.' },
+    admin: {
+      label: 'Admin',
+      blurb:
+        'Browse, search and read papers; import, edit, enrich and delete papers; and manage editors/readers, agents, AI settings and the audit log. Cannot manage other admins or the owner.',
+    },
     owner: {
       label: 'Owner',
       blurb:
-        'Browse, search and read papers; import, edit, enrich and delete papers; and manage users, agents, AI settings and the audit log.',
+        'The single, permanent account: everything an admin can do, plus manage admins. Cannot be disabled, deleted or role-changed.',
     },
   };
 </script>
@@ -263,6 +268,10 @@
   .role-owner {
     background: #fde9d7;
     color: #9a4a07;
+  }
+  .role-admin {
+    background: #ede9fe;
+    color: #5b21b6;
   }
   .role-editor {
     background: #dbeafe;

@@ -34,7 +34,12 @@ def create_first_owner(username: str, password: str) -> User:
         if session.scalar(select(User).where(User.username == username)):
             raise RuntimeError(f"User {username!r} already exists")
 
-        owner = User(username=username, password_hash=hash_password(password), role=Role.OWNER)
+        owner = User(
+            username=username,
+            password_hash=hash_password(password),
+            role=Role.OWNER,
+            is_bootstrap=True,
+        )
         session.add(owner)
         session.flush()
         session.add(

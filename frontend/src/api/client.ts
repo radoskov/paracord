@@ -360,7 +360,8 @@ export interface AiModel {
   size_bytes: number | null;
 }
 
-export type UserRole = 'owner' | 'editor' | 'reader';
+// Privilege ladder, highest first: owner > admin > editor > reader.
+export type UserRole = 'owner' | 'admin' | 'editor' | 'reader';
 
 export interface AdminUser {
   id: string;
@@ -368,6 +369,9 @@ export interface AdminUser {
   role: string;
   created_at: string;
   disabled_at: string | null;
+  // The single immutable owner account (provisioned by `make bootstrap-admin`). Never disablable,
+  // deletable or role-changeable; only the owner can manage admins.
+  is_bootstrap: boolean;
 }
 
 export interface CurrentUser {
