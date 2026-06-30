@@ -20,11 +20,22 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path
-from app.services.tei_parser import ParsedPaper, parse_tei
+from app.services.keyword_extraction import extract_keywords
+from app.services.tei_parser import ParsedPaper, extract_body_text, parse_tei
 from app.utils.normalization import normalize_title
 
 # fetch_tei takes the PDF path and returns raw TEI XML (the GROBID call, injected for testing).
 TeiFetcher = Callable[[Path], str]
+
+
+def _text_layer_quality(body_text: str, abstract: str | None, page_count: int | None) -> str:
+    """Classify a PDF's text layer (SPEC §8.3): ``poor`` likely needs OCR, else ``good``."""
+    chars = len(body_text or "") + len(abstract or "")
+    pages = page_count or 1
+    # Heuristic: a born-digital PDF yields hundreds+ of chars per page; near-empty ⇒ scanned.
+    if chars < max(200, 100 * pages // 4):
+        return "poor"
+    return "good"
 
 
 def store_parsed_extraction(
@@ -78,6 +89,15 @@ def store_parsed_extraction(
 
     if parsed.authors:
         assert_field("authors", "; ".join(parsed.authors), canonical=False)
+
+    # Deterministic keyword extraction (SPEC §8.15.1) over the richest available text, and a
+    # text-layer / needs-OCR signal for the file (SPEC §8.3).
+    body_text = extract_body_text(raw_tei_xml) if raw_tei_xml else ""
+    keyword_source = " ".join(part for part in (parsed.abstract, body_text) if part)
+    if keyword_source:
+        work.keywords = extract_keywords(keyword_source, top_k=12)
+    if file is not None:
+        file.text_layer_quality = _text_layer_quality(body_text, parsed.abstract, file.page_count)
 
     work.updated_at = datetime.now(UTC)
 

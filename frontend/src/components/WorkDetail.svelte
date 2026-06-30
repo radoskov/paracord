@@ -255,6 +255,11 @@
     </div>
   </div>
   {#if message}<p class="muted">{message}</p>{/if}
+  {#if work.keywords && work.keywords.length}
+    <div class="keywords">
+      {#each work.keywords as kw}<span class="kw">{kw}</span>{/each}
+    </div>
+  {/if}
 
   <details open>
     <summary>Details</summary>
@@ -627,6 +632,20 @@
   .danger-btn {
     border-color: #f1b0a8;
     color: #b3261e;
+  }
+
+  .keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .kw {
+    background: #eef1f4;
+    border-radius: 10px;
+    color: #41505f;
+    font-size: 0.72rem;
+    padding: 0.05rem 0.45rem;
   }
 
   .lock {

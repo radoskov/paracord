@@ -9,6 +9,8 @@ export interface Work {
   venue: string | null;
   year: number | null;
   reading_status: ReadingStatus;
+  confirmed_fields?: string[];
+  keywords?: string[];
   created_at: string;
   updated_at: string;
 }

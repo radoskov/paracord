@@ -77,6 +77,7 @@ class WorkRead(BaseModel):
     reading_status: str
     canonical_metadata_source: str | None = None
     confirmed_fields: list[str] = []
+    keywords: list[str] = []
     created_at: datetime
     updated_at: datetime
 

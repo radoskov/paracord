@@ -35,6 +35,8 @@ class Work(Base):
     # Per-field user confirmation (SPEC §8.12): names of fields the user has locked so enrichment
     # never overwrites them (e.g. ["title", "year"]). Supersedes the all-or-nothing user_confirmed.
     confirmed_fields: Mapped[list | None] = mapped_column(_JSONB, default=list)
+    # Deterministic keyphrases from extraction (SPEC §8.15.1), most salient first.
+    keywords: Mapped[list | None] = mapped_column(_JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
