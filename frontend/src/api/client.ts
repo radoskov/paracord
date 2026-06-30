@@ -465,6 +465,17 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/${workId}`);
   }
 
+  async getReadingQueue(): Promise<Work[]> {
+    return this.request<Work[]>('/api/v1/works/reading-queue');
+  }
+
+  async reorderReadingQueue(workIds: string[]): Promise<Work[]> {
+    return this.request<Work[]>('/api/v1/works/reading-queue/reorder', {
+      method: 'POST',
+      body: { work_ids: workIds },
+    });
+  }
+
   async createWork(payload: Partial<Work>): Promise<Work> {
     return this.request<Work>('/api/v1/works', { method: 'POST', body: payload });
   }

@@ -29,6 +29,8 @@ class Work(Base):
     work_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
     canonical_metadata_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reading_status: Mapped[str] = mapped_column(String(64), default="unread", index=True)
+    # Manual ordering within the reading queue (SPEC §8.17.1); NULL sorts last.
+    queue_position: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     # Per-field user confirmation (SPEC §8.12): names of fields the user has locked so enrichment
     # never overwrites them (e.g. ["title", "year"]). Supersedes the all-or-nothing user_confirmed.

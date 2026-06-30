@@ -9,6 +9,7 @@
   let tags: Tag[] = [];
   let newTagName = '';
   let newTagColor = '';
+  let newTagDescription = '';
   let loading = false;
   let message = '';
 
@@ -35,9 +36,14 @@
 
   async function createTag(): Promise<void> {
     await run(async () => {
-      await client.createTag({ name: newTagName, color: newTagColor || undefined });
+      await client.createTag({
+        name: newTagName,
+        color: newTagColor || undefined,
+        description: newTagDescription || undefined,
+      });
       newTagName = '';
       newTagColor = '';
+      newTagDescription = '';
       tags = await client.listTags();
     }, 'Tag created');
   }
@@ -55,6 +61,7 @@
     <form on:submit|preventDefault={createTag} class="new-tag">
       <input bind:value={newTagName} placeholder="Tag name" aria-label="Tag name" />
       <input bind:value={newTagColor} placeholder="#color (optional)" aria-label="Tag colour" />
+      <input bind:value={newTagDescription} placeholder="Description (optional)" aria-label="Tag description" />
       <button type="submit" disabled={!newTagName.trim() || loading}>Create tag</button>
     </form>
     {#if !newTagName.trim()}<p class="hintline">Enter a name to enable “Create tag”.</p>{/if}

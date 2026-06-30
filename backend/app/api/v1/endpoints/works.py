@@ -198,6 +198,32 @@ def list_works(
     return list(db.scalars(stmt).all())
 
 
+class ReorderQueueRequest(BaseModel):
+    work_ids: list[uuid.UUID]
+
+
+@router.get("/reading-queue", response_model=list[WorkRead])
+def reading_queue(db: Session = DB_DEP) -> list[Work]:
+    """Return the manual reading queue (status='reading'), ordered by queue_position then recency."""
+    stmt = (
+        select(Work)
+        .where(Work.reading_status == "reading")
+        .order_by(Work.queue_position.is_(None), Work.queue_position, Work.updated_at.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+@router.post("/reading-queue/reorder", response_model=list[WorkRead])
+def reorder_reading_queue(
+    payload: ReorderQueueRequest, db: Session = DB_DEP, _: User = EDITOR_DEP
+) -> list[Work]:
+    """Set the reading-queue order to the given work id sequence (SPEC §8.17.1)."""
+    for position, work_id in enumerate(payload.work_ids):
+        db.execute(update(Work).where(Work.id == work_id).values(queue_position=position))
+    db.commit()
+    return reading_queue(db=db)
+
+
 @router.post("", response_model=WorkRead, status_code=status.HTTP_201_CREATED)
 def create_work(
     payload: WorkCreate,
