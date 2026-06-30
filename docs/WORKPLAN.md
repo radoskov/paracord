@@ -604,3 +604,58 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   (`WorkDetail.findweb.test.ts`): platform labels render, a PDF-less candidate shows a View link +
   disabled Download with a reason, a PDF candidate has Download enabled; streaming/confirmation/blocked
   tests still pass. Download security/confirmation flow unchanged.
+
+# Round: access-control, batch import, modeling (2026-07-01)
+
+Batch of 10 findings. Resolved decisions:
+- **Role ladder (linear, items 1+3):** `reader < contributor < editor < librarian < admin < owner`.
+  reader = read accessible content; contributor = + CRUD **own** papers (created_by self), no
+  rack/shelf changes; editor = + CRUD **any accessible** paper, no rack/shelf changes; librarian =
+  editor + create/edit/delete racks & shelves and organize papers in them; admin = + manage
+  users/groups/grants/defaults/agents/AI/audit (sees/does everything, not other admins/owner);
+  owner = + manage admins, immutable singleton. (Migrate existing `editor` → stays `editor`.)
+- **Groups (item 1, Linux-like):** `Group(name unique, is_personal, personal_user_id)`; user↔group
+  M2M. Each user auto-gets a **personal group** named = their username on create, deleted on user
+  delete (usernames are unique + immutable). A user can be in many groups. `GroupGrant(group, target
+  ∈ {rack,shelf})` grants access. Owner/admins manage groups, membership, grants, and an
+  owner/admin-configurable **default grant set for new personal groups**.
+- **Rack/shelf ACL (item 2):** `access_level ∈ {open, visible, private}` (default configurable,
+  default `open`). SEE: open/visible → all; private → group members with a grant (admin/owner always).
+  MODIFY structure (librarian+): open → role only; visible/private → role AND group grant ("not even
+  a librarian without a grant").
+- **Paper governance:** SEE = most-permissive over the shelves containing it; a paper in no shelf →
+  global default (open); admin/owner see all. MODIFY (contributor=own only; editor+=any visible):
+  requires SEE + modify-access via a governing shelf (open→role; visible/private→role+grant); loose
+  paper treated as open. (The design pass formalizes the exact multi-shelf matrix.)
+- **Batch import (item 5):** paste raw citations/titles, one per line → Crossref/OpenAlex lookup by
+  default, **GROBID citation parser as a selectable option**; a staging UI lets the user confirm/edit
+  parsed fields before committing. No-match lines → title-only draft.
+- **Find-on-web redirect (item 4):** resolver must follow the FULL chain (e.g. linkhub.elsevier.com →
+  sciencedirect.com) and show the **final** host, and download should attempt the resolved/landing
+  URL too (not only a direct `pdf_url`), %PDF-validating with manual fallback.
+
+## Phases (sequential impl; design pipelined read-only; commit to `main`, no branch)
+
+- [ ] **Phase H — Access-control foundation (items 1, 2, 3).** Groups + personal-group lifecycle +
+  group↔rack/shelf grants + rack/shelf `access_level` + roles `contributor`/`librarian` + the full
+  permission matrix (visibility filtering on list endpoints + modify guards) + admin UI
+  (groups/membership/grants/defaults, role assignment) + frontend gating. Migrations. **Design first.**
+- [ ] **Phase I — Find-on-web redirect/download fix (item 4).** Full redirect chain → true final host;
+  download attempts pdf_url then resolved/landing (%PDF-validate, manual fallback). web_find/works.py
+  + WorkDetail. (Independent of H.)
+- [ ] **Phase J — Batch import (5) + import-to-rack/shelf (6).** Raw-citation batch import (Crossref/
+  OpenAlex default, GROBID option) + staging/confirm UI; import-page option to drop a work straight
+  into a rack/shelf. ImportPage + backend. (After H for shelf ACLs.)
+- [ ] **Phase K — Topic & keyword buttons (item 7).** Per-paper **Topic** (BERTopic) + **Keyword**
+  extraction buttons beside Enrich/Extract; show topics below the title, visually separated from
+  keywords. WorkDetail + backend triggers (investigate existing infra).
+- [ ] **Phase L — Conflict remove (8) + job order (9).** Add "remove" (delete assertion) buttons to
+  metadata-conflict review (keep "use this"); reverse job list to newest-first.
+- [ ] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
+  help/explanations (what each model does, when it's used, why something is disabled, BERTopic
+  out-of-the-box status).
+
+## Dependencies & collision-safety
+- **Phase H first / foundational** — it changes the `Role` enum + adds ACL the others build on; J's
+  import-to-shelf and the paper/rack/shelf gating depend on it. I, L, M, K are largely independent of
+  H. Phases run sequentially (shared backend tests + git); read-only design passes pipeline.
