@@ -18,7 +18,14 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(512))
     role: Mapped[str] = mapped_column(String(32), default="reader")
+    # Profile + account metadata (SPEC §9.3).
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -62,7 +62,8 @@ def enroll_agent(db: Session, *, token: str, name: str) -> Agent:
     if _as_utc(record.expires_at) <= datetime.now(UTC):
         raise ValueError("Enrollment token has expired")
 
-    agent = Agent(name=name, status="pending")
+    # Attribute the agent to the owner who minted the enrollment token (SPEC §9.3).
+    agent = Agent(name=name, status="pending", created_by_user_id=record.created_by_user_id)
     db.add(agent)
     db.flush()
     record.used_by_agent_id = agent.id

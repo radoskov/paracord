@@ -108,4 +108,5 @@ def change_password(db: Session, user: User, *, current_password: str, new_passw
     if new_password == current_password:
         raise ValueError("New password must differ from the current password")
     user.password_hash = hash_password(new_password)
+    user.password_changed_at = datetime.now(UTC)
     db.flush()

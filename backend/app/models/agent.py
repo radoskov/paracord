@@ -9,6 +9,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -18,9 +19,12 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Agent(Base):
@@ -39,6 +43,14 @@ class Agent(Base):
     approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
+    # Identity + lifecycle metadata (SPEC §9.3).
+    host_alias: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    capabilities: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Per-agent privileges (SPEC §32.8). Least-privilege for permanent storage (teleport off);
     # indexing, transient extract, being-requested, and visibility are on by default.

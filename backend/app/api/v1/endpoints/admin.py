@@ -1,6 +1,7 @@
 """Owner-only admin endpoints: user management and audit-log access (SPEC 10.2)."""
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -29,6 +30,8 @@ class AgentOut(BaseModel):
     id: uuid.UUID
     name: str
     status: str
+    host_alias: str | None = None
+    last_seen_at: datetime | None = None
     can_index: bool = True
     can_extract: bool = True
     can_teleport: bool = False

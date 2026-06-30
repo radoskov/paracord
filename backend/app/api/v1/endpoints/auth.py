@@ -71,6 +71,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         )
 
     login_throttle.clear(throttle_key)
+    from datetime import UTC, datetime
+
+    user.last_login_at = datetime.now(UTC)
     token, _session = create_user_session(db, user, ttl_minutes=settings.session_ttl_minutes)
     record_event(
         db,
@@ -81,6 +84,20 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     )
     db.commit()
     return TokenResponse(access_token=token)
+
+
+@router.get("/me")
+def whoami(user: User = Depends(require_authenticated_user)) -> dict:
+    """Return the authenticated caller's identity and profile (SPEC §9.3)."""
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "display_name": user.display_name,
+        "email": user.email,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+    }
 
 
 @router.post("/change-password")

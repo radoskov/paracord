@@ -79,4 +79,9 @@ def require_agent_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or unapproved agent token"
         )
+    # Liveness tracking (SPEC §9.3): stamp last_seen on each authenticated agent request.
+    from datetime import UTC, datetime
+
+    agent.last_seen_at = datetime.now(UTC)
+    db.commit()
     return agent
