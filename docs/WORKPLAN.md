@@ -393,15 +393,15 @@ shared dev stack or the git index. Effort: **S** ≈ hours · **M** ≈ half-day
 
 ## Phase 1 — Access & profile polish  *(S)*
 Files: `frontend/src/App.svelte`, `frontend/src/pages/ProfilePage.svelte`, `frontend/src/App.test.ts`.
-- [ ] 1. **Header grouping** — username + Profile link in one rounded-rect chip (a user-menu unit).
-- [ ] 2. **Profile role badge → top-right** of the Account card.
-- [ ] 3. **Roles & access: show only the user's own role** (don't advertise the privilege ladder).
+- [x] 1. **Header grouping** — username + Profile link in one rounded-rect chip (a user-menu unit).
+- [x] 2. **Profile role badge → top-right** of the Account card.
+- [x] 3. **Roles & access: show only the user's own role** (don't advertise the privilege ladder).
   Self-contained descriptions: Reader = "Browse, search and read papers; cannot modify the library.";
   Editor = "Browse, search and read papers; import, edit, enrich and delete papers."; Owner = that +
   "manage users, agents, AI settings and the audit log."
-- [ ] 4. **Change-password copy fix** — "Signs you out everywhere else (other browsers/devices). This
+- [x] 4. **Change-password copy fix** — "Signs you out everywhere else (other browsers/devices). This
   tab stays signed in." (behavior unchanged).
-- [ ] 5. **Role-gated tabs** — `roles: ['owner','editor']` on Import, Jobs, Duplicates; update
+- [x] 5. **Role-gated tabs** — `roles: ['owner','editor']` on Import, Jobs, Duplicates; update
   `App.test.ts`.
 
 ## Phase 2 — Library: references/citations, import refresh, Read robustness  *(M)*

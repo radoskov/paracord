@@ -22,12 +22,12 @@
 
   const TABS: Tab[] = [
     { id: 'library', label: 'Library', hint: 'Search, read, edit and organise your papers.' },
-    { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.' },
+    { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.', roles: ['owner', 'editor'] },
     { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
     { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
-    { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.' },
-    { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).' },
+    { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'editor'] },
+    { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'editor'] },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner'] },
     { id: 'events', label: 'Events', hint: 'Browse the audit log of activity across the library.', roles: ['owner'] },
@@ -136,13 +136,19 @@
       {#if token}
         <nav aria-label="Sections">
           {#each visibleTabs as tab}
-            <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
+            {#if tab.id !== 'profile'}
+              <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
+            {/if}
           {/each}
-          {#if $currentUser}
-            <span class="whoami" title={`Signed in as ${$currentUser.username} (${$currentUser.role})`}>
-              {$currentUser.display_name || $currentUser.username}
-            </span>
-          {/if}
+          <!-- User-menu chip: the Profile link and the signed-in name grouped as one unit. -->
+          <div class="user-chip">
+            <a href="#profile" class:active={active === 'profile'} title="Your account, appearance name and password.">Profile</a>
+            {#if $currentUser}
+              <span class="whoami" title={`Signed in as ${$currentUser.username} (${$currentUser.role})`}>
+                {$currentUser.display_name || $currentUser.username}
+              </span>
+            {/if}
+          </div>
           <button type="button" class="signout" on:click={logout} title="Sign out of PaRacORD">
             Sign out
           </button>
@@ -286,13 +292,26 @@
     margin-left: 0.4rem;
   }
 
+  /* User-menu chip: a bordered, rounded container grouping the Profile link + the
+     signed-in name into one clearly-distinct unit, set apart from the section tabs. */
+  .user-chip {
+    align-items: center;
+    background: #f4f6f9;
+    border: 1px solid #d8dee6;
+    border-radius: 999px;
+    display: flex;
+    gap: 0.15rem;
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.3rem 0.15rem 0.15rem;
+  }
+
   .whoami {
     color: #44515f;
     font-size: 0.85rem;
     font-weight: 600;
-    margin-left: 0.5rem;
     max-width: 12rem;
     overflow: hidden;
+    padding-right: 0.35rem;
     text-overflow: ellipsis;
     white-space: nowrap;
   }

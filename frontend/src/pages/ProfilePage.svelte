@@ -82,19 +82,25 @@
     return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
   }
 
-  const ROLES: { role: string; label: string; blurb: string }[] = [
-    { role: 'reader', label: 'Reader', blurb: 'Browse, search and read papers. Cannot modify the library.' },
-    { role: 'editor', label: 'Editor', blurb: 'Everything a reader can do, plus import, edit, enrich and delete papers.' },
-    { role: 'owner', label: 'Owner', blurb: 'Full administration: manage users and agents, AI settings, and the audit log.' },
-  ];
+  // Self-contained description of each role. Only the signed-in user's own role is shown
+  // (the full privilege ladder is intentionally not advertised to every user).
+  const ROLE_INFO: Record<string, { label: string; blurb: string }> = {
+    reader: { label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
+    editor: { label: 'Editor', blurb: 'Browse, search and read papers; import, edit, enrich and delete papers.' },
+    owner: {
+      label: 'Owner',
+      blurb:
+        'Browse, search and read papers; import, edit, enrich and delete papers; and manage users, agents, AI settings and the audit log.',
+    },
+  };
 </script>
 
 {#if me}
   <div class="profile">
-    <section class="card">
+    <section class="card account">
+      <span class="role-badge role-{me.role} corner" title={`Your role: ${me.role}`}>{me.role}</span>
       <div class="head">
         <h2>Account</h2>
-        <span class="role-badge role-{me.role}">{me.role}</span>
       </div>
       <dl class="meta">
         <div><dt>Username</dt><dd>{me.username} <small class="muted">(cannot be changed)</small></dd></div>
@@ -138,20 +144,19 @@
           {#if pwErr}<p class="danger">{pwErr}</p>{/if}
         </form>
       {:else}
-        <p class="muted">Changing your password signs out your other active sessions.</p>
+        <p class="muted">Signs you out everywhere else (other browsers/devices). This tab stays signed in.</p>
       {/if}
     </section>
 
     <section class="card">
       <h2>Roles &amp; access</h2>
-      <ul class="roles">
-        {#each ROLES as r}
-          <li class:current={r.role === me.role}>
-            <strong>{r.label}{#if r.role === me.role} <span class="you">· your role</span>{/if}</strong>
-            <span class="muted">{r.blurb}</span>
-          </li>
-        {/each}
-      </ul>
+      <div class="role-card">
+        <strong>
+          {ROLE_INFO[me.role]?.label ?? me.role}
+          <span class="you">· your role</span>
+        </strong>
+        <span class="muted">{ROLE_INFO[me.role]?.blurb ?? ''}</span>
+      </div>
     </section>
   </div>
 {:else}
@@ -212,12 +217,23 @@
     display: flex;
     gap: 0.5rem;
   }
+  /* The Account card anchors its role badge in the top-right corner. */
+  .account {
+    position: relative;
+  }
   .role-badge {
     border-radius: 999px;
     font-size: 0.75rem;
     font-weight: 700;
     padding: 0.15rem 0.6rem;
     text-transform: capitalize;
+  }
+  .role-badge.corner {
+    font-size: 0.8rem;
+    padding: 0.2rem 0.7rem;
+    position: absolute;
+    right: 1rem;
+    top: 1rem;
   }
   .role-owner {
     background: #fde9d7;
@@ -231,25 +247,15 @@
     background: #e2e8f0;
     color: #44515f;
   }
-  .roles {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    list-style: none;
-    margin: 0.6rem 0 0;
-    padding: 0;
-  }
-  .roles li {
-    border: 1px solid #e2e8f0;
+  .role-card {
+    background: #f0f7ff;
+    border: 1px solid #93c5fd;
     border-radius: 0.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
+    margin-top: 0.6rem;
     padding: 0.5rem 0.7rem;
-  }
-  .roles li.current {
-    border-color: #93c5fd;
-    background: #f0f7ff;
   }
   .you {
     color: #2563eb;
