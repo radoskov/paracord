@@ -15,6 +15,13 @@ export interface Work {
   updated_at: string;
 }
 
+export interface RelatedWork {
+  work: Work;
+  score: number;
+  shared_keywords: string[];
+  reason: string;
+}
+
 export interface SemanticSearchItem {
   work_id: string;
   title: string | null;
@@ -490,8 +497,8 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/from-reference/${referenceId}`, { method: 'POST' });
   }
 
-  async getRelatedWorks(workId: string, limit = 8): Promise<Work[]> {
-    return this.request<Work[]>(`/api/v1/works/${workId}/related?limit=${limit}`);
+  async getRelatedWorks(workId: string, limit = 8): Promise<RelatedWork[]> {
+    return this.request<RelatedWork[]>(`/api/v1/works/${workId}/related?limit=${limit}`);
   }
 
   async acceptTopicAsTag(
@@ -982,6 +989,12 @@ export class ApiClient {
 
   async extractFile(fileId: string): Promise<{ job_id: string | null; status: string }> {
     return this.request(`/api/v1/files/${fileId}/extract`, { method: 'POST' });
+  }
+
+  async extractWork(
+    workId: string,
+  ): Promise<{ status: string; queued: number; job_ids?: string[] }> {
+    return this.request(`/api/v1/works/${workId}/extract`, { method: 'POST' });
   }
 
   async listAuditEvents(limit = 50): Promise<AuditEvent[]> {

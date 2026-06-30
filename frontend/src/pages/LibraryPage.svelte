@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
 
   import {
@@ -14,7 +14,7 @@
   import Modal from '../components/Modal.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
-  import { selectedWorkId } from '../lib/selection';
+  import { pendingLibrarySearch, selectedWorkId } from '../lib/selection';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -64,6 +64,16 @@
     const remembered = get(selectedWorkId);
     if (remembered) selected = works.find((w) => w.id === remembered) ?? null;
   });
+
+  // A keyword chip (or other tab) requested a Library search — consume it once and run it.
+  const unsubscribePendingSearch = pendingLibrarySearch.subscribe((req) => {
+    if (!req) return;
+    search = req.query;
+    searchMode = req.mode;
+    pendingLibrarySearch.set(null);
+    void loadWorks();
+  });
+  onDestroy(unsubscribePendingSearch);
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -131,6 +141,19 @@
   function selectWork(work: Work | null): void {
     selected = work;
     selectedWorkId.set(work?.id ?? null);
+  }
+
+  // Switch the open paper to a related one by id. Prefer the already-loaded list; fall back to a
+  // direct fetch when the related paper isn't in the current (filtered) results.
+  async function onSelectWork(workId: string): Promise<void> {
+    const inList = works.find((w) => w.id === workId);
+    if (inList) {
+      selectWork(inList);
+      return;
+    }
+    await run(async () => {
+      selectWork(await client.getWork(workId));
+    });
   }
 
   async function updateStatus(work: Work, status: ReadingStatus): Promise<void> {
@@ -379,7 +402,7 @@
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
-        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} {onImported} onClose={() => selectWork(null)} />
+        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} {onImported} {onSelectWork} onClose={() => selectWork(null)} />
       {/key}
     {:else}
       <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>

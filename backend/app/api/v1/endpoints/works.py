@@ -118,6 +118,13 @@ class WorkRead(BaseModel):
         return value or []
 
 
+class RelatedWorkRead(BaseModel):
+    work: WorkRead
+    score: float
+    shared_keywords: list[str] = []
+    reason: str
+
+
 def _looks_like_hash(text: str) -> bool:
     """True if ``text`` could be a sha256 or a sha256 prefix (all hex, 8..64 chars).
 
@@ -342,15 +349,38 @@ def create_work(
     return work
 
 
-@router.get("/{work_id}/related", response_model=list[WorkRead])
+@router.get("/{work_id}/related", response_model=list[RelatedWorkRead])
 def related_papers(
     work_id: uuid.UUID, limit: int = Query(default=10, ge=1, le=50), db: Session = DB_DEP
-) -> list[Work]:
-    """Return papers most similar to this one by embedding neighborhood (SPEC §8.17.2)."""
+) -> list[RelatedWorkRead]:
+    """Return papers most similar to this one, with a "why related" reason (SPEC §8.17.2).
+
+    The reason is the keywords the two papers share (there are no author entities to compare),
+    or the embedding-similarity score when they share none.
+    """
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    return [hit.work for hit in related_works(db, work, limit=limit)]
+    source_keywords = work.keywords or []
+    related: list[RelatedWorkRead] = []
+    for hit in related_works(db, work, limit=limit):
+        hit_keywords = hit.work.keywords or []
+        # Preserve the source paper's keyword order for a stable, readable shared list.
+        hit_set = {k.lower() for k in hit_keywords}
+        shared = [k for k in source_keywords if k.lower() in hit_set]
+        if shared:
+            reason = "Shares keywords: " + ", ".join(shared[:3])
+        else:
+            reason = f"Embedding similarity {hit.score:.0%}"
+        related.append(
+            RelatedWorkRead(
+                work=WorkRead.model_validate(hit.work),
+                score=hit.score,
+                shared_keywords=shared,
+                reason=reason,
+            )
+        )
+    return related
 
 
 @router.get("/{work_id}", response_model=WorkRead)
@@ -1030,6 +1060,41 @@ def enrich_work_endpoint(
             detail="Enrichment queue unavailable",
         )
     return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/{work_id}/extract", status_code=status.HTTP_202_ACCEPTED)
+def extract_work_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    _: User = EDITOR_DEP,
+) -> dict[str, object]:
+    """Queue GROBID extraction for every file attached to a work.
+
+    404 if the paper is missing; ``{status: "no_files"}`` when nothing is attached; 503 if the
+    extraction queue is unavailable. Per-file extraction is still available via /files/{id}/extract.
+    """
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    file_ids = list(
+        db.scalars(
+            select(File.id)
+            .join(FileWorkLink, FileWorkLink.file_id == File.id)
+            .where(FileWorkLink.work_id == work_id)
+            .order_by(File.created_at.desc())
+        ).all()
+    )
+    if not file_ids:
+        return {"status": "no_files", "queued": 0}
+    job_ids: list[str] = []
+    for file_id in file_ids:
+        job_id = enqueue_extraction(file_id)
+        if job_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Extraction queue unavailable",
+            )
+        job_ids.append(job_id)
+    return {"status": "queued", "queued": len(job_ids), "job_ids": job_ids}
 
 
 @router.post("/{work_id}/metadata/select", response_model=WorkRead)

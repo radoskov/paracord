@@ -16,10 +16,57 @@ def test_related_papers_ranks_similar_first(client, auth_headers):
 
     related = client.get(f"/api/v1/works/{a}/related?limit=2", headers=h)
     assert related.status_code == 200
-    titles = [w["canonical_title"] for w in related.json()]
+    items = related.json()
+    titles = [item["work"]["canonical_title"] for item in items]
     assert titles  # at least one neighbor
-    assert a not in [w["id"] for w in related.json()]  # never returns itself
+    assert a not in [item["work"]["id"] for item in items]  # never returns itself
     assert "Attention networks" in titles  # the similar one ranks in
+
+
+def test_related_papers_response_shape(client, auth_headers):
+    """Each related entry carries the work, a score, shared_keywords, and a human reason (#17)."""
+    h = auth_headers("editor")
+    a = _work(client, h, "Graph neural networks", "message passing graph nodes edges learning")
+    _work(client, h, "Graph attention", "attention over graph nodes message passing learning")
+    _work(client, h, "Sourdough baking", "bread fermentation yeast flour oven")
+    client.post("/api/v1/search/reindex", headers=h)
+
+    related = client.get(f"/api/v1/works/{a}/related?limit=5", headers=h)
+    assert related.status_code == 200
+    items = related.json()
+    assert items
+    first = items[0]
+    assert {"work", "score", "shared_keywords", "reason"} <= first.keys()
+    assert isinstance(first["score"], (int, float))
+    assert isinstance(first["shared_keywords"], list)
+    assert first["reason"]  # always a non-empty explanation
+    # No shared keywords here → reason falls back to the embedding-similarity phrasing.
+    assert any("Embedding similarity" in item["reason"] for item in items)
+
+
+def test_related_papers_reason_uses_shared_keywords(client, auth_headers, db):
+    """When two papers share keywords, the reason lists them instead of the similarity score."""
+    import uuid as _uuid  # noqa: PLC0415
+
+    from app.models.work import Work as WorkModel  # noqa: PLC0415
+
+    h = auth_headers("editor")
+    a = _work(client, h, "Graph neural networks", "message passing graph nodes edges learning")
+    b = _work(client, h, "Graph attention", "attention over graph nodes message passing learning")
+    client.post("/api/v1/search/reindex", headers=h)
+
+    # Give both papers an overlapping keyword (no enrichment pipeline needed for this contract).
+    for wid in (a, b):
+        work = db.get(WorkModel, _uuid.UUID(wid))
+        work.keywords = ["graphs", "machine learning"]
+    db.commit()
+
+    related = client.get(f"/api/v1/works/{a}/related?limit=5", headers=h)
+    assert related.status_code == 200
+    entry = next(item for item in related.json() if item["work"]["id"] == b)
+    assert "graphs" in entry["shared_keywords"]
+    assert entry["reason"].startswith("Shares keywords:")
+    assert "graphs" in entry["reason"]
 
 
 def test_topic_accept_as_tag_and_create_shelf(client, auth_headers, db):

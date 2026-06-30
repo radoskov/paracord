@@ -496,7 +496,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   spans so phrase matches span item boundaries); #13 disable annotation add/highlight/remove for
   readers (role-gated) with hints; #16 reader fit-to-window (no clipped bottom on browser zoom).
   Files: PdfReader.svelte, WorkDetail.svelte.
-- [ ] **Phase C — Paper-view actions & links.** #2 note count on the file widget (above hash); #12
+- [x] **Phase C — Paper-view actions & links.** #2 note count on the file widget (above hash); #12
   separate **Enrich** (metadata/refs) and **Extract** (GROBID) buttons (+ room for topics/summarize
   later); #17 related-papers clickable → switch paper view + show "why related" reason; #18 keyword
   chips clickable → semantic search in library. Files: WorkDetail.svelte, LibraryPage.svelte, backend

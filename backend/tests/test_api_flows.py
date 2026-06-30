@@ -224,3 +224,65 @@ def test_m2_enrich_trigger_requires_identifier(client, auth_headers, db, no_queu
         "/api/v1/works", headers=h, json={"canonical_title": "Has arXiv", "arxiv_id": "1706.03762"}
     ).json()
     assert client.post(f"/api/v1/works/{with_id['id']}/enrich", headers=h).status_code == 202
+
+
+_PDF_BYTES = b"%PDF-1.4\n% extract test fixture\n%%EOF\n"
+
+
+def test_work_extract_no_files(client, auth_headers):
+    """Work-level extract on a paper with no attached files reports no_files (not an error)."""
+    h = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=h, json={"canonical_title": "No files"}).json()
+    resp = client.post(f"/api/v1/works/{work['id']}/extract", headers=h)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "no_files"
+    assert body["queued"] == 0
+
+
+def test_work_extract_queues_each_file(client, auth_headers, monkeypatch):
+    """Work-level extract enqueues GROBID extraction for every attached file (#12)."""
+    jobs: list[str] = []
+
+    def fake_enqueue(file_id):
+        job = f"job-{len(jobs)}"
+        jobs.append(str(file_id))
+        return job
+
+    monkeypatch.setattr("app.api.v1.endpoints.works.enqueue_extraction", fake_enqueue)
+    h = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=h, json={"canonical_title": "Has a PDF"}).json()
+    upload = client.post(
+        f"/api/v1/works/{work['id']}/files",
+        headers=h,
+        files={"file": ("paper.pdf", _PDF_BYTES, "application/pdf")},
+    )
+    assert upload.status_code == 201
+    jobs.clear()  # ignore the enqueue fired by the upload itself
+
+    resp = client.post(f"/api/v1/works/{work['id']}/extract", headers=h)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert body["queued"] == 1
+    assert len(body["job_ids"]) == 1
+    assert len(jobs) == 1  # one enqueue per attached file
+
+
+def test_work_extract_missing_work_404(client, auth_headers):
+    import uuid as _uuid  # noqa: PLC0415
+
+    h = auth_headers("editor")
+    resp = client.post(f"/api/v1/works/{_uuid.uuid4()}/extract", headers=h)
+    assert resp.status_code == 404
+
+
+def test_work_extract_requires_editor(client, auth_headers):
+    """Readers cannot trigger extraction (role gate)."""
+    editor = auth_headers("editor")
+    work = client.post(
+        "/api/v1/works", headers=editor, json={"canonical_title": "Role-gated"}
+    ).json()
+    reader = auth_headers("reader")
+    resp = client.post(f"/api/v1/works/{work['id']}/extract", headers=reader)
+    assert resp.status_code == 403

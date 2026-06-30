@@ -8,11 +8,13 @@
     type CitationContext,
     type FieldReview,
     type ReferenceRecord,
+    type RelatedWork,
     type Summary,
     type Tag,
     type Work,
     type WorkFile,
   } from '../api/client';
+  import { pendingLibrarySearch } from '../lib/selection';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
@@ -24,6 +26,8 @@
   export let onClose: () => void = () => {};
   export let onDeleted: (workId: string) => void = () => {};
   export let onImported: () => void = () => {};
+  // Switch the open paper to a related one (wired by the page hosting this detail panel).
+  export let onSelectWork: (workId: string) => void = () => {};
 
   const STATUSES = ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'];
 
@@ -53,6 +57,19 @@
   let flashRefId = '';
 
   $: if (work && work.id !== loadedId) void loadDetail(work);
+
+  // Note counts per file (and overall) from the already-loaded annotations — no extra request.
+  // Annotations with a null file_id (not bound to a specific PDF) count toward the work total and
+  // are surfaced separately as "unattached" so they aren't silently lost.
+  $: noteCountByFile = annotations.reduce<Record<string, number>>((m, a) => {
+    if (a.file_id) m[a.file_id] = (m[a.file_id] ?? 0) + 1;
+    return m;
+  }, {});
+  $: noteCount = annotations.length;
+  $: unattachedNoteCount = annotations.filter((a) => !a.file_id).length;
+
+  // GROBID extraction needs at least one file whose PDF bytes are on the server.
+  $: hasReadableFile = files.some((f) => f.content_available);
 
   // Reference ids that have at least one in-text mention with page coordinates — these can
   // be located in the reader via "Find in text".
@@ -116,7 +133,7 @@
     }, 'Saved');
   }
 
-  let related: Work[] = [];
+  let related: RelatedWork[] = [];
   let relatedLoaded = false;
   async function loadRelated(): Promise<void> {
     await run(async () => {
@@ -150,6 +167,19 @@
       const result = await client.enrichWork(work.id);
       message =
         `Enrichment ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab for progress.';
+    });
+  }
+
+  async function extract(): Promise<void> {
+    await run(async () => {
+      const result = await client.extractWork(work.id);
+      if (result.status === 'no_files') {
+        message = 'No files attached — attach a PDF first, then extract.';
+        return;
+      }
+      message =
+        `Extraction queued for ${result.queued} file${result.queued === 1 ? '' : 's'}. ` +
         'It runs in the background worker — watch the Jobs tab for progress.';
     });
   }
@@ -308,6 +338,12 @@
     readerJumpReferenceId = null;
   }
 
+  // Keyword chip clicked → run a semantic search for it in the Library tab.
+  function searchKeyword(keyword: string): void {
+    pendingLibrarySearch.set({ query: keyword, mode: 'semantic' });
+    window.location.hash = '#library';
+  }
+
   onDestroy(clearReader);
 </script>
 
@@ -325,7 +361,8 @@
   {#if message}<p class="muted">{message}</p>{/if}
   {#if work.keywords && work.keywords.length}
     <div class="keywords">
-      {#each work.keywords as kw}<span class="kw">{kw}</span>{/each}
+      {#each work.keywords as kw}<button type="button" class="kw" on:click={() => searchKeyword(kw)}
+        title="Search the library for this keyword">{kw}</button>{/each}
     </div>
   {/if}
 
@@ -350,14 +387,24 @@
       <div class="actions">
         <button type="submit" disabled={loading || !$canEdit}
           title={$canEdit ? '' : INSUFFICIENT_ROLE}>Save changes</button>
+      </div>
+      <div class="actions">
         <button type="button" class="secondary" on:click={enrich} disabled={loading || !$canEdit || (!form.doi && !form.arxiv_id)}
           title={!$canEdit
             ? INSUFFICIENT_ROLE
             : form.doi || form.arxiv_id
-              ? 'Fetch external metadata'
+              ? 'Fetch external metadata & references'
               : 'Needs a DOI or arXiv id to enrich'}>Enrich</button>
+        <button type="button" class="secondary" on:click={extract} disabled={loading || !$canEdit || !hasReadableFile}
+          title={!$canEdit
+            ? INSUFFICIENT_ROLE
+            : hasReadableFile
+              ? 'Run GROBID extraction on this paper’s PDFs (text, references, citations)'
+              : 'Attach a PDF to extract'}>Extract</button>
+        <!-- future: Extract topics / Summarize buttons go here (same Actions sub-row). -->
       </div>
       {#if $canEdit && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
+      {#if $canEdit && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
       {#if !$canEdit}<p class="hintline">{INSUFFICIENT_ROLE} — your role is read-only for library content.</p>{/if}
     </form>
   </details>
@@ -438,6 +485,9 @@
                   title={$canEdit ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
               </span>
             </div>
+            <span class="note-count" title="Notes (annotations) on this file">
+              {noteCountByFile[file.id] ?? 0} note{(noteCountByFile[file.id] ?? 0) === 1 ? '' : 's'}
+            </span>
             <button
               type="button"
               class="hash"
@@ -447,6 +497,9 @@
           </li>
         {/each}
       </ul>
+      {#if unattachedNoteCount > 0}
+        <p class="hintline">+{unattachedNoteCount} note{unattachedNoteCount === 1 ? '' : 's'} not attached to a specific file (counted in this paper's {noteCount} total).</p>
+      {/if}
       <p class="hintline">
         The <strong>hash</strong> is the file's content hash — the same value the agent shows as its
         local file id. Click to copy, or paste it (or a prefix) into the Library search box to find
@@ -463,9 +516,15 @@
       <p class="empty">No related papers found (build embeddings via Admin → AI &amp; Models → Reindex).</p>
     {:else}
       <ul class="refs">
-        {#each related as r (r.id)}
-          <li><span class="ref-title">{r.canonical_title ?? 'Untitled'}</span>
-            <small class="muted">{r.year ?? ''}</small></li>
+        {#each related as r (r.work.id)}
+          <li class="entry-card">
+            <button type="button" class="related-link" on:click={() => onSelectWork(r.work.id)}
+              title="Open this related paper">
+              <span class="ref-title">{r.work.canonical_title ?? 'Untitled'}</span>
+              <small class="muted">{r.work.year ?? ''}</small>
+            </button>
+            <small class="related-reason">{r.reason}</small>
+          </li>
         {/each}
       </ul>
     {/if}
@@ -753,6 +812,12 @@
     color: #7c2d12;
   }
 
+  .note-count {
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
   .hash {
     background: #eef1f4;
     border: 1px solid #d8dee6;
@@ -799,10 +864,17 @@
 
   .kw {
     background: #eef1f4;
+    border: 1px solid #d8dee6;
     border-radius: 10px;
     color: #41505f;
+    cursor: pointer;
     font-size: 0.72rem;
+    min-height: auto;
     padding: 0.05rem 0.45rem;
+  }
+
+  .kw:hover {
+    background: #dbe3ec;
   }
 
   .lock {
@@ -836,6 +908,29 @@
     align-items: baseline;
     display: flex;
     gap: 0.4rem;
+  }
+
+  .related-link {
+    background: none;
+    border: none;
+    color: #1d4ed8;
+    cursor: pointer;
+    display: flex;
+    gap: 0.4rem;
+    min-height: auto;
+    padding: 0;
+    text-align: left;
+  }
+
+  .related-link:hover .ref-title {
+    text-decoration: underline;
+  }
+
+  .related-reason {
+    color: #64748b;
+    display: block;
+    font-size: 0.72rem;
+    margin-top: 0.15rem;
   }
 
   .ref-marker {
