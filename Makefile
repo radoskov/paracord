@@ -67,6 +67,38 @@ prod-up: init ## Build and start the production stack (gunicorn + nginx static f
 prod-down: ## Stop the production stack.
 	$(COMPOSE_PROD) down
 
+.PHONY: prod-smoke
+prod-smoke: init ## Build+start the prod stack and assert the API health endpoint responds.
+	$(COMPOSE_PROD) up -d --build postgres redis api
+	@echo "Waiting for the API to become healthy…"
+	@for i in $$(seq 1 30); do \
+	  if $(COMPOSE_PROD) exec -T api curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1; then \
+	    echo "✅ prod smoke passed: /api/v1/health is responding"; exit 0; \
+	  fi; \
+	  sleep 2; \
+	done; \
+	echo "❌ prod smoke failed: API did not become healthy in time"; \
+	$(COMPOSE_PROD) logs --tail=50 api; exit 1
+
+.PHONY: backup
+backup: ## Back up the database + managed library to ./backups (BACKUP_DIR overrides).
+	@mkdir -p $${BACKUP_DIR:-./backups}
+	@ts=$$(date +%Y%m%d-%H%M%S); out=$${BACKUP_DIR:-./backups}; \
+	echo "Dumping database → $$out/db-$$ts.sql.gz"; \
+	$(COMPOSE) exec -T postgres sh -c 'pg_dump -U $$POSTGRES_USER $$POSTGRES_DB' | gzip > $$out/db-$$ts.sql.gz; \
+	echo "Archiving managed library → $$out/library-$$ts.tar.gz"; \
+	$(COMPOSE) run --rm --no-deps -T -v $$(pwd)/$$out:/backup $(API_SERVICE) \
+	  sh -c 'tar czf /backup/library-'$$ts'.tar.gz -C /app storage' 2>/dev/null || \
+	  echo "(library volume archive skipped — start the stack first if you need it)"; \
+	echo "✅ backup complete in $$out"
+
+.PHONY: restore
+restore: ## Restore the database from a dump: make restore RESTORE=backups/db-YYYYMMDD-HHMMSS.sql.gz
+	@test -n "$(RESTORE)" || { echo 'Usage: make restore RESTORE=backups/db-YYYYMMDD-HHMMSS.sql.gz'; exit 1; }
+	@echo "Restoring $(RESTORE) into the database (existing data is dropped)…"
+	@gunzip -c $(RESTORE) | $(COMPOSE) exec -T postgres sh -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'
+	@echo "✅ restore complete"
+
 .PHONY: up-api
 up-api: init ## Start only runtime services needed by the API.
 	$(COMPOSE) up -d --build postgres redis api

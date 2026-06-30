@@ -19,3 +19,10 @@ pybtex>=0.24
 citeproc-py>=0.8
 PyYAML>=6.0
 PyMuPDF>=1.24
+
+# Optional AI/perf providers — the app degrades gracefully (guarded imports) when these are absent,
+# so they are intentionally NOT installed by default. Uncomment to enable:
+#   rapidfuzz>=3.9                 # faster fuzzy-title dedup (else stdlib difflib)
+#   sentence-transformers>=3.0     # embedding_provider=sentence_transformers (local embeddings)
+# Ollama (embedding_provider=ollama, summary_llm_enabled) needs no Python dep — just a reachable
+# Ollama daemon at OLLAMA_URL.

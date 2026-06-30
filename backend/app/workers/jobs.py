@@ -84,6 +84,23 @@ def embed_work_job(work_id: str) -> None:
         db.commit()
 
 
+def scan_duplicates_job() -> None:
+    """Full-library duplicate/version scan over every work and file (off the request path)."""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.file import File
+    from app.models.work import Work
+    from app.services.duplicate_detection import scan_duplicate_candidates
+
+    with SessionLocal() as db:
+        for work in db.scalars(select(Work)).all():
+            scan_duplicate_candidates(db, work=work)
+        for file in db.scalars(select(File)).all():
+            scan_duplicate_candidates(db, file=file)
+        db.commit()
+
+
 def summarize_scope_job(scope_type: str, scope_id: str | None = None) -> None:
     """Run local summary pipeline for a scope."""
     _ = (scope_type, scope_id)

@@ -312,27 +312,34 @@ a rewrite. **Keep the hash-BOW / TF-IDF / extractive providers as the default + 
 
 ---
 
-## Stage 7 — Deferred polish & hardening  *(do last; non-blocking)*
+## Stage 7 — Deferred polish & hardening  *(largely DONE 2026-06-30)*
 
-Explicitly postponed so they don't consume time mid-build. Pull one forward only if it becomes a
-user-visible problem (e.g. import latency for H3).
+- **H3 — fuzzy-title dedup. ✅ DONE.** Normalized-title **blocking** (compare only works sharing the
+  first title token) bounds the former all-pairs scan; the ratio uses `rapidfuzz` when installed and
+  falls back to stdlib `difflib`. A full-library scan can run in the background worker
+  (`POST /duplicates/scan {background:true}` → `scan_duplicates_job`).
+- **Auth hardening. ✅ DONE.** Failed-login throttling (429 + `Retry-After`) and in-app
+  change-password with other-session revocation (`POST /auth/change-password`).
+- **Security-doc truthfulness. ✅ DONE.** SSRF hardening (percent-encoded identifiers, same-host
+  redirect enforcement); removed the dead `guest_access_enabled` flag; `SECURITY.md` reconciled
+  (token hashes, no reversibly-encrypted fields, SSRF documented); `PARACORD_SECRET_KEY` is a real
+  reserved setting.
+- **Export polish. ✅ (mostly).** Preview + copy-to-clipboard + download in `ExportDialog`;
+  selection/search export scope (`work_ids`) wired into the library multi-select. *Remaining:* full
+  CSL **style** rendering via citeproc (CSL-JSON interchange already ships) and a graph-scope export.
+- **View audit events. ✅ DONE.** `paper.viewed` on `GET /works/{id}`, `file.downloaded` on the
+  (now-authenticated) stream endpoint (§7.6).
+- **Ops. ✅ (core).** `make prod-smoke` (build prod stack + assert `/api/v1/health`); `make backup`
+  / `make restore` + `docs/runbooks/backup_restore.md` (§8.16).
 
-- **H3** — fuzzy-title dedup: `rapidfuzz` + normalized-title blocking/trigram index; move
-  full-library scans to RQ. *(only when import latency is actually felt)*
-- **C3/C4 remainder** — weak FKs (`Location.agent_id`, `Reference`, `CitationMention`), extend
-  `JSONB` variant to remaining JSON columns, then assert autogenerate-clean in the parity test.
-- **H7** — pgvector column + index + `CREATE EXTENSION vector` (ships with the real embedding model
-  from Stage 6, not before).
-- **Export polish** — CSL styles (citeproc), preview, copy-to-clipboard, search-result/graph/
-  selection scopes, live always-current shelf/rack bibliography (§8.17.3).
-- **Auth hardening (deferred M0)** — login rate limiting / lockout; in-app change-password with
-  session revocation.
-- **Security-doc truthfulness** — implement at-rest field encryption (`PARACORD_SECRET_KEY`) *or*
-  correct `SECURITY.md` (M2/B8); remove/enforce `guest_access_enabled` (M3); SSRF hardening:
-  URL-encode identifiers, forbid cross-host redirects (M5); reword egress copy (L).
-- **Ops** — production smoke target (`prod-smoke`, B10); backup/restore (§8.16); emit and surface
-  read/view audit events `file.viewed`/`downloaded`/`paper.viewed` (§7.6); Postgres-backed
-  integration suite for FK-cascade/timestamptz/JSONB-query behavior.
+**Genuinely-remaining tail** (non-blocking; pull forward only if needed):
+- **C3/C4 remainder** — add the weak FKs (`Location.agent_id`, `Reference`, `CitationMention`) and
+  extend the `JSONB` variant to the remaining JSON columns via a migration, then assert
+  autogenerate-clean parity. *(schema migration; deferred to avoid risk in the autonomous sweep)*
+- **H7** — pgvector column + index + `CREATE EXTENSION vector`. Ships with a *real* embedding model
+  (Stage 6 left `hash_bow` as the default), so it is intentionally not enabled yet.
+- **CSL citeproc styles**, a Postgres-backed FK-cascade/timestamptz/JSONB integration suite, and the
+  graph-scope export.
 
 ---
 

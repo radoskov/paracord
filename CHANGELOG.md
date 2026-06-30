@@ -27,6 +27,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Stage 7 — dedup performance + ops.**
+  - **Fuzzy-title dedup (H3):** normalized-title **blocking** (only works sharing the first title
+    token are compared) bounds the former all-pairs scan; the similarity ratio uses `rapidfuzz`
+    when installed and falls back to stdlib `difflib`. A full-library scan can run in the worker via
+    `POST /duplicates/scan {"background": true}` (`scan_duplicates_job`).
+  - **Ops:** `make prod-smoke` builds/starts the prod stack and asserts `/api/v1/health`;
+    `make backup` / `make restore` dump+restore the database and managed-library volume, documented
+    in `docs/runbooks/backup_restore.md`.
+  - Optional providers (`rapidfuzz`, `sentence-transformers`, Ollama) documented in
+    `backend/requirements.txt` as opt-in — none is installed by default.
 - **Stage 7 — export polish + view audit events.**
   - **Selection / search export scope:** `POST /exports` accepts `scope_type: "selection"` (or
     `"search"`) with `work_ids`, exporting an explicit set in caller order. Wired into the library

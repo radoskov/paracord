@@ -71,6 +71,8 @@ def _candidate_view(db: Session, candidate: DuplicateCandidate) -> DuplicateCand
 class DuplicateScanRequest(BaseModel):
     work_id: uuid.UUID | None = None
     file_id: uuid.UUID | None = None
+    # Run a full-library scan in the background worker instead of inline (avoids a slow request).
+    background: bool = False
 
 
 class DuplicateScanResult(BaseModel):
@@ -78,6 +80,8 @@ class DuplicateScanResult(BaseModel):
     scanned_files: int
     candidate_count: int
     candidates: list[DuplicateCandidateRead]
+    queued: bool = False
+    job_id: str | None = None
 
 
 class FileSplitSegment(BaseModel):
@@ -118,6 +122,25 @@ def scan_duplicates(
     _: User = EDITOR_DEP,
 ) -> DuplicateScanResult:
     """Scan selected or all known work/file identities for duplicate candidates."""
+    # A full-library scan (no specific work/file) can be pushed to the background worker.
+    if payload.background and payload.work_id is None and payload.file_id is None:
+        from app.workers.queue import enqueue_duplicate_scan
+
+        job_id = enqueue_duplicate_scan()
+        if job_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Duplicate-scan queue unavailable",
+            )
+        return DuplicateScanResult(
+            scanned_works=0,
+            scanned_files=0,
+            candidate_count=0,
+            candidates=[],
+            queued=True,
+            job_id=job_id,
+        )
+
     works = _selected_works(db, payload.work_id)
     files = _selected_files(db, payload.file_id)
 

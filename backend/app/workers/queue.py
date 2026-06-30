@@ -15,6 +15,7 @@ QUEUE_NAME = "paracord"
 EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
 EMBED_JOB = "app.workers.jobs.embed_work_job"
+DEDUP_JOB = "app.workers.jobs.scan_duplicates_job"
 
 
 def get_queue():
@@ -58,7 +59,22 @@ def enqueue_embedding(work_id) -> str | None:
         return None
 
 
-_FUNC_LABELS = {EXTRACT_JOB: "extract", ENRICH_JOB: "enrich", EMBED_JOB: "embed"}
+def enqueue_duplicate_scan() -> str | None:
+    """Best-effort enqueue of a full-library duplicate scan (kept off the request path)."""
+    try:
+        job = get_queue().enqueue(DEDUP_JOB)
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue duplicate scan: %s", exc)
+        return None
+
+
+_FUNC_LABELS = {
+    EXTRACT_JOB: "extract",
+    ENRICH_JOB: "enrich",
+    EMBED_JOB: "embed",
+    DEDUP_JOB: "dedup-scan",
+}
 
 
 def clear_jobs(which: str = "finished_failed") -> dict:

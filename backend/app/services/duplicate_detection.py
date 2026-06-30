@@ -15,6 +15,27 @@ from app.utils.normalization import normalize_doi, normalize_title
 
 FUZZY_TITLE_THRESHOLD = 0.92
 
+
+def _title_ratio(a: str, b: str) -> float:
+    """Similarity in [0, 1]. Uses rapidfuzz when installed (fast C impl), else stdlib difflib."""
+    try:
+        from rapidfuzz.fuzz import ratio  # noqa: PLC0415 (optional dependency)
+
+        return ratio(a, b) / 100.0
+    except ImportError:
+        return SequenceMatcher(None, a, b).ratio()
+
+
+def _blocking_key(normalized_title: str) -> str:
+    """First token of the normalized title — the blocking key that bounds fuzzy comparisons.
+
+    Only works whose normalized title starts with the same token are compared, turning the former
+    O(n²) all-pairs scan into a per-block scan. This is the standard blocking tradeoff: titles that
+    differ in their first word are not fuzzy-matched (DOI/arXiv exact matching still catches those).
+    """
+    return normalized_title.split(" ", 1)[0] if normalized_title else ""
+
+
 _ARXIV_VERSION_RE = re.compile(
     r"^(?P<base>(?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Z]{2})?/\d{7}))(?:v(?P<version>\d+))?$",
     re.IGNORECASE,
@@ -213,13 +234,18 @@ def _fuzzy_title_candidates(db: Session, work: Work) -> list[DuplicateCandidate]
         return []
 
     candidates: list[DuplicateCandidate] = []
-    for other in db.scalars(select(Work).where(Work.id != work.id)):
+    block = _blocking_key(title)
+    # Blocking: only compare works whose normalized title starts with the same first token.
+    stmt = select(Work).where(Work.id != work.id)
+    if block:
+        stmt = stmt.where(Work.normalized_title.like(f"{block}%"))
+    for other in db.scalars(stmt):
         if work.year and other.year and work.year != other.year:
             continue
         other_title = other.normalized_title or normalize_title(other.canonical_title or "")
         if not other_title:
             continue
-        score = SequenceMatcher(None, title, other_title).ratio()
+        score = _title_ratio(title, other_title)
         if score < FUZZY_TITLE_THRESHOLD:
             continue
         candidates.append(

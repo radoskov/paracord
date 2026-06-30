@@ -126,6 +126,31 @@ def test_scan_file_candidates_flags_possible_multiwork_file(db_session) -> None:
     assert len(db_session.scalars(select(DuplicateCandidate)).all()) == 1
 
 
+def test_fuzzy_blocking_skips_different_first_token_but_keeps_same_block(db_session) -> None:
+    """Blocking compares only same-first-token titles; near-identical titles still match."""
+    target = Work(
+        canonical_title="Attention Is All You Need",
+        normalized_title="attention is all you need",
+    )
+    same_block = Work(
+        canonical_title="Attention Is All You Need (v2)",
+        normalized_title="attention is all you need v2",
+    )
+    other_block = Work(
+        canonical_title="Attention Is All You Need",  # identical text, different first token
+        normalized_title="transformer is all you need",
+    )
+    db_session.add_all([target, same_block, other_block])
+    db_session.commit()
+
+    candidates = scan_duplicate_candidates(db_session, work=target)
+    db_session.commit()
+    matched_ids = {c.entity_b_id for c in candidates if c.candidate_type == "fuzzy_title"}
+    matched_ids |= {c.entity_a_id for c in candidates if c.candidate_type == "fuzzy_title"}
+    assert same_block.id in matched_ids  # same first token → compared + matched
+    assert other_block.id not in matched_ids  # different first token → blocked out
+
+
 def test_split_arxiv_id_handles_versioned_and_url_forms() -> None:
     assert split_arxiv_id("arXiv:1706.03762v5") == {"base": "1706.03762", "version": "v5"}
     assert split_arxiv_id("https://arxiv.org/abs/2106.01345") == {
