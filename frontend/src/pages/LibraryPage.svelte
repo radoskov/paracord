@@ -235,6 +235,11 @@
     selectWork(null);
     message = 'Paper deleted';
   }
+
+  function onImported(): void {
+    // A reference was imported into the library as a new paper — reload the list so it appears.
+    void loadWorks();
+  }
 </script>
 
 <section class="layout">
@@ -374,7 +379,7 @@
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
-        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} onClose={() => selectWork(null)} />
+        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} {onImported} onClose={() => selectWork(null)} />
       {/key}
     {:else}
       <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>

@@ -223,6 +223,7 @@ export interface WorkFile {
   page_count: number | null;
   text_layer_quality: string;
   status: string;
+  content_available: boolean;
 }
 
 export interface ReferenceRecord {
@@ -234,6 +235,7 @@ export interface ReferenceRecord {
   year: number | null;
   resolution_status: string;
   resolved_work_id: string | null;
+  shorthand: string | null;
 }
 
 export interface Annotation {

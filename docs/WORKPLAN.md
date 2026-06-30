@@ -407,15 +407,15 @@ Files: `frontend/src/App.svelte`, `frontend/src/pages/ProfilePage.svelte`, `fron
 ## Phase 2 — Library: references/citations, import refresh, Read robustness  *(M)*
 Files: `frontend/src/components/WorkDetail.svelte`, `frontend/src/pages/LibraryPage.svelte`,
 `frontend/src/api/client.ts`, `backend/app/api/v1/endpoints/works.py`, files read schema.
-- [ ] 6. **Reference ↔ citation cross-link** — derived shorthand/label per reference (from a linked
+- [x] 6. **Reference ↔ citation cross-link** — derived shorthand/label per reference (from a linked
   `CitationMention.marker_text`, one join, no migration); show as a leading column/badge.
-- [ ] 7. **Group entries in rounded-rect cards** — References and In-text-citations lists.
-- [ ] 8. **Refresh library list on import** — `onImported` callback WorkDetail → LibraryPage reloads
+- [x] 7. **Group entries in rounded-rect cards** — References and In-text-citations lists.
+- [x] 8. **Refresh library list on import** — `onImported` callback WorkDetail → LibraryPage reloads
   the works list.
-- [ ] 9. **Read-button robustness** — `content_available` in the file read schema (false for
+- [x] 9. **Read-button robustness** — `content_available` in the file read schema (false for
   `extracted_discarded` / missing location); clear label + disabled Read w/ tooltip; surface failure
   reason.
-- [ ] 10. **Search by hash + full hash (server GUI)** — full hash visible + copy-on-click; library
+- [x] 10. **Search by hash + full hash (server GUI)** — full hash visible + copy-on-click; library
   search matches a file `sha256` → owning paper.
 
 ## Phase 3 — Agent GUI overhaul  *(L)*  — internal order: **#11 before #15**

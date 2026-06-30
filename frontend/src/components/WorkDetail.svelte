@@ -23,6 +23,7 @@
   export let onUpdated: (work: Work) => void = () => {};
   export let onClose: () => void = () => {};
   export let onDeleted: (workId: string) => void = () => {};
+  export let onImported: () => void = () => {};
 
   const STATUSES = ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'];
 
@@ -116,6 +117,7 @@
     await run(async () => {
       await client.importReferenceAsWork(referenceId);
       references = await client.listWorkReferences(work.id);
+      onImported();
     }, 'Reference imported into the library');
   }
 
@@ -188,9 +190,12 @@
 
   function fileStatusLabel(status: string): string {
     return (
-      { extracted: 'extracted ✓', extract_failed: 'extraction failed', available: 'not extracted' }[
-        status
-      ] ?? status
+      {
+        extracted: 'extracted ✓',
+        extract_failed: 'extraction failed',
+        available: 'not extracted',
+        extracted_discarded: 'extracted — PDF not stored on server',
+      }[status] ?? status
     );
   }
 
@@ -362,32 +367,44 @@
     {:else}
       <ul class="files">
         {#each files as file (file.id)}
-          <li>
-            <div class="file-main">
-              <span class="fname">{file.original_filename ?? file.id.slice(0, 8)}</span>
-              <small class="muted">{formatBytes(file.size_bytes)}</small>
-              <span class="fstatus fstatus-{file.status}">{fileStatusLabel(file.status)}</span>
-              <button
-                type="button"
-                class="hash"
-                on:click={() => copyHash(file.sha256)}
-                title={`Content hash (SHA-256) — matches the agent's local file id:\n${file.sha256}\nClick to copy`}
-              >#{file.sha256.slice(0, 12)}…</button>
+          <li class="entry-card" class:unavailable={!file.content_available}>
+            <div class="file-row">
+              <div class="file-main">
+                <span class="fname">{file.original_filename ?? file.id.slice(0, 8)}</span>
+                <small class="muted">{formatBytes(file.size_bytes)}</small>
+                <span class="fstatus fstatus-{file.status}">{fileStatusLabel(file.status)}</span>
+                {#if !file.content_available}
+                  <span class="fstatus funavail" title="The PDF bytes are not stored on the server (extracted-only or the source location was removed).">file unavailable</span>
+                {/if}
+              </div>
+              <span class="file-actions">
+                <button type="button" class="secondary small" on:click={() => openInReader(file)}
+                  disabled={loading || !file.content_available}
+                  title={file.content_available
+                    ? 'Open in the in-app reader (annotations + citation overlay)'
+                    : 'PDF not available on the server — it was extracted-only or its source was removed.'}>Read</button>
+                <button type="button" class="secondary small" on:click={() => openInNewTab(file)}
+                  disabled={loading || !file.content_available}
+                  title={file.content_available
+                    ? 'Open the raw PDF in a new browser tab'
+                    : 'PDF not available on the server.'}>New tab ↗</button>
+                <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !$canEdit}
+                  title={$canEdit ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
+              </span>
             </div>
-            <span class="file-actions">
-              <button type="button" class="secondary small" on:click={() => openInReader(file)} disabled={loading}
-                title="Open in the in-app reader (annotations + citation overlay)">Read</button>
-              <button type="button" class="secondary small" on:click={() => openInNewTab(file)} disabled={loading}
-                title="Open the raw PDF in a new browser tab">New tab ↗</button>
-              <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !$canEdit}
-                title={$canEdit ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
-            </span>
+            <button
+              type="button"
+              class="hash"
+              on:click={() => copyHash(file.sha256)}
+              title="Content hash (SHA-256) — matches the agent's local file id. Click to copy; searchable in the Library search box."
+            >{file.sha256}</button>
           </li>
         {/each}
       </ul>
       <p class="hintline">
-        The <strong>#hash</strong> is the file's content hash — the same value the agent shows as its
-        local file id, so you can cross-reference a server paper with a file on a workstation.
+        The <strong>hash</strong> is the file's content hash — the same value the agent shows as its
+        local file id. Click to copy, or paste it (or a prefix) into the Library search box to find
+        the owning paper.
       </p>
     {/if}
   </details>
@@ -433,8 +450,11 @@
     {:else}
       <ol class="refs">
         {#each references as ref (ref.id)}
-          <li>
-            <span class="ref-title">{ref.title ?? ref.raw_citation ?? 'Untitled reference'}</span>
+          <li class="entry-card">
+            <div class="ref-head">
+              {#if ref.shorthand}<span class="ref-marker" title="In-text citation marker for this reference">{ref.shorthand}</span>{/if}
+              <span class="ref-title">{ref.title ?? ref.raw_citation ?? 'Untitled reference'}</span>
+            </div>
             <small class="muted">
               {ref.year ?? ''}{ref.doi ? ` · doi:${ref.doi}` : ''}{ref.arxiv_id
                 ? ` · arXiv:${ref.arxiv_id}`
@@ -458,8 +478,8 @@
       <p class="hintline">Open a PDF with “Read” to jump to each citation in the reader.</p>
       <ul class="ctx">
         {#each contexts as c (c.id)}
-          <li>
-            <strong>{c.marker_text ?? '•'}</strong>
+          <li class="entry-card">
+            <strong class="ref-marker">{c.marker_text ?? '•'}</strong>
             <span>{c.context_sentence ?? c.reference_title ?? c.reference_raw_citation ?? ''}</span>
           </li>
         {/each}
@@ -597,21 +617,40 @@
     margin-top: 0.5rem;
   }
 
+  /* Rounded-rect card around each References / In-text-citation / File entry so it is
+     unambiguous which Import button / text / hash belongs to which entry. */
+  .entry-card {
+    background: #fff;
+    border: 1px solid #e1e7ee;
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+  }
+
   .files {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.4rem;
     list-style: none;
     margin: 0.5rem 0 0;
     padding: 0;
   }
 
   .files li {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .file-row {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: space-between;
+  }
+
+  .files li.unavailable {
+    background: #fbfbfc;
+    border-style: dashed;
   }
 
   .file-main {
@@ -649,6 +688,16 @@
     color: #475569;
   }
 
+  .fstatus-extracted_discarded {
+    background: #e2e8f0;
+    color: #475569;
+  }
+
+  .funavail {
+    background: #fed7aa;
+    color: #7c2d12;
+  }
+
   .hash {
     background: #eef1f4;
     border: 1px solid #d8dee6;
@@ -658,7 +707,12 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
     min-height: auto;
-    padding: 0.05rem 0.35rem;
+    /* Full hash, selectable (browser Ctrl+F finds it) and wrapping so the row never scrolls. */
+    overflow-wrap: anywhere;
+    padding: 0.15rem 0.4rem;
+    text-align: left;
+    user-select: text;
+    width: 100%;
   }
 
   .small {
@@ -721,6 +775,24 @@
   .refs li {
     display: grid;
     gap: 0.1rem;
+  }
+
+  .ref-head {
+    align-items: baseline;
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .ref-marker {
+    background: #dbeafe;
+    border-radius: 0.25rem;
+    color: #1e3a8a;
+    flex-shrink: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.05rem 0.4rem;
+    white-space: nowrap;
   }
 
   .ref-title {

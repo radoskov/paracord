@@ -5,10 +5,11 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_roles
+from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.ai import Embedding, Summary
@@ -21,6 +22,7 @@ from app.models.organization import RackShelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services.audit import record_event
+from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work
@@ -116,6 +118,15 @@ class WorkRead(BaseModel):
         return value or []
 
 
+def _looks_like_hash(text: str) -> bool:
+    """True if ``text`` could be a sha256 or a sha256 prefix (all hex, 8..64 chars).
+
+    The lower bound (8) avoids treating short common words like "deed" or "cafe" as hashes.
+    """
+    candidate = text.strip()
+    return 8 <= len(candidate) <= 64 and all(c in "0123456789abcdefABCDEF" for c in candidate)
+
+
 # Work columns that the `missing` filter can test for absence (NULL or empty string).
 _MISSING_FIELDS = {
     "title": Work.canonical_title,
@@ -150,15 +161,27 @@ def list_works(
     stmt = select(Work)
     if parsed.text:
         like = f"%{parsed.text}%"
-        stmt = stmt.where(
-            or_(
-                Work.canonical_title.ilike(like),
-                Work.abstract.ilike(like),
-                Work.doi.ilike(like),
-                Work.arxiv_id.ilike(like),
-                Work.venue.ilike(like),
+        conditions = [
+            Work.canonical_title.ilike(like),
+            Work.abstract.ilike(like),
+            Work.doi.ilike(like),
+            Work.arxiv_id.ilike(like),
+            Work.venue.ilike(like),
+        ]
+        # A query that looks like a sha256 (full or a hex prefix) also matches the paper that owns
+        # a file with that content hash — so pasting the hash shown in the file row finds the paper.
+        if _looks_like_hash(parsed.text):
+            owns_hash = (
+                select(FileWorkLink.work_id)
+                .join(File, File.id == FileWorkLink.file_id)
+                .where(
+                    FileWorkLink.work_id == Work.id,
+                    File.sha256.ilike(f"{parsed.text.lower()}%"),
+                )
+                .exists()
             )
-        )
+            conditions.append(owns_hash)
+        stmt = stmt.where(or_(*conditions))
     if parsed.title:
         stmt = stmt.where(Work.canonical_title.ilike(f"%{parsed.title}%"))
     if parsed.venue:
@@ -555,22 +578,61 @@ class ReferenceRead(BaseModel):
     year: int | None = None
     resolution_status: str
     resolved_work_id: uuid.UUID | None = None
+    # Derived in-text shorthand/label (e.g. "[69]" or "(Chen et al., 2022)") taken from a linked
+    # CitationMention.marker_text — lets a reference be cross-referenced with its in-text citations.
+    shorthand: str | None = None
 
     model_config = {"from_attributes": True}
 
 
+def _reference_shorthands(db: Session, reference_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Map each reference id → a representative in-text marker (the most common non-null one).
+
+    Done as ONE batched ``reference_id IN (...)`` query (no N+1): we count each marker per
+    reference and keep the most frequent, breaking ties deterministically by marker text.
+    """
+    if not reference_ids:
+        return {}
+    rows = db.execute(
+        select(
+            CitationMention.reference_id,
+            CitationMention.marker_text,
+            func.count().label("n"),
+        )
+        .where(
+            CitationMention.reference_id.in_(reference_ids),
+            CitationMention.marker_text.is_not(None),
+            CitationMention.marker_text != "",
+        )
+        .group_by(CitationMention.reference_id, CitationMention.marker_text)
+    ).all()
+    best: dict[uuid.UUID, tuple[int, str]] = {}
+    for reference_id, marker, count in rows:
+        current = best.get(reference_id)
+        # Prefer the highest count; on a tie pick the lexicographically smaller marker (stable).
+        candidate = (count, marker)
+        if current is None or count > current[0] or (count == current[0] and marker < current[1]):
+            best[reference_id] = candidate
+    return {ref_id: marker for ref_id, (_count, marker) in best.items()}
+
+
 @router.get("/{work_id}/references", response_model=list[ReferenceRead])
-def list_work_references(work_id: uuid.UUID, db: Session = DB_DEP) -> list[Reference]:
+def list_work_references(work_id: uuid.UUID, db: Session = DB_DEP) -> list[ReferenceRead]:
     """Return the parsed bibliography (extracted references) for a work."""
     if db.get(Work, work_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    return list(
+    references = list(
         db.scalars(
             select(Reference)
             .where(Reference.citing_work_id == work_id)
             .order_by(Reference.created_at)
         ).all()
     )
+    shorthands = _reference_shorthands(db, [ref.id for ref in references])
+    return [
+        ReferenceRead.model_validate(ref).model_copy(update={"shorthand": shorthands.get(ref.id)})
+        for ref in references
+    ]
 
 
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
@@ -624,16 +686,41 @@ class WorkFileRead(BaseModel):
     page_count: int | None = None
     text_layer_quality: str
     status: str
+    # Whether the backend can actually stream the PDF bytes. False when the file's status is
+    # `extracted_discarded` (PDF removed after extract-only) or no on-disk location resolves;
+    # the reader uses this to disable "Read" instead of letting the stream 404 silently.
+    content_available: bool = True
 
     model_config = {"from_attributes": True}
 
 
+# File statuses for which the original PDF bytes are deliberately not kept on the server.
+_PDF_DISCARDED_STATUSES = {"extracted_discarded"}
+
+
+def _file_content_available(db: Session, file: File) -> bool:
+    """Return True if the PDF bytes for ``file`` can be streamed from disk right now."""
+    if file.status in _PDF_DISCARDED_STATUSES:
+        return False
+    try:
+        path = resolve_backend_readable_pdf_path(db, file=file, settings=get_settings())
+    except FileLocationError:
+        return False
+    return path.exists() and path.is_file()
+
+
+def _file_read(db: Session, file: File) -> WorkFileRead:
+    return WorkFileRead.model_validate(file).model_copy(
+        update={"content_available": _file_content_available(db, file)}
+    )
+
+
 @router.get("/{work_id}/files", response_model=list[WorkFileRead])
-def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[File]:
+def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[WorkFileRead]:
     """List the files attached to a work (via FileWorkLink)."""
     if db.get(Work, work_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    return list(
+    files = list(
         db.scalars(
             select(File)
             .join(FileWorkLink, FileWorkLink.file_id == File.id)
@@ -641,6 +728,7 @@ def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[File]:
             .order_by(File.created_at.desc())
         ).all()
     )
+    return [_file_read(db, file) for file in files]
 
 
 @router.post("/{work_id}/files", response_model=WorkFileRead, status_code=status.HTTP_201_CREATED)
@@ -649,7 +737,7 @@ async def upload_work_file(
     file: UploadFile,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
-) -> File:
+) -> WorkFileRead:
     """Upload a PDF and attach it to an existing work (so a manual work isn't a dead end)."""
     work = db.get(Work, work_id)
     if work is None:
@@ -677,7 +765,7 @@ async def upload_work_file(
     db.commit()
     db.refresh(file_obj)
     enqueue_extraction(file_obj.id)
-    return file_obj
+    return _file_read(db, file_obj)
 
 
 @router.get("/annotations/search", response_model=list[AnnotationRead])
