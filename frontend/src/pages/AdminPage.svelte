@@ -7,12 +7,13 @@
     type AgentRecord,
     type ServerImportRoot,
     type UserRole,
+    type WebFindAllowedHost,
   } from '../api/client';
   import { get } from 'svelte/store';
 
   import AiModelsPanel from '../components/AiModelsPanel.svelte';
   import Modal from '../components/Modal.svelte';
-  import { currentUser, isOwner } from '../lib/session';
+  import { canManageUsers, currentUser, isOwner } from '../lib/session';
 
   // Static reference shown under the Users widget so an admin/owner can understand each role
   // before assigning it. Kept in sync with ProfilePage's own-role description.
@@ -84,6 +85,10 @@
   let newRootAlias = '';
   let newRootPath = '';
 
+  // Find-on-web allowed download hosts (owner+admin): merged built-in defaults + DB rows (batch 2 #5).
+  let allowedHosts: WebFindAllowedHost[] = [];
+  let newAllowedHost = '';
+
   async function run(action: () => Promise<void>, success?: string): Promise<void> {
     loading = true;
     message = '';
@@ -105,7 +110,29 @@
       ]);
       // The import-roots whitelist is owner-only (the endpoint 403s for admins).
       if (get(isOwner)) importRoots = await client.listServerImportRoots();
+      // The find-on-web allowed-hosts list is owner+admin.
+      if (get(canManageUsers)) allowedHosts = await client.listWebFindAllowedHosts();
     });
+  }
+
+  async function addAllowedHost(): Promise<void> {
+    const host = newAllowedHost.trim();
+    if (!host) return;
+    await run(async () => {
+      await client.addWebFindAllowedHost({ host });
+      newAllowedHost = '';
+      allowedHosts = await client.listWebFindAllowedHosts();
+    }, 'Allowed host added');
+  }
+
+  async function removeAllowedHost(entry: WebFindAllowedHost): Promise<void> {
+    if (!entry.removable || !entry.id) return;
+    if (!window.confirm(`Remove “${entry.host}” from the find-on-web allowed-downloads list? New paper downloads can no longer be fetched from this host.`))
+      return;
+    await run(async () => {
+      await client.removeWebFindAllowedHost(entry.id as string);
+      allowedHosts = await client.listWebFindAllowedHosts();
+    }, 'Allowed host removed');
   }
 
   async function addImportRoot(): Promise<void> {
@@ -601,6 +628,61 @@
       <p class="hintline">The path must already exist as a directory on the server, and the alias must be unique across all roots.</p>
     </section>
   {/if}
+
+  <!-- Find-on-web allowed download hosts (owner+admin; batch 2 #5) -->
+  {#if $canManageUsers}
+    <section class="surface admin-section allowed-hosts">
+      <h2>Find-on-web allowed hosts</h2>
+      <p class="muted">
+        When you fetch a paper PDF with <strong>Find on web</strong>, the server only downloads it
+        if the final host is on this allowlist. The locked entries are built-in, well-known
+        open-access hosts and cannot be removed; the entries you add below are stored in the
+        database and merged with them. Known shadow libraries are always refused, even if added here.
+      </p>
+
+      <table class="hosts">
+        <thead>
+          <tr><th>Host</th><th>Source</th><th></th></tr>
+        </thead>
+        <tbody>
+          {#each allowedHosts as entry (entry.host)}
+            <tr>
+              <td><code>{entry.host}</code></td>
+              <td>
+                {#if entry.source === 'default'}
+                  <span class="lock-badge" title="Built-in default host — cannot be removed">default · locked</span>
+                {:else}
+                  <span class="db-badge" title="Added here and stored in the database">database</span>
+                {/if}
+              </td>
+              <td>
+                {#if entry.removable}
+                  <button type="button" class="danger" on:click={() => removeAllowedHost(entry)}
+                    disabled={loading}
+                    title="Remove this database-managed allowed host">Remove</button>
+                {:else}
+                  <button type="button" class="danger" disabled
+                    title="Locked: built-in default host.">Remove</button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+          {#if allowedHosts.length === 0}
+            <tr><td colspan="3" class="muted">No hosts yet.</td></tr>
+          {/if}
+        </tbody>
+      </table>
+
+      <form class="add-host" on:submit|preventDefault={addAllowedHost}>
+        <input bind:value={newAllowedHost} placeholder="Host (e.g. repository.example.org or *.example.org)" aria-label="Allowed host" />
+        <button type="submit" disabled={loading || !newAllowedHost.trim()}
+          title={newAllowedHost.trim()
+            ? 'Add this host to the find-on-web allowed-downloads list'
+            : 'Enter a hostname first'}>Add host</button>
+      </form>
+      <p class="hintline">A bare host (e.g. <code>example.org</code>) also covers its subdomains; use the <code>*.example.org</code> form to allow subdomains only.</p>
+    </section>
+  {/if}
 </div>
 
 {#if resetTarget}
@@ -1008,6 +1090,60 @@
   }
 
   .import-roots button.danger:disabled {
+    background: #e5e7eb;
+    color: #9ca3af;
+    cursor: not-allowed;
+  }
+
+  .allowed-hosts {
+    margin-top: 1rem;
+  }
+
+  .allowed-hosts .hosts {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+  }
+
+  .allowed-hosts .hosts th,
+  .allowed-hosts .hosts td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: top;
+  }
+
+  .allowed-hosts .db-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: #dcfce7;
+    color: #166534;
+    font-weight: 600;
+  }
+
+  .allowed-hosts .add-host {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .allowed-hosts .add-host input {
+    flex: 1 1 16rem;
+  }
+
+  .allowed-hosts button.danger {
+    background: #b91c1c;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+  }
+
+  .allowed-hosts button.danger:disabled {
     background: #e5e7eb;
     color: #9ca3af;
     cursor: not-allowed;

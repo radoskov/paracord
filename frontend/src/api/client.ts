@@ -161,6 +161,14 @@ export interface ServerImportRoot {
   exists: boolean;
 }
 
+// A merged find-on-web allowed download host: built-in default (locked) or DB-managed (removable).
+export interface WebFindAllowedHost {
+  host: string;
+  source: 'default' | 'db';
+  removable: boolean;
+  id: string | null;
+}
+
 export interface FileRecord {
   id: string;
   sha256: string;
@@ -867,6 +875,24 @@ export class ApiClient {
 
   async removeServerImportRoot(rootId: string): Promise<void> {
     await this.request<void>(`/api/v1/admin/import-roots/${rootId}`, { method: 'DELETE' });
+  }
+
+  // --- Find-on-web allowed download hosts (admin-or-owner; merged defaults + DB allowlist) ---
+  async listWebFindAllowedHosts(): Promise<WebFindAllowedHost[]> {
+    return this.request<WebFindAllowedHost[]>('/api/v1/admin/web-find/allowed-hosts');
+  }
+
+  async addWebFindAllowedHost(payload: { host: string }): Promise<WebFindAllowedHost> {
+    return this.request<WebFindAllowedHost>('/api/v1/admin/web-find/allowed-hosts', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async removeWebFindAllowedHost(hostId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/web-find/allowed-hosts/${hostId}`, {
+      method: 'DELETE',
+    });
   }
 
   async importFolder(sourceId: string): Promise<ImportBatch> {

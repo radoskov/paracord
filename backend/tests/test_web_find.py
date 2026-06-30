@@ -13,11 +13,13 @@ from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
+from app.models.web_find_allowed_host import WebFindAllowedHost
 from app.models.work import Work
 from app.services import web_find
 from app.services.web_find import (
     DownloadRefused,
     WebCandidate,
+    _is_allowed_host,
     _is_denied_host,
     deduplicate,
     download_and_attach,
@@ -29,6 +31,13 @@ from app.services.web_find import (
     search_openalex,
     search_semantic_scholar,
     search_unpaywall,
+)
+from app.services.web_find_allowed_hosts import (
+    add_allowed_host,
+    is_valid_host_pattern,
+    list_merged_hosts,
+    merged_allowed_hosts,
+    remove_allowed_host,
 )
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -69,6 +78,7 @@ def db_session(tmp_path):
             File.__table__,
             FileWorkLink.__table__,
             Location.__table__,
+            WebFindAllowedHost.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -354,7 +364,7 @@ def test_download_dedup_returns_deduped(db_session, tmp_path):
     first = download_and_attach(
         db_session,
         work=work,
-        candidate_url="https://h/x.pdf",
+        candidate_url="https://arxiv.org/pdf/x.pdf",
         source="arxiv",
         actor=_Actor(),
         settings=settings,
@@ -365,7 +375,7 @@ def test_download_dedup_returns_deduped(db_session, tmp_path):
     second = download_and_attach(
         db_session,
         work=work,
-        candidate_url="https://h/x.pdf",
+        candidate_url="https://arxiv.org/pdf/x.pdf",
         source="arxiv",
         actor=_Actor(),
         settings=settings,
@@ -384,7 +394,7 @@ def test_download_non_pdf_manual_upload_no_file(db_session, tmp_path):
     out = download_and_attach(
         db_session,
         work=work,
-        candidate_url="https://h/login.html",
+        candidate_url="https://europepmc.org/login.html",
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
@@ -404,7 +414,7 @@ def test_download_oversized_errors_no_file(db_session, tmp_path):
     out = download_and_attach(
         db_session,
         work=work,
-        candidate_url="https://h/big.pdf",
+        candidate_url="https://zenodo.org/big.pdf",
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
@@ -445,3 +455,157 @@ def test_download_denied_host_refused(db_session, tmp_path):
     )
     assert out["status"] == "error"
     assert "shadow" in out["reason"].lower()
+
+
+# --- download-host allowlist (batch 2 #5 hardening) -------------------------
+
+
+@pytest.mark.parametrize(
+    "host,pattern,expected",
+    [
+        ("arxiv.org", "arxiv.org", True),
+        ("export.arxiv.org", "arxiv.org", True),  # parent-domain suffix match
+        ("evil-arxiv.org", "arxiv.org", False),  # not a subdomain
+        ("notarxiv.org", "arxiv.org", False),
+        ("repo.example.org", "*.example.org", True),  # wildcard matches subdomain
+        ("example.org", "*.example.org", False),  # wildcard does NOT match the apex
+        ("example.org", "example.org", True),
+    ],
+)
+def test_host_matches_suffix_and_wildcard(host, pattern, expected):
+    assert web_find._host_matches(host, pattern) is expected
+
+
+def test_is_allowed_host_against_defaults():
+    assert _is_allowed_host("https://arxiv.org/pdf/1.pdf", set(web_find.DEFAULT_ALLOWED_HOSTS))
+    assert not _is_allowed_host("https://evil.example/1.pdf", set(web_find.DEFAULT_ALLOWED_HOSTS))
+
+
+def test_merged_hosts_is_defaults_union_db(db_session):
+    add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+    db_session.commit()
+    merged = merged_allowed_hosts(db_session)
+    assert "repo.example.org" in merged
+    assert set(web_find.DEFAULT_ALLOWED_HOSTS).issubset(merged)
+
+
+def test_list_marks_default_locked_vs_db_removable(db_session):
+    add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+    db_session.commit()
+    items = {item["host"]: item for item in list_merged_hosts(db_session)}
+    assert items["arxiv.org"]["source"] == "default"
+    assert items["arxiv.org"]["removable"] is False
+    assert items["arxiv.org"]["id"] is None
+    assert items["repo.example.org"]["source"] == "db"
+    assert items["repo.example.org"]["removable"] is True
+    assert items["repo.example.org"]["id"] is not None
+
+
+def test_add_host_validates_and_dedupes(db_session):
+    with pytest.raises(ValueError, match="plausible hostname"):
+        add_allowed_host(db_session, host="not a host!", created_by_user_id=None)
+    with pytest.raises(ValueError, match="required"):
+        add_allowed_host(db_session, host="   ", created_by_user_id=None)
+    # Cannot re-add a built-in default.
+    with pytest.raises(ValueError, match="already"):
+        add_allowed_host(db_session, host="arxiv.org", created_by_user_id=None)
+    # Cannot add the same DB host twice.
+    add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+    db_session.commit()
+    with pytest.raises(ValueError, match="already"):
+        add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+
+
+def test_is_valid_host_pattern():
+    assert is_valid_host_pattern("example.org")
+    assert is_valid_host_pattern("*.example.org")
+    assert is_valid_host_pattern("sub.example.co.uk")
+    assert not is_valid_host_pattern("nodot")
+    assert not is_valid_host_pattern("bad host.org")
+    assert not is_valid_host_pattern("")
+
+
+def test_remove_db_host_works_default_cannot(db_session):
+    row = add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+    db_session.commit()
+    remove_allowed_host(db_session, host_id=row.id)
+    db_session.commit()
+    assert db_session.get(WebFindAllowedHost, row.id) is None
+    # Defaults have no DB row, so a random id is a "not found" (they can never be removed).
+    import uuid as _uuid
+
+    with pytest.raises(ValueError, match="not found"):
+        remove_allowed_host(db_session, host_id=_uuid.uuid4())
+
+
+def test_download_non_allowlisted_host_refused_no_file(db_session, tmp_path):
+    work = _seed_work(db_session)
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://random.example/paper.pdf",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        allowed_urls=None,  # surfaced check skipped; allowlist must still refuse
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "error"
+    assert "allowed-downloads" in out["reason"].lower()
+    assert db_session.scalar(select(File)) is None
+
+
+def test_download_allowlisted_default_host_attaches(db_session, tmp_path):
+    work = _seed_work(db_session)
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://arxiv.org/pdf/1512.03385.pdf",
+        source="arxiv",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        allowed_urls=None,
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "attached"
+    assert db_session.scalar(select(File)) is not None
+
+
+def test_download_db_added_host_attaches(db_session, tmp_path):
+    work = _seed_work(db_session)
+    add_allowed_host(db_session, host="repo.example.org", created_by_user_id=None)
+    db_session.commit()
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://repo.example.org/paper.pdf",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        allowed_urls=None,
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "attached"
+    assert db_session.scalar(select(File)) is not None
+
+
+def test_denylist_wins_even_if_added_to_allowlist(db_session, tmp_path):
+    """A denylisted host is refused even if someone manages to add it to the allowlist."""
+    work = _seed_work(db_session)
+    # Force the denied host into the DB allowlist (bypassing validation) to prove denylist wins.
+    db_session.add(WebFindAllowedHost(host="sci-hub.se", created_by_user_id=None))
+    db_session.commit()
+    assert "sci-hub.se" in merged_allowed_hosts(db_session)
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://sci-hub.se/x.pdf",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        allowed_urls=None,
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "error"
+    assert "shadow" in out["reason"].lower()
+    assert db_session.scalar(select(File)) is None

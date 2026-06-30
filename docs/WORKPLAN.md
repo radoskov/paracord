@@ -532,3 +532,14 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   directory; alias unique across the merged set) and the anti-path-traversal containment check is
   preserved. Owner-only endpoints (`require_owner`) list (yaml-fixed vs DB-removable) / add / remove;
   AdminPage "Server import folders" section gated by `isOwner`; ImportPage reflects the merged set.
+- [x] **find-on-web download-host allowlist (defaults + owner/admin-managed).** Positive allowlist on
+  find-on-web downloads: a built-in `DEFAULT_ALLOWED_HOSTS` set of well-known safe open-access hosts
+  (arXiv, Unpaywall, OpenAlex, Semantic Scholar, DOI resolver, PubMed Central, Europe PMC, bio/medRxiv,
+  Zenodo, DOAJ, Crossref) merged with a DB-backed `web_find_allowed_hosts` table (migration
+  `0026_web_find_allowed_hosts`). `merged_allowed_hosts()` = defaults ∪ DB; suffix-aware match
+  (`_host_matches`/`_is_allowed_host`) consistent with the denylist (exact host, parent-domain suffix,
+  `*.` subdomain wildcard). `download_and_attach` now requires surfaced-by-search AND not-denylisted
+  (every hop) AND final host ∈ merged allowlist (re-checked on every redirect hop) — the denylist
+  always wins. Admin-or-owner endpoints (`require_admin`) list (default-locked vs DB-removable) / add
+  (hostname-validated, deduped) / remove (defaults non-removable), audit-logged. AdminPage "Find-on-web
+  allowed hosts" section gated by `canManageUsers`.

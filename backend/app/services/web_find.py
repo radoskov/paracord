@@ -19,10 +19,31 @@ manual upload; nothing is stored.
 SSRF hardening reuses :mod:`app.services.metadata_enrichment`'s ``_get`` (same-host-redirect
 refusal) for the read-only search egress. The download path additionally validates the URL
 against the set the search actually surfaced and re-checks the denylist on every hop.
+
+Download-host allowlist policy (batch 2 #5 hardening — REQUIRED)
+---------------------------------------------------------------
+A download is permitted only when, in addition to being surfaced-by-search and passing the
+%PDF/size validation, its final (post-redirect) host is on a POSITIVE allowlist:
+
+    final host ∈ (DEFAULT_ALLOWED_HOSTS ∪ DB-managed additional hosts)   AND
+    no hop (incl. the final host) is on the shadow-library denylist.
+
+``DEFAULT_ALLOWED_HOSTS`` below is a conservative, built-in set of well-known, safe open-access
+hosts (arXiv, Unpaywall, OpenAlex, Semantic Scholar, DOI resolver, PubMed Central, Europe PMC,
+the bio/medRxiv preprint servers, Zenodo, DOAJ, …) plus the OA-PDF hosts the existing fetchers
+surface. Owners/admins may extend the allowlist with additional hosts at runtime (stored in the
+``web_find_allowed_hosts`` table and merged in via :func:`app.services.web_find_allowed_hosts.\
+merged_allowed_hosts`). The DENYLIST ALWAYS WINS: a host on the denylist is refused even if it
+was somehow added to the allowlist.
+
+Allowlist entries (defaults and DB rows alike) match the request host with the same suffix-aware
+logic as the denylist (see :func:`_host_matches`): an exact host, a parent-domain suffix
+(``arxiv.org`` also matches ``export.arxiv.org``), or an explicit ``*.example.org`` wildcard form.
 """
 
 import difflib
 import hashlib
+import inspect
 import logging
 import re
 import time
@@ -70,6 +91,37 @@ DENIED_HOST_SUFFIXES = (
     "b-ok",
     "1lib",
     "gen.lib.rus.ec",
+)
+
+# Built-in default download-host allowlist (batch 2 #5 hardening). Conservative but practical:
+# well-known, safe open-access hosts plus the OA-PDF hosts the existing search fetchers surface.
+# Entries match suffix-aware (see ``_host_matches``): a bare host also matches its subdomains, so
+# e.g. "arxiv.org" covers "export.arxiv.org" and "openalex.org" covers "api.openalex.org". An
+# owner/admin may extend this set at runtime via the ``web_find_allowed_hosts`` table. NEVER add a
+# host that the denylist would also match — the denylist always wins regardless.
+DEFAULT_ALLOWED_HOSTS = frozenset(
+    {
+        "arxiv.org",
+        "export.arxiv.org",
+        "api.unpaywall.org",
+        "openalex.org",
+        "api.openalex.org",
+        "api.semanticscholar.org",
+        "semanticscholar.org",
+        "pdfs.semanticscholar.org",
+        "doi.org",
+        "ncbi.nlm.nih.gov",
+        "pmc.ncbi.nlm.nih.gov",
+        "europepmc.org",
+        "www.biorxiv.org",
+        "biorxiv.org",
+        "www.medrxiv.org",
+        "medrxiv.org",
+        "zenodo.org",
+        "doaj.org",
+        "crossref.org",
+        "api.crossref.org",
+    }
 )
 
 
@@ -120,6 +172,31 @@ def _is_denied_host(url: str) -> bool:
         if first_label == suffix or first_label.startswith(suffix):
             return True
     return False
+
+
+def _host_matches(host: str, pattern: str) -> bool:
+    """Return True if ``host`` matches an allowlist ``pattern`` (suffix-aware, denylist-style).
+
+    A pattern matches when the host is exactly the pattern, or is a subdomain of it. The explicit
+    ``*.example.org`` wildcard form matches subdomains only (NOT the bare apex), which lets an
+    operator allow a vendor's subdomains without allowing the apex itself.
+    """
+    host = (host or "").lower().strip().rstrip(".")
+    pattern = (pattern or "").lower().strip().rstrip(".")
+    if not host or not pattern:
+        return False
+    if pattern.startswith("*."):
+        base = pattern[2:]
+        return bool(base) and host.endswith("." + base)
+    return host == pattern or host.endswith("." + pattern)
+
+
+def _is_allowed_host(url: str, allowed_hosts: set[str]) -> bool:
+    """Return True if ``url``'s host matches any allowlist pattern in ``allowed_hosts``."""
+    host = _host(url)
+    if not host:
+        return False
+    return any(_host_matches(host, pattern) for pattern in allowed_hosts)
 
 
 # --- helpers ----------------------------------------------------------------
@@ -541,12 +618,18 @@ class DownloadRefused(RuntimeError):
     """A download URL was refused by the legitimacy/SSRF guard before any bytes were fetched."""
 
 
-def _stream_pdf(url: str, *, timeout: float, max_bytes: int) -> bytes | None:
-    """Stream a candidate URL, enforcing the denylist on every hop + size/PDF validation.
+def _stream_pdf(
+    url: str, *, timeout: float, max_bytes: int, allowed_hosts: set[str] | None = None
+) -> bytes | None:
+    """Stream a candidate URL, enforcing the deny/allow lists on every hop + size/PDF validation.
 
     Returns the PDF bytes, or None when the response is not a real PDF (HTML/login wall, wrong
-    content-type, missing %PDF magic). Raises DownloadRefused for a denied host on any hop and
-    ValueError when the size cap is exceeded.
+    content-type, missing %PDF magic). Raises DownloadRefused for a denied host on any hop, a final
+    host not on ``allowed_hosts`` (when provided), and ValueError when the size cap is exceeded.
+
+    The denylist is re-checked on EVERY hop (denylist always wins). The allowlist is checked on the
+    final (post-redirect) host — and, defensively, on every hop — so a redirect can neither escape
+    to a denied host nor land on a host outside the allowlist.
     """
     if _is_denied_host(url):
         raise DownloadRefused(f"Refusing download from shadow-library host {_host(url)!r}")
@@ -557,9 +640,14 @@ def _stream_pdf(url: str, *, timeout: float, max_bytes: int) -> bytes | None:
     ):
         # Re-check the denylist on every redirect hop AND the final host.
         for hop in [*response.history, response]:
-            if _is_denied_host(str(hop.url)):
+            hop_url = str(hop.url)
+            if _is_denied_host(hop_url):
                 raise DownloadRefused(
-                    f"Refusing redirect to shadow-library host {_host(str(hop.url))!r}"
+                    f"Refusing redirect to shadow-library host {_host(hop_url)!r}"
+                )
+            if allowed_hosts is not None and not _is_allowed_host(hop_url, allowed_hosts):
+                raise DownloadRefused(
+                    f"Host {_host(hop_url)!r} is not in the allowed-downloads list"
                 )
         if response.status_code >= 400:
             return None
@@ -599,16 +687,44 @@ def download_and_attach(
     timeout = float(getattr(settings, "web_find_download_timeout", 60.0))
     max_bytes = int(getattr(settings, "web_find_max_download_bytes", 100 * 1024 * 1024))
     stream = streamer or _stream_pdf
+    # Merge the built-in default allowlist with the owner/admin-managed DB rows. Imported lazily to
+    # avoid a circular import (web_find_allowed_hosts imports DEFAULT_ALLOWED_HOSTS from this module).
+    from app.services.web_find_allowed_hosts import merged_allowed_hosts
+
+    allowed_hosts = merged_allowed_hosts(db)
+    # Only hand the allowlist to streamers that accept it (the real _stream_pdf re-checks every
+    # redirect hop). An injected/patched test streamer keeps its (url, timeout, max_bytes) shape.
+    try:
+        stream_accepts_hosts = "allowed_hosts" in inspect.signature(stream).parameters
+    except (TypeError, ValueError):
+        stream_accepts_hosts = False
 
     try:
         if not candidate_url:
             return {"status": "error", "reason": "missing download url"}
         if allowed_urls is not None and candidate_url not in allowed_urls:
             return {"status": "error", "reason": "url was not surfaced by this search"}
+        # Denylist always wins, checked first.
         if _is_denied_host(candidate_url):
             return {"status": "error", "reason": "refused: shadow-library source"}
+        # Positive allowlist on the candidate host; the streamer re-checks the final/redirect host.
+        if not _is_allowed_host(candidate_url, allowed_hosts):
+            return {
+                "status": "error",
+                "reason": "Host not in the allowed-downloads list (an owner/admin can add it)",
+            }
         try:
-            pdf_bytes = stream(candidate_url, timeout=timeout, max_bytes=max_bytes)
+            # The real streamer enforces the deny/allow lists on every redirect hop too; an
+            # injected test streamer keeps the original (url, timeout, max_bytes) signature.
+            if stream_accepts_hosts:
+                pdf_bytes = stream(
+                    candidate_url,
+                    timeout=timeout,
+                    max_bytes=max_bytes,
+                    allowed_hosts=allowed_hosts,
+                )
+            else:
+                pdf_bytes = stream(candidate_url, timeout=timeout, max_bytes=max_bytes)
         except DownloadRefused as exc:
             return {"status": "error", "reason": str(exc)}
         except ValueError:

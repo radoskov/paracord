@@ -13,6 +13,7 @@ from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagL
 from app.models.session import UserSession
 from app.models.source import ImportBatch, Source
 from app.models.user import User
+from app.models.web_find_allowed_host import WebFindAllowedHost
 from app.models.work import Work, WorkVersion
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "TopicAssignment",
     "User",
     "UserSession",
+    "WebFindAllowedHost",
     "Work",
     "WorkVersion",
 ]

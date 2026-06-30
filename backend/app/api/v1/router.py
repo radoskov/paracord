@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     shelves,
     sources,
     tags,
+    web_find_allowed_hosts,
     works,
 )
 
@@ -39,6 +40,10 @@ api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(ai_admin.router, prefix="/admin", tags=["admin", "ai"])
 # Server import roots GUI (batch 2 #19). Owner-only, enforced per-endpoint via require_owner.
 api_router.include_router(import_roots.router, prefix="/admin", tags=["admin", "import-roots"])
+# Find-on-web allowed download hosts GUI (batch 2 #5). Admin-or-owner, enforced via require_admin.
+api_router.include_router(
+    web_find_allowed_hosts.router, prefix="/admin", tags=["admin", "web-find"]
+)
 # Agent routes authenticate via the enrollment/agent token, not a user session, so the
 # router is not behind the user-session dependency.
 api_router.include_router(
