@@ -62,7 +62,8 @@
       <input bind:value={newTagName} placeholder="Tag name" aria-label="Tag name" />
       <input bind:value={newTagColor} placeholder="#color (optional)" aria-label="Tag colour" />
       <input bind:value={newTagDescription} placeholder="Description (optional)" aria-label="Tag description" />
-      <button type="submit" disabled={!newTagName.trim() || loading}>Create tag</button>
+      <button type="submit" disabled={!newTagName.trim() || loading}
+        title={newTagName.trim() ? 'Create this tag' : 'Enter a tag name first'}>Create tag</button>
     </form>
     {#if !newTagName.trim()}<p class="hintline">Enter a name to enable “Create tag”.</p>{/if}
   </div>

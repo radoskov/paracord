@@ -104,6 +104,7 @@
                 type="checkbox"
                 checked={selectedIds.includes(work.id)}
                 on:change={() => onToggleSelect(work.id)}
+                title="Select this paper for batch actions"
                 aria-label="Select paper"
               />
             </td>
@@ -125,7 +126,7 @@
                 <select
                   value={work.reading_status}
                   disabled={!$canEdit}
-                  title={$canEdit ? '' : INSUFFICIENT_ROLE}
+                  title={$canEdit ? 'Change this paper’s reading status' : INSUFFICIENT_ROLE}
                   on:change={(event) =>
                     onStatusChange(work, event.currentTarget.value as ReadingStatus)}
                 >

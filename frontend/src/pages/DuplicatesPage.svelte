@@ -120,7 +120,7 @@
     <div class="head">
       <h2>Duplicate &amp; version review</h2>
       <div class="controls">
-        <select bind:value={statusFilter} on:change={load} aria-label="Filter by status">
+        <select bind:value={statusFilter} on:change={load} aria-label="Filter by status" title="Filter candidates by their review status">
           <option value="open">Open</option>
           <option value="accepted">Accepted</option>
           <option value="rejected">Rejected</option>

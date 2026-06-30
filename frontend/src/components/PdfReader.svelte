@@ -622,14 +622,17 @@
       <span>{fileId.slice(0, 8)}</span>
     </div>
     <nav aria-label="Reader panels">
-      <button type="button" class:active={tab === 'pdf'} on:click={() => (tab = 'pdf')}>Paper</button>
-      <button type="button" class:active={tab === 'contexts'} on:click={() => (tab = 'contexts')}>
+      <button type="button" class:active={tab === 'pdf'} on:click={() => (tab = 'pdf')}
+        title="Show the PDF pages">Paper</button>
+      <button type="button" class:active={tab === 'contexts'} on:click={() => (tab = 'contexts')}
+        title="Show extracted in-text citations and their references">
         References
       </button>
       <button
         type="button"
         class:active={tab === 'annotations'}
         on:click={() => (tab = 'annotations')}
+        title="Show and add notes and highlights"
       >
         Notes
       </button>
@@ -642,7 +645,8 @@
     {:else}
       <div class="pdf-toolbar">
         <div class="pager">
-          <button type="button" on:click={() => goTo(currentPage - 1)} disabled={currentPage <= 1}>
+          <button type="button" on:click={() => goTo(currentPage - 1)} disabled={currentPage <= 1}
+            title={currentPage <= 1 ? 'Already on the first page' : 'Previous page'}>
             ‹
           </button>
           <span>{currentPage} / {numPages || '?'}</span>
@@ -650,14 +654,15 @@
             type="button"
             on:click={() => goTo(currentPage + 1)}
             disabled={currentPage >= numPages}
+            title={currentPage >= numPages ? 'Already on the last page' : 'Next page'}
           >
             ›
           </button>
         </div>
         <div class="zoom">
-          <button type="button" on:click={() => zoom(-0.2)} aria-label="Zoom out">−</button>
+          <button type="button" on:click={() => zoom(-0.2)} aria-label="Zoom out" title="Zoom out">−</button>
           <span>{Math.round(scale * 100)}%</span>
-          <button type="button" on:click={() => zoom(0.2)} aria-label="Zoom in">+</button>
+          <button type="button" on:click={() => zoom(0.2)} aria-label="Zoom in" title="Zoom in">+</button>
         </div>
         <div class="mode" role="group" aria-label="View mode">
           <button
@@ -683,13 +688,14 @@
             placeholder="Search whole paper…"
             title="In-app search scans the whole paper. Browser Ctrl+F searches only the visible page."
           />
-          <button type="submit" disabled={searching || !searchQuery.trim()}>Find</button>
+          <button type="submit" disabled={searching || !searchQuery.trim()}
+            title={searchQuery.trim() ? 'Search the whole paper' : 'Type a phrase to search for'}>Find</button>
           {#if searchHits.length}
             <button type="button" on:click={() => stepSearch(-1)} aria-label="Previous match"
-              >‹</button
+              title="Previous match">‹</button
             >
             <span>{searchPos + 1}/{searchHits.length}</span>
-            <button type="button" on:click={() => stepSearch(1)} aria-label="Next match">›</button>
+            <button type="button" on:click={() => stepSearch(1)} aria-label="Next match" title="Next match">›</button>
           {/if}
         </form>
         <button
@@ -720,6 +726,7 @@
               type="button"
               class:active={currentPage === i + 1}
               on:click={() => goTo(i + 1)}
+              title="Go to page {i + 1}"
             >
               {i + 1}
             </button>
@@ -802,7 +809,8 @@
             </small>
             <div class="ctx-actions">
               {#if (context.pdf_coordinates?.length ?? 0) > 0 || context.page}
-                <button type="button" class="jump" on:click={() => jumpToContext(context)}>
+                <button type="button" class="jump" on:click={() => jumpToContext(context)}
+                  title="Jump to where this citation appears in the paper">
                   Jump to p.{context.pdf_coordinates?.[0]?.page ?? context.page}
                 </button>
               {/if}
@@ -811,6 +819,7 @@
                   type="button"
                   class="jump"
                   on:click={() => onNavigateToReference?.(context.reference_id)}
+                  title="Reveal the matching entry in the paper’s References list"
                 >
                   Show reference
                 </button>
@@ -822,15 +831,19 @@
     {/if}
   {:else}
     <form class="annotation-form" on:submit|preventDefault={createAnnotation}>
-      <select bind:value={annotationType} disabled={!$canEdit || !onCreateAnnotation}>
+      <select bind:value={annotationType} disabled={!$canEdit || !onCreateAnnotation}
+        title={$canEdit ? 'Choose the kind of annotation to add' : INSUFFICIENT_ROLE}>
         <option value="note">Note</option>
         <option value="highlight">Highlight</option>
         <option value="page_anchor">Page anchor</option>
         <option value="citation_note">Citation note</option>
       </select>
-      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" disabled={!$canEdit} />
-      <input bind:value={selectedText} placeholder="Selected text" disabled={!$canEdit} />
-      <textarea bind:value={annotationContent} placeholder="Note" disabled={!$canEdit}></textarea>
+      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" disabled={!$canEdit}
+        title={$canEdit ? 'Page this note refers to' : INSUFFICIENT_ROLE} />
+      <input bind:value={selectedText} placeholder="Selected text" disabled={!$canEdit}
+        title={$canEdit ? 'Text this note refers to (filled in by Highlight selection)' : INSUFFICIENT_ROLE} />
+      <textarea bind:value={annotationContent} placeholder="Note" disabled={!$canEdit}
+        title={$canEdit ? 'Your note text' : INSUFFICIENT_ROLE}></textarea>
       {#if selectionBoxes?.length}
         <small class="coord-note">
           Anchored at p.{selectionBoxes[0].page} ({selectionBoxes.length} box{selectionBoxes.length >
@@ -856,7 +869,8 @@
         {#each annotations as annotation (annotation.id)}
           <article class:flash={flashKey === `ann:${annotation.id}`}>
             <header>
-              <button type="button" class="ann-jump" on:click={() => jumpToAnnotation(annotation)}>
+              <button type="button" class="ann-jump" on:click={() => jumpToAnnotation(annotation)}
+                title="Jump to this note’s page and highlight">
                 <strong>{annotation.annotation_type.replaceAll('_', ' ')}</strong>
                 <span>page {annotation.page ?? '-'}</span>
               </button>

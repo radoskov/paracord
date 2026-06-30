@@ -416,10 +416,10 @@ th.sortable{cursor:pointer;user-select:none}
   <div class="conn" id="conn">…</div>
 </header>
 <nav>
-  <button data-tab="conn" class="active" onclick="show('conn')">Connection</button>
-  <button data-tab="folders" onclick="show('folders')">Folders &amp; files <span class="count" id="cFolders">0</span></button>
-  <button data-tab="files" onclick="show('files')">Indexed <span class="count" id="cFiles">0</span></button>
-  <button data-tab="reqs" onclick="show('reqs')">Requests <span class="count" id="cReqs">0</span></button>
+  <button data-tab="conn" class="active" onclick="show('conn')" title="Server connection and enrollment">Connection</button>
+  <button data-tab="folders" onclick="show('folders')" title="Folders and files this agent watches">Folders &amp; files <span class="count" id="cFolders">0</span></button>
+  <button data-tab="files" onclick="show('files')" title="Files this agent has indexed">Indexed <span class="count" id="cFiles">0</span></button>
+  <button data-tab="reqs" onclick="show('reqs')" title="Teleport requests from the server">Requests <span class="count" id="cReqs">0</span></button>
 </nav>
 <main>
   <section class="tab active" data-tab="conn">
@@ -427,7 +427,7 @@ th.sortable{cursor:pointer;user-select:none}
       <div id="status" class="muted">…</div>
       <div class="row" style="margin-top:.6rem">
         <input id="url" placeholder="http://server:8000" size="28">
-        <button class="sec" onclick="act(connect,'Server URL saved')">Set server</button>
+        <button class="sec" onclick="act(connect,'Server URL saved')" title="Save the server URL this agent connects to">Set server</button>
       </div>
     </div>
     <div class="card"><h2>Enrollment</h2>
@@ -435,11 +435,11 @@ th.sortable{cursor:pointer;user-select:none}
       <div class="row" style="margin-top:.5rem">
         <input id="enrollTok" placeholder="enrollment token" size="20">
         <input id="agentName" placeholder="agent name" size="14">
-        <button class="sec" onclick="act(enroll,'Enrolled — ask the owner to approve')">Enroll</button>
+        <button class="sec" onclick="act(enroll,'Enrolled — ask the owner to approve')" title="Enroll this agent with the server using the token above">Enroll</button>
       </div>
       <div class="row" style="margin-top:.5rem">
         <input id="agentTok" placeholder="agent token (after approval)" size="26">
-        <button class="sec" onclick="act(setToken,'Agent token saved')">Save token</button>
+        <button class="sec" onclick="act(setToken,'Agent token saved')" title="Save the agent bearer token issued after approval">Save token</button>
       </div>
     </div>
   </section>
@@ -447,10 +447,10 @@ th.sortable{cursor:pointer;user-select:none}
   <section class="tab" data-tab="folders">
     <div class="card"><h2>Managed folders &amp; files</h2>
       <div class="row">
-        <button onclick="openPicker()">+ Add folder or file…</button>
+        <button onclick="openPicker()" title="Browse this workstation to add a folder or file">+ Add folder or file…</button>
         <span class="muted">or paste a path:</span>
         <input id="path" placeholder="/home/me/papers" size="24">
-        <button class="sec" onclick="addByPath()">Add</button>
+        <button class="sec" onclick="addByPath()" title="Add the pasted path to the watched list">Add</button>
       </div>
       <div id="items" style="margin-top:.7rem"></div>
     </div>
@@ -458,8 +458,8 @@ th.sortable{cursor:pointer;user-select:none}
 
   <section class="tab" data-tab="files">
     <div class="card"><h2>Indexed files
-        <button class="sec tiny" onclick="act(sync)">Sync now</button>
-        <button class="sec tiny" onclick="refresh()">Refresh</button></h2>
+        <button class="sec tiny" onclick="act(sync)" title="Re-scan the watched folders and send the manifest to the server">Sync now</button>
+        <button class="sec tiny" onclick="refresh()" title="Reload the indexed-files list">Refresh</button></h2>
       <div class="filters">
         <input id="fSearch" placeholder="search filename, hash, title or authors…" oninput="renderFiles()">
         <label>action <select id="fAction" onchange="renderFiles()"><option value="">all</option>
@@ -484,7 +484,7 @@ th.sortable{cursor:pointer;user-select:none}
   </section>
 
   <section class="tab" data-tab="reqs">
-    <div class="card"><h2>Teleport requests <button class="sec tiny" onclick="refresh()">Refresh</button></h2>
+    <div class="card"><h2>Teleport requests <button class="sec tiny" onclick="refresh()" title="Reload the teleport requests list">Refresh</button></h2>
       <div id="reqs"></div>
     </div>
   </section>
@@ -493,9 +493,9 @@ th.sortable{cursor:pointer;user-select:none}
 <div class="modal" id="picker">
   <div class="box">
     <div class="head">
-      <button class="sec tiny" onclick="browse(pickerParent)" id="upBtn">↑ Up</button>
+      <button class="sec tiny" onclick="browse(pickerParent)" id="upBtn" title="Go up to the parent folder">↑ Up</button>
       <code id="pickerPath"></code>
-      <button class="sec tiny" onclick="closePicker()">✕</button>
+      <button class="sec tiny" onclick="closePicker()" title="Close without adding">✕</button>
     </div>
     <div class="body" id="pickerList"></div>
     <div class="foot">
@@ -505,7 +505,7 @@ th.sortable{cursor:pointer;user-select:none}
         <label><input type="radio" name="pMode" value="monitored" onchange="savePMode()"> monitored</label>
         <label><input type="radio" name="pMode" value="once" onchange="savePMode()"> once</label>
       </span>
-      <button onclick="addCurrentFolder()">Add this folder</button>
+      <button onclick="addCurrentFolder()" title="Watch the folder currently shown above">Add this folder</button>
     </div>
   </div>
 </div>
@@ -567,8 +567,8 @@ async function refresh(){
         `<td>${sel('action',[['index_only','index_only'],['index_and_extract','index_and_extract'],['teleport','teleport']],i.action)}</td>`+
         `<td>${sel('teleport_policy',[['ask','ask'],['allow','allow']],i.teleport_policy)}</td>`+
         `<td class="muted">${found}</td>`+
-        `<td class="row"><button class="sec tiny" onclick="togglePause('${ep}',${i.enabled})">${i.enabled?'Pause':'Resume'}</button>`+
-        `<button class="danger tiny" onclick="removeItem('${ep}')">Remove</button></td></tr>`;
+        `<td class="row"><button class="sec tiny" onclick="togglePause('${ep}',${i.enabled})" title="${i.enabled?'Stop watching this item (keep it in the list)':'Resume watching this item'}">${i.enabled?'Pause':'Resume'}</button>`+
+        `<button class="danger tiny" onclick="removeItem('${ep}')" title="Stop watching and remove this item from the list">Remove</button></td></tr>`;
     }).join('')+'</table>'
     : '<p class="muted">No managed items. Click “Add folder or file…”.</p>';
   // indexed files (#15: cache + client-side search/sort/filter via renderFiles)
@@ -578,9 +578,9 @@ async function refresh(){
   let reqs=[];try{reqs=await api('/api/requests');}catch(e){/* visibility/connectivity */}
   document.getElementById('cReqs').textContent=reqs.length||0;
   document.getElementById('reqs').innerHTML = (reqs.length? '<table>'+reqs.map(r=>`<tr><td>${esc(r.display_path||r.local_file_id.slice(0,10))}</td>`+
-    `<td class="row"><button class="tiny" onclick="reqAct('${r.local_file_id}','approve','Approved — pushing file')">approve</button>`+
-    `<button class="sec tiny" onclick="reqAct('${r.local_file_id}','reject','Rejected')">reject</button>`+
-    `<button class="danger tiny" onclick="rejectForever('${r.local_file_id}')">reject forever</button></td></tr>`).join('')+'</table>'
+    `<td class="row"><button class="tiny" onclick="reqAct('${r.local_file_id}','approve','Approved — pushing file')" title="Approve and upload this file to the server">approve</button>`+
+    `<button class="sec tiny" onclick="reqAct('${r.local_file_id}','reject','Rejected')" title="Reject this request (it may be requested again later)">reject</button>`+
+    `<button class="danger tiny" onclick="rejectForever('${r.local_file_id}')" title="Reject and never offer this file again">reject forever</button></td></tr>`).join('')+'</table>'
     : '<p class="muted">No pending requests.</p>');
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');}
@@ -625,18 +625,18 @@ function renderFiles(){
       const title=f.extracted_title?`<span class="titlecell" title="${esc(f.extracted_title)}${f.extracted_authors?'\n'+esc(f.extracted_authors):''}">${esc(f.extracted_title)}</span>`:'<span class="muted">—</span>';
       const teleported=(f.processing_state==='teleported')||(f.teleport_status==='complete');
       const offerBtn=(canTeleport&&!teleported&&!f.blocked&&f.present)
-        ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')">offer teleport</button>`:'';
+        ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')" title="Upload this file into the server library">offer teleport</button>`:'';
       const gone=f.present?'':' <span class="bad" title="The original file is no longer present in the indexed folder on this workstation — the agent can no longer see it. The server still keeps the indexed copy and metadata.">(file no longer on this workstation)</span>';
       return `<tr><td class="pathcell">${esc(f.virtual_path||f.local_file_id.slice(0,10))}${gone}</td>`+
         `<td><span class="pill mono" data-hash="${esc(f.local_file_id)}" onclick="copyHash('${f.local_file_id}')" title="click to copy full hash (the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span>`+
         `<span class="fullhash">${esc(f.local_file_id)}</span></td>`+
         `<td>${title}</td>`+
         `<td><span class="pill">${f.action}</span></td><td>${f.processing_state}${f.blocked?' <span class="bad">blocked</span>':''}</td>`+
-        `<td class="row"><button class="sec tiny" onclick="readFile('${f.local_file_id}')"${f.present?'':' disabled'}>read</button>`+
+        `<td class="row"><button class="sec tiny" onclick="readFile('${f.local_file_id}')"${f.present?'':' disabled'} title="${f.present?'Open this PDF in a new tab':'The original file is no longer on this workstation'}">read</button>`+
         offerBtn+
-        `<button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')">re-extract</button>`+
-        (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')">unblock</button>`:'')+
-        `<button class="danger tiny" onclick="forget('${f.local_file_id}')">forget</button></td></tr>`;
+        `<button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')" title="Ask the server to extract this file again">re-extract</button>`+
+        (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')" title="Unblock this file so it can be processed again">unblock</button>`:'')+
+        `<button class="danger tiny" onclick="forget('${f.local_file_id}')" title="Forget this file locally (the server keeps its copy)">forget</button></td></tr>`;
     }).join('')+'</table>';
 }
 // Open a locally-indexed PDF in a new tab (#13). The httpOnly session cookie authorizes the
@@ -670,8 +670,8 @@ async function browse(path){
   document.getElementById('pickerList').innerHTML=d.entries.length?d.entries.map(e=>{
     const ep=enc(e.path);
     return `<div class="entry">${e.is_dir
-      ? `<span class="nm" onclick="browse(decodeURIComponent('${ep}'))">📁 ${esc(e.name)}</span><button class="sec tiny" onclick="addPath(decodeURIComponent('${ep}'),'folder')">add</button>`
-      : `<span class="nm">📄 ${esc(e.name)}</span><button class="sec tiny" onclick="addPath(decodeURIComponent('${ep}'),'file')">add</button>`}</div>`;}).join('')
+      ? `<span class="nm" onclick="browse(decodeURIComponent('${ep}'))">📁 ${esc(e.name)}</span><button class="sec tiny" onclick="addPath(decodeURIComponent('${ep}'),'folder')" title="Watch this folder">add</button>`
+      : `<span class="nm">📄 ${esc(e.name)}</span><button class="sec tiny" onclick="addPath(decodeURIComponent('${ep}'),'file')" title="Watch this file">add</button>`}</div>`;}).join('')
     :'<p class="muted" style="padding:0 1rem">Empty (no subfolders or PDFs).</p>';
 }
 function pMode(){const r=document.querySelector('input[name=pMode]:checked');return r?r.value:'monitored';}

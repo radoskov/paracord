@@ -58,6 +58,9 @@
             type="checkbox"
             checked={isVisible(id)}
             disabled={META.get(id)?.alwaysOn}
+            title={META.get(id)?.alwaysOn
+              ? 'The title column is always shown'
+              : `Show or hide the ${META.get(id)?.label ?? id} column`}
             on:change={() => toggle(id)}
           />
           <span class="name">{META.get(id)?.label ?? id}</span>
@@ -65,10 +68,12 @@
         </label>
         <span class="reorder">
           <button type="button" class="secondary" on:click={() => move(i, -1)} disabled={i === 0}
-            title="Move up" aria-label="Move {META.get(id)?.label ?? id} up">↑</button>
+            title={i === 0 ? 'Already the first column' : 'Move this column up'}
+            aria-label="Move {META.get(id)?.label ?? id} up">↑</button>
           <button type="button" class="secondary" on:click={() => move(i, 1)}
             disabled={i === localOrder.length - 1}
-            title="Move down" aria-label="Move {META.get(id)?.label ?? id} down">↓</button>
+            title={i === localOrder.length - 1 ? 'Already the last column' : 'Move this column down'}
+            aria-label="Move {META.get(id)?.label ?? id} down">↓</button>
         </span>
       </li>
     {/each}
@@ -80,8 +85,9 @@
     </p>
   {/if}
   <div class="actions">
-    <button type="button" on:click={apply}>Apply</button>
-    <button type="button" class="secondary" on:click={onClose}>Cancel</button>
+    <button type="button" on:click={apply} title="Apply this column layout to the list">Apply</button>
+    <button type="button" class="secondary" on:click={onClose}
+      title="Discard changes and close">Cancel</button>
   </div>
 </Modal>
 

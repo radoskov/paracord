@@ -142,6 +142,7 @@
           type="button"
           class:active={renderMode === 'graph'}
           on:click={() => (renderMode = 'graph')}
+          title="Show an interactive node-link graph"
         >
           Graph
         </button>
@@ -149,23 +150,27 @@
           type="button"
           class:active={renderMode === 'list'}
           on:click={() => (renderMode = 'list')}
+          title="Show the citation edges as a plain list"
         >
           List
         </button>
       </div>
       {#if renderMode === 'graph'}
-        <select bind:value={layout} on:change={relayout} disabled={disabled || busy}>
+        <select bind:value={layout} on:change={relayout} disabled={disabled || busy}
+          title="Graph layout algorithm">
           <option value="cose">Force</option>
           <option value="circle">Circle</option>
           <option value="grid">Grid</option>
           <option value="breadthfirst">Hierarchy</option>
         </select>
       {/if}
-      <select bind:value={nodeMode} disabled={disabled || busy}>
+      <select bind:value={nodeMode} disabled={disabled || busy}
+        title="Whether to include papers outside the library as external nodes">
         <option value="local_only">Local only</option>
         <option value="include_external">Include external</option>
       </select>
-      <button type="button" on:click={build} disabled={disabled || busy}>Build graph</button>
+      <button type="button" on:click={build} disabled={disabled || busy}
+        title="Build the citation graph for the chosen scope">Build graph</button>
     </div>
   </div>
 

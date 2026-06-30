@@ -155,7 +155,7 @@
         <h3>Add a paper to this shelf</h3>
         <input bind:value={workFilter} placeholder="Filter papers by title…" aria-label="Filter papers" />
         <div class="row">
-          <select bind:value={pickWorkId} aria-label="Choose a paper">
+          <select bind:value={pickWorkId} aria-label="Choose a paper" title="Choose a paper to add to this shelf">
             <option value="">Choose a paper…</option>
             {#each filteredWorks.slice(0, 200) as work (work.id)}
               <option value={work.id}>{work.canonical_title ?? 'Untitled'}{work.year ? ` (${work.year})` : ''}</option>

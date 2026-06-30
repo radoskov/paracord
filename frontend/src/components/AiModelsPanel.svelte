@@ -115,7 +115,7 @@
   {#if config}
     <div class="grid">
       <label>Embedding provider
-        <select bind:value={config.embedding_provider} disabled={busy}>
+        <select bind:value={config.embedding_provider} disabled={busy} title="Engine used to embed papers for semantic search">
           {#each allowed.embedding_provider ?? [] as p}
             <option value={p} disabled={!avail('embedding', p)}>
               {p}{avail('embedding', p) ? '' : ' (unavailable)'}
@@ -127,11 +127,12 @@
         {/if}
       </label>
       <label>Embedding model
-        <input bind:value={config.embedding_model} placeholder="(provider default)" disabled={busy} />
+        <input bind:value={config.embedding_model} placeholder="(provider default)" disabled={busy}
+          title="Specific embedding model name, or blank for the provider default" />
       </label>
 
       <label>Summary provider
-        <select bind:value={config.summary_provider} disabled={busy}>
+        <select bind:value={config.summary_provider} disabled={busy} title="Engine used to generate summaries">
           {#each allowed.summary_provider ?? [] as p}
             <option value={p} disabled={!avail('summary', p)}>
               {p}{avail('summary', p) ? '' : ' (unavailable)'}
@@ -143,21 +144,22 @@
         {/if}
       </label>
       <label>Summary model (Ollama)
-        <input bind:value={config.summary_model} disabled={busy} />
+        <input bind:value={config.summary_model} disabled={busy} title="Ollama model used for summaries" />
       </label>
 
       <label>Topic backend
-        <select bind:value={config.topic_backend} disabled={busy}>
+        <select bind:value={config.topic_backend} disabled={busy} title="Engine used to cluster papers into topics">
           {#each allowed.topic_backend ?? [] as p}<option value={p}>{p}</option>{/each}
         </select>
       </label>
       <label>Ollama URL
-        <input bind:value={config.ollama_url} placeholder="http://localhost:11434" disabled={busy} />
+        <input bind:value={config.ollama_url} placeholder="http://localhost:11434" disabled={busy}
+          title="Base URL of the Ollama server to reach" />
       </label>
     </div>
     <div class="row">
-      <button type="button" on:click={save} disabled={busy}>Save config</button>
-      <button type="button" class="secondary" on:click={refresh} disabled={busy}>Refresh</button>
+      <button type="button" on:click={save} disabled={busy} title="Save the AI provider/model settings (changing the embedding model queues a reindex)">Save config</button>
+      <button type="button" class="secondary" on:click={refresh} disabled={busy} title="Reload the current settings and provider availability">Refresh</button>
       {#if providers}
         <span class="muted">Ollama: {providers.ollama_reachable ? 'reachable ✓' : 'not reachable'}</span>
       {/if}
@@ -165,12 +167,14 @@
 
     <h3>Models</h3>
     <div class="row">
-      <select bind:value={pullProvider} disabled={busy}>
+      <select bind:value={pullProvider} disabled={busy} title="Provider to download the model from">
         <option value="ollama">ollama</option>
         <option value="sentence_transformers">sentence_transformers</option>
       </select>
-      <input bind:value={pullModel} placeholder="model name (e.g. nomic-embed-text)" disabled={busy} />
-      <button type="button" class="secondary" on:click={pull} disabled={busy || !pullModel.trim()}>
+      <input bind:value={pullModel} placeholder="model name (e.g. nomic-embed-text)" disabled={busy}
+        title="Name of the model to download" />
+      <button type="button" class="secondary" on:click={pull} disabled={busy || !pullModel.trim()}
+        title={pullModel.trim() ? 'Download this model in the background' : 'Enter a model name first'}>
         Pull model
       </button>
     </div>
@@ -181,7 +185,7 @@
         {#each models as m (m.provider + m.name)}
           <li>
             <span>{m.name} <small class="muted">{m.provider} {fmtSize(m.size_bytes)}</small></span>
-            <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy}>Delete</button>
+            <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy} title="Delete this downloaded model">Delete</button>
           </li>
         {/each}
       </ul>
@@ -194,7 +198,7 @@
         <code>{reindex.model_name}</code>.
       </p>
     {/if}
-    <button type="button" class="secondary" on:click={doReindex} disabled={busy}>Reindex embeddings</button>
+    <button type="button" class="secondary" on:click={doReindex} disabled={busy} title="Rebuild embeddings for every paper with the current embedding model">Reindex embeddings</button>
   {:else}
     <p class="empty">Loading…</p>
   {/if}

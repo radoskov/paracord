@@ -512,7 +512,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   arXiv/Semantic Scholar + DOI resolver), search + download-and-attach endpoints; WorkDetail "Find on
   web" button → candidate picker modal → select 0…N → download + attach with per-item status.
   Files: backend new service + endpoints, WorkDetail.svelte, client.ts.
-- [ ] **Phase G — Hover-hint audit (#6).** Cross-cutting pass (run last, over final state): every
+- [x] **Phase G — Hover-hint audit (#6).** Cross-cutting pass (run last, over final state): every
   actionable control has a hint — enabled = what it does; disabled = why (role vs missing
   prerequisite). Files: LibraryPage.svelte, WorkDetail.svelte, AdminPage.svelte, PdfReader.svelte, etc.
 

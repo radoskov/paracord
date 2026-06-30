@@ -391,21 +391,25 @@
           <button type="submit" disabled={loading} title="Apply search and filters">Search</button>
         </div>
         <div class="filter-row">
-          <select bind:value={statusFilter} on:change={loadWorks} aria-label="Reading status">
+          <select bind:value={statusFilter} on:change={loadWorks} aria-label="Reading status"
+            title="Filter the list by reading status">
             <option value="">Any status</option>
             {#each ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'] as s}
               <option value={s}>{s}</option>
             {/each}
           </select>
-          <select bind:value={shelfFilter} on:change={loadWorks} aria-label="Shelf">
+          <select bind:value={shelfFilter} on:change={loadWorks} aria-label="Shelf"
+            title="Filter the list by shelf">
             <option value="">Any shelf</option>
             {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
-          <select bind:value={rackFilter} on:change={loadWorks} aria-label="Rack">
+          <select bind:value={rackFilter} on:change={loadWorks} aria-label="Rack"
+            title="Filter the list by rack">
             <option value="">Any rack</option>
             {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
-          <select bind:value={tagFilter} on:change={loadWorks} aria-label="Tag">
+          <select bind:value={tagFilter} on:change={loadWorks} aria-label="Tag"
+            title="Filter the list by tag">
             <option value="">Any tag</option>
             {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
           </select>
@@ -417,14 +421,16 @@
         {#if showMoreFilters}
           <div class="more-filters">
             <label class="inline">PDF
-              <select bind:value={pdfFilter} on:change={loadWorks}>
+              <select bind:value={pdfFilter} on:change={loadWorks}
+                title="Filter by whether the paper has an attached PDF">
                 <option value="">any</option>
                 <option value="yes">has file</option>
                 <option value="no">no file</option>
               </select>
             </label>
             <label class="inline">References
-              <select bind:value={refsFilter} on:change={loadWorks}>
+              <select bind:value={refsFilter} on:change={loadWorks}
+                title="Filter by whether references have been extracted">
                 <option value="">any</option>
                 <option value="yes">extracted</option>
                 <option value="no">none</option>
@@ -437,6 +443,9 @@
                   type="button"
                   class="chip"
                   class:on={missing.includes(field)}
+                  title={missing.includes(field)
+                    ? `Stop filtering on missing ${field}`
+                    : `Show only papers missing ${field}`}
                   on:click={() => {
                     toggleMissing(field);
                     loadWorks();
@@ -444,7 +453,8 @@
                 >{field}</button>
               {/each}
             </span>
-            <button type="button" class="secondary" on:click={resetFilters}>Reset</button>
+            <button type="button" class="secondary" on:click={resetFilters}
+              title="Clear the search box and all filters">Reset</button>
           </div>
         {/if}
       </form>
@@ -466,7 +476,7 @@
             title={$canEdit ? 'Queue GROBID extraction for every attached file of the selected papers' : INSUFFICIENT_ROLE}>Re-extract</button>
           <label class="inline">Set status
             <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading || !$canEdit}
-              title={$canEdit ? '' : INSUFFICIENT_ROLE}>
+              title={$canEdit ? 'Set the reading status for all selected papers' : INSUFFICIENT_ROLE}>
               <option value="">…</option>
               {#each ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'] as s}
                 <option value={s}>{s}</option>
@@ -483,7 +493,8 @@
                 style,
               })}
           />
-          <button type="button" class="link" on:click={() => (selectedIds = [])}>Clear</button>
+          <button type="button" class="link" on:click={() => (selectedIds = [])}
+            title="Clear the current selection">Clear</button>
         </div>
       {/if}
     </div>
@@ -536,8 +547,13 @@
       <label>URL<input bind:value={newUrl} placeholder="https://arxiv.org/abs/… or https://doi.org/…" /></label>
       <div class="actions">
         <button type="submit" disabled={!canCreate || loading || !$canEdit}
-          title={$canEdit ? '' : INSUFFICIENT_ROLE}>Create paper</button>
-        <button type="button" class="secondary" on:click={() => (showNew = false)}>Cancel</button>
+          title={!$canEdit
+            ? INSUFFICIENT_ROLE
+            : canCreate
+              ? 'Create the paper from the details above'
+              : 'Enter a title, DOI, arXiv id or URL first'}>Create paper</button>
+        <button type="button" class="secondary" on:click={() => (showNew = false)}
+          title="Discard and close without creating">Cancel</button>
       </div>
       {#if !canCreate}<p class="hintline">Enter at least one identifier to enable “Create paper”.</p>{/if}
     </form>

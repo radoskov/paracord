@@ -92,18 +92,18 @@
     <h2>Scope</h2>
     <p class="muted">Choose what the graph, topics and summary below operate on.</p>
     <div class="row">
-      <select bind:value={scopeType} aria-label="Scope type">
+      <select bind:value={scopeType} aria-label="Scope type" title="What the analyses below operate on">
         <option value="library">Whole library</option>
         <option value="shelf">A shelf</option>
         <option value="rack">A rack</option>
       </select>
       {#if scopeType === 'shelf'}
-        <select bind:value={scopeId} aria-label="Shelf">
+        <select bind:value={scopeId} aria-label="Shelf" title="Choose the shelf to analyse">
           <option value="">Choose a shelf…</option>
           {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
         </select>
       {:else if scopeType === 'rack'}
-        <select bind:value={scopeId} aria-label="Rack">
+        <select bind:value={scopeId} aria-label="Rack" title="Choose the rack to analyse">
           <option value="">Choose a rack…</option>
           {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
         </select>
@@ -139,7 +139,7 @@
       <div class="head">
         <h2>Topics</h2>
         <button type="button" on:click={modelTopics} disabled={loading || !scopeReady}
-          title="Cluster the scope's papers into keyword topics">Model topics</button>
+          title={scopeReady ? 'Cluster the scope’s papers into keyword topics' : `Pick a ${scopeType} first`}>Model topics</button>
       </div>
       {#if topics.length === 0}
         <p class="empty">No topics yet — click “Model topics”.</p>
@@ -156,7 +156,7 @@
       <div class="head">
         <h2>Scope summary</h2>
         <button type="button" on:click={summarise} disabled={loading || !scopeReady}
-          title="Generate an extractive summary across the scope's abstracts">Summarise</button>
+          title={scopeReady ? 'Generate an extractive summary across the scope’s abstracts' : `Pick a ${scopeType} first`}>Summarise</button>
       </div>
       {#if !summary}
         <p class="empty">No summary yet — click “Summarise”.</p>
@@ -172,7 +172,8 @@
     <p class="muted">Find papers by meaning across the whole library (lexical baseline embedder).</p>
     <form on:submit|preventDefault={semanticSearch} class="row">
       <input bind:value={semanticQuery} placeholder="e.g. attention mechanisms for translation" aria-label="Semantic query" />
-      <button type="submit" disabled={!semanticQuery.trim() || loading}>Search</button>
+      <button type="submit" disabled={!semanticQuery.trim() || loading}
+        title={semanticQuery.trim() ? 'Search the library by meaning' : 'Type a query first'}>Search</button>
     </form>
     {#if semanticResults.length > 0}
       <ul class="plain">

@@ -130,7 +130,8 @@
     <p class="muted">Fetch metadata for an arXiv id or DOI and create a paper (idempotent).</p>
     <form on:submit|preventDefault={importIdentifier} class="row">
       <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
-      <button type="submit" disabled={!identifierValue.trim() || loading}>Import</button>
+      <button type="submit" disabled={!identifierValue.trim() || loading}
+        title={identifierValue.trim() ? 'Fetch metadata and create the paper' : 'Enter an arXiv id or DOI first'}>Import</button>
     </form>
   </div>
 
@@ -151,7 +152,7 @@
         title="Create a server-folder source from a configured alias">Add source</button>
     </form>
     <div class="row top">
-      <select bind:value={selectedSourceId} aria-label="Source to import">
+      <select bind:value={selectedSourceId} aria-label="Source to import" title="Server-folder source to scan">
         <option value="">Choose a source…</option>
         {#each sources as source (source.id)}<option value={source.id}>{source.name}</option>{/each}
       </select>
@@ -166,7 +167,8 @@
     <p class="muted">Paste one or more BibTeX entries; duplicates (by DOI/title) are skipped.</p>
     <form on:submit|preventDefault={importBibtex} class="stack">
       <textarea bind:value={bibtexContent} rows="5" placeholder="@article&#123;...&#125;" aria-label="BibTeX"></textarea>
-      <button type="submit" disabled={!bibtexContent.trim() || loading}>Import BibTeX</button>
+      <button type="submit" disabled={!bibtexContent.trim() || loading}
+        title={bibtexContent.trim() ? 'Import the pasted BibTeX entries' : 'Paste BibTeX first'}>Import BibTeX</button>
     </form>
   </div>
 
@@ -175,7 +177,8 @@
     <p class="muted">Reference Manager / EndNote format (tagged lines, one record per <code>ER</code>).</p>
     <form on:submit|preventDefault={importRis} class="stack">
       <textarea bind:value={risContent} rows="5" placeholder="TY  - JOUR&#10;TI  - Title&#10;ER  -" aria-label="RIS"></textarea>
-      <button type="submit" disabled={!risContent.trim() || loading}>Import RIS</button>
+      <button type="submit" disabled={!risContent.trim() || loading}
+        title={risContent.trim() ? 'Import the pasted RIS records' : 'Paste RIS first'}>Import RIS</button>
     </form>
   </div>
 
@@ -184,7 +187,8 @@
     <p class="muted">Citation Style Language JSON (an array of items, as exported by Zotero).</p>
     <form on:submit|preventDefault={importCsl} class="stack">
       <textarea bind:value={cslContent} rows="5" placeholder={'[{"title": "…", "DOI": "…"}]'} aria-label="CSL JSON"></textarea>
-      <button type="submit" disabled={!cslContent.trim() || loading}>Import CSL JSON</button>
+      <button type="submit" disabled={!cslContent.trim() || loading}
+        title={cslContent.trim() ? 'Import the pasted CSL JSON items' : 'Paste CSL JSON first'}>Import CSL JSON</button>
     </form>
   </div>
 </section>

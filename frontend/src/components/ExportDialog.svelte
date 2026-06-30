@@ -76,7 +76,7 @@
   <div class="row">
     <label>
       Export {label}
-      <select bind:value={format} disabled={disabled || busy}>
+      <select bind:value={format} disabled={disabled || busy} title="Citation export format">
         {#each EXPORT_FORMATS as option (option.value)}
           <option value={option.value}>{option.label}</option>
         {/each}
@@ -84,17 +84,17 @@
     </label>
     {#if format === 'styled'}
       <label>Style
-        <select bind:value={style} disabled={disabled || busy}>
+        <select bind:value={style} disabled={disabled || busy} title="Citation style for the formatted output">
           {#each CITATION_STYLES as s}<option value={s}>{s.toUpperCase()}</option>{/each}
         </select>
       </label>
     {/if}
     {#if fetchExport}
-      <button type="button" class="secondary" on:click={doPreview} disabled={disabled || busy}>Preview</button>
-      <button type="button" class="secondary" on:click={doCopy} disabled={disabled || busy}>Copy</button>
-      <button type="button" on:click={doDownload} disabled={disabled || busy}>Download</button>
+      <button type="button" class="secondary" on:click={doPreview} disabled={disabled || busy} title="Show the export inline below">Preview</button>
+      <button type="button" class="secondary" on:click={doCopy} disabled={disabled || busy} title="Copy the export to the clipboard">Copy</button>
+      <button type="button" on:click={doDownload} disabled={disabled || busy} title="Download the export as a file">Download</button>
     {:else}
-      <button type="button" on:click={() => onExport(format)} disabled={disabled || busy}>Export</button>
+      <button type="button" on:click={() => onExport(format)} disabled={disabled || busy} title="Export in the chosen format">Export</button>
     {/if}
   </div>
   {#if status}<p class="status">{status}</p>{/if}

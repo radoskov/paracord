@@ -147,7 +147,7 @@
       <div class="add-shelf">
         <h3>Add a shelf to this rack</h3>
         <div class="row">
-          <select bind:value={pickShelfId} aria-label="Choose a shelf">
+          <select bind:value={pickShelfId} aria-label="Choose a shelf" title="Choose a shelf to add to this rack">
             <option value="">Choose a shelf…</option>
             {#each availableShelves as shelf (shelf.id)}
               <option value={shelf.id}>{shelf.name}</option>

@@ -46,13 +46,14 @@
   <div class="head">
     <h2>Events</h2>
     <div class="controls">
-      <input bind:value={filter} placeholder="Filter by type (e.g. auth, paper, agent)" aria-label="Filter events" />
-      <select bind:value={limit} on:change={load} aria-label="How many">
+      <input bind:value={filter} placeholder="Filter by type (e.g. auth, paper, agent)" aria-label="Filter events"
+        title="Filter the events list by event type" />
+      <select bind:value={limit} on:change={load} aria-label="How many" title="How many recent events to load">
         <option value={50}>50</option>
         <option value={100}>100</option>
         <option value={250}>250</option>
       </select>
-      <button type="button" class="secondary" on:click={load} disabled={loading}>Refresh</button>
+      <button type="button" class="secondary" on:click={load} disabled={loading} title="Reload the audit log">Refresh</button>
     </div>
   </div>
   <p class="muted">

@@ -123,7 +123,8 @@
           <input type="email" bind:value={email} maxlength="320" placeholder="Contact email (optional)" />
         </label>
         <div class="actions">
-          <button type="submit" disabled={savingProfile || !dirty}>Save changes</button>
+          <button type="submit" disabled={savingProfile || !dirty}
+            title={dirty ? 'Save your appearance name and email' : 'No changes to save'}>Save changes</button>
         </div>
         {#if profileMsg}<p class="muted">{profileMsg}</p>{/if}
         {#if profileErr}<p class="danger">{profileErr}</p>{/if}
@@ -133,7 +134,8 @@
     <section class="card pw">
       <div class="head">
         <h2>Password</h2>
-        <button type="button" class="secondary" on:click={togglePw}>
+        <button type="button" class="secondary" on:click={togglePw}
+          title={showPw ? 'Close the password form' : 'Change your account password'}>
           {showPw ? 'Cancel' : 'Change password'}
         </button>
       </div>
@@ -143,7 +145,12 @@
           <label>New password<input type="password" bind:value={newPw} autocomplete="new-password" /></label>
           {#if newPw && newPw.length < 8}<p class="hintline">New password must be at least 8 characters.</p>{/if}
           <div class="actions">
-            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}>Change</button>
+            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}
+              title={!curPw
+                ? 'Enter your current password'
+                : newPw.length < 8
+                  ? 'New password must be at least 8 characters'
+                  : 'Change your password (signs out other sessions)'}>Change</button>
           </div>
           {#if pwMsg}<p class="muted">{pwMsg}</p>{/if}
           {#if pwErr}<p class="danger">{pwErr}</p>{/if}

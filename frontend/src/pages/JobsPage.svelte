@@ -72,7 +72,7 @@
     <div class="head">
       <h2>Background jobs</h2>
       <div class="controls">
-        <label class="auto"><input type="checkbox" checked={auto} on:change={toggleAuto} /> Auto-refresh</label>
+        <label class="auto"><input type="checkbox" checked={auto} on:change={toggleAuto} title="Reload the job list every few seconds" /> Auto-refresh</label>
         <button type="button" class="secondary" on:click={refresh} title="Refresh now">Refresh</button>
         <button type="button" class="secondary" on:click={clean}
           title="Clear finished and failed job history (running jobs are kept)">Clean</button>
@@ -100,7 +100,8 @@
           {/if}
         </p>
         <div class="counts">
-          <button type="button" class="count count-all" class:active={filter === 'all'} on:click={() => (filter = 'all')}>
+          <button type="button" class="count count-all" class:active={filter === 'all'} on:click={() => (filter = 'all')}
+            title="Show jobs of every status">
             <span class="n">{status.jobs.length}</span>
             <span class="k">all</span>
           </button>
@@ -116,7 +117,7 @@
         {#if status.jobs.length === 0}
           <p class="empty">No recent jobs. Import a PDF or click Enrich on a paper to create one.</p>
         {:else if visibleJobs.length === 0}
-          <p class="empty">No <strong>{filter}</strong> jobs in the recent window. <button type="button" class="linkish" on:click={() => (filter = 'all')}>Show all</button></p>
+          <p class="empty">No <strong>{filter}</strong> jobs in the recent window. <button type="button" class="linkish" on:click={() => (filter = 'all')} title="Show jobs of every status">Show all</button></p>
         {:else}
           <ul class="jobs">
             {#each visibleJobs as job (job.id)}

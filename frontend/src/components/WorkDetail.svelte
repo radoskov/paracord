@@ -436,7 +436,7 @@
       <div class="two">
         <label>Year<input bind:value={form.year} inputmode="numeric" /></label>
         <label>Reading status
-          <select bind:value={form.reading_status}>
+          <select bind:value={form.reading_status} title="Set your reading status for this paper (save to apply)">
             {#each STATUSES as s}<option value={s}>{s}</option>{/each}
           </select>
         </label>
@@ -449,7 +449,7 @@
       <label>Abstract<textarea bind:value={form.abstract} rows="4"></textarea></label>
       <div class="actions">
         <button type="submit" disabled={loading || !$canEdit}
-          title={$canEdit ? '' : INSUFFICIENT_ROLE}>Save changes</button>
+          title={$canEdit ? 'Save edits to this paper’s details' : INSUFFICIENT_ROLE}>Save changes</button>
       </div>
       <div class="actions">
         <button type="button" class="secondary" on:click={enrich} disabled={loading || !$canEdit || (!form.doi && !form.arxiv_id)}
@@ -600,14 +600,14 @@
   <details>
     <summary>Tags</summary>
     <div class="tags">
-      <select bind:value={applyTagId} aria-label="Tag">
+      <select bind:value={applyTagId} aria-label="Tag" title="Choose a tag to apply to or remove from this paper">
         <option value="">Choose a tag…</option>
         {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
       <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !$canEdit}
-        title={$canEdit ? '' : INSUFFICIENT_ROLE}>Apply</button>
+        title={!$canEdit ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>
       <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading || !$canEdit}
-        title={$canEdit ? '' : INSUFFICIENT_ROLE}>Remove</button>
+        title={!$canEdit ? INSUFFICIENT_ROLE : applyTagId ? 'Remove the chosen tag from this paper' : 'Choose a tag first'}>Remove</button>
     </div>
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
@@ -698,6 +698,9 @@
                   checked={selectedIds.has(cand.candidate_id)}
                   on:change={() => toggleCandidate(cand.candidate_id)}
                   disabled={!(cand.pdf_url || cand.landing_url)}
+                  title={cand.pdf_url || cand.landing_url
+                    ? 'Select this candidate to download and attach'
+                    : 'No downloadable link for this candidate'}
                 />
               </label>
               <div class="cand-main">

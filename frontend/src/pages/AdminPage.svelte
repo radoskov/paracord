@@ -265,18 +265,19 @@
     <section class="surface admin-section">
       <div class="section-head">
         <h2>Users</h2>
-        <button type="button" on:click={refresh} disabled={loading}>Refresh</button>
+        <button type="button" on:click={refresh} disabled={loading} title="Reload the users and agents lists">Refresh</button>
       </div>
 
       <form on:submit|preventDefault={createUser} class="stack">
         <input bind:value={newUsername} placeholder="Username" autocomplete="off" />
         <input bind:value={newPassword} type="password" placeholder="Password" autocomplete="new-password" />
-        <select bind:value={newRole}>
+        <select bind:value={newRole} title={$isOwner ? 'Role for the new account' : 'Role for the new account (admins can create readers and editors)'}>
           {#each assignableRoles as r}
             <option value={r}>{r}</option>
           {/each}
         </select>
-        <button type="submit" disabled={!newUsername || !newPassword || loading}>Create user</button>
+        <button type="submit" disabled={!newUsername || !newPassword || loading}
+          title={newUsername && newPassword ? 'Create the new account' : 'Enter a username and password first'}>Create user</button>
       </form>
 
       {#if users.length === 0}
@@ -387,7 +388,8 @@
       </p>
 
       <div class="inline-action">
-        <button type="button" on:click={issueEnrollToken} disabled={loading}>
+        <button type="button" on:click={issueEnrollToken} disabled={loading}
+          title="Mint a one-time token to enroll a new workstation agent">
           Issue enrollment token
         </button>
       </div>
@@ -444,6 +446,7 @@
                   type="button"
                   on:click={() => approveAgent(agent)}
                   disabled={loading}
+                  title="Approve this agent and mint its bearer token"
                 >
                   Approve
                 </button>
@@ -522,8 +525,9 @@
         autocomplete="new-password"
       />
       <div class="reset-actions">
-        <button type="submit" disabled={loading || resetPw.length < 8}>Reset password</button>
-        <button type="button" class="secondary" on:click={closeReset}>Cancel</button>
+        <button type="submit" disabled={loading || resetPw.length < 8}
+          title={resetPw.length < 8 ? 'Enter a new password of at least 8 characters' : 'Set the new password and sign out this user’s sessions'}>Reset password</button>
+        <button type="button" class="secondary" on:click={closeReset} title="Close without changing the password">Cancel</button>
       </div>
       {#if resetPw && resetPw.length < 8}<p class="small-help">Must be at least 8 characters.</p>{/if}
       {#if resetMsg}<p class="muted">{resetMsg}</p>{/if}
