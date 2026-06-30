@@ -8,6 +8,7 @@
     type ServerImportRoot,
     type UserRole,
     type WebFindAllowedHost,
+    type WebFindDownloadPolicy,
   } from '../api/client';
   import { get } from 'svelte/store';
 
@@ -89,6 +90,27 @@
   let allowedHosts: WebFindAllowedHost[] = [];
   let newAllowedHost = '';
 
+  // Find-on-web download policy (owner-only): restricted | careful | unrestricted (find-on-web v2).
+  const DOWNLOAD_POLICIES: { value: WebFindDownloadPolicy; label: string; blurb: string }[] = [
+    {
+      value: 'restricted',
+      label: 'Restricted',
+      blurb: 'Allow-list only — downloads must resolve to a host on the allow-list above.',
+    },
+    {
+      value: 'careful',
+      label: 'Careful',
+      blurb: 'Allow-list plus well-known publishers and open-access hosts.',
+    },
+    {
+      value: 'unrestricted',
+      label: 'Unrestricted',
+      blurb:
+        'Any host, with a per-download confirmation for unknown hosts. Shadow libraries and internal hosts are always blocked.',
+    },
+  ];
+  let downloadPolicy: WebFindDownloadPolicy | null = null;
+
   async function run(action: () => Promise<void>, success?: string): Promise<void> {
     loading = true;
     message = '';
@@ -112,7 +134,16 @@
       if (get(isOwner)) importRoots = await client.listServerImportRoots();
       // The find-on-web allowed-hosts list is owner+admin.
       if (get(canManageUsers)) allowedHosts = await client.listWebFindAllowedHosts();
+      // The download policy is owner-only (the endpoint 403s for admins).
+      if (get(isOwner)) downloadPolicy = (await client.getWebFindDownloadPolicy()).policy;
     });
+  }
+
+  async function changeDownloadPolicy(policy: WebFindDownloadPolicy): Promise<void> {
+    if (policy === downloadPolicy) return;
+    await run(async () => {
+      downloadPolicy = (await client.setWebFindDownloadPolicy(policy)).policy;
+    }, 'Download policy updated');
   }
 
   async function addAllowedHost(): Promise<void> {
@@ -683,6 +714,41 @@
       <p class="hintline">A bare host (e.g. <code>example.org</code>) also covers its subdomains; use the <code>*.example.org</code> form to allow subdomains only.</p>
     </section>
   {/if}
+
+  <!-- Find-on-web download policy (owner-only; find-on-web v2). -->
+  {#if $isOwner}
+    <section class="surface admin-section download-policy">
+      <h2>Find-on-web download policy</h2>
+      <p class="muted">
+        Controls which hosts the server will fetch paper PDFs from during <strong>Find on web</strong>.
+        Stricter policies download less automatically; <strong>Unrestricted</strong> asks for a
+        per-download confirmation before fetching from an unknown host. Shadow libraries and internal
+        hosts are always blocked, whatever the policy.
+      </p>
+      <fieldset class="policy-options">
+        <legend class="sr-only">Download policy</legend>
+        {#each DOWNLOAD_POLICIES as opt (opt.value)}
+          <label class="policy-option" class:active={downloadPolicy === opt.value}>
+            <input
+              type="radio"
+              name="download-policy"
+              value={opt.value}
+              checked={downloadPolicy === opt.value}
+              on:change={() => changeDownloadPolicy(opt.value)}
+              disabled={loading || downloadPolicy === null}
+              title={downloadPolicy === null
+                ? 'Loading the current policy…'
+                : `Set the download policy to “${opt.label}”`}
+            />
+            <span class="policy-text">
+              <strong>{opt.label}</strong>
+              <small class="muted">{opt.blurb}</small>
+            </span>
+          </label>
+        {/each}
+      </fieldset>
+    </section>
+  {/if}
 </div>
 
 {#if resetTarget}
@@ -1147,5 +1213,45 @@
     background: #e5e7eb;
     color: #9ca3af;
     cursor: not-allowed;
+  }
+
+  .sr-only {
+    border: 0;
+    clip: rect(0 0 0 0);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    width: 1px;
+  }
+
+  .download-policy .policy-options {
+    border: none;
+    display: grid;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+  }
+
+  .download-policy .policy-option {
+    align-items: flex-start;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    gap: 0.6rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .download-policy .policy-option.active {
+    background: #eef2ff;
+    border-color: #4f46e5;
+  }
+
+  .download-policy .policy-text {
+    display: grid;
+    gap: 0.15rem;
   }
 </style>

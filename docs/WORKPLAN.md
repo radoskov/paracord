@@ -559,3 +559,17 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   `blocked`. New EDITOR-gated NDJSON streaming endpoint `POST /works/{id}/find-on-web/stream` emits per-
   source `querying`/`done`(`count`)/`failed` lines then a final `result` line via a `find_candidates`
   `on_progress` callback; the non-streaming endpoint is unchanged.
+- [x] **find-on-web v2 frontend (paper-info header + live search progress + sticky download bar +
+  per-item status + confirmation + admin policy switch).** WorkDetail picker overhaul: a distinct
+  searched-paper header band (title/year/venue/DOI/arXiv) to validate candidates against; the search
+  now uses a new `client.streamFindOnWeb(workId, onEvent[, sources])` that reads the NDJSON
+  `ReadableStream` (reusing ApiClient auth + base URL) and renders a per-source progress list
+  (querying spinner → ✓ done(count) / ✗ failed), with a fallback to non-streaming `findOnWeb` on
+  error. A `position:sticky;top:0` download bar (select all/none, selected count, "Download selected
+  (N)", "N/M downloaded") sits above the scrolling list. "Download selected" downloads one item at a
+  time so each row + the N/M total update live; `needs_confirmation` opens a confirm dialog (URL +
+  unverified-host warning) and re-sends that one item with `confirmed:true` on confirm (skip on
+  decline); `blocked` shows its reason with no confirmation; allow-list/known hosts proceed silently.
+  AdminPage gains an owner-only 3-way download-policy control (restricted/careful/unrestricted, each
+  described) via new `client.getWebFindDownloadPolicy`/`setWebFindDownloadPolicy`, near the allowed-
+  hosts section.

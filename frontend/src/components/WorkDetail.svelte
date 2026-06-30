@@ -12,7 +12,9 @@
     type Summary,
     type Tag,
     type WebCandidate,
+    type WebFindDownloadItem,
     type WebFindDownloadResult,
+    type WebFindStreamEvent,
     type Work,
     type WorkFile,
   } from '../api/client';
@@ -50,13 +52,24 @@
   let applyTagId = '';
   let attachFile: File | null = null;
 
-  // Find-on-web (#5): picker modal state.
+  // Find-on-web (#5 / v2): picker modal state.
   let showFindModal = false;
+  let searching = false;
   let findResults: WebCandidate[] = [];
   let degradedSources: string[] = [];
   let selectedIds = new Set<string>();
   let downloadStatus: Record<string, WebFindDownloadResult> = {};
   let downloading = false;
+  // Live per-source progress for the streaming search ('querying' | 'done' | 'failed', + count).
+  type SourceProgress = { source: string; status: 'querying' | 'done' | 'failed'; count?: number };
+  let sourceProgress: SourceProgress[] = [];
+  // Total download progress (N done / M selected) shown in the sticky bar.
+  let downloadDone = 0;
+  let downloadTotal = 0;
+  // Pending needs_confirmation prompt: the item + the server's reason/url, awaiting the user's call.
+  let confirmPrompt: { item: WebFindDownloadItem; reason: string | null; candidateTitle: string } | null =
+    null;
+  let confirmResolve: ((ok: boolean) => void) | null = null;
 
   let readerFile: WorkFile | null = null;
   let readerUrl: string | null = null;
@@ -200,11 +213,41 @@
     degradedSources = [];
     selectedIds = new Set();
     downloadStatus = {};
-    await run(async () => {
-      const result = await client.findOnWeb(work.id);
-      findResults = result.candidates;
-      degradedSources = result.degraded_sources;
-    });
+    sourceProgress = [];
+    downloadDone = 0;
+    downloadTotal = 0;
+    searching = true;
+    message = '';
+    try {
+      // Live progress: stream the search and render each source as it starts/finishes.
+      await client.streamFindOnWeb(work.id, onStreamEvent);
+    } catch {
+      // Streaming unavailable/errored → fall back to the non-streaming search so the picker works.
+      try {
+        const result = await client.findOnWeb(work.id);
+        findResults = result.candidates;
+        degradedSources = result.degraded_sources;
+        sourceProgress = result.queried_sources.map((s) => ({
+          source: s,
+          status: result.degraded_sources.includes(s) ? 'failed' : 'done',
+        }));
+      } catch (error) {
+        message = errorMessage(error);
+      }
+    } finally {
+      searching = false;
+    }
+  }
+
+  function onStreamEvent(event: WebFindStreamEvent): void {
+    if (event.type === 'source') {
+      const next = sourceProgress.filter((p) => p.source !== event.source);
+      next.push({ source: event.source, status: event.status, count: event.count });
+      sourceProgress = next;
+    } else if (event.type === 'result') {
+      findResults = event.candidates;
+      degradedSources = event.degraded_sources;
+    }
   }
 
   function toggleCandidate(id: string): void {
@@ -214,8 +257,40 @@
     selectedIds = next;
   }
 
+  $: downloadableCandidates = findResults.filter((c) => c.pdf_url || c.landing_url);
+  $: allDownloadableSelected =
+    downloadableCandidates.length > 0 &&
+    downloadableCandidates.every((c) => selectedIds.has(c.candidate_id));
+
+  function selectAll(): void {
+    selectedIds = new Set(downloadableCandidates.map((c) => c.candidate_id));
+  }
+
+  function selectNone(): void {
+    selectedIds = new Set();
+  }
+
+  // Ask the user before fetching from an off-allowlist host (unrestricted mode). Resolves to the
+  // user's choice; the prompt UI calls resolveConfirm().
+  function askConfirm(item: WebFindDownloadItem, reason: string | null, title: string): Promise<boolean> {
+    confirmPrompt = { item, reason, candidateTitle: title };
+    return new Promise<boolean>((resolve) => {
+      confirmResolve = resolve;
+    });
+  }
+
+  function resolveConfirm(ok: boolean): void {
+    confirmResolve?.(ok);
+    confirmResolve = null;
+    confirmPrompt = null;
+  }
+
+  function recordResult(r: WebFindDownloadResult): void {
+    downloadStatus = { ...downloadStatus, [r.candidate_id]: r };
+  }
+
   async function downloadSelected(): Promise<void> {
-    const items = findResults
+    const items: WebFindDownloadItem[] = findResults
       .filter((c) => selectedIds.has(c.candidate_id) && (c.pdf_url || c.landing_url))
       .map((c) => ({
         candidate_id: c.candidate_id,
@@ -224,21 +299,55 @@
       }));
     if (items.length === 0) return;
     downloading = true;
+    message = '';
+    downloadDone = 0;
+    downloadTotal = items.length;
+    let attachedAny = false;
     try {
-      const response = await client.downloadWebCandidates(work.id, items);
-      const merged: Record<string, WebFindDownloadResult> = { ...downloadStatus };
-      let attachedAny = false;
-      for (const r of response.results) {
-        merged[r.candidate_id] = r;
-        if (r.status === 'attached' || r.status === 'deduped') attachedAny = true;
+      // One item at a time so each row updates live and the N/M total advances per download.
+      for (const item of items) {
+        const title =
+          findResults.find((c) => c.candidate_id === item.candidate_id)?.title ?? '(untitled)';
+        let result = await downloadOne(item);
+        // needs_confirmation (unrestricted mode, unknown host) → ask, then re-send with confirmed.
+        if (result.status === 'needs_confirmation') {
+          const ok = await askConfirm(item, result.reason, title);
+          if (!ok) {
+            recordResult({
+              candidate_id: item.candidate_id,
+              status: 'error',
+              reason: 'Skipped — download not confirmed.',
+              file: null,
+            });
+            downloadDone += 1;
+            continue;
+          }
+          result = await downloadOne({ ...item, confirmed: true });
+        }
+        recordResult(result);
+        if (result.status === 'attached' || result.status === 'deduped') attachedAny = true;
+        downloadDone += 1;
       }
-      downloadStatus = merged;
       if (attachedAny) files = await client.listWorkFiles(work.id);
     } catch (error) {
       message = errorMessage(error);
     } finally {
       downloading = false;
     }
+  }
+
+  // Download a single item and unwrap its one per-item result.
+  async function downloadOne(item: WebFindDownloadItem): Promise<WebFindDownloadResult> {
+    const response = await client.downloadWebCandidates(work.id, [item]);
+    return (
+      response.results.find((r) => r.candidate_id === item.candidate_id) ??
+      response.results[0] ?? {
+        candidate_id: item.candidate_id,
+        status: 'error' as const,
+        reason: 'No result returned',
+        file: null,
+      }
+    );
   }
 
   function startManualUpload(): void {
@@ -676,19 +785,75 @@
 {#if showFindModal}
   <Modal title="Find on web" wide onClose={() => (showFindModal = false)}>
     <div class="findwrap">
+      <!-- Searched-paper header so the user can validate candidates against the source paper. -->
+      <div class="searched-paper">
+        <span class="searched-label">Searching for this paper</span>
+        <strong class="searched-title">{form.canonical_title || 'Untitled paper'}</strong>
+        <div class="searched-meta">
+          {#if form.year}<span>{form.year}</span>{/if}
+          {#if form.venue}<span>· {form.venue}</span>{/if}
+          {#if form.doi}<span>· doi:{form.doi}</span>{/if}
+          {#if form.arxiv_id}<span>· arXiv:{form.arxiv_id}</span>{/if}
+        </div>
+      </div>
+
       <p class="hintline">
         Candidate matches from legitimate scholarly sources (Crossref, OpenAlex, arXiv, Unpaywall,
         Semantic Scholar). Select the papers to download and attach; failed downloads fall back to
         manual upload.
       </p>
+
+      <!-- Live per-source search progress. -->
+      {#if sourceProgress.length}
+        <ul class="sources" aria-label="Search progress by source">
+          {#each sourceProgress as p (p.source)}
+            <li class="source-row source-{p.status}">
+              <span class="source-name">{p.source}</span>
+              {#if p.status === 'querying'}
+                <span class="spinner" aria-hidden="true"></span><span class="source-state">querying…</span>
+              {:else if p.status === 'done'}
+                <span class="source-state ok">✓ {p.count ?? 0} match{(p.count ?? 0) === 1 ? '' : 'es'}</span>
+              {:else}
+                <span class="source-state err">✗ failed</span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
       {#if degradedSources.length}
         <p class="hintline warn">Some sources were unavailable and skipped: {degradedSources.join(', ')}.</p>
       {/if}
-      {#if loading}
+      {#if searching && findResults.length === 0}
         <p class="empty">Searching…</p>
       {:else if findResults.length === 0}
         <p class="empty">No candidate matches found. Try refining the title/year, or attach a PDF manually.</p>
       {:else}
+        <!-- Sticky download bar pinned above the scrolling candidate list. -->
+        <div class="download-bar">
+          <div class="bar-left">
+            <button type="button" class="secondary small" on:click={selectAll}
+              disabled={allDownloadableSelected || downloadableCandidates.length === 0}
+              title={downloadableCandidates.length === 0
+                ? 'No downloadable candidates'
+                : allDownloadableSelected
+                  ? 'All downloadable candidates are selected'
+                  : 'Select all downloadable candidates'}>Select all</button>
+            <button type="button" class="secondary small" on:click={selectNone}
+              disabled={selectedIds.size === 0}
+              title={selectedIds.size === 0 ? 'Nothing selected' : 'Clear selection'}>Select none</button>
+            <span class="sel-count">{selectedIds.size} selected</span>
+          </div>
+          <div class="bar-right">
+            {#if downloading || downloadTotal > 0}
+              <span class="dl-progress" title="Downloads completed of the batch">{downloadDone}/{downloadTotal} downloaded</span>
+            {/if}
+            <button type="button" on:click={downloadSelected} disabled={downloading || selectedIds.size === 0}
+              title={selectedIds.size === 0 ? 'Select at least one candidate' : 'Download selected PDFs and attach them'}>
+              {downloading ? 'Downloading…' : `Download selected (${selectedIds.size})`}
+            </button>
+          </div>
+        </div>
         <ul class="candidates">
           {#each findResults as cand (cand.candidate_id)}
             <li class="candidate">
@@ -731,6 +896,8 @@
                       Could not download automatically (login/paywall).
                       <button type="button" class="link" on:click={startManualUpload}>Upload the PDF manually</button>.
                     </span>
+                  {:else if r.status === 'blocked'}
+                    <span class="cand-status err">Blocked: {r.reason ?? 'this host is not allowed for downloads'}</span>
                   {:else}
                     <span class="cand-status err">Error: {r.reason ?? 'download failed'}</span>
                   {/if}
@@ -739,13 +906,29 @@
             </li>
           {/each}
         </ul>
-        <div class="find-actions">
-          <button type="button" on:click={downloadSelected} disabled={downloading || selectedIds.size === 0}
-            title={selectedIds.size === 0 ? 'Select at least one candidate' : 'Download selected PDFs and attach them'}>
-            {downloading ? 'Downloading…' : `Download selected (${selectedIds.size})`}
-          </button>
-        </div>
       {/if}
+    </div>
+  </Modal>
+{/if}
+
+{#if confirmPrompt}
+  <Modal title="Confirm download from an unverified host" onClose={() => resolveConfirm(false)}>
+    <div class="confirmwrap">
+      <p>
+        The download for <strong>{confirmPrompt.candidateTitle}</strong> resolves to a host that is
+        <strong>not on the allow-list and is not a known publisher</strong>:
+      </p>
+      <p class="confirm-url"><code>{confirmPrompt.item.url}</code></p>
+      {#if confirmPrompt.reason}<p class="hintline warn">{confirmPrompt.reason}</p>{/if}
+      <p class="hintline">
+        Only continue if you trust this source. The file will be fetched and attached to this paper.
+      </p>
+      <div class="confirm-actions">
+        <button type="button" class="secondary" on:click={() => resolveConfirm(false)}
+          title="Skip this download">Cancel</button>
+        <button type="button" on:click={() => resolveConfirm(true)}
+          title="Download from this host anyway">Download anyway</button>
+      </div>
     </div>
   </Modal>
 {/if}
@@ -1231,8 +1414,134 @@
     text-decoration: underline;
   }
 
-  .find-actions {
+  .searched-paper {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-left: 4px solid #4f46e5;
+    border-radius: 8px;
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .searched-label {
+    color: #4338ca;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .searched-title {
+    overflow-wrap: anywhere;
+  }
+
+  .searched-meta {
+    color: #475569;
     display: flex;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    gap: 0.4rem;
+  }
+
+  .sources {
+    display: grid;
+    gap: 0.3rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .source-row {
+    align-items: center;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .source-name {
+    flex: 1;
+    font-weight: 600;
+  }
+
+  .source-state {
+    font-size: 0.82rem;
+  }
+
+  .source-state.ok {
+    color: #166534;
+  }
+
+  .source-state.err {
+    color: #b91c1c;
+  }
+
+  .spinner {
+    animation: spin 0.7s linear infinite;
+    border: 2px solid #cbd5e1;
+    border-radius: 50%;
+    border-top-color: #4f46e5;
+    display: inline-block;
+    height: 0.85rem;
+    width: 0.85rem;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Pinned to the top of the modal's scrolling body so it never scrolls away with the list. */
+  .download-bar {
+    align-items: center;
+    background: #fbfcfd;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: space-between;
+    padding: 0.5rem 0.7rem;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .bar-left,
+  .bar-right {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .sel-count {
+    color: #475569;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .dl-progress {
+    color: #1d4ed8;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .confirmwrap {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .confirm-url {
+    overflow-wrap: anywhere;
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 0.5rem;
     justify-content: flex-end;
   }
 </style>

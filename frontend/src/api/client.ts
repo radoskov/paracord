@@ -275,17 +275,54 @@ export interface WebFindDownloadItem {
   candidate_id: string;
   url: string;
   source: string;
+  // Re-sent as true to proceed past a `needs_confirmation` result (unrestricted mode, unknown host).
+  confirmed?: boolean;
 }
+
+export type WebFindDownloadStatus =
+  | 'attached'
+  | 'deduped'
+  | 'manual_upload_needed'
+  | 'error'
+  | 'blocked'
+  | 'needs_confirmation';
 
 export interface WebFindDownloadResult {
   candidate_id: string;
-  status: 'attached' | 'deduped' | 'manual_upload_needed' | 'error';
+  status: WebFindDownloadStatus;
   reason: string | null;
+  // For `needs_confirmation`: the URL that would be fetched (echo it back with confirmed:true).
+  url?: string | null;
   file: WorkFile | null;
 }
 
 export interface WebFindDownloadResponse {
   results: WebFindDownloadResult[];
+}
+
+// Streaming search NDJSON events (POST .../find-on-web/stream). One object per line.
+export interface WebFindSourceEvent {
+  type: 'source';
+  source: string;
+  status: 'querying' | 'done' | 'failed';
+  count?: number;
+}
+
+export interface WebFindResultEvent {
+  type: 'result';
+  candidates: WebCandidate[];
+  degraded_sources: string[];
+  queried_sources: string[];
+}
+
+export type WebFindStreamEvent = WebFindSourceEvent | WebFindResultEvent;
+
+// Find-on-web download policy (owner-only).
+export type WebFindDownloadPolicy = 'restricted' | 'careful' | 'unrestricted';
+
+export interface WebFindDownloadPolicyResponse {
+  policy: WebFindDownloadPolicy;
+  allowed: string[];
 }
 
 export interface ReferenceRecord {
@@ -670,6 +707,60 @@ export class ApiClient {
     });
   }
 
+  // Streaming search: POST the same find-on-web request but read the NDJSON ReadableStream,
+  // invoking `onEvent` per parsed line. Reuses the ApiClient auth header + base URL (no bypass).
+  // Resolves once the stream ends; throws on a non-OK response or missing stream support so the
+  // caller can fall back to the non-streaming findOnWeb().
+  async streamFindOnWeb(
+    workId: string,
+    onEvent: (event: WebFindStreamEvent) => void,
+    sources?: string[],
+  ): Promise<void> {
+    const headers: Record<string, string> = {
+      Accept: 'application/x-ndjson',
+      'Content-Type': 'application/json',
+    };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/v1/works/${workId}/find-on-web/stream`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(sources ? { sources } : {}),
+    });
+    if (!response.ok) {
+      let detail = `Request failed: ${response.status}`;
+      try {
+        detail = (await response.json()).detail ?? detail;
+      } catch {
+        /* keep status message */
+      }
+      if (response.status === 401 && this.token) this.onUnauthorized?.(detail);
+      throw new Error(detail);
+    }
+    if (!response.body) throw new Error('Streaming not supported');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const flushLine = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      onEvent(JSON.parse(trimmed) as WebFindStreamEvent);
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline = buffer.indexOf('\n');
+      while (newline !== -1) {
+        flushLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf('\n');
+      }
+    }
+    // Emit any trailing line that arrived without a closing newline.
+    flushLine(buffer);
+  }
+
   async downloadWebCandidates(
     workId: string,
     items: WebFindDownloadItem[],
@@ -892,6 +983,20 @@ export class ApiClient {
   async removeWebFindAllowedHost(hostId: string): Promise<void> {
     await this.request<void>(`/api/v1/admin/web-find/allowed-hosts/${hostId}`, {
       method: 'DELETE',
+    });
+  }
+
+  // --- Find-on-web download policy (owner-only; restricted | careful | unrestricted) ---
+  async getWebFindDownloadPolicy(): Promise<WebFindDownloadPolicyResponse> {
+    return this.request<WebFindDownloadPolicyResponse>('/api/v1/admin/web-find/download-policy');
+  }
+
+  async setWebFindDownloadPolicy(
+    policy: WebFindDownloadPolicy,
+  ): Promise<WebFindDownloadPolicyResponse> {
+    return this.request<WebFindDownloadPolicyResponse>('/api/v1/admin/web-find/download-policy', {
+      method: 'PUT',
+      body: { policy },
     });
   }
 
