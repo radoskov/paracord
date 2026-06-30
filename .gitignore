@@ -57,3 +57,6 @@ docs/latex/build/
 .DS_Store
 .vscode/
 .idea/
+
+# Local scratch working notes (intentionally untracked)
+FOLLOWUPS.md
