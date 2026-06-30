@@ -522,3 +522,13 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   run **sequentially** (one impl agent at a time; pytest imports the whole app and the git index is
   shared). Read-only **design** passes pipeline in parallel with the prior phase's implementation.
 - Agent GUI (#10/#14/#15) lives in the agent app (separate test suite) — only the git index is shared.
+
+## Batch 2 follow-ups
+
+- [x] **#19 server import roots GUI.** Owner-only `import_roots` table (migration `0025_import_roots`),
+  merged read-only with the `server.yaml` `storage.server_allowed_roots` entries (yaml wins on an
+  alias clash; never written). A single `merged_server_roots()` feeds both the server-folder import
+  validation and the listing API; GUI-added roots are validated identically (absolute, existing
+  directory; alias unique across the merged set) and the anti-path-traversal containment check is
+  preserved. Owner-only endpoints (`require_owner`) list (yaml-fixed vs DB-removable) / add / remove;
+  AdminPage "Server import folders" section gated by `isOwner`; ImportPage reflects the merged set.

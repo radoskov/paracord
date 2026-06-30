@@ -151,6 +151,16 @@ export interface Source {
   is_active: boolean;
 }
 
+// A merged server-folder import root: yaml-fixed (read-only) or DB-managed (owner-removable).
+export interface ServerImportRoot {
+  alias: string;
+  path: string;
+  source: 'yaml' | 'db';
+  removable: boolean;
+  id: string | null;
+  exists: boolean;
+}
+
 export interface FileRecord {
   id: string;
   sha256: string;
@@ -841,6 +851,22 @@ export class ApiClient {
       method: 'POST',
       body: payload,
     });
+  }
+
+  // --- Server import roots (owner-only; merged yaml + DB whitelist for the "Server folder" import) ---
+  async listServerImportRoots(): Promise<ServerImportRoot[]> {
+    return this.request<ServerImportRoot[]>('/api/v1/admin/import-roots');
+  }
+
+  async addServerImportRoot(payload: { alias: string; path: string }): Promise<ServerImportRoot> {
+    return this.request<ServerImportRoot>('/api/v1/admin/import-roots', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async removeServerImportRoot(rootId: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/import-roots/${rootId}`, { method: 'DELETE' });
   }
 
   async importFolder(sourceId: string): Promise<ImportBatch> {

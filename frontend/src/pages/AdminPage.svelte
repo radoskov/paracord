@@ -5,8 +5,11 @@
     type AgentFileRecord,
     type AgentPrivilege,
     type AgentRecord,
+    type ServerImportRoot,
     type UserRole,
   } from '../api/client';
+  import { get } from 'svelte/store';
+
   import AiModelsPanel from '../components/AiModelsPanel.svelte';
   import Modal from '../components/Modal.svelte';
   import { currentUser, isOwner } from '../lib/session';
@@ -76,6 +79,11 @@
   let enrollExpiry = '';
   let lastApprovedToken = '';
 
+  // Server import roots (owner-only): the merged yaml-fixed + DB-managed whitelist (batch 2 #19).
+  let importRoots: ServerImportRoot[] = [];
+  let newRootAlias = '';
+  let newRootPath = '';
+
   async function run(action: () => Promise<void>, success?: string): Promise<void> {
     loading = true;
     message = '';
@@ -95,7 +103,31 @@
         client.listAdminUsers(),
         client.listAgents(),
       ]);
+      // The import-roots whitelist is owner-only (the endpoint 403s for admins).
+      if (get(isOwner)) importRoots = await client.listServerImportRoots();
     });
+  }
+
+  async function addImportRoot(): Promise<void> {
+    const alias = newRootAlias.trim();
+    const path = newRootPath.trim();
+    if (!alias || !path) return;
+    await run(async () => {
+      await client.addServerImportRoot({ alias, path });
+      newRootAlias = '';
+      newRootPath = '';
+      importRoots = await client.listServerImportRoots();
+    }, 'Import root added');
+  }
+
+  async function removeImportRoot(root: ServerImportRoot): Promise<void> {
+    if (!root.removable || !root.id) return;
+    if (!window.confirm(`Remove import root “${root.alias}” (${root.path})? Existing imports stay; new server-folder imports can no longer use this alias.`))
+      return;
+    await run(async () => {
+      await client.removeServerImportRoot(root.id as string);
+      importRoots = await client.listServerImportRoots();
+    }, 'Import root removed');
   }
 
   async function createUser(): Promise<void> {
@@ -509,6 +541,66 @@
       <AiModelsPanel {client} />
     </div>
   </div>
+
+  <!-- Server import folders (owner-only; batch 2 #19) -->
+  {#if $isOwner}
+    <section class="surface admin-section import-roots">
+      <h2>Server import folders</h2>
+      <p class="muted">
+        Whitelisted folders <strong>on the server machine</strong> that the “Server folder” import
+        may scan. The locked entries come from <code>storage.server_allowed_roots</code> in
+        <code>server.yaml</code> and can only be changed there; the entries you add below are stored
+        in the database and merged with them. <strong>Papers on your own computer?</strong> Use a
+        local agent instead — server-folder can’t reach your PC.
+      </p>
+
+      <table class="roots">
+        <thead>
+          <tr><th>Alias</th><th>Path</th><th>Source</th><th></th></tr>
+        </thead>
+        <tbody>
+          {#each importRoots as root (root.alias)}
+            <tr>
+              <td><code>{root.alias}</code></td>
+              <td class="path"><code>{root.path}</code>
+                {#if !root.exists}<span class="warn" title="This folder does not currently exist on the server">missing</span>{/if}
+              </td>
+              <td>
+                {#if root.source === 'yaml'}
+                  <span class="lock-badge" title="Defined in server.yaml — edit that file to change it">yaml · locked</span>
+                {:else}
+                  <span class="db-badge" title="Added here and stored in the database">database</span>
+                {/if}
+              </td>
+              <td>
+                {#if root.removable}
+                  <button type="button" class="danger" on:click={() => removeImportRoot(root)}
+                    disabled={loading}
+                    title="Remove this database-managed import root">Remove</button>
+                {:else}
+                  <button type="button" class="danger" disabled
+                    title="Locked: defined in server.yaml. Edit that file to remove it.">Remove</button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+          {#if importRoots.length === 0}
+            <tr><td colspan="4" class="muted">No import folders yet. Add one below or define them in <code>server.yaml</code>.</td></tr>
+          {/if}
+        </tbody>
+      </table>
+
+      <form class="add-root" on:submit|preventDefault={addImportRoot}>
+        <input bind:value={newRootAlias} placeholder="Alias (e.g. shared-drive)" aria-label="Import root alias" />
+        <input bind:value={newRootPath} placeholder="Absolute path on the server (e.g. /data/papers)" aria-label="Import root path" />
+        <button type="submit" disabled={loading || !newRootAlias.trim() || !newRootPath.trim()}
+          title={newRootAlias.trim() && newRootPath.trim()
+            ? 'Add this server folder to the import whitelist (path must exist and be a directory)'
+            : 'Enter both an alias and an absolute server path first'}>Add folder</button>
+      </form>
+      <p class="hintline">The path must already exist as a directory on the server, and the alias must be unique across all roots.</p>
+    </section>
+  {/if}
 </div>
 
 {#if resetTarget}
@@ -854,5 +946,70 @@
     font-size: 0.75rem;
     font-weight: 600;
     gap: 0.25rem;
+  }
+
+  .import-roots {
+    margin-top: 1rem;
+  }
+
+  .import-roots .roots {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+  }
+
+  .import-roots .roots th,
+  .import-roots .roots td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: top;
+  }
+
+  .import-roots .roots .path {
+    word-break: break-all;
+  }
+
+  .import-roots .db-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: #dcfce7;
+    color: #166534;
+    font-weight: 600;
+  }
+
+  .import-roots .warn {
+    margin-left: 0.4rem;
+    font-size: 0.7rem;
+    color: #b45309;
+    font-weight: 600;
+  }
+
+  .import-roots .add-root {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .import-roots .add-root input {
+    flex: 1 1 12rem;
+  }
+
+  .import-roots button.danger {
+    background: #b91c1c;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+  }
+
+  .import-roots button.danger:disabled {
+    background: #e5e7eb;
+    color: #9ca3af;
+    cursor: not-allowed;
   }
 </style>

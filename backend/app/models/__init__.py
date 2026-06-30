@@ -7,6 +7,7 @@ from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink, Location
+from app.models.import_root import ImportRoot
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.session import UserSession
@@ -28,6 +29,7 @@ __all__ = [
     "FileSegment",
     "FileWorkLink",
     "ImportBatch",
+    "ImportRoot",
     "Location",
     "MetadataAssertion",
     "Rack",

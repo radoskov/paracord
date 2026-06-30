@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
-  import { ApiClient, type Source } from '../api/client';
+  import { ApiClient, type ServerImportRoot, type Source } from '../api/client';
+  import { isOwner } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
 
   let sources: Source[] = [];
+  // The merged (yaml + owner-managed DB) import-root whitelist. Owner-only to list, so it stays
+  // empty for editors — they type a configured alias the owner set up.
+  let importRoots: ServerImportRoot[] = [];
   let newSourceName = '';
   let newSourceAlias = '';
   let selectedSourceId = '';
@@ -37,6 +42,14 @@
     await run(async () => {
       sources = await client.listSources();
       if (!selectedSourceId && sources[0]) selectedSourceId = sources[0].id;
+      // Owners can see the merged whitelist (yaml-fixed + owner-managed) and pick an alias.
+      if (get(isOwner)) {
+        try {
+          importRoots = await client.listServerImportRoots();
+        } catch {
+          importRoots = [];
+        }
+      }
     });
   }
 
@@ -139,18 +152,37 @@
     <h2>Server folder</h2>
     <p class="muted">
       Scans a folder <strong>on the server machine</strong> for PDFs. For security the server
-      won’t read arbitrary paths — an operator first whitelists folders in the server config
-      (<code>storage.server_allowed_roots</code> in <code>server.yaml</code>), each with an
-      <em>alias</em>. Enter that alias below. <br />
+      won’t read arbitrary paths — the whitelist of folders (each with an <em>alias</em>) comes
+      from <code>storage.server_allowed_roots</code> in <code>server.yaml</code> plus any the owner
+      adds under <em>Admin → Server import folders</em>. Enter a configured alias below. <br />
       <strong>Files on your own computer?</strong> Use a local <strong>agent</strong> instead
       (see the <em>Admin → Agents</em> tab) — server-folder can’t reach your PC.
     </p>
     <form on:submit|preventDefault={createSource} class="stack">
       <input bind:value={newSourceName} placeholder="Source name" aria-label="Source name" />
-      <input bind:value={newSourceAlias} placeholder="Configured alias" aria-label="Configured alias" />
+      <input
+        bind:value={newSourceAlias}
+        placeholder="Configured alias"
+        aria-label="Configured alias"
+        list={importRoots.length ? 'server-import-roots' : undefined}
+        title="The alias of a whitelisted server folder (configured in server.yaml or under Admin → Server import folders)"
+      />
+      {#if importRoots.length}
+        <datalist id="server-import-roots">
+          {#each importRoots as root (root.alias)}
+            <option value={root.alias}>{root.path}</option>
+          {/each}
+        </datalist>
+      {/if}
       <button type="submit" disabled={!newSourceName.trim() || !newSourceAlias.trim() || loading}
         title="Create a server-folder source from a configured alias">Add source</button>
     </form>
+    {#if importRoots.length}
+      <p class="hintline">
+        Available aliases:
+        {#each importRoots as root, i (root.alias)}<code>{root.alias}</code>{#if !root.exists} <span class="warn" title="This folder does not currently exist on the server">(missing)</span>{/if}{#if i < importRoots.length - 1}, {/if}{/each}
+      </p>
+    {/if}
     <div class="row top">
       <select bind:value={selectedSourceId} aria-label="Source to import" title="Server-folder source to scan">
         <option value="">Choose a source…</option>
@@ -198,6 +230,11 @@
     display: grid;
     gap: 1rem;
     grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  }
+
+  .warn {
+    color: #b45309;
+    font-weight: 600;
   }
 
   .msg {

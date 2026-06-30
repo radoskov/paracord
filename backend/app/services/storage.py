@@ -48,7 +48,7 @@ def content_addressed_path(root: Path, sha256: str) -> Path:
 
 
 def configured_server_roots(settings: Settings) -> dict[str, Path]:
-    """Return configured server-folder roots keyed by stable alias."""
+    """Return the read-only ``server.yaml`` server-folder roots keyed by stable alias."""
     roots: dict[str, Path] = {}
     for index, entry in enumerate(settings.server_allowed_roots):
         alias: str | None = None
@@ -65,6 +65,35 @@ def configured_server_roots(settings: Settings) -> dict[str, Path]:
     return roots
 
 
+def db_server_roots(db: Session) -> dict[str, Path]:
+    """Return the GUI-managed (DB-backed) server-folder roots keyed by alias.
+
+    Tolerant of narrow unit-test schemas that don't create the ``import_roots`` table: absent table
+    -> no DB roots (so the merged set is just the yaml entries).
+    """
+    from sqlalchemy import inspect
+
+    from app.models.import_root import ImportRoot
+
+    if not inspect(db.get_bind()).has_table(ImportRoot.__tablename__):
+        return {}
+    roots: dict[str, Path] = {}
+    for row in db.scalars(select(ImportRoot)).all():
+        roots[row.alias] = Path(str(row.path)).expanduser().resolve()
+    return roots
+
+
+def merged_server_roots(db: Session, settings: Settings) -> dict[str, Path]:
+    """Return the MERGED allowed server-folder roots: read-only yaml entries + DB entries.
+
+    The yaml entries take precedence on an alias clash (they are immutable and cannot be weakened by
+    a DB row). Used by BOTH the import validation and the listing API so they never diverge.
+    """
+    merged = dict(db_server_roots(db))
+    merged.update(configured_server_roots(settings))  # yaml wins on clash
+    return merged
+
+
 def create_server_folder_source(
     db: Session,
     *,
@@ -73,8 +102,8 @@ def create_server_folder_source(
     path_alias: str,
     actor: User,
 ) -> Source:
-    """Create a server-folder source from a configured root alias."""
-    roots = configured_server_roots(settings)
+    """Create a server-folder source from a configured (yaml or GUI-managed) root alias."""
+    roots = merged_server_roots(db, settings)
     root = roots.get(path_alias)
     if root is None:
         raise ValueError("Unknown server-folder alias")

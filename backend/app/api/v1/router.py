@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     files,
     graph,
     health,
+    import_roots,
     imports,
     jobs,
     preferences,
@@ -36,6 +37,8 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 # AI provider config + model management (owner or admin; WORKPLAN_NEXT Stage 8).
 api_router.include_router(ai_admin.router, prefix="/admin", tags=["admin", "ai"])
+# Server import roots GUI (batch 2 #19). Owner-only, enforced per-endpoint via require_owner.
+api_router.include_router(import_roots.router, prefix="/admin", tags=["admin", "import-roots"])
 # Agent routes authenticate via the enrollment/agent token, not a user session, so the
 # router is not behind the user-session dependency.
 api_router.include_router(
