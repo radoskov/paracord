@@ -11,6 +11,8 @@
     type RelatedWork,
     type Summary,
     type Tag,
+    type WebCandidate,
+    type WebFindDownloadResult,
     type Work,
     type WorkFile,
   } from '../api/client';
@@ -47,6 +49,14 @@
   let tags: Tag[] = [];
   let applyTagId = '';
   let attachFile: File | null = null;
+
+  // Find-on-web (#5): picker modal state.
+  let showFindModal = false;
+  let findResults: WebCandidate[] = [];
+  let degradedSources: string[] = [];
+  let selectedIds = new Set<string>();
+  let downloadStatus: Record<string, WebFindDownloadResult> = {};
+  let downloading = false;
 
   let readerFile: WorkFile | null = null;
   let readerUrl: string | null = null;
@@ -182,6 +192,59 @@
         `Extraction queued for ${result.queued} file${result.queued === 1 ? '' : 's'}. ` +
         'It runs in the background worker — watch the Jobs tab for progress.';
     });
+  }
+
+  async function findOnWeb(): Promise<void> {
+    showFindModal = true;
+    findResults = [];
+    degradedSources = [];
+    selectedIds = new Set();
+    downloadStatus = {};
+    await run(async () => {
+      const result = await client.findOnWeb(work.id);
+      findResults = result.candidates;
+      degradedSources = result.degraded_sources;
+    });
+  }
+
+  function toggleCandidate(id: string): void {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedIds = next;
+  }
+
+  async function downloadSelected(): Promise<void> {
+    const items = findResults
+      .filter((c) => selectedIds.has(c.candidate_id) && (c.pdf_url || c.landing_url))
+      .map((c) => ({
+        candidate_id: c.candidate_id,
+        url: (c.pdf_url ?? c.landing_url) as string,
+        source: c.source,
+      }));
+    if (items.length === 0) return;
+    downloading = true;
+    try {
+      const response = await client.downloadWebCandidates(work.id, items);
+      const merged: Record<string, WebFindDownloadResult> = { ...downloadStatus };
+      let attachedAny = false;
+      for (const r of response.results) {
+        merged[r.candidate_id] = r;
+        if (r.status === 'attached' || r.status === 'deduped') attachedAny = true;
+      }
+      downloadStatus = merged;
+      if (attachedAny) files = await client.listWorkFiles(work.id);
+    } catch (error) {
+      message = errorMessage(error);
+    } finally {
+      downloading = false;
+    }
+  }
+
+  function startManualUpload(): void {
+    showFindModal = false;
+    document.getElementById('attach-pdf-input')?.scrollIntoView({ behavior: 'smooth' });
+    (document.getElementById('attach-pdf-input') as HTMLInputElement | null)?.focus();
   }
 
   async function deletePaper(): Promise<void> {
@@ -401,6 +464,10 @@
             : hasReadableFile
               ? 'Run GROBID extraction on this paper’s PDFs (text, references, citations)'
               : 'Attach a PDF to extract'}>Extract</button>
+        <button type="button" class="secondary" on:click={findOnWeb} disabled={loading || !$canEdit}
+          title={$canEdit
+            ? 'Search legitimate scholarly sources for this paper’s PDF and attach it'
+            : INSUFFICIENT_ROLE}>Find on web</button>
         <!-- future: Extract topics / Summarize buttons go here (same Actions sub-row). -->
       </div>
       {#if $canEdit && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
@@ -451,7 +518,7 @@
   <details>
     <summary>Files ({files.length})</summary>
     <div class="attach">
-      <input type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
+      <input id="attach-pdf-input" type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
       <button type="button" on:click={upload} disabled={!attachFile || loading || !$canEdit}
         title={!$canEdit ? INSUFFICIENT_ROLE : attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
     </div>
@@ -605,6 +672,80 @@
     </details>
   {/if}
 </div>
+
+{#if showFindModal}
+  <Modal title="Find on web" wide onClose={() => (showFindModal = false)}>
+    <div class="findwrap">
+      <p class="hintline">
+        Candidate matches from legitimate scholarly sources (Crossref, OpenAlex, arXiv, Unpaywall,
+        Semantic Scholar). Select the papers to download and attach; failed downloads fall back to
+        manual upload.
+      </p>
+      {#if degradedSources.length}
+        <p class="hintline warn">Some sources were unavailable and skipped: {degradedSources.join(', ')}.</p>
+      {/if}
+      {#if loading}
+        <p class="empty">Searching…</p>
+      {:else if findResults.length === 0}
+        <p class="empty">No candidate matches found. Try refining the title/year, or attach a PDF manually.</p>
+      {:else}
+        <ul class="candidates">
+          {#each findResults as cand (cand.candidate_id)}
+            <li class="candidate">
+              <label class="pick">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(cand.candidate_id)}
+                  on:change={() => toggleCandidate(cand.candidate_id)}
+                  disabled={!(cand.pdf_url || cand.landing_url)}
+                />
+              </label>
+              <div class="cand-main">
+                <div class="cand-head">
+                  {#each cand.sources as s}<span class="badge src">{s}</span>{/each}
+                  {#if cand.is_oa}<span class="badge oa">OA</span>{/if}
+                  <span class="badge score" title="Match score (0–1)">{cand.score.toFixed(2)}</span>
+                </div>
+                <strong class="cand-title">{cand.title ?? '(untitled)'}</strong>
+                <div class="cand-meta">
+                  {#if cand.authors.length}<span>{cand.authors.slice(0, 4).join(', ')}{cand.authors.length > 4 ? ' et al.' : ''}</span>{/if}
+                  {#if cand.year}<span>· {cand.year}</span>{/if}
+                  {#if cand.landing_url}
+                    <a href={cand.landing_url} target="_blank" rel="noopener noreferrer">View ↗</a>
+                  {/if}
+                </div>
+                {#if !(cand.pdf_url || cand.landing_url)}
+                  <span class="cand-status warn">No downloadable link — open “View” or attach manually.</span>
+                {/if}
+                {#if downloadStatus[cand.candidate_id]}
+                  {@const r = downloadStatus[cand.candidate_id]}
+                  {#if r.status === 'attached'}
+                    <span class="cand-status ok">✓ Attached</span>
+                  {:else if r.status === 'deduped'}
+                    <span class="cand-status ok">✓ Already attached (deduplicated)</span>
+                  {:else if r.status === 'manual_upload_needed'}
+                    <span class="cand-status warn">
+                      Could not download automatically (login/paywall).
+                      <button type="button" class="link" on:click={startManualUpload}>Upload the PDF manually</button>.
+                    </span>
+                  {:else}
+                    <span class="cand-status err">Error: {r.reason ?? 'download failed'}</span>
+                  {/if}
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+        <div class="find-actions">
+          <button type="button" on:click={downloadSelected} disabled={downloading || selectedIds.size === 0}
+            title={selectedIds.size === 0 ? 'Select at least one candidate' : 'Download selected PDFs and attach them'}>
+            {downloading ? 'Downloading…' : `Download selected (${selectedIds.size})`}
+          </button>
+        </div>
+      {/if}
+    </div>
+  </Modal>
+{/if}
 
 {#if showReader && readerUrl}
   <Modal title={readerFile?.original_filename ?? 'PDF reader'} wide onClose={closeReader}>
@@ -993,5 +1134,102 @@
 
   .ctx span {
     overflow-wrap: anywhere;
+  }
+
+  .findwrap {
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .hintline.warn {
+    color: #92400e;
+  }
+
+  .candidates {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .candidate {
+    display: flex;
+    gap: 0.6rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+  }
+
+  .candidate .cand-main {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  .cand-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .badge {
+    border-radius: 4px;
+    font-size: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    background: #eef2ff;
+    color: #3730a3;
+  }
+
+  .badge.oa {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .badge.score {
+    background: #f1f5f9;
+    color: #475569;
+  }
+
+  .cand-title {
+    overflow-wrap: anywhere;
+  }
+
+  .cand-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    color: #64748b;
+    font-size: 0.85rem;
+  }
+
+  .cand-status {
+    font-size: 0.85rem;
+  }
+
+  .cand-status.ok {
+    color: #166534;
+  }
+
+  .cand-status.warn {
+    color: #92400e;
+  }
+
+  .cand-status.err {
+    color: #b91c1c;
+  }
+
+  .link {
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+  }
+
+  .find-actions {
+    display: flex;
+    justify-content: flex-end;
   }
 </style>

@@ -27,6 +27,7 @@ from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
+from app.services.web_find import WebCandidate, download_and_attach, find_candidates
 from app.utils.normalization import normalize_doi, normalize_title
 from app.workers.queue import enqueue_embedding, enqueue_enrichment, enqueue_extraction
 
@@ -1114,6 +1115,156 @@ def extract_work_endpoint(
             )
         job_ids.append(job_id)
     return {"status": "queued", "queued": len(job_ids), "job_ids": job_ids}
+
+
+class WebCandidateRead(BaseModel):
+    candidate_id: str
+    source: str
+    sources: list[str]
+    title: str | None = None
+    authors: list[str] = []
+    year: int | None = None
+    doi: str | None = None
+    pdf_url: str | None = None
+    landing_url: str | None = None
+    is_oa: bool = False
+    score: float = 0.0
+
+
+class WebFindRequest(BaseModel):
+    sources: list[str] | None = None
+
+
+class WebFindResponse(BaseModel):
+    candidates: list[WebCandidateRead]
+    degraded_sources: list[str]
+    queried_sources: list[str]
+
+
+class WebFindDownloadItem(BaseModel):
+    candidate_id: str
+    url: str
+    source: str
+
+
+class WebFindDownloadRequest(BaseModel):
+    items: list[WebFindDownloadItem] = []
+
+
+class WebFindDownloadResult(BaseModel):
+    candidate_id: str
+    status: str
+    reason: str | None = None
+    file: WorkFileRead | None = None
+
+
+class WebFindDownloadResponse(BaseModel):
+    results: list[WebFindDownloadResult]
+
+
+def _candidate_read(candidate: WebCandidate) -> WebCandidateRead:
+    return WebCandidateRead(
+        candidate_id=candidate.candidate_id,
+        source=candidate.source,
+        sources=candidate.sources,
+        title=candidate.title,
+        authors=candidate.authors,
+        year=candidate.year,
+        doi=candidate.doi,
+        pdf_url=candidate.pdf_url,
+        landing_url=candidate.landing_url,
+        is_oa=candidate.is_oa,
+        score=candidate.score,
+    )
+
+
+@router.post("/{work_id}/find-on-web", response_model=WebFindResponse)
+def find_on_web_endpoint(
+    work_id: uuid.UUID,
+    payload: WebFindRequest | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> WebFindResponse:
+    """Search legitimate scholarly sources for candidate matches for a paper (#5).
+
+    Read-only egress: never stores anything and never fails the whole search when a source is
+    down — a degraded source is reported in ``degraded_sources``. Returns a (possibly empty)
+    ranked candidate list.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    settings = get_settings()
+    if not getattr(settings, "web_find_enabled", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
+    sources = payload.sources if payload else None
+    result = find_candidates(db, work, settings=settings, sources=sources)
+    record_event(
+        db,
+        "web_find.searched",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work_id),
+        details={
+            "queried": result["queried_sources"],
+            "degraded": result["degraded_sources"],
+            "count": len(result["candidates"]),
+        },
+    )
+    db.commit()
+    return WebFindResponse(
+        candidates=[_candidate_read(c) for c in result["candidates"]],
+        degraded_sources=result["degraded_sources"],
+        queried_sources=result["queried_sources"],
+    )
+
+
+@router.post("/{work_id}/find-on-web/download", response_model=WebFindDownloadResponse)
+def find_on_web_download_endpoint(
+    work_id: uuid.UUID,
+    payload: WebFindDownloadRequest,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> WebFindDownloadResponse:
+    """Download 0…N selected candidate PDFs and attach them to a paper (#5).
+
+    Per-item status: ``attached`` / ``deduped`` / ``manual_upload_needed`` / ``error``. A failed
+    item never aborts the others. An empty ``items`` list is a no-op.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    settings = get_settings()
+    if not getattr(settings, "web_find_enabled", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
+    results: list[WebFindDownloadResult] = []
+    # Anti-SSRF: re-run the search and only allow downloading a URL it actually surfaced. This
+    # prevents a client from coaxing the server into fetching an arbitrary attacker URL.
+    allowed_urls: set[str] = set()
+    if payload.items:
+        surfaced = find_candidates(db, work, settings=settings)["candidates"]
+        for cand in surfaced:
+            allowed_urls.update(u for u in (cand.pdf_url, cand.landing_url) if u)
+    for item in payload.items:
+        outcome = download_and_attach(
+            db,
+            work=work,
+            candidate_url=item.url,
+            source=item.source,
+            actor=actor,
+            settings=settings,
+            allowed_urls=allowed_urls,
+            file_read=_file_read,
+        )
+        results.append(
+            WebFindDownloadResult(
+                candidate_id=item.candidate_id,
+                status=outcome["status"],
+                reason=outcome.get("reason"),
+                file=outcome.get("file"),
+            )
+        )
+    return WebFindDownloadResponse(results=results)
 
 
 @router.post("/{work_id}/metadata/select", response_model=WorkRead)

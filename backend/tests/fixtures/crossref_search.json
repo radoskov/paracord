@@ -1,0 +1,21 @@
+{
+  "message": {
+    "items": [
+      {
+        "DOI": "10.1109/CVPR.2016.90",
+        "title": ["Deep Residual Learning for Image Recognition"],
+        "issued": {"date-parts": [[2016]]},
+        "author": [
+          {"given": "Kaiming", "family": "He"},
+          {"given": "Xiangyu", "family": "Zhang"}
+        ]
+      },
+      {
+        "DOI": "10.5555/unrelated",
+        "title": ["A Totally Different Paper About Birds"],
+        "issued": {"date-parts": [[1999]]},
+        "author": [{"given": "Jane", "family": "Doe"}]
+      }
+    ]
+  }
+}

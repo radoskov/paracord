@@ -88,6 +88,23 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["enrichment_semantic_scholar"] = sources["semantic_scholar"]
     if "crossref_mailto" in enrichment:
         values["crossref_mailto"] = enrichment["crossref_mailto"]
+
+    # Find-on-web (#5): aggregate candidate matches from legitimate scholarly sources only.
+    web_find = data.get("web_find") or {}
+    if "enabled" in web_find:
+        values["web_find_enabled"] = web_find["enabled"]
+    if "unpaywall_email" in web_find:
+        values["web_find_unpaywall_email"] = web_find["unpaywall_email"]
+    if "max_candidates" in web_find:
+        values["web_find_max_candidates"] = web_find["max_candidates"]
+    if "per_source_timeout" in web_find:
+        values["web_find_per_source_timeout"] = web_find["per_source_timeout"]
+    if "total_budget" in web_find:
+        values["web_find_total_budget"] = web_find["total_budget"]
+    if "download_timeout" in web_find:
+        values["web_find_download_timeout"] = web_find["download_timeout"]
+    if "max_download_bytes" in web_find:
+        values["web_find_max_download_bytes"] = web_find["max_download_bytes"]
     return values
 
 
@@ -138,6 +155,16 @@ class Settings(BaseSettings):
     enrichment_openalex: bool = False
     enrichment_semantic_scholar: bool = False
     crossref_mailto: str | None = None
+    # Find-on-web (#5). Keyless-by-default: every source is reachable without an API key.
+    # LEGITIMATE SOURCES ONLY — there is intentionally no setting that enables a shadow library.
+    web_find_enabled: bool = True
+    # Unpaywall requires an email param; defaults to crossref_mailto at call time when unset.
+    web_find_unpaywall_email: str | None = None
+    web_find_max_candidates: int = 10
+    web_find_per_source_timeout: float = 8.0
+    web_find_total_budget: float = 25.0
+    web_find_download_timeout: float = 60.0
+    web_find_max_download_bytes: int = 100 * 1024 * 1024  # 100 MB
     # AI provider seams (Stage 6). Defaults keep the dependency-free lexical baselines; the
     # heavier providers are opt-in and degrade gracefully when their lib/daemon is absent.
     embedding_provider: str = "hash_bow"  # hash_bow | sentence_transformers | ollama

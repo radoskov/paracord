@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "title": "Deep Residual Learning for Image Recognition",
+      "year": 2016,
+      "externalIds": {"DOI": "10.1109/CVPR.2016.90"},
+      "isOpenAccess": true,
+      "openAccessPdf": {"url": "https://www.cv-foundation.org/openaccess/he_deep_residual.pdf"},
+      "authors": [{"name": "Kaiming He"}, {"name": "Xiangyu Zhang"}]
+    }
+  ]
+}

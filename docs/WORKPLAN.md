@@ -508,7 +508,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   via radio toggle (below search) + asc/desc radio group; #15 reword "(removed)" to explain (source
   file gone from the indexed folder on the workstation); #11 jobs list shows processed paper
   name/hash. Files: agent/paperracks_agent/web.py, JobsPage.svelte, backend jobs endpoint.
-- [ ] **Phase F — Find-on-web (#5).** Backend candidate-search service (Crossref/OpenAlex/Unpaywall/
+- [x] **Phase F — Find-on-web (#5).** Backend candidate-search service (Crossref/OpenAlex/Unpaywall/
   arXiv/Semantic Scholar + DOI resolver), search + download-and-attach endpoints; WorkDetail "Find on
   web" button → candidate picker modal → select 0…N → download + attach with per-item status.
   Files: backend new service + endpoints, WorkDetail.svelte, client.ts.

@@ -59,6 +59,20 @@ metadata_enrichment:
     semantic_scholar: false
   overwrite_user_fields: false
 
+# Find-on-web (#5): for a paper, search LEGITIMATE scholarly sources by title/authors/year,
+# show candidate matches in a picker, and download+attach the ones the user selects. The
+# server fetches PDFs over its own network, so IP-based institutional access to publisher PDFs
+# applies. There is NO shadow-library source (Sci-Hub/LibGen/Z-Library/… are hard-refused on
+# every redirect hop). Keyless by default; only Unpaywall needs an email (a polite-pool param).
+web_find:
+  enabled: true
+  unpaywall_email: null        # null → falls back to metadata_enrichment.crossref_mailto
+  max_candidates: 10
+  per_source_timeout: 8.0      # seconds per source before it is flagged "degraded"
+  total_budget: 25.0           # seconds wall-clock for the whole search
+  download_timeout: 60.0       # seconds per PDF download
+  max_download_bytes: 104857600  # 100 MB hard cap; oversized downloads are refused
+
 processing:
   # Fast preview path: first-page text/thumbnails before the slower GROBID job.
   pdf_preview: pymupdf

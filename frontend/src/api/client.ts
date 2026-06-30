@@ -233,6 +233,43 @@ export interface WorkFile {
   content_available: boolean;
 }
 
+export interface WebCandidate {
+  candidate_id: string;
+  source: string;
+  sources: string[];
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  pdf_url: string | null;
+  landing_url: string | null;
+  is_oa: boolean;
+  score: number;
+}
+
+export interface WebFindResponse {
+  candidates: WebCandidate[];
+  degraded_sources: string[];
+  queried_sources: string[];
+}
+
+export interface WebFindDownloadItem {
+  candidate_id: string;
+  url: string;
+  source: string;
+}
+
+export interface WebFindDownloadResult {
+  candidate_id: string;
+  status: 'attached' | 'deduped' | 'manual_upload_needed' | 'error';
+  reason: string | null;
+  file: WorkFile | null;
+}
+
+export interface WebFindDownloadResponse {
+  results: WebFindDownloadResult[];
+}
+
 export interface ReferenceRecord {
   id: string;
   title: string | null;
@@ -606,6 +643,23 @@ export class ApiClient {
 
   async listWorkFiles(workId: string): Promise<WorkFile[]> {
     return this.request<WorkFile[]>(`/api/v1/works/${workId}/files`);
+  }
+
+  async findOnWeb(workId: string, sources?: string[]): Promise<WebFindResponse> {
+    return this.request<WebFindResponse>(`/api/v1/works/${workId}/find-on-web`, {
+      method: 'POST',
+      body: sources ? { sources } : {},
+    });
+  }
+
+  async downloadWebCandidates(
+    workId: string,
+    items: WebFindDownloadItem[],
+  ): Promise<WebFindDownloadResponse> {
+    return this.request<WebFindDownloadResponse>(`/api/v1/works/${workId}/find-on-web/download`, {
+      method: 'POST',
+      body: { items },
+    });
   }
 
   async listWorkReferences(workId: string): Promise<ReferenceRecord[]> {

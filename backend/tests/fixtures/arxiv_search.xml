@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/1512.03385v1</id>
+    <title>Deep Residual Learning for Image Recognition</title>
+    <published>2015-12-10T00:00:00Z</published>
+    <author><name>Kaiming He</name></author>
+    <author><name>Xiangyu Zhang</name></author>
+    <arxiv:doi>10.1109/CVPR.2016.90</arxiv:doi>
+  </entry>
+</feed>

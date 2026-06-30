@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "id": "https://openalex.org/W2194775991",
+      "display_name": "Deep Residual Learning for Image Recognition",
+      "doi": "https://doi.org/10.1109/cvpr.2016.90",
+      "publication_year": 2016,
+      "open_access": {"is_oa": true},
+      "best_oa_location": {
+        "pdf_url": "https://arxiv.org/pdf/1512.03385",
+        "landing_page_url": "https://arxiv.org/abs/1512.03385"
+      },
+      "authorships": [
+        {"author": {"display_name": "Kaiming He"}},
+        {"author": {"display_name": "Xiangyu Zhang"}}
+      ]
+    }
+  ]
+}
