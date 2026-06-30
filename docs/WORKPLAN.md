@@ -573,3 +573,21 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   AdminPage gains an owner-only 3-way download-policy control (restricted/careful/unrestricted, each
   described) via new `client.getWebFindDownloadPolicy`/`setWebFindDownloadPolicy`, near the allowed-
   hosts section.
+- [x] **find-on-web v2.1 backend (incremental search streaming + always-View link + resolved
+  platform).** The source-iteration core is now a generator `iter_find_candidates(...)` that yields a
+  `{"type":"source",...,"status":"querying"}` event BEFORE each source runs, then `done`(`count`)/
+  `failed` after it, then a final `{"type":"result",...}` (after dedup+rank+resolution) — so the NDJSON
+  stream endpoint flushes per-source progress AS each source runs (no run-to-completion-then-dump);
+  `find_candidates(...)` is now a thin wrapper that drains the generator (non-streaming endpoint + old
+  tests unchanged). Adapters now ALWAYS populate `landing_url` when possible (OpenAlex → primary-
+  location landing / DOI resolver / OpenAlex work id; Semantic Scholar → paper `url` / DOI / paper-id
+  URL; Crossref/arXiv already had one), so a PDF-less candidate (e.g. an OpenAlex work with no OA PDF
+  and no DOI) still offers "View". New `WebCandidate`/`WebCandidateRead` fields `resolved_url` +
+  `platform`: for the RETURNED (ranked, ≤ max) candidates only, a new `resolve_final_url(url,*,timeout)`
+  follows the redirect chain of `pdf_url or landing_url` ACROSS hosts (the ONLY cross-host follower) via
+  HEAD (GET-stream-closed fallback, never a body), enforcing the shadow-library denylist + private/
+  internal-IP guard on EVERY hop and degrading to `None` on any denied/internal hop or timeout;
+  resolution runs concurrently (ThreadPoolExecutor) so it adds ~one timeout of latency. `platform` =
+  resolved final host, else the original landing/pdf host. New settings `web_find_resolve_enabled`
+  (default True) + `web_find_resolve_timeout` (default 4.0). No migration (the candidate is a transient
+  dataclass/schema, not persisted). Download security model (denylist + IP guard + mode gate) unchanged.

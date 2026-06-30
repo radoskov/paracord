@@ -105,6 +105,10 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["web_find_download_timeout"] = web_find["download_timeout"]
     if "max_download_bytes" in web_find:
         values["web_find_max_download_bytes"] = web_find["max_download_bytes"]
+    if "resolve_enabled" in web_find:
+        values["web_find_resolve_enabled"] = web_find["resolve_enabled"]
+    if "resolve_timeout" in web_find:
+        values["web_find_resolve_timeout"] = web_find["resolve_timeout"]
     return values
 
 
@@ -165,6 +169,10 @@ class Settings(BaseSettings):
     web_find_total_budget: float = 25.0
     web_find_download_timeout: float = 60.0
     web_find_max_download_bytes: int = 100 * 1024 * 1024  # 100 MB
+    # find-on-web v2.1: resolve each RETURNED candidate's View/redirect target to its final host
+    # (display-only "platform"). Short, best-effort, concurrent; never downloads a body.
+    web_find_resolve_enabled: bool = True
+    web_find_resolve_timeout: float = 4.0
     # AI provider seams (Stage 6). Defaults keep the dependency-free lexical baselines; the
     # heavier providers are opt-in and degrade gracefully when their lib/daemon is absent.
     embedding_provider: str = "hash_bow"  # hash_bow | sentence_transformers | ollama

@@ -25,7 +25,9 @@ from app.services.web_find import (
     deduplicate,
     download_and_attach,
     find_candidates,
+    iter_find_candidates,
     rank,
+    resolve_final_url,
     score_candidate,
     search_arxiv,
     search_crossref,
@@ -324,6 +326,262 @@ def test_find_candidates_empty_title(db_session):
     db_session.commit()
     result = find_candidates(db_session, work, settings=Settings())
     assert result["candidates"] == []
+
+
+# --- find-on-web v2.1: incremental streaming generator ----------------------
+
+
+def _no_resolve_settings(**kwargs):
+    # Disable redirect resolution so the generator does no network I/O in these tests.
+    return Settings(web_find_resolve_enabled=False, **kwargs)
+
+
+def test_iter_find_candidates_emits_querying_before_done_interleaved(db_session):
+    work = _seed_work(db_session)
+    fetchers = {
+        "crossref": lambda: [WebCandidate(source="crossref", title="X", doi="10.1/a", year=2016)],
+        "openalex": lambda: [WebCandidate(source="openalex", title="Y", doi="10.1/b", year=2016)],
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    events = list(
+        iter_find_candidates(db_session, work, settings=_no_resolve_settings(), fetchers=fetchers)
+    )
+    # Per source: querying then done, and every querying precedes the final result.
+    types = [(e.get("type"), e.get("source"), e.get("status")) for e in events]
+    assert types[-1][0] == "result"
+    # crossref querying is immediately followed by its done (interleaved, not all-querying-first).
+    cr_query = types.index(("source", "crossref", "querying"))
+    cr_done = types.index(("source", "crossref", "done"))
+    oa_query = types.index(("source", "openalex", "querying"))
+    assert cr_query < cr_done < oa_query  # crossref fully done before openalex starts
+    # The result is the LAST event; all source events precede it.
+    result_idx = next(i for i, t in enumerate(types) if t[0] == "result")
+    assert result_idx == len(types) - 1
+    assert all(t[0] == "source" for t in types[:result_idx])
+
+
+def test_iter_find_candidates_querying_precedes_result(db_session):
+    work = _seed_work(db_session)
+    order: list[str] = []
+
+    def slow_crossref():
+        order.append("crossref-ran")
+        return [WebCandidate(source="crossref", title="X", doi="10.1/a", year=2016)]
+
+    fetchers = {
+        "crossref": slow_crossref,
+        "openalex": lambda: [],
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    gen = iter_find_candidates(db_session, work, settings=_no_resolve_settings(), fetchers=fetchers)
+    first = next(gen)
+    # The FIRST event is a querying event, yielded BEFORE the source actually ran.
+    assert first == {"type": "source", "source": "crossref", "status": "querying"}
+    assert order == []  # not run yet — proves the querying event is emitted pre-fetch
+    rest = list(gen)
+    assert order == ["crossref-ran"]
+    assert rest[-1]["type"] == "result"
+
+
+def test_find_candidates_wrapper_consumes_generator(db_session):
+    work = _seed_work(db_session)
+    fetchers = {
+        "crossref": lambda: [WebCandidate(source="crossref", title="X", doi="10.1/a", year=2016)],
+        "openalex": lambda: [],
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    seen: list[dict] = []
+    result = find_candidates(
+        db_session,
+        work,
+        settings=_no_resolve_settings(),
+        fetchers=fetchers,
+        on_progress=seen.append,
+    )
+    assert len(result["candidates"]) == 1
+    assert result["queried_sources"] == ["crossref", "openalex", "arxiv", "semanticscholar"]
+    # on_progress saw the per-source events but NOT the final result event.
+    assert all(e["type"] == "source" for e in seen)
+    assert any(e["status"] == "querying" for e in seen)
+
+
+# --- find-on-web v2.1: adapters always set a landing_url --------------------
+
+
+def test_openalex_landing_url_falls_back_to_work_id(monkeypatch):
+    # An OpenAlex work with no OA location, no primary landing page, and no DOI still gets a
+    # landing_url from the OpenAlex work id (so the UI can always offer "View").
+    payload = {
+        "results": [
+            {
+                "id": "https://openalex.org/W123",
+                "display_name": "The Ontolingua Server",
+                "publication_year": 1996,
+                "doi": None,
+                "open_access": {"is_oa": False},
+                "best_oa_location": None,
+                "primary_location": None,
+                "authorships": [],
+            }
+        ]
+    }
+    _patch_get(monkeypatch, _FakeResponse(json_data=payload))
+    out = search_openalex("The Ontolingua Server", [], 1996)
+    assert len(out) == 1
+    assert out[0].pdf_url is None
+    assert out[0].landing_url == "https://openalex.org/W123"
+
+
+def test_semantic_scholar_landing_url_falls_back_to_paper_url(monkeypatch):
+    payload = {
+        "data": [
+            {
+                "paperId": "abc123",
+                "title": "A Paper",
+                "year": 2020,
+                "externalIds": {},
+                "openAccessPdf": None,
+                "isOpenAccess": False,
+                "url": "https://www.semanticscholar.org/paper/abc123",
+                "authors": [],
+            }
+        ]
+    }
+    _patch_get(monkeypatch, _FakeResponse(json_data=payload))
+    out = search_semantic_scholar("A Paper", [], 2020)
+    assert len(out) == 1
+    assert out[0].pdf_url is None
+    assert out[0].landing_url == "https://www.semanticscholar.org/paper/abc123"
+
+
+# --- find-on-web v2.1: resolve_final_url + platform -------------------------
+
+
+class _ResolveResponse:
+    def __init__(self, url, history=None):
+        self.url = url
+        self.history = history or []
+
+
+class _ResolveClient:
+    """A fake httpx.Client that returns a canned final response from head()."""
+
+    def __init__(self, final_url, history_urls=()):
+        self._final_url = final_url
+        self._history_urls = history_urls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def head(self, url):
+        history = [_ResolveResponse(u) for u in self._history_urls]
+        return _ResolveResponse(self._final_url, history=history)
+
+
+def test_resolve_final_url_follows_cross_host_redirect(monkeypatch):
+    # doi.org → sciencedirect.com (cross-host); a public resolver keeps it non-internal.
+    client = _ResolveClient(
+        "https://www.sciencedirect.com/science/article/pii/X",
+        history_urls=["https://doi.org/10.1/x"],
+    )
+    monkeypatch.setattr(web_find.httpx, "Client", lambda **kw: client)
+    out = resolve_final_url(
+        "https://doi.org/10.1/x", timeout=4.0, resolver=lambda h: ["93.184.216.34"]
+    )
+    assert out == "https://www.sciencedirect.com/science/article/pii/X"
+
+
+def test_resolve_final_url_blocked_on_denylisted_hop(monkeypatch):
+    client = _ResolveClient("https://sci-hub.se/10.1/x", history_urls=["https://doi.org/10.1/x"])
+    monkeypatch.setattr(web_find.httpx, "Client", lambda **kw: client)
+    out = resolve_final_url(
+        "https://doi.org/10.1/x", timeout=4.0, resolver=lambda h: ["93.184.216.34"]
+    )
+    assert out is None  # a denylisted hop stops resolution
+
+
+def test_resolve_final_url_blocked_on_private_ip(monkeypatch):
+    # The very first host resolves to a private IP → refused before any request.
+    out = resolve_final_url(
+        "https://internal.example/x", timeout=4.0, resolver=lambda h: ["10.0.0.5"]
+    )
+    assert out is None
+
+
+def test_resolve_final_url_degrades_to_none_on_timeout(monkeypatch):
+    class _Boom:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def head(self, url):
+            raise web_find.httpx.TimeoutException("timeout")
+
+    monkeypatch.setattr(web_find.httpx, "Client", lambda **kw: _Boom())
+    out = resolve_final_url(
+        "https://doi.org/10.1/x", timeout=4.0, resolver=lambda h: ["93.184.216.34"]
+    )
+    assert out is None
+
+
+def test_find_candidates_populates_platform_from_resolution(db_session, monkeypatch):
+    work = _seed_work(db_session)
+    client = _ResolveClient("https://www.sciencedirect.com/science/article/pii/X")
+    monkeypatch.setattr(web_find.httpx, "Client", lambda **kw: client)
+    fetchers = {
+        "crossref": lambda: [
+            WebCandidate(
+                source="crossref",
+                title="Deep Residual Learning for Image Recognition",
+                doi="10.1/x",
+                year=2016,
+                landing_url="https://doi.org/10.1/x",
+            )
+        ],
+        "openalex": lambda: [],
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    result = find_candidates(
+        db_session,
+        work,
+        settings=Settings(web_find_resolve_enabled=True),
+        fetchers=fetchers,
+        resolver=lambda h: ["93.184.216.34"],
+    )
+    cand = result["candidates"][0]
+    assert cand.resolved_url == "https://www.sciencedirect.com/science/article/pii/X"
+    assert cand.platform == "www.sciencedirect.com"
+
+
+def test_resolve_disabled_sets_platform_from_landing_host(db_session):
+    work = _seed_work(db_session)
+    fetchers = {
+        "crossref": lambda: [
+            WebCandidate(
+                source="crossref",
+                title="Deep Residual Learning for Image Recognition",
+                doi="10.1/x",
+                year=2016,
+                landing_url="https://doi.org/10.1/x",
+            )
+        ],
+        "openalex": lambda: [],
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    result = find_candidates(db_session, work, settings=_no_resolve_settings(), fetchers=fetchers)
+    cand = result["candidates"][0]
+    assert cand.resolved_url is None
+    assert cand.platform == "doi.org"
 
 
 # --- download + attach ------------------------------------------------------

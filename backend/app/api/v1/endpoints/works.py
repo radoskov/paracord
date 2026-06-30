@@ -30,7 +30,12 @@ from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
-from app.services.web_find import WebCandidate, download_and_attach, find_candidates
+from app.services.web_find import (
+    WebCandidate,
+    download_and_attach,
+    find_candidates,
+    iter_find_candidates,
+)
 from app.utils.normalization import normalize_doi, normalize_title
 from app.workers.queue import enqueue_embedding, enqueue_enrichment, enqueue_extraction
 
@@ -1132,6 +1137,10 @@ class WebCandidateRead(BaseModel):
     landing_url: str | None = None
     is_oa: bool = False
     score: float = 0.0
+    # find-on-web v2.1: where the "View" link actually lands after following redirects, and the
+    # host to show. ``landing_url`` is now ~always populated, so the UI can always offer "View".
+    resolved_url: str | None = None
+    platform: str | None = None
 
 
 class WebFindRequest(BaseModel):
@@ -1184,6 +1193,8 @@ def _candidate_read(candidate: WebCandidate) -> WebCandidateRead:
         landing_url=candidate.landing_url,
         is_oa=candidate.is_oa,
         score=candidate.score,
+        resolved_url=candidate.resolved_url,
+        platform=candidate.platform,
     )
 
 
@@ -1299,39 +1310,34 @@ def find_on_web_stream_endpoint(
     sources = payload.sources if payload else None
 
     def _generate() -> Iterator[str]:
-        events: list[dict] = []
-        result = find_candidates(
-            db,
-            work,
-            settings=settings,
-            sources=sources,
-            on_progress=events.append,
-        )
-        # The orchestrator runs synchronously; flush its collected per-source progress events first,
-        # then the final result line. (find_candidates is sequential, so events are already ordered.)
-        for event in events:
-            yield json.dumps(event) + "\n"
-        record_event(
-            db,
-            "web_find.searched",
-            actor_user_id=actor.id,
-            entity_type="work",
-            entity_id=str(work_id),
-            details={
-                "queried": result["queried_sources"],
-                "degraded": result["degraded_sources"],
-                "count": len(result["candidates"]),
-                "streamed": True,
-            },
-        )
-        db.commit()
-        final = {
-            "type": "result",
-            "candidates": [_candidate_read(c).model_dump() for c in result["candidates"]],
-            "degraded_sources": result["degraded_sources"],
-            "queried_sources": result["queried_sources"],
-        }
-        yield json.dumps(final) + "\n"
+        # Drive the generator directly so each per-source event is flushed AS the source runs
+        # (incremental progress), not buffered to completion. The generator yields the final
+        # "result" event last (after dedup + rank + redirect resolution).
+        for event in iter_find_candidates(db, work, settings=settings, sources=sources):
+            if event.get("type") == "result":
+                record_event(
+                    db,
+                    "web_find.searched",
+                    actor_user_id=actor.id,
+                    entity_type="work",
+                    entity_id=str(work_id),
+                    details={
+                        "queried": event["queried_sources"],
+                        "degraded": event["degraded_sources"],
+                        "count": len(event["candidates"]),
+                        "streamed": True,
+                    },
+                )
+                db.commit()
+                final = {
+                    "type": "result",
+                    "candidates": [_candidate_read(c).model_dump() for c in event["candidates"]],
+                    "degraded_sources": event["degraded_sources"],
+                    "queried_sources": event["queried_sources"],
+                }
+                yield json.dumps(final) + "\n"
+            else:
+                yield json.dumps(event) + "\n"
 
     return StreamingResponse(_generate(), media_type="application/x-ndjson")
 

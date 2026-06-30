@@ -41,6 +41,7 @@ logic as the denylist (see :func:`_host_matches`): an exact host, a parent-domai
 (``arxiv.org`` also matches ``export.arxiv.org``), or an explicit ``*.example.org`` wildcard form.
 """
 
+import concurrent.futures
 import difflib
 import hashlib
 import inspect
@@ -49,7 +50,7 @@ import logging
 import re
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -77,7 +78,7 @@ OPENALEX_SEARCH_API = "https://api.openalex.org/works"
 ARXIV_SEARCH_API = "https://export.arxiv.org/api/query"
 UNPAYWALL_API = "https://api.unpaywall.org/v2"
 SEMANTIC_SCHOLAR_SEARCH_API = "https://api.semanticscholar.org/graph/v1/paper/search"
-SEMANTIC_SCHOLAR_SEARCH_FIELDS = "title,year,authors,externalIds,openAccessPdf,isOpenAccess"
+SEMANTIC_SCHOLAR_SEARCH_FIELDS = "title,year,authors,externalIds,openAccessPdf,isOpenAccess,url"
 
 # Shadow-library denylist. Matched against the registrable host (suffix match), so e.g.
 # "sci-hub.se", "sci-hub.ru", "www.sci-hub.st" are all refused. NEVER remove an entry.
@@ -219,6 +220,12 @@ class WebCandidate:
     score: float = 0.0
     sources: list[str] = field(default_factory=list)
     candidate_id: str = ""
+    # find-on-web v2.1: where "View" actually lands after following the redirect chain of
+    # ``pdf_url or landing_url`` (resolved only for the returned, ranked candidates). ``platform``
+    # is the host to display — the resolved final host if we resolved it, else the host of the
+    # original landing/pdf URL. Both are best-effort + display-only.
+    resolved_url: str | None = None
+    platform: str | None = None
 
     def __post_init__(self) -> None:
         if not self.sources:
@@ -336,6 +343,78 @@ def _host_resolves_internal(
     return any(_ip_is_internal(ip) for ip in ips)
 
 
+# --- redirect resolution (find-on-web v2.1; display-only "where View leads") ---
+#
+# resolve_final_url follows a redirect chain ACROSS hosts (unlike the search egress ``_get``,
+# which refuses cross-host redirects) — DOIs intentionally redirect cross-host to the publisher.
+# It is the ONLY cross-host follower in this module and STILL enforces the shadow-library denylist
+# and the private/internal-IP SSRF guard on EVERY hop. It never downloads a body (HEAD, falling
+# back to a GET whose stream is closed immediately). Best-effort: any failure → ``None``.
+
+
+def resolve_final_url(
+    url: str,
+    *,
+    timeout: float,
+    resolver: Callable[[str], list[str]] | None = None,
+) -> str | None:
+    """Follow ``url``'s redirect chain to its final URL (cross-host), or ``None`` if unresolved.
+
+    The denylist + private/internal-IP guard are checked on the initial URL and on EVERY redirect
+    hop (and the final URL). If any hop is denied, internal, or non-http(s), resolution stops and
+    returns ``None`` (treated as unresolved). No response body is ever read.
+    """
+    if not url or not _scheme_is_http(url):
+        return None
+
+    def _hop_ok(hop_url: str) -> bool:
+        return (
+            _scheme_is_http(hop_url)
+            and not _is_denied_host(hop_url)
+            and not _host_resolves_internal(hop_url, resolver=resolver)
+        )
+
+    if not _hop_ok(url):
+        return None
+    headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; resolve view target)"}
+    try:
+        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+            try:
+                response = client.head(url)
+            except httpx.HTTPError:
+                # Some hosts reject HEAD; fall back to a GET but never read the body.
+                with client.stream("GET", url) as response:
+                    pass
+            # Validate every hop (history + final). Any denied/internal/non-http hop → unresolved.
+            for hop in [*response.history, response]:
+                if not _hop_ok(str(hop.url)):
+                    return None
+        return str(response.url)
+    except Exception as exc:  # noqa: BLE001 - best-effort; any failure/timeout → unresolved
+        logger.info("find-on-web resolve_final_url failed for %s: %s", url, exc)
+        return None
+
+
+def _resolve_candidate(
+    candidate: WebCandidate,
+    *,
+    timeout: float,
+    resolver: Callable[[str], list[str]] | None = None,
+) -> None:
+    """Populate ``resolved_url`` + ``platform`` on one candidate in place (best-effort)."""
+    target = candidate.pdf_url or candidate.landing_url
+    fallback_host = _host(candidate.landing_url or candidate.pdf_url or "") or None
+    if not target:
+        candidate.platform = fallback_host
+        return
+    resolved = resolve_final_url(target, timeout=timeout, resolver=resolver)
+    if resolved:
+        candidate.resolved_url = resolved
+        candidate.platform = _host(resolved) or fallback_host
+    else:
+        candidate.platform = fallback_host
+
+
 # --- helpers ----------------------------------------------------------------
 
 
@@ -420,9 +499,18 @@ def search_openalex(
             doi = normalize_doi(doi)
         oa = work.get("open_access") or {}
         best = work.get("best_oa_location") or {}
+        primary = work.get("primary_location") or {}
         author_names = [
             (a.get("author") or {}).get("display_name") for a in work.get("authorships", [])
         ]
+        # Always surface a landing URL when at all possible (find-on-web v2.1): the OA landing page,
+        # else the primary-location landing page, else the DOI resolver, else the OpenAlex work id.
+        landing_url = (
+            best.get("landing_page_url")
+            or primary.get("landing_page_url")
+            or (f"https://doi.org/{doi}" if doi else None)
+            or work.get("id")
+        )
         candidates.append(
             WebCandidate(
                 source="openalex",
@@ -431,8 +519,7 @@ def search_openalex(
                 year=_year_from(work.get("publication_year")),
                 doi=doi,
                 pdf_url=best.get("pdf_url"),
-                landing_url=best.get("landing_page_url")
-                or (f"https://doi.org/{doi}" if doi else None),
+                landing_url=landing_url,
                 is_oa=bool(oa.get("is_oa")),
             )
         )
@@ -493,6 +580,14 @@ def search_semantic_scholar(
         doi = (paper.get("externalIds") or {}).get("DOI")
         oa_pdf = paper.get("openAccessPdf") or {}
         author_names = [a.get("name") for a in paper.get("authors", [])]
+        paper_id = paper.get("paperId")
+        # Always surface a landing URL (find-on-web v2.1): the paper's own page, else the DOI
+        # resolver, else the canonical Semantic Scholar paper URL built from the paperId.
+        landing_url = (
+            paper.get("url")
+            or (f"https://doi.org/{doi}" if doi else None)
+            or (f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else None)
+        )
         candidates.append(
             WebCandidate(
                 source="semanticscholar",
@@ -501,7 +596,7 @@ def search_semantic_scholar(
                 year=_year_from(paper.get("year")),
                 doi=normalize_doi(doi) if doi else None,
                 pdf_url=oa_pdf.get("url"),
-                landing_url=f"https://doi.org/{doi}" if doi else None,
+                landing_url=landing_url,
                 is_oa=bool(paper.get("isOpenAccess") or oa_pdf.get("url")),
             )
         )
@@ -652,26 +747,62 @@ def _work_authors(db: Session, work: Work) -> list[str]:
 # --- orchestrator -----------------------------------------------------------
 
 
-def find_candidates(
+def _resolve_returned_candidates(
+    candidates: list[WebCandidate],
+    *,
+    settings,
+    resolver: Callable[[str], list[str]] | None = None,
+) -> None:
+    """Resolve the View/redirect target + platform for the RETURNED candidates, concurrently.
+
+    Capped to the (already ranked, ≤ max_candidates) set so it adds ~one timeout of latency rather
+    than N×. Disabled via ``web_find_resolve_enabled``; when disabled (or no candidates) we still
+    set ``platform`` to the host of the original landing/pdf URL so the UI can label "View".
+    """
+    if not candidates:
+        return
+    enabled = bool(getattr(settings, "web_find_resolve_enabled", True))
+    timeout = float(getattr(settings, "web_find_resolve_timeout", 4.0))
+    if not enabled:
+        for cand in candidates:
+            cand.platform = _host(cand.landing_url or cand.pdf_url or "") or None
+        return
+    max_workers = min(len(candidates), 8)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(_resolve_candidate, cand, timeout=timeout, resolver=resolver)
+            for cand in candidates
+        ]
+        for fut in futures:
+            try:
+                fut.result()
+            except Exception as exc:  # noqa: BLE001 - resolution is best-effort, never fatal
+                logger.info("find-on-web candidate resolution failed: %s", exc)
+
+
+def iter_find_candidates(
     db: Session,
     work: Work,
     *,
     settings,
     sources: list[str] | None = None,
     fetchers: dict | None = None,
-    on_progress: Callable[[dict], None] | None = None,
-) -> dict:
-    """Search enabled sources for candidate matches; return ranked candidates + degraded list.
+    resolver: Callable[[str], list[str]] | None = None,
+) -> Iterator[dict]:
+    """Generator core of find-on-web (find-on-web v2.1): yields progress events AS work happens.
 
-    ``fetchers`` lets tests inject per-source callables. A source whose fetcher raises, times
-    out, or is skipped for the wall-clock budget is reported in ``degraded_sources`` — the
-    search never fails as a whole.
+    Yields one event per source transition, interleaved with the actual fetching, then a final
+    result event after dedup + rank + the redirect-resolution step:
 
-    ``on_progress`` (find-on-web v2) is an optional callback invoked with one progress event dict
-    as each source starts and finishes, so a streaming caller can surface live progress. It is
-    invoked with ``{"type":"source","source":<name>,"status":"querying"}`` when a source begins and
-    ``{"type":"source","source":<name>,"status":"done","count":N}`` (or ``"status":"failed"``) as it
-    finishes. The non-streaming return value is unchanged.
+      * ``{"type":"source","source":<name>,"status":"querying"}`` — yielded BEFORE running a source,
+      * ``{"type":"source","source":<name>,"status":"done","count":N}`` / ``"status":"failed"`` —
+        yielded after the source finishes (or is skipped for the wall-clock budget),
+      * ``{"type":"result","candidates":[...],"degraded_sources":[...],"queried_sources":[...]}`` —
+        the final event (candidates are :class:`WebCandidate` instances; the caller serializes them).
+
+    ``fetchers`` lets tests inject per-source callables. A source whose fetcher raises, times out,
+    or is skipped for the wall-clock budget is reported in ``degraded_sources``; the search never
+    fails as a whole. The per-source timeout + total wall-clock budget are preserved.
     """
     title = (work.canonical_title or "").strip()
     authors = _work_authors(db, work)
@@ -701,14 +832,13 @@ def find_candidates(
     collected: list[WebCandidate] = []
 
     if not title:
-        return {"candidates": [], "degraded_sources": [], "queried_sources": []}
-
-    def _emit(event: dict) -> None:
-        if on_progress is not None:
-            try:
-                on_progress(event)
-            except Exception as exc:  # noqa: BLE001 - progress must never abort the search
-                logger.warning("find-on-web progress callback failed: %s", exc)
+        yield {
+            "type": "result",
+            "candidates": [],
+            "degraded_sources": [],
+            "queried_sources": [],
+        }
+        return
 
     start = time.monotonic()
     for name in selected:
@@ -717,17 +847,18 @@ def find_candidates(
             continue
         if time.monotonic() - start > total_budget:
             degraded.append(name)  # wall-clock budget exhausted; skip remaining
-            _emit({"type": "source", "source": name, "status": "failed"})
+            yield {"type": "source", "source": name, "status": "failed"}
             continue
         queried.append(name)
-        _emit({"type": "source", "source": name, "status": "querying"})
+        # Emit "querying" BEFORE the source runs so the client sees live progression.
+        yield {"type": "source", "source": name, "status": "querying"}
         source_start = time.monotonic()
         try:
             result = runner()
         except Exception as exc:  # noqa: BLE001 - one source must never abort the search
             logger.warning("find-on-web source %s failed: %s", name, exc)
             degraded.append(name)
-            _emit({"type": "source", "source": name, "status": "failed"})
+            yield {"type": "source", "source": name, "status": "failed"}
             continue
         if time.monotonic() - source_start > per_source_timeout:
             # Returned, but over its slice; keep results, flag as degraded for transparency.
@@ -735,7 +866,7 @@ def find_candidates(
             degraded.append(name)
         result = result or []
         collected.extend(result)
-        _emit({"type": "source", "source": name, "status": "done", "count": len(result)})
+        yield {"type": "source", "source": name, "status": "done", "count": len(result)}
 
     # Unpaywall OA backfill for DOI-bearing candidates that still lack a PDF link.
     if unpaywall_email and ("unpaywall" not in degraded):
@@ -760,11 +891,50 @@ def find_candidates(
         query_authors=authors,
         max_candidates=max_candidates,
     )
-    return {
+    # Resolve the View/redirect target + platform for ONLY the returned set (concurrently).
+    _resolve_returned_candidates(ranked, settings=settings, resolver=resolver)
+    yield {
+        "type": "result",
         "candidates": ranked,
         "degraded_sources": sorted(set(degraded)),
         "queried_sources": queried,
     }
+
+
+def find_candidates(
+    db: Session,
+    work: Work,
+    *,
+    settings,
+    sources: list[str] | None = None,
+    fetchers: dict | None = None,
+    resolver: Callable[[str], list[str]] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
+    """Search enabled sources for candidate matches; return ranked candidates + degraded list.
+
+    Non-streaming wrapper around :func:`iter_find_candidates`: it drains the generator, forwarding
+    each per-source progress event to the optional ``on_progress`` callback, and returns the final
+    result dict. ``fetchers`` lets tests inject per-source callables; a source whose fetcher raises,
+    times out, or is skipped for the wall-clock budget is reported in ``degraded_sources``.
+    """
+    result: dict = {"candidates": [], "degraded_sources": [], "queried_sources": []}
+    for event in iter_find_candidates(
+        db, work, settings=settings, sources=sources, fetchers=fetchers, resolver=resolver
+    ):
+        if event.get("type") == "result":
+            result = {
+                "candidates": event["candidates"],
+                "degraded_sources": event["degraded_sources"],
+                "queried_sources": event["queried_sources"],
+            }
+            continue
+        if on_progress is not None:
+            try:
+                on_progress(event)
+            except Exception as exc:  # noqa: BLE001 - progress must never abort the search
+                logger.warning("find-on-web progress callback failed: %s", exc)
+    return result
 
 
 # --- download + attach ------------------------------------------------------

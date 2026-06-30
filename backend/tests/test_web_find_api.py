@@ -310,11 +310,12 @@ def test_find_on_web_stream_emits_ndjson_sequence(client, auth_headers, monkeypa
     """The streaming endpoint emits per-source querying/done lines then a final result line."""
     import json
 
-    def fake_find(db, work, *, settings, sources=None, fetchers=None, on_progress=None):
+    def fake_iter(db, work, *, settings, sources=None, fetchers=None, resolver=None):
         for name in ("crossref", "openalex"):
-            on_progress({"type": "source", "source": name, "status": "querying"})
-            on_progress({"type": "source", "source": name, "status": "done", "count": 1})
-        return {
+            yield {"type": "source", "source": name, "status": "querying"}
+            yield {"type": "source", "source": name, "status": "done", "count": 1}
+        yield {
+            "type": "result",
             "candidates": [
                 WebCandidate(source="openalex", title="Deep Residual Learning", year=2016)
             ],
@@ -322,7 +323,7 @@ def test_find_on_web_stream_emits_ndjson_sequence(client, auth_headers, monkeypa
             "queried_sources": ["crossref", "openalex"],
         }
 
-    monkeypatch.setattr("app.api.v1.endpoints.works.find_candidates", fake_find)
+    monkeypatch.setattr("app.api.v1.endpoints.works.iter_find_candidates", fake_iter)
     h = auth_headers("editor")
     resp = client.post(f"/api/v1/works/{work_id}/find-on-web/stream", headers=h, json={})
     assert resp.status_code == 200
