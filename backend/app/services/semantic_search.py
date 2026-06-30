@@ -188,6 +188,43 @@ def reindex_status(db: Session, *, provider: EmbeddingProvider | None = None) ->
     return {"model_name": provider.model_name, "indexed": int(indexed or 0), "total": total}
 
 
+def related_works(
+    db: Session, work: Work, *, limit: int = 10, provider: EmbeddingProvider | None = None
+) -> list[SearchHit]:
+    """Find works most similar to ``work`` (SPEC §8.17.2). Read-only.
+
+    Uses stored embeddings for the active model (cosine); if the target work has no embedding,
+    falls back to the work's own title+abstract text as the query.
+    """
+    provider = provider or get_embedding_provider(db=db)
+    target = db.scalar(
+        select(Embedding).where(
+            Embedding.entity_type == "work",
+            Embedding.entity_id == work.id,
+            Embedding.model_name == provider.model_name,
+        )
+    )
+    query_vector = target.vector if target else provider.embed(_work_text(work))
+    rows = db.scalars(
+        select(Embedding).where(
+            Embedding.entity_type == "work", Embedding.model_name == provider.model_name
+        )
+    ).all()
+    scored: list[tuple[uuid.UUID, float]] = []
+    for emb in rows:
+        if emb.entity_id == work.id:
+            continue
+        score = cosine_similarity(query_vector, emb.vector)
+        if score > 0.0:
+            scored.append((emb.entity_id, score))
+    scored.sort(key=lambda i: i[1], reverse=True)
+    top = scored[:limit]
+    works = {
+        w.id: w for w in db.scalars(select(Work).where(Work.id.in_([wid for wid, _ in top]))).all()
+    }
+    return [SearchHit(work=works[wid], score=score) for wid, score in top if wid in works]
+
+
 def _lexical_search(db: Session, query: str, *, limit: int) -> list[SearchHit]:
     """Rank works by query-term overlap with title + abstract (no embeddings required)."""
     terms = {t for t in _WORD.findall(query.lower()) if len(t) > 1}

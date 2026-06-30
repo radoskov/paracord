@@ -102,6 +102,15 @@
     }, 'Saved');
   }
 
+  let related: Work[] = [];
+  let relatedLoaded = false;
+  async function loadRelated(): Promise<void> {
+    await run(async () => {
+      related = await client.getRelatedWorks(work.id, 8);
+      relatedLoaded = true;
+    });
+  }
+
   async function exportNotes(): Promise<void> {
     await run(async () => {
       const r = await client.exportAnnotations(work.id, 'markdown');
@@ -364,6 +373,22 @@
         The <strong>#hash</strong> is the file's content hash — the same value the agent shows as its
         local file id, so you can cross-reference a server paper with a file on a workstation.
       </p>
+    {/if}
+  </details>
+
+  <details on:toggle={(e) => e.currentTarget.open && !relatedLoaded && loadRelated()}>
+    <summary>Related papers</summary>
+    {#if !relatedLoaded}
+      <p class="hintline">Open to find papers similar to this one (by embedding neighborhood).</p>
+    {:else if related.length === 0}
+      <p class="empty">No related papers found (build embeddings via Admin → AI &amp; Models → Reindex).</p>
+    {:else}
+      <ul class="refs">
+        {#each related as r (r.id)}
+          <li><span class="ref-title">{r.canonical_title ?? 'Untitled'}</span>
+            <small class="muted">{r.year ?? ''}</small></li>
+        {/each}
+      </ul>
     {/if}
   </details>
 

@@ -467,6 +467,32 @@ export class ApiClient {
     return this.request<Work>(`/api/v1/works/${workId}`);
   }
 
+  async getRelatedWorks(workId: string, limit = 8): Promise<Work[]> {
+    return this.request<Work[]>(`/api/v1/works/${workId}/related?limit=${limit}`);
+  }
+
+  async acceptTopicAsTag(
+    topicModelId: string,
+    topicId: number,
+    name: string,
+  ): Promise<{ tag_id: string; tagged: number }> {
+    return this.request('/api/v1/ai/topics/accept-as-tag', {
+      method: 'POST',
+      body: { topic_model_id: topicModelId, topic_id: topicId, name },
+    });
+  }
+
+  async createShelfFromTopic(
+    topicModelId: string,
+    topicId: number,
+    name: string,
+  ): Promise<{ shelf_id: string; added: number }> {
+    return this.request('/api/v1/ai/topics/create-shelf', {
+      method: 'POST',
+      body: { topic_model_id: topicModelId, topic_id: topicId, name },
+    });
+  }
+
   async getReadingQueue(): Promise<Work[]> {
     return this.request<Work[]>('/api/v1/works/reading-queue');
   }

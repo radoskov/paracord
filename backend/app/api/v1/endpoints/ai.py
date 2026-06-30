@@ -5,14 +5,18 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.core.security import Role
 from app.db.session import get_db
+from app.models.ai import TopicAssignment
+from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.services.summarization import summarize_scope
 from app.services.topic_modeling import model_topics
+from app.utils.normalization import normalize_title
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -118,3 +122,70 @@ def create_topic_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     return TopicModelResponse(**result)
+
+
+class TopicActionRequest(BaseModel):
+    topic_model_id: str
+    topic_id: int
+    name: str  # tag name / shelf name
+
+
+def _topic_work_ids(db: Session, model_id: str, topic_id: int) -> list[uuid.UUID]:
+    ids = list(
+        db.scalars(
+            select(TopicAssignment.work_id).where(
+                TopicAssignment.topic_model_id == model_id, TopicAssignment.topic_id == topic_id
+            )
+        ).all()
+    )
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No works for that topic")
+    return ids
+
+
+@router.post("/topics/accept-as-tag", status_code=status.HTTP_201_CREATED)
+def accept_topic_as_tag(
+    payload: TopicActionRequest, db: Session = DB_DEP, actor: User = EDITOR_DEP
+) -> dict:
+    """Create a tag from a topic and apply it to the topic's works (SPEC §8.15.3)."""
+    work_ids = _topic_work_ids(db, payload.topic_model_id, payload.topic_id)
+    normalized = normalize_title(payload.name)
+    tag = db.scalar(select(Tag).where(Tag.normalized_name == normalized))
+    if tag is None:
+        tag = Tag(name=payload.name, normalized_name=normalized, description="From topic model")
+        db.add(tag)
+        db.flush()
+    tagged = 0
+    for work_id in work_ids:
+        exists = db.get(TagLink, {"tag_id": tag.id, "entity_type": "work", "entity_id": work_id})
+        if exists is None:
+            db.add(
+                TagLink(
+                    tag_id=tag.id,
+                    entity_type="work",
+                    entity_id=work_id,
+                    created_by_user_id=actor.id,
+                )
+            )
+            tagged += 1
+    db.commit()
+    return {"tag_id": str(tag.id), "tagged": tagged}
+
+
+@router.post("/topics/create-shelf", status_code=status.HTTP_201_CREATED)
+def create_shelf_from_topic(
+    payload: TopicActionRequest, db: Session = DB_DEP, actor: User = EDITOR_DEP
+) -> dict:
+    """Create a shelf from a topic and add the topic's works to it (SPEC §8.15.3)."""
+    work_ids = _topic_work_ids(db, payload.topic_model_id, payload.topic_id)
+    shelf = Shelf(name=payload.name, created_by_user_id=actor.id)
+    db.add(shelf)
+    db.flush()
+    for position, work_id in enumerate(work_ids):
+        db.add(
+            ShelfWork(
+                shelf_id=shelf.id, work_id=work_id, position=position, added_by_user_id=actor.id
+            )
+        )
+    db.commit()
+    return {"shelf_id": str(shelf.id), "added": len(work_ids)}

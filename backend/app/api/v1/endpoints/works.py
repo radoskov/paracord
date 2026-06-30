@@ -22,6 +22,7 @@ from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services.audit import record_event
 from app.services.search_query import parse_search_query
+from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_doi, normalize_title
@@ -249,6 +250,17 @@ def create_work(
     db.refresh(work)
     enqueue_embedding(work.id)  # index off the search read path (best-effort)
     return work
+
+
+@router.get("/{work_id}/related", response_model=list[WorkRead])
+def related_papers(
+    work_id: uuid.UUID, limit: int = Query(default=10, ge=1, le=50), db: Session = DB_DEP
+) -> list[Work]:
+    """Return papers most similar to this one by embedding neighborhood (SPEC §8.17.2)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    return [hit.work for hit in related_works(db, work, limit=limit)]
 
 
 @router.get("/{work_id}", response_model=WorkRead)
