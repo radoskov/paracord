@@ -81,6 +81,15 @@
 
   $: if (work && work.id !== loadedId) void loadDetail(work);
 
+  // Authors for the find-on-web header: the Work has no author column, so take them from the
+  // 'authors' metadata-review field (canonical value, else the selected/first assertion).
+  $: searchedAuthors = (() => {
+    const f = fields.find((x) => x.field_name === 'authors');
+    if (!f) return '';
+    const selected = f.assertions.find((a) => a.selected_as_canonical);
+    return (f.canonical_value ?? selected?.value ?? f.assertions[0]?.value ?? '').trim();
+  })();
+
   // Note counts per file (and overall) from the already-loaded annotations — no extra request.
   // Annotations with a null file_id (not bound to a specific PDF) count toward the work total and
   // are surfaced separately as "unattached" so they aren't silently lost.
@@ -789,6 +798,7 @@
       <div class="searched-paper">
         <span class="searched-label">Searching for this paper</span>
         <strong class="searched-title">{form.canonical_title || 'Untitled paper'}</strong>
+        {#if searchedAuthors}<div class="searched-authors">{searchedAuthors}</div>{/if}
         <div class="searched-meta">
           {#if form.year}<span>{form.year}</span>{/if}
           {#if form.venue}<span>· {form.venue}</span>{/if}
@@ -1432,6 +1442,13 @@
   }
 
   .searched-title {
+    overflow-wrap: anywhere;
+  }
+
+  .searched-authors {
+    color: #334155;
+    font-size: 0.85rem;
+    margin-top: 0.15rem;
     overflow-wrap: anywhere;
   }
 
