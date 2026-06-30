@@ -266,7 +266,9 @@
     selectedIds = next;
   }
 
-  $: downloadableCandidates = findResults.filter((c) => c.pdf_url || c.landing_url);
+  // Only candidates with a direct PDF URL can be auto-downloaded; PDF-less ones (landing/resolved
+  // only) are opened via "View" and attached manually.
+  $: downloadableCandidates = findResults.filter((c) => c.pdf_url);
   $: allDownloadableSelected =
     downloadableCandidates.length > 0 &&
     downloadableCandidates.every((c) => selectedIds.has(c.candidate_id));
@@ -300,10 +302,10 @@
 
   async function downloadSelected(): Promise<void> {
     const items: WebFindDownloadItem[] = findResults
-      .filter((c) => selectedIds.has(c.candidate_id) && (c.pdf_url || c.landing_url))
+      .filter((c) => selectedIds.has(c.candidate_id) && c.pdf_url)
       .map((c) => ({
         candidate_id: c.candidate_id,
-        url: (c.pdf_url ?? c.landing_url) as string,
+        url: c.pdf_url as string,
         source: c.source,
       }));
     if (items.length === 0) return;
@@ -872,10 +874,10 @@
                   type="checkbox"
                   checked={selectedIds.has(cand.candidate_id)}
                   on:change={() => toggleCandidate(cand.candidate_id)}
-                  disabled={!(cand.pdf_url || cand.landing_url)}
-                  title={cand.pdf_url || cand.landing_url
-                    ? 'Select this candidate to download and attach'
-                    : 'No downloadable link for this candidate'}
+                  disabled={!cand.pdf_url}
+                  title={cand.pdf_url
+                    ? 'Select this candidate to download its PDF and attach'
+                    : 'No direct PDF link — open “View” to download it manually, then attach'}
                 />
               </label>
               <div class="cand-main">
@@ -888,12 +890,16 @@
                 <div class="cand-meta">
                   {#if cand.authors.length}<span>{cand.authors.slice(0, 4).join(', ')}{cand.authors.length > 4 ? ' et al.' : ''}</span>{/if}
                   {#if cand.year}<span>· {cand.year}</span>{/if}
-                  {#if cand.landing_url}
-                    <a href={cand.landing_url} target="_blank" rel="noopener noreferrer">View ↗</a>
+                  {#if cand.platform}<span class="badge platform" title="Where this link leads">via {cand.platform}</span>{/if}
+                  {#if cand.resolved_url || cand.landing_url}
+                    {@const viewUrl = cand.resolved_url ?? (cand.landing_url as string)}
+                    <a href={viewUrl} target="_blank" rel="noopener noreferrer" title={`Open ${viewUrl} in a new tab`}>View ↗</a>
                   {/if}
                 </div>
-                {#if !(cand.pdf_url || cand.landing_url)}
-                  <span class="cand-status warn">No downloadable link — open “View” or attach manually.</span>
+                {#if !cand.pdf_url && (cand.resolved_url || cand.landing_url)}
+                  <span class="cand-status warn">No direct PDF link — open “View” to download it manually, then attach.</span>
+                {:else if !(cand.pdf_url || cand.resolved_url || cand.landing_url)}
+                  <span class="cand-status warn">No link to open — attach the PDF manually.</span>
                 {/if}
                 {#if downloadStatus[cand.candidate_id]}
                   {@const r = downloadStatus[cand.candidate_id]}
@@ -1385,6 +1391,11 @@
   .badge.score {
     background: #f1f5f9;
     color: #475569;
+  }
+
+  .badge.platform {
+    background: #fef3c7;
+    color: #92400e;
   }
 
   .cand-title {

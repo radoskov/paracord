@@ -261,6 +261,11 @@ export interface WebCandidate {
   doi: string | null;
   pdf_url: string | null;
   landing_url: string | null;
+  // Final URL after following the redirect chain of `pdf_url || landing_url` (nullable).
+  resolved_url: string | null;
+  // Host to display (e.g. `sciencedirect.com`) — resolved final host, else the original
+  // landing/pdf host (nullable).
+  platform: string | null;
   is_oa: boolean;
   score: number;
 }

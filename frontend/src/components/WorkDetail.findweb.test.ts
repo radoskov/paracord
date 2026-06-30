@@ -32,6 +32,8 @@ const CANDIDATES = [
     doi: '10.1/x',
     pdf_url: 'https://arxiv.org/pdf/1512.03385.pdf',
     landing_url: 'https://arxiv.org/abs/1512.03385',
+    resolved_url: 'https://arxiv.org/pdf/1512.03385.pdf',
+    platform: 'arxiv.org',
     is_oa: true,
     score: 0.95,
   },
@@ -45,6 +47,8 @@ const CANDIDATES = [
     doi: '10.1/y',
     pdf_url: null,
     landing_url: 'https://doi.org/10.1/y',
+    resolved_url: 'https://www.sciencedirect.com/science/article/pii/123',
+    platform: 'sciencedirect.com',
     is_oa: false,
     score: 0.4,
   },
@@ -134,6 +138,33 @@ describe('WorkDetail find-on-web picker (v2)', () => {
     expect(await screen.findByText(/Attached/)).toBeTruthy();
     // Total progress advanced to 1/1.
     expect(screen.getByText('1/1 downloaded')).toBeTruthy();
+  });
+
+  it('renders platform labels, a View link + disabled Download for PDF-less candidates, and enables Download for PDF candidates', async () => {
+    const client = makeClient();
+    render(WorkDetail, { client: client as never, work: WORK });
+
+    await fireEvent.click(screen.getByRole('button', { name: /find on web/i }));
+    await screen.findByText(/Deep Residual Learning for Image Recognition/);
+
+    // Platform badges render for both candidates ("via <host>").
+    expect(screen.getByText(/via arxiv\.org/)).toBeTruthy();
+    expect(screen.getByText(/via sciencedirect\.com/)).toBeTruthy();
+
+    // The PDF-less candidate (c2) keeps a working View link (targets its resolved_url), shows the
+    // "no direct PDF" reason, and is NOT a dead "no link" state.
+    const viewLinks = screen.getAllByRole('link', { name: /View/i }) as HTMLAnchorElement[];
+    expect(viewLinks.length).toBe(2);
+    expect(
+      viewLinks.some((a) => a.href === 'https://www.sciencedirect.com/science/article/pii/123'),
+    ).toBe(true);
+    expect(screen.getByText(/No direct PDF link — open/)).toBeTruthy();
+
+    // c1 (has pdf_url) → checkbox enabled; c2 (no pdf_url) → checkbox disabled with a reason.
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+    expect(checkboxes[0].disabled).toBe(false);
+    expect(checkboxes[1].disabled).toBe(true);
+    expect(checkboxes[1].title).toMatch(/No direct PDF link/);
   });
 
   it('shows a manual-upload fallback when a download cannot complete', async () => {

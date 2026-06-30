@@ -591,3 +591,16 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   resolved final host, else the original landing/pdf host. New settings `web_find_resolve_enabled`
   (default True) + `web_find_resolve_timeout` (default 4.0). No migration (the candidate is a transient
   dataclass/schema, not persisted). Download security model (denylist + IP guard + mode gate) unchanged.
+- [x] **find-on-web v2.1 frontend (platform badge + always-View + progressive search render).** Added
+  the nullable `resolved_url` + `platform` fields to the `WebCandidate` interface in `client.ts`. Each
+  candidate row now shows a "via <platform>" badge when present, and a "View ↗" link whenever a
+  `resolved_url`/`landing_url` exists (target = `resolved_url ?? landing_url`, `rel="noopener"`,
+  new tab, full-URL tooltip). Per-row Download (checkbox) is enabled only when `pdf_url` is present
+  (direct PDF); a PDF-less candidate has its checkbox disabled with the reason "No direct PDF link —
+  open View to download it manually, then attach" and still offers View — the dead "no downloadable
+  link" copy is gone (a true "no link to open" state now only shows when both pdf_url and landing/
+  resolved are null). `downloadableCandidates`/`downloadSelected` now key off `pdf_url` only. Live
+  per-source streaming progress (querying→done/failed) renders unchanged. Tests extended
+  (`WorkDetail.findweb.test.ts`): platform labels render, a PDF-less candidate shows a View link +
+  disabled Download with a reason, a PDF candidate has Download enabled; streaming/confirmation/blocked
+  tests still pass. Download security/confirmation flow unchanged.
