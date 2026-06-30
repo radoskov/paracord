@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS files (
     teleport_policy TEXT NOT NULL DEFAULT 'ask',
     processing_state TEXT NOT NULL DEFAULT 'indexed',
     teleport_blocked INTEGER NOT NULL DEFAULT 0,
-    present         INTEGER NOT NULL DEFAULT 1
+    present         INTEGER NOT NULL DEFAULT 1,
+    extracted_title TEXT,
+    extracted_authors TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_files_real_path ON files (real_path);
 """
@@ -40,6 +42,8 @@ class FileRecord:
     processing_state: str
     teleport_blocked: bool
     present: bool
+    extracted_title: str | None = None
+    extracted_authors: str | None = None
 
 
 def default_state_path() -> Path:
@@ -59,10 +63,15 @@ class AgentState:
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
-        # Migrate a pre-existing DB that lacks the mtime column (added for incremental scans).
+        # Migrate a pre-existing DB that lacks newer columns (idempotent ADD COLUMN guards).
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(files)")}
         if "mtime" not in columns:
             self._conn.execute("ALTER TABLE files ADD COLUMN mtime REAL")
+        # Server→agent metadata sync (#11): cached title + authors of the linked Work.
+        if "extracted_title" not in columns:
+            self._conn.execute("ALTER TABLE files ADD COLUMN extracted_title TEXT")
+        if "extracted_authors" not in columns:
+            self._conn.execute("ALTER TABLE files ADD COLUMN extracted_authors TEXT")
         self._conn.commit()
 
     def close(self) -> None:
@@ -79,13 +88,20 @@ class AgentState:
         import_action: str = "index_only",
         teleport_policy: str = "ask",
         mtime: float | None = None,
+        extracted_title: str | None = None,
+        extracted_authors: str | None = None,
     ) -> None:
-        """Insert/refresh a file, preserving processing_state and block on update."""
+        """Insert/refresh a file, preserving processing_state and block on update.
+
+        ``extracted_title``/``extracted_authors`` (synced from the server, #11) are only overwritten
+        when a non-NULL value is supplied, so a plain rescan never wipes previously synced metadata.
+        """
         self._conn.execute(
             """
             INSERT INTO files (local_file_id, virtual_path, real_path, sha256, size_bytes, mtime,
-                               import_action, teleport_policy, present)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                               import_action, teleport_policy, extracted_title, extracted_authors,
+                               present)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(local_file_id) DO UPDATE SET
                 virtual_path=excluded.virtual_path,
                 real_path=excluded.real_path,
@@ -94,6 +110,8 @@ class AgentState:
                 mtime=excluded.mtime,
                 import_action=excluded.import_action,
                 teleport_policy=excluded.teleport_policy,
+                extracted_title=COALESCE(excluded.extracted_title, files.extracted_title),
+                extracted_authors=COALESCE(excluded.extracted_authors, files.extracted_authors),
                 present=1
             """,
             (
@@ -105,6 +123,8 @@ class AgentState:
                 mtime,
                 import_action,
                 teleport_policy,
+                extracted_title,
+                extracted_authors,
             ),
         )
         self._conn.commit()
@@ -187,6 +207,8 @@ class AgentState:
                 processing_state=r["processing_state"],
                 teleport_blocked=bool(r["teleport_blocked"]),
                 present=bool(r["present"]),
+                extracted_title=r["extracted_title"],
+                extracted_authors=r["extracted_authors"],
             )
             for r in rows
         ]

@@ -233,14 +233,79 @@ def report_source_removed(
 
 
 @router.get("/files", response_model=list[AgentFileStatus])
-def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> list:
-    """Report this agent's files + their processing/teleport state (for the agent's own status view)."""
+def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> list[AgentFileStatus]:
+    """Report this agent's files + their processing/teleport state (for the agent's own status view).
+
+    Includes the linked Work's title + authors (#11) so the agent GUI can search/sort by them.
+    """
     if not agent.processing_visibility:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks processing visibility"
         )
-    return list(
+    rows = list(
         db.scalars(
             select(AgentFile).where(AgentFile.agent_id == agent.id).order_by(AgentFile.created_at)
         ).all()
     )
+    metadata = agent_files.extracted_metadata_for(db, rows)
+    out: list[AgentFileStatus] = []
+    for row in rows:
+        title, authors = metadata.get(row.id, (None, None))
+        out.append(
+            AgentFileStatus(
+                local_file_id=row.local_file_id,
+                virtual_path=row.virtual_path,
+                display_path=row.display_path,
+                import_action=row.import_action,
+                processing_state=row.processing_state,
+                teleport_status=row.teleport_status,
+                teleport_policy=row.teleport_policy,
+                teleport_blocked=row.teleport_blocked,
+                extracted_title=title,
+                extracted_authors=authors,
+            )
+        )
+    return out
+
+
+@router.post("/files/{local_file_id}/offer-teleport", status_code=status.HTTP_201_CREATED)
+async def offer_teleport(
+    local_file_id: str,
+    file: UploadFile,
+    db: Session = DB_DEP,
+    agent: Agent = AGENT_DEP,
+) -> dict[str, str]:
+    """Agent-*initiated* teleport (#12): the agent pushes a file directly (no prior user request).
+
+    Allowed only when the owner has granted ``can_teleport``. The server verifies the hash, stores
+    the managed file + Work, and enqueues extraction — mirroring a user-requested teleport.
+    """
+    if not agent.can_teleport:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the teleport privilege"
+        )
+    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Uploaded file exceeds 200 MB limit",
+        )
+    if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
+        )
+    try:
+        stored = agent_files.offer_teleport(
+            db,
+            agent=agent,
+            local_file_id=local_file_id,
+            pdf_bytes=pdf_bytes,
+            display_path=file.filename,
+        )
+    except ValueError as exc:
+        db.commit()  # persist any teleport.failed audit/state before surfacing the error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(stored)
+    enqueue_extraction(stored.id)
+    return {"file_id": str(stored.id), "sha256": stored.sha256, "status": "complete"}

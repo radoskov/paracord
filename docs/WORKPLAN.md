@@ -421,17 +421,17 @@ Files: `frontend/src/components/WorkDetail.svelte`, `frontend/src/pages/LibraryP
 ## Phase 3 — Agent GUI overhaul  *(L)*  — internal order: **#11 before #15**
 Files: `agent/paperracks_agent/{web.py,client.py,state.py,agent_ops.py,config.py}`,
 `backend/app/api/v1/endpoints/agents.py`, `backend/app/schemas/agent.py`.
-- [ ] 11. **Server→agent metadata sync** — server returns extracted title + authors in the agent
+- [x] 11. **Server→agent metadata sync** — server returns extracted title + authors in the agent
   file-status response; agent stores them in `state.sqlite3` (new columns).
-- [ ] 12. **Agent-initiated teleport** — backend endpoint accepting an agent-offered teleport when
+- [x] 12. **Agent-initiated teleport** — backend endpoint accepting an agent-offered teleport when
   `can_teleport` is granted; **Request teleport** button per file in the agent GUI.
-- [ ] 13. **Local Read** — agent route `GET /api/files/{local_file_id}/view` (resolves `real_path`
+- [x] 13. **Local Read** — agent route `GET /api/files/{local_file_id}/view` (resolves `real_path`
   locally); **Read** button opens it in a new tab.
-- [ ] 14. **Full hash + copy-on-click** in the agent table.
-- [ ] 15. **Search / sort / filter** — search over filename + hash + title + authors; sort by any
+- [x] 14. **Full hash + copy-on-click** in the agent table.
+- [x] 15. **Search / sort / filter** — search over filename + hash + title + authors; sort by any
   column (incl. title); filter by action and state.
-- [ ] 16. **Add-folder/file dialog** — monitored/once as a radio/toggle remembering the last choice.
-- [ ] 17. **Server status light** — green = reachable + approved; yellow = reachable but error
+- [x] 16. **Add-folder/file dialog** — monitored/once as a radio/toggle remembering the last choice.
+- [x] 17. **Server status light** — green = reachable + approved; yellow = reachable but error
   (pending/revoked/unregistered/other); red = unreachable.
 
 ## Phase 4 — PDF reader overhaul  *(L)*  — internal order: **#18 before #19–#21**

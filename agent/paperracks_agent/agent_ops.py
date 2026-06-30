@@ -135,7 +135,13 @@ def _manifest_payload(scanned: list[ScannedFile]) -> dict:
 async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerClient) -> dict:
     """Scan, send the manifest, apply per-file actions, report removals, fulfil allow-requests."""
     scanned = scan_managed(config, state)
+    # Pull the server's view first so we can cache its title/authors metadata (#11) at upsert time.
+    try:
+        server_files = {f["local_file_id"]: f for f in await client.get_my_files()}
+    except Exception:  # noqa: BLE001 - status is best-effort; proceed without it
+        server_files = {}
     for s in scanned:
+        sf = server_files.get(s.local_file_id, {})
         state.upsert(
             local_file_id=s.local_file_id,
             real_path=str(s.path),
@@ -145,6 +151,8 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
             import_action=s.action,
             teleport_policy=s.teleport_policy,
             mtime=s.mtime,
+            extracted_title=sf.get("extracted_title"),
+            extracted_authors=sf.get("extracted_authors"),
         )
     await client.send_manifest(_manifest_payload(scanned))
 
@@ -152,12 +160,7 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
     if absent:
         await client.report_source_removed(absent)
 
-    try:
-        server_state = {
-            f["local_file_id"]: f.get("processing_state") for f in await client.get_my_files()
-        }
-    except Exception:  # noqa: BLE001 - status is best-effort; proceed without it
-        server_state = {}
+    server_state = {lid: f.get("processing_state") for lid, f in server_files.items()}
 
     applied = 0
     for s in scanned:
@@ -214,6 +217,22 @@ async def approve_request(
         return False
     with path.open("rb") as handle:
         await client.upload_teleport_content(local_file_id, handle)
+    state.set_processing_state(local_file_id, "teleported")
+    return True
+
+
+async def request_teleport_offer(
+    state: AgentState, client: PaRacORDServerClient, local_file_id: str
+) -> bool:
+    """Agent-initiated teleport (#12): push a file's bytes to the server now.
+
+    The real path is resolved **locally** by id (never sent to the server). Returns True on success.
+    """
+    path = state.resolve_path(local_file_id)
+    if path is None or not path.exists():
+        return False
+    with path.open("rb") as handle:
+        await client.offer_teleport(local_file_id, handle)
     state.set_processing_state(local_file_id, "teleported")
     return True
 

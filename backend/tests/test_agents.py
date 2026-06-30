@@ -483,6 +483,82 @@ def test_discard_after_extract_removes_file_keeps_work(db, tmp_path) -> None:
     assert row.file_id is None
 
 
+def test_file_status_includes_title_and_authors(client, db) -> None:
+    """#11: the file-status endpoint returns the linked Work's title + best authors assertion."""
+    from app.models.agent import AgentFile
+    from app.models.file import File, FileWorkLink
+    from app.models.metadata import MetadataAssertion
+    from app.models.work import Work
+
+    agent, headers = _agent_with_token(db)
+    file = File(sha256="c" * 64, size_bytes=1, mime_type="application/pdf", status="available")
+    work = Work(canonical_title="Deep Nets", normalized_title="deep nets")
+    db.add_all([file, work])
+    db.flush()
+    db.add_all(
+        [
+            FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False),
+            MetadataAssertion(
+                entity_type="work",
+                entity_id=work.id,
+                field_name="authors",
+                value="Jane Doe; John Roe",
+                source="grobid",
+                confidence=0.9,
+                selected_as_canonical=True,
+            ),
+            AgentFile(
+                agent_id=agent.id,
+                local_file_id="m1",
+                sha256="c" * 64,
+                size_bytes=1,
+                display_path="deep.pdf",
+                file_id=file.id,
+            ),
+        ]
+    )
+    db.commit()
+
+    rows = client.get("/api/v1/agents/files", headers=headers).json()
+    row = next(r for r in rows if r["local_file_id"] == "m1")
+    assert row["extracted_title"] == "Deep Nets"
+    assert row["extracted_authors"] == "Jane Doe; John Roe"
+
+
+def test_offer_teleport_requires_can_teleport(client, db) -> None:
+    """#12: agent-initiated teleport is rejected unless can_teleport is granted."""
+    agent, headers = _agent_with_token(db, can_teleport=False)
+    r = client.post(
+        "/api/v1/agents/files/o1/offer-teleport",
+        headers=headers,
+        files={"file": ("x.pdf", _io.BytesIO(_PDF), "application/pdf")},
+    )
+    assert r.status_code == 403
+
+
+def test_offer_teleport_stores_file_and_work(client, db) -> None:
+    """#12: a granted agent can push a file directly; it is stored + linked to a Work."""
+    from app.core.config import get_settings
+    from app.models.agent import AgentFile
+
+    agent, headers = _agent_with_token(db, can_teleport=True)
+    with (
+        _patch("app.services.storage.get_settings", return_value=get_settings()),
+        _patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            "/api/v1/agents/files/o1/offer-teleport",
+            headers=headers,
+            files={"file": ("offered.pdf", _io.BytesIO(_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    assert r.json()["status"] == "complete"
+    row = db.query(AgentFile).filter(AgentFile.local_file_id == "o1").first()
+    assert row.teleport_status == "complete"
+    assert row.processing_state == "teleported"
+    assert row.file_id is not None
+
+
 def test_agent_me_and_source_removed(client, db) -> None:
     from app.models.agent import AgentFile
 

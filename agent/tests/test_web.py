@@ -143,6 +143,43 @@ def test_forget_removes_indexed_file(tmp_path) -> None:
     assert AgentState(state_path).all_files() == []
 
 
+def test_view_route_streams_local_pdf(tmp_path) -> None:
+    """The local Read route (#13) serves an indexed PDF, resolving its path local-only."""
+    from paperracks_agent.state import AgentState
+
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\nbody")
+    state_path = tmp_path / "state.sqlite3"
+    state = AgentState(state_path)
+    state.upsert(local_file_id="vid", real_path=str(pdf), sha256="d", size_bytes=13)
+    state.close()
+
+    app = create_app("tok", state_path=state_path)
+    view = _route(app, "/api/files/{local_file_id}/view")
+
+    req = _request("/api/files/vid/view", query=b"token=tok")
+    req.scope["path_params"] = {"local_file_id": "vid"}
+    res = asyncio.run(view(req))
+    assert res.status_code == 200
+    assert res.media_type == "application/pdf"
+
+    # Unknown id → 404.
+    bad = _request("/api/files/none/view", query=b"token=tok")
+    bad.scope["path_params"] = {"local_file_id": "none"}
+    assert asyncio.run(view(bad)).status_code == 404
+
+    # Bad token → 401 (never reaches the filesystem).
+    denied = _request("/api/files/vid/view", query=b"token=wrong")
+    denied.scope["path_params"] = {"local_file_id": "vid"}
+    assert asyncio.run(view(denied)).status_code == 401
+
+
+def test_view_route_is_registered() -> None:
+    app = create_app("secret")
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/api/files/{local_file_id}/view" in paths
+
+
 def test_web_runtime_lifecycle(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("PARACORD_AGENT_HOME", str(tmp_path))
     assert web_server._read_runtime() is None

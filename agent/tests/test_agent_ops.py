@@ -20,6 +20,7 @@ class FakeClient:
         self.teleported: list[str] = []
         self.rejected: list[str] = []
         self.removed: list[str] = []
+        self.offered: list[str] = []
         self._pending = pending or []
         self._my_files = my_files or []
 
@@ -42,6 +43,10 @@ class FakeClient:
 
     async def upload_teleport_content(self, local_file_id: str, handle) -> dict:
         self.teleported.append(local_file_id)
+        return {"status": "complete"}
+
+    async def offer_teleport(self, local_file_id: str, handle) -> dict:
+        self.offered.append(local_file_id)
         return {"status": "complete"}
 
     async def reject_teleport(self, local_file_id: str, forever: bool = False) -> dict:
@@ -107,6 +112,50 @@ def test_blocked_request_is_rejected(tmp_path: Path) -> None:
     asyncio.run(agent_ops.fulfil_requests(config, state, client))
     assert client.rejected == [local_id]
     assert client.teleported == []
+
+
+def test_sync_caches_server_title_and_authors(tmp_path: Path) -> None:
+    """Server-returned title/authors (#11) are cached in local state on sync."""
+    config = _folder(tmp_path, "index_only")
+    state = AgentState(tmp_path / "state.sqlite3")
+    # First sync to learn the local_file_id.
+    asyncio.run(agent_ops.sync(config, AgentState(tmp_path / "state.sqlite3"), FakeClient()))
+    lid = state.all_files()[0].local_file_id
+    client = FakeClient(
+        my_files=[
+            {
+                "local_file_id": lid,
+                "processing_state": "extracted",
+                "extracted_title": "A Great Paper",
+                "extracted_authors": "Ada Lovelace; Alan Turing",
+            }
+        ]
+    )
+    asyncio.run(agent_ops.sync(config, state, client))
+    rec = next(r for r in state.all_files() if r.local_file_id == lid)
+    assert rec.extracted_title == "A Great Paper"
+    assert rec.extracted_authors == "Ada Lovelace; Alan Turing"
+
+
+def test_request_teleport_offer_pushes_bytes(tmp_path: Path) -> None:
+    """Agent-initiated teleport (#12) resolves the path locally and pushes the bytes."""
+    config = _folder(tmp_path, "index_only")
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    lid = state.all_files()[0].local_file_id
+    client = FakeClient()
+    ok = asyncio.run(agent_ops.request_teleport_offer(state, client, lid))
+    assert ok is True
+    assert client.offered == [lid]
+    assert (
+        next(r for r in state.all_files() if r.local_file_id == lid).processing_state
+        == "teleported"
+    )
+
+
+def test_request_teleport_offer_missing_file_returns_false(tmp_path: Path) -> None:
+    state = AgentState(tmp_path / "state.sqlite3")
+    assert asyncio.run(agent_ops.request_teleport_offer(state, FakeClient(), "nope")) is False
 
 
 def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch) -> None:

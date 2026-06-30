@@ -57,6 +57,18 @@ class PaRacORDServerClient:
             response.raise_for_status()
             return response.json()
 
+    async def offer_teleport(self, local_file_id: str, handle) -> dict:
+        """Agent-initiated teleport (#12): push bytes directly (requires can_teleport on the server)."""
+        async with httpx.AsyncClient(timeout=120) as client:
+            files = {"file": (f"{local_file_id}.pdf", handle, "application/pdf")}
+            response = await client.post(
+                f"{self.server_url}/api/v1/agents/files/{local_file_id}/offer-teleport",
+                files=files,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def upload_for_extraction(self, local_file_id: str, handle) -> dict:
         """Push bytes for index_and_extract: the server extracts then discards the PDF."""
         async with httpx.AsyncClient(timeout=120) as client:

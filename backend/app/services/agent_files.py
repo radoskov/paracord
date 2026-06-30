@@ -11,12 +11,13 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.agent import Agent, AgentFile
 from app.models.file import File, FileWorkLink
+from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services import storage
 from app.services.audit import record_event
@@ -70,6 +71,54 @@ def ingest_manifest(db: Session, *, agent: Agent, items: list) -> int:
         details={"item_count": len(items)},
     )
     return len(items)
+
+
+def extracted_metadata_for(
+    db: Session, agent_files: list[AgentFile]
+) -> dict[uuid.UUID, tuple[str | None, str | None]]:
+    """Resolve (title, authors) of each agent file's linked Work, keyed by AgentFile.id (#11).
+
+    Title is the linked Work's ``canonical_title``; authors is its best ``authors`` assertion
+    (canonical first, then confidence). Resolved in two batched queries to avoid an N+1.
+    """
+    by_file_id = {af.file_id: af for af in agent_files if af.file_id is not None}
+    if not by_file_id:
+        return {}
+    # file_id → work (one query); a file may link to several works — first link wins.
+    work_rows = db.execute(
+        select(FileWorkLink.file_id, Work.id, Work.canonical_title)
+        .join(Work, Work.id == FileWorkLink.work_id)
+        .where(FileWorkLink.file_id.in_(by_file_id.keys()))
+    ).all()
+    file_to_work: dict[uuid.UUID, tuple[uuid.UUID, str | None]] = {}
+    for file_id, work_id, title in work_rows:
+        file_to_work.setdefault(file_id, (work_id, title))
+    work_ids = [wid for wid, _ in file_to_work.values()]
+    authors_by_work: dict[uuid.UUID, str] = {}
+    if work_ids:
+        rows = db.execute(
+            select(MetadataAssertion.entity_id, MetadataAssertion.value)
+            .where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id.in_(work_ids),
+                MetadataAssertion.field_name == "authors",
+            )
+            .order_by(
+                MetadataAssertion.entity_id,
+                MetadataAssertion.selected_as_canonical.desc(),
+                func.coalesce(MetadataAssertion.confidence, 0).desc(),
+            )
+        ).all()
+        for entity_id, value in rows:
+            authors_by_work.setdefault(entity_id, value)
+    out: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+    for file_id, agent_file in by_file_id.items():
+        work = file_to_work.get(file_id)
+        if work is None:
+            continue
+        work_id, title = work
+        out[agent_file.id] = (title, authors_by_work.get(work_id))
+    return out
 
 
 def request_teleport(
@@ -179,6 +228,96 @@ def complete_teleport(
             "local_file_id": local_file_id,
             "file_id": str(file.id),
             "sha256_prefix": actual[:8],
+        },
+    )
+    return file
+
+
+def offer_teleport(
+    db: Session,
+    *,
+    agent: Agent,
+    local_file_id: str,
+    pdf_bytes: bytes,
+    settings: Settings | None = None,
+    display_path: str | None = None,
+) -> File:
+    """Agent-*initiated* teleport (#12): the agent pushes a file without a prior user request.
+
+    Allowed only when the owner has granted ``can_teleport`` (enforced at the endpoint). Creates
+    the manifest entry if it doesn't exist yet (so a file can be offered without a separate sync),
+    verifies the bytes against the reported/manifested hash, stores the managed file + Work, and
+    records ``teleport.completed`` with ``initiated_by='agent'``.
+    """
+    if settings is None:
+        settings = get_settings()
+    actual = hashlib.sha256(pdf_bytes).hexdigest()
+    agent_file = db.scalar(
+        select(AgentFile).where(
+            AgentFile.agent_id == agent.id, AgentFile.local_file_id == local_file_id
+        )
+    )
+    if agent_file is None:
+        agent_file = AgentFile(
+            agent_id=agent.id,
+            local_file_id=local_file_id,
+            sha256=actual,
+            size_bytes=len(pdf_bytes),
+            display_path=display_path,
+            virtual_path=display_path,
+            import_action="teleport",
+        )
+        db.add(agent_file)
+        db.flush()
+    if agent_file.teleport_blocked:
+        raise ValueError("File is blocked from teleport by the agent")
+    if actual != agent_file.sha256:
+        agent_file.teleport_status = "failed"
+        record_event(
+            db,
+            "teleport.failed",
+            entity_type="agent",
+            entity_id=str(agent.id),
+            details={
+                "local_file_id": local_file_id,
+                "reason": "sha256 mismatch",
+                "initiated_by": "agent",
+            },
+        )
+        raise ValueError("Uploaded content does not match the manifested SHA-256")
+
+    name = Path(agent_file.display_path or display_path or local_file_id).name or "teleport.pdf"
+    file, _created_file = storage._ensure_managed_file(
+        db, filename=name, pdf_bytes=pdf_bytes, settings=settings
+    )
+    has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
+    if not has_link:
+        title = storage._title_from_filename(Path(name))
+        raw_arxiv = storage._arxiv_id_from_filename(Path(name))
+        work = Work(
+            canonical_title=title,
+            normalized_title=normalize_title(title),
+            canonical_metadata_source="teleport",
+            arxiv_id=raw_arxiv,
+            arxiv_base_id=arxiv_base_id(raw_arxiv),
+        )
+        db.add(work)
+        db.flush()
+        db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+
+    agent_file.teleport_status = "complete"
+    agent_file.processing_state = "teleported"
+    agent_file.file_id = file.id
+    record_event(
+        db,
+        "teleport.completed",
+        entity_type="agent",
+        entity_id=str(agent.id),
+        details={
+            "local_file_id": local_file_id,
+            "file_id": str(file.id),
+            "sha256_prefix": actual[:8],
+            "initiated_by": "agent",
         },
     )
     return file

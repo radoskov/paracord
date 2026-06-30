@@ -30,6 +30,28 @@ def test_upsert_resolve_and_block(tmp_path: Path) -> None:
     state.close()
 
 
+def test_extracted_metadata_persists_and_is_not_wiped(tmp_path: Path) -> None:
+    """Synced title/authors (#11) persist; a later plain rescan (no metadata) keeps them."""
+    state = AgentState(tmp_path / "state.sqlite3")
+    state.upsert(
+        local_file_id="h1",
+        real_path="/p/a.pdf",
+        sha256="h1",
+        size_bytes=10,
+        extracted_title="Attention Is All You Need",
+        extracted_authors="Vaswani; Shazeer",
+    )
+    rec = state.all_files()[0]
+    assert rec.extracted_title == "Attention Is All You Need"
+    assert rec.extracted_authors == "Vaswani; Shazeer"
+    # A rescan-style upsert with no metadata must not clear the cached values.
+    state.upsert(local_file_id="h1", real_path="/p/a.pdf", sha256="h1", size_bytes=10)
+    rec = state.all_files()[0]
+    assert rec.extracted_title == "Attention Is All You Need"
+    assert rec.extracted_authors == "Vaswani; Shazeer"
+    state.close()
+
+
 def test_mark_absent_except(tmp_path: Path) -> None:
     state = AgentState(tmp_path / "state.sqlite3")
     for i in (1, 2, 3):

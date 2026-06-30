@@ -57,3 +57,7 @@ class AgentFileStatus(BaseModel):
     teleport_status: str
     teleport_policy: str
     teleport_blocked: bool
+    # Server→agent metadata sync (#11): canonical title + authors of the linked Work, so the
+    # agent GUI can search/sort by them. Populated by the file-status endpoint, not the model.
+    extracted_title: str | None = None
+    extracted_authors: str | None = None

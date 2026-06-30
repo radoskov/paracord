@@ -12,7 +12,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from paperracks_agent import agent_ops
@@ -245,6 +245,11 @@ def create_app(
                     "blocked": rec.teleport_blocked,
                     "present": rec.present,
                     "processing_state": sf.get("processing_state", rec.processing_state),
+                    "teleport_status": sf.get("teleport_status"),
+                    # Server→agent metadata sync (#11): prefer the fresh server value, fall back to
+                    # the locally cached copy so titles/authors survive an offline refresh.
+                    "extracted_title": sf.get("extracted_title") or rec.extracted_title,
+                    "extracted_authors": sf.get("extracted_authors") or rec.extracted_authors,
                 }
             )
         return JSONResponse(rows)
@@ -280,9 +285,45 @@ def create_app(
             if path and path.exists():
                 with path.open("rb") as handle:
                     await client.upload_for_extraction(local_file_id, handle)
+        elif action == "offer_teleport":
+            # Agent-initiated teleport (#12): push the file's bytes directly to the server.
+            ok = await agent_ops.request_teleport_offer(state, client, local_file_id)
+            if not ok:
+                return JSONResponse(
+                    {"detail": "File not found locally; re-sync first."}, status_code=404
+                )
         else:
             return JSONResponse({"detail": "unknown action"}, status_code=400)
         return JSONResponse({"ok": True})
+
+    async def api_view_file(request: Request):
+        """Stream a locally-indexed PDF for in-browser reading (#13).
+
+        Loopback + token-gated, and the id → real path resolution is **local-only** (state.resolve_path);
+        no server-supplied path is ever accepted. Only files already in the local index can be served.
+        """
+        if (deny := guard(request)) is not None:
+            return deny
+        local_file_id = request.path_params["local_file_id"]
+        path = _state().resolve_path(local_file_id)
+        if path is None or not path.exists() or not path.is_file():
+            return JSONResponse({"detail": "Not found locally."}, status_code=404)
+        if path.suffix.lower() != ".pdf":
+            return JSONResponse({"detail": "Not a PDF."}, status_code=400)
+
+        def _chunks():
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(256 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return StreamingResponse(
+            _chunks(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+        )
 
     async def on_error(request: Request, exc: Exception):
         """Surface any unhandled handler error as JSON so the GUI can toast it (not a silent 500)."""
@@ -301,6 +342,7 @@ def create_app(
         Route("/api/forget", api_forget, methods=["POST"]),
         Route("/api/sync", api_sync, methods=["POST"]),
         Route("/api/files", api_files),
+        Route("/api/files/{local_file_id}/view", api_view_file),
         Route("/api/requests", api_requests),
         Route("/api/requests/{local_file_id}/{action}", api_request_action, methods=["POST"]),
     ]
@@ -336,8 +378,17 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}
 td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-align:middle}
 .muted{color:#64717f;font-size:.85rem}.ok{color:#14532d}.bad{color:#b3261e}
 .pill{font-size:.72rem;border-radius:10px;padding:.05rem .45rem;background:#eef1f4;color:#41505f}
-.pill.mono{font-family:ui-monospace,Menlo,monospace;cursor:help}
+.pill.mono{font-family:ui-monospace,Menlo,monospace;cursor:pointer}
+.pill.mono:hover{background:#dde6ef}
+.fullhash{position:absolute;left:-9999px}
 .paused{opacity:.55}
+.statusLight{display:inline-block;width:.7rem;height:.7rem;border-radius:50%;background:#888;
+  margin-right:.4rem;vertical-align:middle;box-shadow:0 0 0 2px rgba(255,255,255,.15)}
+.statusLight.green{background:#3fbf6b}.statusLight.yellow{background:#e3b23c}.statusLight.red{background:#e0564b}
+.filters{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem}
+.filters input{flex:1;min-width:10rem}
+th.sortable{cursor:pointer;user-select:none}
+.titlecell{max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal{position:fixed;inset:0;background:rgba(20,28,38,.5);display:none;align-items:center;justify-content:center;z-index:20}
 .modal.open{display:flex}
 .modal .box{background:#fff;border-radius:10px;width:min(40rem,92vw);max-height:84vh;display:flex;flex-direction:column}
@@ -353,7 +404,7 @@ td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-al
 .toast.bad{background:#9c1c12}.toast.ok{background:#1f6b3a}
 </style></head><body>
 <header>
-  <div class="title">PaRacORD Local Agent</div>
+  <div class="title"><span class="statusLight" id="statusLight" title="server status"></span>PaRacORD Local Agent</div>
   <div class="conn" id="conn">…</div>
 </header>
 <nav>
@@ -401,6 +452,16 @@ td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-al
     <div class="card"><h2>Indexed files
         <button class="sec tiny" onclick="act(sync)">Sync now</button>
         <button class="sec tiny" onclick="refresh()">Refresh</button></h2>
+      <div class="filters">
+        <input id="fSearch" placeholder="search filename, hash, title or authors…" oninput="renderFiles()">
+        <label>action <select id="fAction" onchange="renderFiles()"><option value="">all</option>
+          <option value="index_only">index_only</option><option value="index_and_extract">index_and_extract</option><option value="teleport">teleport</option></select></label>
+        <label>state <select id="fState" onchange="renderFiles()"><option value="">all</option></select></label>
+        <label>sort <select id="fSort" onchange="renderFiles()">
+          <option value="file">file</option><option value="title">title</option>
+          <option value="action">action</option><option value="state">state</option>
+          <option value="hash">hash</option></select></label>
+      </div>
       <div id="files"></div>
     </div>
   </section>
@@ -423,7 +484,10 @@ td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-al
     <div class="foot">
       <label>action <select id="pAction"><option>index_only</option><option>index_and_extract</option><option>teleport</option></select></label>
       <label>teleport <select id="pPolicy"><option value="ask">ask</option><option value="allow">allow</option></select></label>
-      <label>mode <select id="pMode"><option value="monitored">monitored</option><option value="once">once</option></select></label>
+      <span class="row" style="gap:.3rem">mode
+        <label><input type="radio" name="pMode" value="monitored" onchange="savePMode()"> monitored</label>
+        <label><input type="radio" name="pMode" value="once" onchange="savePMode()"> once</label>
+      </span>
       <button onclick="addCurrentFolder()">Add this folder</button>
     </div>
   </div>
@@ -432,6 +496,11 @@ td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-al
 <div id="toasts"></div>
 <script>
 let pickerParent=null;
+let allFiles=[];        // last /api/files result, cached for client-side search/sort/filter (#15)
+let canTeleport=false;  // from /api/status me.can_teleport — gates the offer-teleport button (#12)
+// Capture the access token from the opening URL (the session cookie is httpOnly, so JS can't read
+// it); needed to authorize the loopback /view route opened in a new tab (#13).
+const pageToken=new URLSearchParams(location.search).get('token')||'';
 function show(t){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.querySelectorAll('.tab').forEach(s=>s.classList.toggle('active',s.dataset.tab===t));
@@ -451,9 +520,16 @@ async function act(fn,okMsg){try{const r=await fn();
   const m=typeof okMsg==='function'?okMsg(r):(okMsg!==undefined?okMsg:(typeof r==='string'?r:'Done'));
   toast(m,'ok');}catch(e){toast(e.message,'bad');}await refresh();}
 
+function setLight(color,title){const el=document.getElementById('statusLight');
+  el.className='statusLight '+color;el.title=title;}
 async function refresh(){
   let s;
-  try{s=await api('/api/status');}catch(e){document.getElementById('conn').textContent='status error: '+e.message;return;}
+  try{s=await api('/api/status');}catch(e){document.getElementById('conn').textContent='status error: '+e.message;setLight('red','status error: '+e.message);return;}
+  canTeleport=!!(s.connected&&s.me&&s.me.can_teleport);
+  // Status light (#17): green = reachable + approved; yellow = reachable but error; red = unreachable.
+  if(!s.connected){setLight('red','unreachable'+(s.error?' — '+s.error:''));}
+  else if(s.me&&s.me.status==='approved'){setLight('green','reachable + approved');}
+  else{setLight('yellow','reachable but '+((s.me&&s.me.status)||'no agent identity'));}
   document.getElementById('conn').innerHTML = s.connected
     ? `<span class="ok">●</span> connected to ${s.server_url} — agent <b>${s.me.name}</b> [${s.me.status}]; can: ${Object.keys(s.me).filter(k=>k.startsWith('can_')&&s.me[k]).map(k=>k.slice(4)).join(', ')||'—'}`
     : `<span class="bad">●</span> not connected (${s.server_url}) ${s.error?'— '+s.error:''}`;
@@ -478,17 +554,9 @@ async function refresh(){
         `<button class="danger tiny" onclick="removeItem('${ep}')">Remove</button></td></tr>`;
     }).join('')+'</table>'
     : '<p class="muted">No managed items. Click “Add folder or file…”.</p>';
-  // indexed files
-  let files=[];try{files=await api('/api/files');}catch(e){toast('files: '+e.message,'bad');}
-  document.getElementById('cFiles').textContent=files.length;
-  document.getElementById('files').innerHTML = files.length? '<table><tr><th>file</th><th>id (hash)</th><th>action</th><th>state</th><th></th></tr>'+
-    files.map(f=>`<tr><td>${esc(f.virtual_path||f.local_file_id.slice(0,10))}${f.present?'':' <span class="bad">(removed)</span>'}</td>`+
-      `<td><span class="pill mono" title="${esc(f.local_file_id)}\n(this content hash is the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span></td>`+
-      `<td><span class="pill">${f.action}</span></td><td>${f.processing_state}${f.blocked?' <span class="bad">blocked</span>':''}</td>`+
-      `<td class="row"><button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')">re-extract</button>`+
-      (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')">unblock</button>`:'')+
-      `<button class="danger tiny" onclick="forget('${f.local_file_id}')">forget</button></td></tr>`).join('')+'</table>'
-    : '<p class="muted">No files indexed yet — add a folder, then “Sync now”.</p>';
+  // indexed files (#15: cache + client-side search/sort/filter via renderFiles)
+  try{allFiles=await api('/api/files');}catch(e){toast('files: '+e.message,'bad');allFiles=[];}
+  renderFiles();
   // requests
   let reqs=[];try{reqs=await api('/api/requests');}catch(e){/* visibility/connectivity */}
   document.getElementById('cReqs').textContent=reqs.length||0;
@@ -501,6 +569,58 @@ async function refresh(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');}
 // Encode a value for safe use as an onclick JS-string argument (apostrophe included). Decoded in the handler.
 function enc(s){return encodeURIComponent(String(s)).replace(/'/g,'%27');}
+
+// --- indexed files: client-side search / sort / filter (#15) ---
+function renderFiles(){
+  const files=allFiles||[];
+  document.getElementById('cFiles').textContent=files.length;
+  // Keep the state filter's options in sync with the states actually present.
+  const fState=document.getElementById('fState');
+  const states=[...new Set(files.map(f=>f.processing_state).filter(Boolean))].sort();
+  const cur=fState.value;
+  fState.innerHTML='<option value="">all</option>'+states.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  fState.value=states.includes(cur)?cur:'';
+  const q=document.getElementById('fSearch').value.trim().toLowerCase();
+  const fAction=document.getElementById('fAction').value;
+  const fSt=fState.value;
+  const sort=document.getElementById('fSort').value;
+  let rows=files.filter(f=>{
+    if(fAction&&f.action!==fAction)return false;
+    if(fSt&&f.processing_state!==fSt)return false;
+    if(!q)return true;
+    const hay=[f.virtual_path,f.local_file_id,f.extracted_title,f.extracted_authors].map(x=>(x||'').toLowerCase());
+    return hay.some(h=>h.includes(q));
+  });
+  const key=f=>({file:(f.virtual_path||f.local_file_id),title:(f.extracted_title||''),
+    action:f.action,state:f.processing_state,hash:f.local_file_id})[sort]||'';
+  rows.sort((a,b)=>String(key(a)).toLowerCase().localeCompare(String(key(b)).toLowerCase()));
+  const el=document.getElementById('files');
+  if(!files.length){el.innerHTML='<p class="muted">No files indexed yet — add a folder, then “Sync now”.</p>';return;}
+  if(!rows.length){el.innerHTML='<p class="muted">No files match the current filters.</p>';return;}
+  el.innerHTML='<table><tr><th>file</th><th>id (hash)</th><th>title</th><th>action</th><th>state</th><th></th></tr>'+
+    rows.map(f=>{
+      const title=f.extracted_title?`<span class="titlecell" title="${esc(f.extracted_title)}${f.extracted_authors?'\n'+esc(f.extracted_authors):''}">${esc(f.extracted_title)}</span>`:'<span class="muted">—</span>';
+      const teleported=(f.processing_state==='teleported')||(f.teleport_status==='complete');
+      const offerBtn=(canTeleport&&!teleported&&!f.blocked&&f.present)
+        ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')">offer teleport</button>`:'';
+      return `<tr><td>${esc(f.virtual_path||f.local_file_id.slice(0,10))}${f.present?'':' <span class="bad">(removed)</span>'}</td>`+
+        `<td><span class="pill mono" data-hash="${esc(f.local_file_id)}" onclick="copyHash('${f.local_file_id}')" title="click to copy full hash (the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span>`+
+        `<span class="fullhash">${esc(f.local_file_id)}</span></td>`+
+        `<td>${title}</td>`+
+        `<td><span class="pill">${f.action}</span></td><td>${f.processing_state}${f.blocked?' <span class="bad">blocked</span>':''}</td>`+
+        `<td class="row"><button class="sec tiny" onclick="readFile('${f.local_file_id}')"${f.present?'':' disabled'}>read</button>`+
+        offerBtn+
+        `<button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')">re-extract</button>`+
+        (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')">unblock</button>`:'')+
+        `<button class="danger tiny" onclick="forget('${f.local_file_id}')">forget</button></td></tr>`;
+    }).join('')+'</table>';
+}
+// Open a locally-indexed PDF in a new tab (#13). The httpOnly session cookie authorizes the
+// same-origin navigation; the captured page token is appended as a fallback when no cookie is set.
+function readFile(id){const q=pageToken?`?token=${encodeURIComponent(pageToken)}`:'';
+  window.open(`/api/files/${id}/view${q}`,'_blank');}
+// Copy the full content hash to the clipboard (#14).
+function copyHash(h){navigator.clipboard.writeText(h).then(()=>toast('Hash copied','ok'),()=>toast('Copy failed','bad'));}
 
 // --- server connection / enrollment ---
 function connect(){return api('/api/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:document.getElementById('url').value})});}
@@ -530,7 +650,12 @@ async function browse(path){
       : `<span class="nm">📄 ${esc(e.name)}</span><button class="sec tiny" onclick="addPath(decodeURIComponent('${ep}'),'file')">add</button>`}</div>`;}).join('')
     :'<p class="muted" style="padding:0 1rem">Empty (no subfolders or PDFs).</p>';
 }
-function pickerOpts(){return {action:document.getElementById('pAction').value,teleport_policy:document.getElementById('pPolicy').value,mode:document.getElementById('pMode').value};}
+function pMode(){const r=document.querySelector('input[name=pMode]:checked');return r?r.value:'monitored';}
+function savePMode(){try{localStorage.setItem('pMode',pMode());}catch(e){}}
+function loadPMode(){let v='monitored';try{v=localStorage.getItem('pMode')||'monitored';}catch(e){}
+  const r=document.querySelector(`input[name=pMode][value="${v}"]`)||document.querySelector('input[name=pMode][value="monitored"]');
+  if(r)r.checked=true;}
+function pickerOpts(){return {action:document.getElementById('pAction').value,teleport_policy:document.getElementById('pPolicy').value,mode:pMode()};}
 function addPath(path,kind){
   const o=pickerOpts();
   act(()=>api('/api/items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,kind,...o})}),
@@ -545,6 +670,7 @@ function reqAct(id,a,msg){act(()=>api(`/api/requests/${id}/${a}`,{method:'POST',
 function rejectForever(id){if(!confirm('Reject and block all future requests for this file?'))return;
   act(()=>api(`/api/requests/${id}/reject`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({forever:true})}),'Blocked');}
 
+loadPMode();
 refresh();
 setInterval(refresh,15000);
 </script></body></html>"""
