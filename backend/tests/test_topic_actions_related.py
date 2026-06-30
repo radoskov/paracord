@@ -70,7 +70,8 @@ def test_related_papers_reason_uses_shared_keywords(client, auth_headers, db):
 
 
 def test_topic_accept_as_tag_and_create_shelf(client, auth_headers, db):
-    h = auth_headers("editor")
+    # create-shelf-from-topic is a librarian+ structural action (Phase H).
+    h = auth_headers("librarian")
     # A small two-cluster corpus on a shelf.
     from app.models.organization import Shelf, ShelfWork
     from app.models.work import Work

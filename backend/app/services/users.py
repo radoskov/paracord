@@ -16,7 +16,13 @@ from app.services.audit import record_event
 
 # Roles an admin endpoint may assign/create. ``owner`` is never assignable: it is the single,
 # immutable bootstrap account. ``admin`` is assignable only by the owner (enforced separately).
-_VALID_ROLES = {str(Role.ADMIN), str(Role.EDITOR), str(Role.READER)}
+_VALID_ROLES = {
+    str(Role.ADMIN),
+    str(Role.LIBRARIAN),
+    str(Role.EDITOR),
+    str(Role.CONTRIBUTOR),
+    str(Role.READER),
+}
 
 
 def _check_role(role: str) -> str:
@@ -94,6 +100,12 @@ def create_user(
         entity_id=str(user.id),
         details={"username": username, "role": role, "method": "admin_api"},
     )
+    # Phase H: every user gets an auto-managed personal group (named == username) seeded with the
+    # configured default grants.
+    from app.services.groups import apply_default_grants, create_personal_group
+
+    group = create_personal_group(db, user=user, actor=actor)
+    apply_default_grants(db, group=group, actor=actor)
     return user
 
 
@@ -216,6 +228,10 @@ def delete_user(
     _guard_target(actor, user)
     if user.disabled_at is None:
         raise ValueError("Disable the user before deleting it")
+    # Phase H: delete the user's personal group first (its memberships/grants cascade via FK).
+    from app.services.groups import delete_personal_group
+
+    delete_personal_group(db, user_id=user_id, actor=actor)
     db.execute(delete(UserSession).where(UserSession.user_id == user_id))
     username = user.username
     db.delete(user)

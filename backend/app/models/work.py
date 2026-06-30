@@ -37,6 +37,11 @@ class Work(Base):
     confirmed_fields: Mapped[list | None] = mapped_column(_JSONB, default=list)
     # Deterministic keyphrases from extraction (SPEC §8.15.1), most salient first.
     keywords: Mapped[list | None] = mapped_column(_JSONB, default=list)
+    # The user who created this work (Phase H access control). NULL = system/agent/import origin,
+    # which is treated as a "loose" (no-owner) paper; contributor own-only edits key off this.
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

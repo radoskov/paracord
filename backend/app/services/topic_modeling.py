@@ -135,6 +135,7 @@ def model_topics(
     random_seed: int | None = None,
     allow_outliers: bool = False,
     hierarchical: bool = False,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> dict:
     """Cluster a scope's works into keyword-labelled topics and persist assignments.
 
@@ -142,6 +143,7 @@ def model_topics(
     backend returns the same clusters enriched with BERTopic-style metadata (representative works,
     coherence, optional outliers + hierarchy). It is deterministic — the clustering is seeded from
     the stable title order — so a ``random_seed`` is accepted for API parity but not required.
+    ``visible_ids`` (Phase H) restricts the scope to works the caller may see.
     """
     if backend in ("embedding", "bertopic"):
         return _model_topics_embedding(
@@ -153,10 +155,13 @@ def model_topics(
             embedding_model=embedding_model,
             allow_outliers=allow_outliers,
             hierarchical=hierarchical,
+            visible_ids=visible_ids,
         )
 
     model_id = f"keyword-kmeans:{scope_type}:{scope_id or 'all'}"
-    works = _ordered_works(_scope_works(db, scope_type=scope_type, scope_id=scope_id))
+    works = _ordered_works(
+        _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
+    )
     documents = [(work, _tokenize(_doc_text(work))) for work in works]
     documents = [(work, tokens) for work, tokens in documents if tokens]
 
@@ -237,6 +242,7 @@ def _model_topics_embedding(
     embedding_model: str | None,
     allow_outliers: bool,
     hierarchical: bool,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> dict:
     """BERTopic-style backend: deterministic clustering + representative works / coherence / etc.
 
@@ -246,7 +252,9 @@ def _model_topics_embedding(
     backend can replace the internals behind this same return contract.
     """
     model_id = f"{backend}:{scope_type}:{scope_id or 'all'}"
-    works = _ordered_works(_scope_works(db, scope_type=scope_type, scope_id=scope_id))
+    works = _ordered_works(
+        _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
+    )
     documents = [(work, _tokenize(_doc_text(work))) for work in works]
     documents = [(work, tokens) for work, tokens in documents if tokens]
 
@@ -373,27 +381,29 @@ def _ordered_works(works: list[Work]) -> list[Work]:
     )
 
 
-def _scope_works(db: Session, *, scope_type: str, scope_id: uuid.UUID | None) -> list[Work]:
+def _scope_works(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    visible_ids: set[uuid.UUID] | None = None,
+) -> list[Work]:
     if scope_type == "library":
-        return list(db.scalars(select(Work)).all())
-
-    if scope_type == "shelf":
+        works = list(db.scalars(select(Work)).all())
+    elif scope_type == "shelf":
         if scope_id is None:
             raise ValueError("scope id is required for a shelf topic model")
-
-        return list(
+        works = list(
             db.scalars(
                 select(Work)
                 .join(ShelfWork, ShelfWork.work_id == Work.id)
                 .where(ShelfWork.shelf_id == scope_id)
             ).all()
         )
-
-    if scope_type == "rack":
+    elif scope_type == "rack":
         if scope_id is None:
             raise ValueError("scope id is required for a rack topic model")
-
-        return list(
+        works = list(
             db.scalars(
                 select(Work)
                 .join(ShelfWork, ShelfWork.work_id == Work.id)
@@ -402,8 +412,11 @@ def _scope_works(db: Session, *, scope_type: str, scope_id: uuid.UUID | None) ->
                 .distinct()
             ).all()
         )
-
-    raise ValueError(f"Unsupported topic scope: {scope_type}")
+    else:
+        raise ValueError(f"Unsupported topic scope: {scope_type}")
+    if visible_ids is not None:
+        works = [w for w in works if w.id in visible_ids]
+    return works
 
 
 def _doc_text(work: Work) -> str:

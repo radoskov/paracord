@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_min_role
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
@@ -17,7 +17,7 @@ from app.services.storage import create_server_folder_source
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 
 
 class ServerFolderSourceCreate(BaseModel):

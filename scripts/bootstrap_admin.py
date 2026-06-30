@@ -51,6 +51,11 @@ def create_first_owner(username: str, password: str) -> User:
                 details={"method": "server_console_bootstrap", "role": Role.OWNER},
             )
         )
+        # Phase H: the owner needs a personal group too (it is created outside create_user here).
+        from app.services.groups import apply_default_grants, create_personal_group  # noqa: E402
+
+        group = create_personal_group(session, user=owner, actor=owner)
+        apply_default_grants(session, group=group, actor=owner)
         session.commit()
         session.refresh(owner)
         return owner

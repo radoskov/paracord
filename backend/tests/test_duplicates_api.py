@@ -70,7 +70,7 @@ def test_scan_duplicates_endpoint_creates_and_lists_candidates(db_session, edito
     db_session.add_all([first, second])
     db_session.commit()
 
-    result = scan_duplicates(DuplicateScanRequest(work_id=first.id), db=db_session, _=editor)
+    result = scan_duplicates(DuplicateScanRequest(work_id=first.id), db=db_session, actor=editor)
 
     assert result.scanned_works == 1
     assert result.candidate_count == 1
@@ -80,6 +80,7 @@ def test_scan_duplicates_endpoint_creates_and_lists_candidates(db_session, edito
         candidate_type=None,
         limit=100,
         db=db_session,
+        actor=editor,
     )
     assert listed[0].id == result.candidates[0].id
 
@@ -407,7 +408,7 @@ def test_candidate_view_includes_labels_and_suggested_target(db_session, editor:
     )
 
     [view] = list_duplicate_candidates(
-        status_filter="open", candidate_type=None, limit=100, db=db_session
+        status_filter="open", candidate_type=None, limit=100, db=db_session, actor=editor
     )
     assert view.id == candidate.id
     assert {view.entity_a_label, view.entity_b_label} == {"Attention v1", "Attention v2"}

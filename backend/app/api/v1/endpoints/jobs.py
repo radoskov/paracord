@@ -6,13 +6,13 @@ queued, running, finished, or failed — and whether the background worker is av
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import require_roles
+from app.api.deps import require_min_role
 from app.core.security import Role
 from app.models.user import User
 from app.workers.queue import clear_jobs, queue_status
 
 router = APIRouter()
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 
 
 @router.get("")

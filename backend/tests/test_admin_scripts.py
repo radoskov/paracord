@@ -40,9 +40,11 @@ def test_create_first_owner_records_audit_event(script_session) -> None:
     with script_session() as session:
         events = session.scalars(select(AuditEvent)).all()
 
-    assert len(events) == 1
-    assert events[0].event_type == "user.created"
-    assert events[0].details["method"] == "server_console_bootstrap"
+    # The owner is created with a personal group (Phase H), which also audits a group.created event.
+    user_events = [e for e in events if e.event_type == "user.created"]
+    assert len(user_events) == 1
+    assert user_events[0].details["method"] == "server_console_bootstrap"
+    assert {e.event_type for e in events} <= {"user.created", "group.created"}
 
 
 def test_create_first_owner_refuses_second_owner(script_session) -> None:
@@ -72,7 +74,12 @@ def test_reset_password_updates_hash_and_records_audit_event(script_session) -> 
     assert user is not None
     assert verify_password("new-password", user.password_hash)
     assert not verify_password("old-password", user.password_hash)
-    assert [event.event_type for event in events] == ["user.created", "auth.password_reset_cli"]
+    # Filter out the personal-group bootstrap event (Phase H) to assert the auth sequence.
+    auth_events = [e for e in events if e.event_type != "group.created"]
+    assert [event.event_type for event in auth_events] == [
+        "user.created",
+        "auth.password_reset_cli",
+    ]
     assert events[-1].details["method"] == "server_console"
     assert events[-1].details["sessions_revoked"] is True
     assert events[-1].details["sessions_revoked_count"] == 1

@@ -6,7 +6,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import Role
+from app.core.security import Role, role_at_least
 from app.db.session import get_db
 from app.models.agent import Agent
 from app.models.user import User
@@ -60,6 +60,54 @@ def require_roles(*allowed_roles: str) -> Callable[..., User]:
         return user
 
     return dependency
+
+
+def require_min_role(minimum: Role) -> Callable[..., User]:
+    """Build a ladder-based dependency that allows any role at or above ``minimum``.
+
+    Unlike :func:`require_roles` (an exact set), this honours the linear privilege ladder, so a
+    higher role (e.g. ``admin``/``owner``) always satisfies a lower floor (e.g. ``contributor``).
+    Fine-grained per-object access (own-only paper edits, rack/shelf grants) is still enforced in
+    the endpoint body via ``app.services.access``; this is only the coarse role floor.
+    """
+
+    def dependency(user: User = Depends(require_authenticated_user)) -> User:
+        if not role_at_least(user.role, minimum):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient role for this operation",
+            )
+        return user
+
+    return dependency
+
+
+def require_contributor(user: User = Depends(require_authenticated_user)) -> User:
+    """Allow any role at or above ``contributor`` (the paper-mutation floor).
+
+    Reader is rejected; contributor/editor/librarian/admin/owner pass. Per-object scoping
+    (contributor = own papers only) is enforced separately via ``app.services.access``.
+    """
+    if not role_at_least(user.role, Role.CONTRIBUTOR):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient role for this operation",
+        )
+    return user
+
+
+def require_librarian(user: User = Depends(require_authenticated_user)) -> User:
+    """Allow any role at or above ``librarian`` (the rack/shelf-structure floor).
+
+    Reader/contributor/editor are rejected; librarian/admin/owner pass. Per-object grant checks
+    (visible/private targets need a group grant) are enforced separately via ``app.services.access``.
+    """
+    if not role_at_least(user.role, Role.LIBRARIAN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient role for this operation",
+        )
+    return user
 
 
 def require_admin(user: User = Depends(require_authenticated_user)) -> User:

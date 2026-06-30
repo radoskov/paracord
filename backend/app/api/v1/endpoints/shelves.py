@@ -4,31 +4,55 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
-from app.core.security import Role
+from app.api.deps import require_authenticated_user, require_librarian
 from app.db.session import get_db
+from app.models.access_settings import ACCESS_LEVELS
 from app.models.organization import Shelf, ShelfWork
 from app.models.user import User
 from app.models.work import Work
+from app.services import access
+from app.services.access_settings import get_default_access_level
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+AUTH_DEP = Depends(require_authenticated_user)
+# Shelf structure changes (create/edit/membership) require the librarian floor; per-object grant
+# checks (visible/private need a grant) are enforced in the body via ``access.can_modify_shelf``.
+LIBRARIAN_DEP = Depends(require_librarian)
+
+
+def _validate_access_level(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in ACCESS_LEVELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown access level (allowed: {ACCESS_LEVELS})",
+        )
+    return normalized
 
 
 class ShelfCreate(BaseModel):
     name: str
     description: str | None = None
+    access_level: str | None = None
 
 
 class ShelfUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     status: str | None = None
+    access_level: str | None = None
+
+    @field_validator("access_level")
+    @classmethod
+    def _check_level(cls, value: str | None) -> str | None:
+        return _validate_access_level(value)
 
 
 class ShelfRead(BaseModel):
@@ -36,6 +60,7 @@ class ShelfRead(BaseModel):
     name: str
     description: str | None = None
     status: str
+    access_level: str
     created_at: datetime
     updated_at: datetime
 
@@ -60,22 +85,33 @@ class ShelfWorkAdd(BaseModel):
     note: str | None = None
 
 
+def _guard_modify_shelf(db: Session, actor: User, shelf: Shelf) -> None:
+    if not access.can_modify_shelf(db, actor, shelf):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this shelf",
+        )
+
+
 @router.get("", response_model=list[ShelfRead])
-def list_shelves(db: Session = DB_DEP) -> list[Shelf]:
-    """List active shelves."""
-    return list(db.scalars(select(Shelf).order_by(Shelf.name)).all())
+def list_shelves(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[Shelf]:
+    """List shelves the caller may see."""
+    stmt = access.visible_shelves_query(db, actor).order_by(Shelf.name)
+    return list(db.scalars(stmt).all())
 
 
 @router.post("", response_model=ShelfRead, status_code=status.HTTP_201_CREATED)
 def create_shelf(
     payload: ShelfCreate,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = LIBRARIAN_DEP,
 ) -> Shelf:
-    """Create a shelf."""
+    """Create a shelf (librarian+). Defaults to the global default access level."""
+    level = _validate_access_level(payload.access_level) or get_default_access_level(db)
     shelf = Shelf(
         name=payload.name,
         description=payload.description,
+        access_level=level,
         created_by_user_id=actor.id,
     )
     db.add(shelf)
@@ -89,12 +125,13 @@ def update_shelf(
     shelf_id: uuid.UUID,
     payload: ShelfUpdate,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = LIBRARIAN_DEP,
 ) -> Shelf:
-    """Edit or archive a shelf."""
+    """Edit or archive a shelf (requires modify access to this shelf)."""
     shelf = db.get(Shelf, shelf_id)
     if shelf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    _guard_modify_shelf(db, actor, shelf)
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(shelf, key, value)
@@ -105,9 +142,14 @@ def update_shelf(
 
 
 @router.get("/{shelf_id}/works", response_model=list[ShelfWorkRead])
-def list_shelf_works(shelf_id: uuid.UUID, db: Session = DB_DEP) -> list[Work]:
-    """List works in a shelf."""
-    if db.get(Shelf, shelf_id) is None:
+def list_shelf_works(
+    shelf_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[Work]:
+    """List works in a shelf (requires SEE on the shelf; works the caller can't see are hidden)."""
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    if not access.can_see_shelf(db, actor, shelf):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
     stmt = (
         select(Work)
@@ -115,6 +157,9 @@ def list_shelf_works(shelf_id: uuid.UUID, db: Session = DB_DEP) -> list[Work]:
         .where(ShelfWork.shelf_id == shelf_id)
         .order_by(ShelfWork.position.nullslast(), Work.canonical_title)
     )
+    visible = access.visible_work_ids(db, actor)
+    if visible is not None:
+        stmt = stmt.where(Work.id.in_(visible))
     return list(db.scalars(stmt).all())
 
 
@@ -123,12 +168,17 @@ def add_work_to_shelf(
     shelf_id: uuid.UUID,
     payload: ShelfWorkAdd,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = LIBRARIAN_DEP,
 ) -> None:
-    """Add a work to a shelf."""
-    if db.get(Shelf, shelf_id) is None:
+    """Add a work to a shelf (requires modify access to the shelf)."""
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
-    if db.get(Work, payload.work_id) is None:
+    _guard_modify_shelf(db, actor, shelf)
+    work = db.get(Work, payload.work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    if not access.can_see_work(db, actor, work):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": payload.work_id})
     if link is None:
@@ -152,9 +202,13 @@ def remove_work_from_shelf(
     shelf_id: uuid.UUID,
     work_id: uuid.UUID,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = LIBRARIAN_DEP,
 ) -> None:
-    """Remove a work from a shelf."""
+    """Remove a work from a shelf (requires modify access to the shelf)."""
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")
+    _guard_modify_shelf(db, actor, shelf)
     link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": work_id})
     if link is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")

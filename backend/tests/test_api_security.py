@@ -33,9 +33,12 @@ def test_health_is_public(client):
 
 def test_write_role_matrix(client, auth_headers):
     reader, editor, owner = auth_headers("reader"), auth_headers("editor"), auth_headers("owner")
-    # Editors (and owners) can write library content; readers cannot.
+    librarian = auth_headers("librarian")
+    # Phase H: shelf/rack structure is librarian+. Readers and editors cannot create shelves;
+    # librarians and owners can.
     assert client.post("/api/v1/shelves", headers=reader, json={"name": "r"}).status_code == 403
-    assert client.post("/api/v1/shelves", headers=editor, json={"name": "e"}).status_code == 201
+    assert client.post("/api/v1/shelves", headers=editor, json={"name": "e"}).status_code == 403
+    assert client.post("/api/v1/shelves", headers=librarian, json={"name": "l"}).status_code == 201
     assert client.post("/api/v1/shelves", headers=owner, json={"name": "o"}).status_code == 201
     # User management requires owner or admin; editors/readers are rejected.
     payload = {"username": "newbie", "password": "test-pass-1234", "role": "reader"}

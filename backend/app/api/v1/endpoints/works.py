@@ -11,9 +11,8 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_authenticated_user, require_roles
+from app.api.deps import require_authenticated_user, require_contributor
 from app.core.config import get_settings
-from app.core.security import Role
 from app.db.session import get_db
 from app.models.ai import Embedding, Summary
 from app.models.annotation import Annotation
@@ -24,6 +23,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
+from app.services import access
 from app.services.audit import record_event
 from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
 from app.services.search_query import parse_search_query
@@ -43,8 +43,26 @@ _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upl
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+# Paper mutations require at least the contributor floor; per-object scoping (own-only for
+# contributors, see/modify for everyone) is enforced in the body via ``access.can_modify_work``.
+CONTRIBUTOR_DEP = Depends(require_contributor)
 AUTH_DEP = Depends(require_authenticated_user)
+
+
+def _guard_modify_work(db: Session, actor: User, work: Work) -> None:
+    """Raise 403 if ``actor`` may not modify ``work`` (contributor own-only; see+grant matrix)."""
+    if not access.can_modify_work(db, actor, work):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to modify this paper",
+        )
+
+
+def _guard_see_work(db: Session, actor: User, work: Work) -> None:
+    """Raise 404 if ``actor`` may not see ``work`` (hide existence rather than 403)."""
+    if not access.can_see_work(db, actor, work):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+
 
 # Work columns a metadata assertion can be promoted into (mirrors the enrichment service).
 _PROMOTABLE_FIELDS = {"title", "abstract", "year", "venue", "doi"}
@@ -114,6 +132,9 @@ class WorkRead(BaseModel):
     canonical_metadata_source: str | None = None
     confirmed_fields: list[str] = []
     keywords: list[str] = []
+    # The owning user (Phase H). NULL = system/agent/import "loose" paper. Drives the frontend's
+    # contributor own-only edit affordance.
+    created_by_user_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -180,15 +201,19 @@ def list_works(
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[Work]:
     """List/search works by basic metadata and extraction/metadata completeness.
 
     ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
     ``has:pdf`` ``has:references`` ``title:``); the leftover free text matches title/abstract/DOI/
     arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take precedence.
+
+    Access control: only papers the caller may SEE are returned (most-permissive governing shelf;
+    loose papers are open; admin/owner see all).
     """
     parsed = parse_search_query(q)
-    stmt = select(Work)
+    stmt = access.visible_works_query(db, actor)
     if parsed.text:
         like = f"%{parsed.text}%"
         conditions = [
@@ -294,10 +319,13 @@ class ReorderQueueRequest(BaseModel):
 
 
 @router.get("/reading-queue", response_model=list[WorkRead])
-def reading_queue(db: Session = DB_DEP) -> list[Work]:
-    """Return the manual reading queue (status='reading'), ordered by queue_position then recency."""
+def reading_queue(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[Work]:
+    """Return the manual reading queue (status='reading'), ordered by queue_position then recency.
+
+    Filtered to papers the caller may SEE.
+    """
     stmt = (
-        select(Work)
+        access.visible_works_query(db, actor)
         .where(Work.reading_status == "reading")
         .order_by(Work.queue_position.is_(None), Work.queue_position, Work.updated_at.desc())
     )
@@ -306,24 +334,32 @@ def reading_queue(db: Session = DB_DEP) -> list[Work]:
 
 @router.post("/reading-queue/reorder", response_model=list[WorkRead])
 def reorder_reading_queue(
-    payload: ReorderQueueRequest, db: Session = DB_DEP, _: User = EDITOR_DEP
+    payload: ReorderQueueRequest, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
 ) -> list[Work]:
-    """Set the reading-queue order to the given work id sequence (SPEC §8.17.1)."""
+    """Set the reading-queue order to the given work id sequence (SPEC §8.17.1).
+
+    Each listed paper must be modifiable by the caller (own-only for contributors).
+    """
     for position, work_id in enumerate(payload.work_ids):
+        work = db.get(Work, work_id)
+        if work is None:
+            continue
+        _guard_modify_work(db, actor, work)
         db.execute(update(Work).where(Work.id == work_id).values(queue_position=position))
     db.commit()
-    return reading_queue(db=db)
+    return reading_queue(db=db, actor=actor)
 
 
 @router.post(
     "/from-reference/{reference_id}", response_model=WorkRead, status_code=status.HTTP_201_CREATED
 )
 def import_reference_as_work(
-    reference_id: uuid.UUID, db: Session = DB_DEP, _: User = EDITOR_DEP
+    reference_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
 ) -> Work:
     """Create a library work from an unresolved citation reference (SPEC §8.9 import-missing-ref).
 
-    Idempotent: if the reference already resolves to a work, that work is returned.
+    Idempotent: if the reference already resolves to a work, that work is returned. The new work is
+    owned by the actor (``created_by_user_id``) so a contributor may later edit their own import.
     """
     reference = db.get(Reference, reference_id)
     if reference is None:
@@ -340,6 +376,7 @@ def import_reference_as_work(
         arxiv_id=reference.arxiv_id,
         year=reference.year,
         canonical_metadata_source="reference",
+        created_by_user_id=actor.id,
     )
     db.add(work)
     db.flush()
@@ -355,9 +392,9 @@ def import_reference_as_work(
 def create_work(
     payload: WorkCreate,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Work:
-    """Create a work manually."""
+    """Create a work manually (owned by the actor so contributors may edit their own)."""
     work = Work(
         canonical_title=payload.canonical_title,
         normalized_title=normalize_title(payload.canonical_title or ""),
@@ -369,6 +406,7 @@ def create_work(
         reading_status=payload.reading_status,
         canonical_metadata_source="user",
         user_confirmed=True,
+        created_by_user_id=actor.id,
     )
     db.add(work)
     db.commit()
@@ -379,19 +417,27 @@ def create_work(
 
 @router.get("/{work_id}/related", response_model=list[RelatedWorkRead])
 def related_papers(
-    work_id: uuid.UUID, limit: int = Query(default=10, ge=1, le=50), db: Session = DB_DEP
+    work_id: uuid.UUID,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[RelatedWorkRead]:
     """Return papers most similar to this one, with a "why related" reason (SPEC §8.17.2).
 
     The reason is the keywords the two papers share (there are no author entities to compare),
-    or the embedding-similarity score when they share none.
+    or the embedding-similarity score when they share none. Both the source paper and every
+    related paper are filtered to those the caller may SEE.
     """
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    visible = access.visible_work_ids(db, actor)
     source_keywords = work.keywords or []
     related: list[RelatedWorkRead] = []
     for hit in related_works(db, work, limit=limit):
+        if visible is not None and hit.work.id not in visible:
+            continue
         hit_keywords = hit.work.keywords or []
         # Preserve the source paper's keyword order for a stable, readable shared list.
         hit_set = {k.lower() for k in hit_keywords}
@@ -421,6 +467,7 @@ def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     if _should_record_view(actor.id, work_id):
         record_event(
             db,
@@ -438,12 +485,13 @@ def update_work(
     work_id: uuid.UUID,
     payload: WorkUpdate,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Work:
-    """Edit a work manually."""
+    """Edit a work manually (contributors may edit only their own papers)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(work, key, value)
@@ -463,9 +511,9 @@ def update_work(
 def delete_work(
     work_id: uuid.UUID,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> None:
-    """Delete a paper and its dependent rows.
+    """Delete a paper and its dependent rows (contributors may delete only their own papers).
 
     Removes links and derived data (memberships, tags, assertions, summaries, embeddings,
     references, mentions, annotations, versions, duplicate candidates). The underlying File
@@ -475,6 +523,7 @@ def delete_work(
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
 
     db.execute(delete(FileWorkLink).where(FileWorkLink.work_id == work_id))
     db.execute(delete(ShelfWork).where(ShelfWork.work_id == work_id))
@@ -675,10 +724,14 @@ def _reference_shorthands(db: Session, reference_ids: list[uuid.UUID]) -> dict[u
 
 
 @router.get("/{work_id}/references", response_model=list[ReferenceRead])
-def list_work_references(work_id: uuid.UUID, db: Session = DB_DEP) -> list[ReferenceRead]:
+def list_work_references(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[ReferenceRead]:
     """Return the parsed bibliography (extracted references) for a work."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     references = list(
         db.scalars(
             select(Reference)
@@ -697,10 +750,13 @@ def list_work_references(work_id: uuid.UUID, db: Session = DB_DEP) -> list[Refer
 def get_work_citation_contexts(
     work_id: uuid.UUID,
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[CitationContextRead]:
     """Return in-text citation contexts for one work."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     rows = db.execute(
         select(CitationMention, Reference)
         .join(Reference, Reference.id == CitationMention.reference_id)
@@ -774,10 +830,14 @@ def _file_read(db: Session, file: File) -> WorkFileRead:
 
 
 @router.get("/{work_id}/files", response_model=list[WorkFileRead])
-def list_work_files(work_id: uuid.UUID, db: Session = DB_DEP) -> list[WorkFileRead]:
+def list_work_files(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[WorkFileRead]:
     """List the files attached to a work (via FileWorkLink)."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     files = list(
         db.scalars(
             select(File)
@@ -794,12 +854,13 @@ async def upload_work_file(
     work_id: uuid.UUID,
     file: UploadFile,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> WorkFileRead:
     """Upload a PDF and attach it to an existing work (so a manual work isn't a dead end)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     if file.content_type and file.content_type not in (
         "application/pdf",
         "application/octet-stream",
@@ -832,8 +893,12 @@ def search_annotations(
     annotation_type: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[Annotation]:
-    """Search annotations across all works by selected text / note body (SPEC §8.8.7)."""
+    """Search annotations across all works by selected text / note body (SPEC §8.8.7).
+
+    Restricted to annotations on papers the caller may SEE.
+    """
     stmt = select(Annotation)
     if q and q.strip():
         like = f"%{q.strip()}%"
@@ -842,6 +907,9 @@ def search_annotations(
         )
     if annotation_type:
         stmt = stmt.where(Annotation.annotation_type == annotation_type)
+    visible = access.visible_work_ids(db, actor)
+    if visible is not None:
+        stmt = stmt.where(Annotation.work_id.in_(visible))
     stmt = stmt.order_by(Annotation.created_at.desc()).limit(limit)
     return list(db.scalars(stmt).all())
 
@@ -851,11 +919,13 @@ def export_work_annotations(
     work_id: uuid.UUID,
     output_format: str = Query(default="markdown", pattern="^(markdown|text)$", alias="format"),
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> dict[str, str]:
     """Export a work's annotations as Markdown or plain text (SPEC §8.17.4)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     rows = list(
         db.scalars(
             select(Annotation)
@@ -897,10 +967,13 @@ def export_work_annotations(
 def list_work_annotations(
     work_id: uuid.UUID,
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[Annotation]:
     """List annotations stored separately from a work's PDFs."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     return list(
         db.scalars(
             select(Annotation)
@@ -919,11 +992,13 @@ def create_work_annotation(
     work_id: uuid.UUID,
     payload: AnnotationCreate,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Annotation:
     """Create a reader annotation without modifying the source PDF."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     annotation = Annotation(
         work_id=work_id,
         file_id=payload.file_id,
@@ -949,9 +1024,13 @@ def delete_work_annotation(
     work_id: uuid.UUID,
     annotation_id: uuid.UUID,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Response:
     """Delete a reader annotation (404 when it belongs to a different paper)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     annotation = db.get(Annotation, annotation_id)
     if annotation is None or annotation.work_id != work_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annotation not found")
@@ -961,10 +1040,12 @@ def delete_work_annotation(
 
 
 @router.get("/{work_id}/summaries", response_model=list[SummaryRead])
-def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP) -> list:
+def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> list:
     """List stored summaries for a work (newest first)."""
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     return list_work_summaries(db, work_id)
 
 
@@ -977,12 +1058,13 @@ def create_summary(
     work_id: uuid.UUID,
     payload: SummaryCreate,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> object:
     """Generate a local (no-LLM) summary for a work and store it with provenance."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     try:
         summary = summarize_work(
             db,
@@ -1018,12 +1100,13 @@ def confirm_metadata_field(
     work_id: uuid.UUID,
     payload: ConfirmFieldRequest,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Work:
     """Lock or unlock a single field so enrichment won't overwrite it (SPEC §8.12)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     locked = set(work.confirmed_fields or [])
     if payload.confirmed:
         locked.add(payload.field_name)
@@ -1037,11 +1120,14 @@ def confirm_metadata_field(
 
 
 @router.get("/{work_id}/metadata", response_model=list[FieldReview])
-def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldReview]:
+def get_work_metadata(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[FieldReview]:
     """Return metadata assertions for a work, grouped by field, flagging conflicts."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
     confirmed = set(work.confirmed_fields or [])
     rows = db.scalars(
         select(MetadataAssertion)
@@ -1070,12 +1156,13 @@ def get_work_metadata(work_id: uuid.UUID, db: Session = DB_DEP) -> list[FieldRev
 def enrich_work_endpoint(
     work_id: uuid.UUID,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> dict[str, str | None]:
     """Queue external metadata enrichment for a work (needs a DOI or arXiv id)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     if not work.doi and not work.arxiv_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1094,15 +1181,17 @@ def enrich_work_endpoint(
 def extract_work_endpoint(
     work_id: uuid.UUID,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> dict[str, object]:
     """Queue GROBID extraction for every file attached to a work.
 
     404 if the paper is missing; ``{status: "no_files"}`` when nothing is attached; 503 if the
     extraction queue is unavailable. Per-file extraction is still available via /files/{id}/extract.
     """
-    if db.get(Work, work_id) is None:
+    work = db.get(Work, work_id)
+    if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     file_ids = list(
         db.scalars(
             select(File.id)
@@ -1203,7 +1292,7 @@ def find_on_web_endpoint(
     work_id: uuid.UUID,
     payload: WebFindRequest | None = None,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> WebFindResponse:
     """Search legitimate scholarly sources for candidate matches for a paper (#5).
 
@@ -1214,6 +1303,7 @@ def find_on_web_endpoint(
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     settings = get_settings()
     if not getattr(settings, "web_find_enabled", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
@@ -1244,7 +1334,7 @@ def find_on_web_download_endpoint(
     work_id: uuid.UUID,
     payload: WebFindDownloadRequest,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> WebFindDownloadResponse:
     """Download 0…N selected candidate PDFs and attach them to a paper (find-on-web v2).
 
@@ -1258,6 +1348,7 @@ def find_on_web_download_endpoint(
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     settings = get_settings()
     if not getattr(settings, "web_find_enabled", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
@@ -1290,9 +1381,9 @@ def find_on_web_stream_endpoint(
     work_id: uuid.UUID,
     payload: WebFindRequest | None = None,
     db: Session = DB_DEP,
-    actor: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> StreamingResponse:
-    """Stream find-on-web search progress as NDJSON (find-on-web v2). EDITOR-gated.
+    """Stream find-on-web search progress as NDJSON (find-on-web v2). Contributor-gated.
 
     Emits one JSON object per line (``application/x-ndjson``):
       * ``{"type":"source","source":<name>,"status":"querying"}`` as each source starts,
@@ -1304,6 +1395,7 @@ def find_on_web_stream_endpoint(
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     settings = get_settings()
     if not getattr(settings, "web_find_enabled", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
@@ -1347,12 +1439,13 @@ def select_metadata_assertion(
     work_id: uuid.UUID,
     payload: SelectAssertion,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> Work:
     """Choose an assertion as the canonical value for its field (a review action)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
     assertion = db.get(MetadataAssertion, payload.assertion_id)
     if assertion is None or assertion.entity_type != "work" or assertion.entity_id != work_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assertion not found")

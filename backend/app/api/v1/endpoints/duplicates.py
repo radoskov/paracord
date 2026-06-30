@@ -9,13 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_authenticated_user, require_min_role
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File
 from app.models.user import User
 from app.models.work import Work
+from app.services import access
 from app.services.duplicate_detection import scan_duplicate_candidates
 from app.services.duplicate_resolution import (
     apply_duplicate_action,
@@ -26,7 +27,22 @@ from app.services.duplicate_resolution import (
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
+AUTH_DEP = Depends(require_authenticated_user)
+
+
+def _candidate_visible(candidate: DuplicateCandidate, visible: set[uuid.UUID] | None) -> bool:
+    """True if both work-entities of a candidate are visible (``None`` = unrestricted)."""
+    if visible is None:
+        return True
+    for entity_type, entity_id in (
+        (candidate.entity_a_type, candidate.entity_a_id),
+        (candidate.entity_b_type, candidate.entity_b_id),
+    ):
+        if entity_type == "work" and entity_id not in visible:
+            return False
+    return True
+
 
 CandidateStatus = Literal["open", "accepted", "rejected", "ignored"]
 DuplicateAction = Literal[
@@ -104,24 +120,32 @@ def list_duplicate_candidates(
     candidate_type: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[DuplicateCandidateRead]:
-    """List duplicate/version candidates for review."""
+    """List duplicate/version candidates for review (hiding candidates that touch a hidden work)."""
     stmt = select(DuplicateCandidate)
     if status_filter:
         stmt = stmt.where(DuplicateCandidate.status == status_filter)
     if candidate_type:
         stmt = stmt.where(DuplicateCandidate.candidate_type == candidate_type)
     stmt = stmt.order_by(DuplicateCandidate.created_at.desc()).limit(limit)
-    return [_candidate_view(db, candidate) for candidate in db.scalars(stmt).all()]
+    visible = access.visible_work_ids(db, actor)
+    return [
+        _candidate_view(db, candidate)
+        for candidate in db.scalars(stmt).all()
+        if _candidate_visible(candidate, visible)
+    ]
 
 
 @router.post("/scan", response_model=DuplicateScanResult, status_code=status.HTTP_201_CREATED)
 def scan_duplicates(
     payload: DuplicateScanRequest,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = EDITOR_DEP,
 ) -> DuplicateScanResult:
-    """Scan selected or all known work/file identities for duplicate candidates."""
+    """Scan selected or all known work/file identities for duplicate candidates.
+
+    Only papers/files the caller may SEE are scanned (a full-library scan skips hidden works)."""
     # A full-library scan (no specific work/file) can be pushed to the background worker.
     if payload.background and payload.work_id is None and payload.file_id is None:
         from app.workers.queue import enqueue_duplicate_scan
@@ -141,8 +165,8 @@ def scan_duplicates(
             job_id=job_id,
         )
 
-    works = _selected_works(db, payload.work_id)
-    files = _selected_files(db, payload.file_id)
+    works = _selected_works(db, payload.work_id, actor=actor)
+    files = _selected_files(db, payload.file_id, actor=actor)
 
     candidates: list[DuplicateCandidate] = []
     for work in works:
@@ -171,6 +195,8 @@ def update_duplicate_candidate(
     """Update review status or apply a duplicate/version review action."""
     candidate = db.get(DuplicateCandidate, candidate_id)
     if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not _candidate_visible(candidate, access.visible_work_ids(db, actor)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
 
     if payload.action and payload.status:
@@ -216,19 +242,20 @@ def update_duplicate_candidate(
     return _candidate_view(db, candidate)
 
 
-def _selected_works(db: Session, work_id: uuid.UUID | None) -> list[Work]:
+def _selected_works(db: Session, work_id: uuid.UUID | None, *, actor: User) -> list[Work]:
     if work_id is None:
-        return list(db.scalars(select(Work)).all())
+        return list(db.scalars(access.visible_works_query(db, actor)).all())
     work = db.get(Work, work_id)
-    if work is None:
+    if work is None or not access.can_see_work(db, actor, work):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     return [work]
 
 
-def _selected_files(db: Session, file_id: uuid.UUID | None) -> list[File]:
+def _selected_files(db: Session, file_id: uuid.UUID | None, *, actor: User) -> list[File]:
     if file_id is None:
-        return list(db.scalars(select(File)).all())
+        files = list(db.scalars(select(File)).all())
+        return [f for f in files if access.can_see_file(db, actor, f.id)]
     file = db.get(File, file_id)
-    if file is None:
+    if file is None or not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return [file]

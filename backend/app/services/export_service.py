@@ -53,16 +53,20 @@ def export_bibliography(
     style: str | None = None,
     citation_keys: dict[str, str] | None = None,
     actor_user_id: uuid.UUID | None = None,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> str:
     """Export bibliography content for a scope.
 
     ``citation_keys`` maps ``work_id`` → a user-chosen citation key, overriding the auto-assigned
     one. When ``actor_user_id`` is given, a ``paper.exported`` audit event is recorded in the
-    current transaction (the caller is responsible for committing).
+    current transaction (the caller is responsible for committing). ``visible_ids`` (Phase H access
+    control) restricts the export to works the caller may see; ``None`` means unrestricted.
     """
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported export format: {output_format}")
-    works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids)
+    works = _resolve_works(
+        db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids, visible_ids=visible_ids
+    )
     authors_by_work = _authors_by_work(db, works)
     entries = [_Entry(work=work, authors=authors_by_work.get(work.id, [])) for work in works]
     _assign_keys(entries)
@@ -88,23 +92,36 @@ def export_bibliography(
 
 
 def _resolve_works(
-    db: Session, *, scope_type: str, scope_id: str | None, work_ids: list[str] | None = None
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: str | None,
+    work_ids: list[str] | None = None,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> list[Work]:
+    def _filter(works: list[Work]) -> list[Work]:
+        if visible_ids is None:
+            return works
+        return [w for w in works if w.id in visible_ids]
+
     if scope_type in ("selection", "search"):
         # An explicit set of works (multi-select in the library, or a search result set).
         if not work_ids:
             raise ValueError(f"work_ids is required for {scope_type} export")
         ids = [uuid.UUID(w) for w in work_ids]
         found = {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(ids))).all()}
-        return [found[i] for i in ids if i in found]  # preserve caller order
+        ordered = [found[i] for i in ids if i in found]  # preserve caller order
+        return _filter(ordered)
     if scope_type == "library":
         # Whole-library export (also the library-scoped graph/insights view).
-        return list(db.scalars(select(Work).order_by(Work.year, Work.canonical_title)).all())
+        return _filter(
+            list(db.scalars(select(Work).order_by(Work.year, Work.canonical_title)).all())
+        )
     if scope_type == "work":
         if not scope_id:
             raise ValueError("scope_id is required for work export")
         work = db.get(Work, uuid.UUID(scope_id))
-        return [work] if work else []
+        return _filter([work]) if work else []
     if scope_type == "shelf":
         if not scope_id:
             raise ValueError("scope_id is required for shelf export")
@@ -114,7 +131,7 @@ def _resolve_works(
             .where(ShelfWork.shelf_id == uuid.UUID(scope_id))
             .order_by(ShelfWork.position, Work.year, Work.canonical_title)
         )
-        return list(db.scalars(stmt).all())
+        return _filter(list(db.scalars(stmt).all()))
     if scope_type == "rack":
         if not scope_id:
             raise ValueError("scope_id is required for rack export")
@@ -126,7 +143,7 @@ def _resolve_works(
             .distinct()
             .order_by(Work.year, Work.canonical_title)
         )
-        return list(db.scalars(stmt).all())
+        return _filter(list(db.scalars(stmt).all()))
     raise ValueError(f"Unsupported export scope: {scope_type}")
 
 

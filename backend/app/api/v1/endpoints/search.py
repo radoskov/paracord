@@ -7,16 +7,18 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_authenticated_user, require_min_role
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
+from app.services import access
 from app.services.embeddings import get_embedding_provider
 from app.services.semantic_search import ensure_work_embeddings, semantic_search
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+AUTH_DEP = Depends(require_authenticated_user)
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 
 
 class SemanticSearchRequest(BaseModel):
@@ -40,11 +42,22 @@ class SemanticSearchResponse(BaseModel):
 
 
 @router.post("/semantic", response_model=SemanticSearchResponse)
-def search_semantic(payload: SemanticSearchRequest, db: Session = DB_DEP) -> SemanticSearchResponse:
+def search_semantic(
+    payload: SemanticSearchRequest, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> SemanticSearchResponse:
     """Rank works by similarity to a free-text query. Read-only: embeddings are built off this
-    path (on import / via /search/reindex), so a search never writes to the database."""
+    path (on import / via /search/reindex), so a search never writes to the database.
+
+    Access control: results are filtered to papers the caller may SEE. We over-fetch then trim so
+    the visible result count is preserved when hidden papers rank highly."""
     limit = max(1, min(payload.limit, 50))
-    hits = semantic_search(db, payload.q, limit=limit, mode=payload.mode)
+    visible = access.visible_work_ids(db, actor)
+    # Over-fetch so trimming hidden hits still leaves up to ``limit`` visible results.
+    fetch = limit if visible is None else min(limit * 5, 250)
+    hits = semantic_search(db, payload.q, limit=fetch, mode=payload.mode)
+    if visible is not None:
+        hits = [hit for hit in hits if hit.work.id in visible]
+    hits = hits[:limit]
     return SemanticSearchResponse(
         query=payload.q,
         mode=payload.mode,

@@ -1,5 +1,6 @@
 """ORM model exports."""
 
+from app.models.access_settings import AccessSettings
 from app.models.agent import Agent, AgentEnrollmentToken, AgentFile
 from app.models.ai import AIConfig, Embedding, Summary, TopicAssignment
 from app.models.annotation import Annotation
@@ -7,6 +8,7 @@ from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink, Location
+from app.models.group import DefaultGrant, Group, GroupGrant, GroupMembership
 from app.models.import_root import ImportRoot
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
@@ -19,17 +21,22 @@ from app.models.work import Work, WorkVersion
 
 __all__ = [
     "AIConfig",
+    "AccessSettings",
     "Agent",
     "AgentEnrollmentToken",
     "AgentFile",
     "AuditEvent",
     "Annotation",
     "CitationMention",
+    "DefaultGrant",
     "DuplicateCandidate",
     "Embedding",
     "File",
     "FileSegment",
     "FileWorkLink",
+    "Group",
+    "GroupGrant",
+    "GroupMembership",
     "ImportBatch",
     "ImportRoot",
     "Location",

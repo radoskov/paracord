@@ -270,23 +270,29 @@ def list_work_summaries(db: Session, work_id: uuid.UUID) -> list[Summary]:
     )
 
 
-def _scope_works(db: Session, *, scope_type: str, scope_id: uuid.UUID | None) -> list[Work]:
+def _scope_works(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    visible_ids: set[uuid.UUID] | None = None,
+) -> list[Work]:
     if scope_type == "library":
-        return list(db.scalars(select(Work)).all())
-    if scope_type == "shelf":
+        works = list(db.scalars(select(Work)).all())
+    elif scope_type == "shelf":
         if scope_id is None:
             raise ValueError("scope_id is required for a shelf summary")
-        return list(
+        works = list(
             db.scalars(
                 select(Work)
                 .join(ShelfWork, ShelfWork.work_id == Work.id)
                 .where(ShelfWork.shelf_id == scope_id)
             ).all()
         )
-    if scope_type == "rack":
+    elif scope_type == "rack":
         if scope_id is None:
             raise ValueError("scope_id is required for a rack summary")
-        return list(
+        works = list(
             db.scalars(
                 select(Work)
                 .join(ShelfWork, ShelfWork.work_id == Work.id)
@@ -295,7 +301,11 @@ def _scope_works(db: Session, *, scope_type: str, scope_id: uuid.UUID | None) ->
                 .distinct()
             ).all()
         )
-    raise ValueError(f"Unsupported scope type: {scope_type!r}")
+    else:
+        raise ValueError(f"Unsupported scope type: {scope_type!r}")
+    if visible_ids is not None:
+        works = [w for w in works if w.id in visible_ids]
+    return works
 
 
 def summarize_scope(
@@ -305,13 +315,14 @@ def summarize_scope(
     scope_id: uuid.UUID | None = None,
     summary_type: str = "extractive",
     max_sentences: int = 8,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> tuple[Summary, int]:
     """Generate (replacing prior) an extractive summary over all works in a scope.
 
     Returns ``(summary, work_count)`` so the caller can include the count without an
-    extra query.
+    extra query. ``visible_ids`` (Phase H) restricts the scope to works the caller may see.
     """
-    works = _scope_works(db, scope_type=scope_type, scope_id=scope_id)
+    works = _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
 
     abstracts = [w.abstract for w in works if w.abstract]

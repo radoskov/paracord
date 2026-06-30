@@ -6,22 +6,22 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_authenticated_user, require_roles
+from app.api.deps import require_authenticated_user, require_contributor
 from app.core.config import get_settings
-from app.core.security import Role
 from app.db.session import get_db
-from app.models.file import File
+from app.models.file import File, FileWorkLink
 from app.models.user import User
+from app.services import access
 from app.services.audit import record_event
 from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+CONTRIBUTOR_DEP = Depends(require_contributor)
 AUTH_DEP = Depends(require_authenticated_user)
 
 
@@ -45,16 +45,31 @@ class FileRead(BaseModel):
 def list_files(
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
 ) -> list[File]:
-    """List file metadata for the library file view."""
-    return list(db.scalars(select(File).order_by(File.created_at.desc()).limit(limit)).all())
+    """List file metadata for the library file view (filtered to files the caller may see)."""
+    stmt = select(File).order_by(File.created_at.desc())
+    visible = access.visible_work_ids(db, actor)
+    if visible is not None:
+        # A file is visible when loose (linked to no work) or linked to a visible work.
+        linked = select(FileWorkLink.file_id).where(FileWorkLink.file_id == File.id)
+        loose = ~linked.exists()
+        visible_link = (
+            select(FileWorkLink.file_id)
+            .where(FileWorkLink.file_id == File.id, FileWorkLink.work_id.in_(visible))
+            .exists()
+        )
+        stmt = stmt.where(or_(loose, visible_link))
+    return list(db.scalars(stmt.limit(limit)).all())
 
 
 @router.get("/{file_id}", response_model=FileRead)
-def get_file(file_id: uuid.UUID, db: Session = DB_DEP) -> File:
+def get_file(file_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> File:
     """Return file metadata and quick preview text."""
     file = db.get(File, file_id)
     if file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return file
 
@@ -63,11 +78,13 @@ def get_file(file_id: uuid.UUID, db: Session = DB_DEP) -> File:
 def extract_file(
     file_id: uuid.UUID,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = CONTRIBUTOR_DEP,
 ) -> dict[str, str | None]:
     """Queue GROBID extraction for a file (runs in the background worker)."""
     file = db.get(File, file_id)
     if file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     job_id = enqueue_extraction(file_id)
     if job_id is None:
@@ -85,6 +102,8 @@ def stream_file(
     """Stream a PDF from a server-folder or managed-library location (records a view audit event)."""
     file = db.get(File, file_id)
     if file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if actor is not None and not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     try:

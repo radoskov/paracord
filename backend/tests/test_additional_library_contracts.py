@@ -35,7 +35,7 @@ def test_work_can_appear_in_multiple_shelves_and_rack_filters_remain_distinct(
     client,
     auth_headers,
 ) -> None:
-    headers = auth_headers("editor")
+    headers = auth_headers("librarian")
     work = _create_work(client, headers, "Shared Work")
     shelf_a = _create_shelf(client, headers, "Shelf A")
     shelf_b = _create_shelf(client, headers, "Shelf B")
@@ -74,7 +74,7 @@ def test_work_can_appear_in_multiple_shelves_and_rack_filters_remain_distinct(
 
 
 def test_shelf_and_rack_membership_writes_are_idempotent(client, auth_headers) -> None:
-    headers = auth_headers("editor")
+    headers = auth_headers("librarian")
     work = _create_work(client, headers, "Idempotent Work")
     shelf = _create_shelf(client, headers, "Idempotent Shelf")
     rack = _create_rack(client, headers, "Idempotent Rack")
@@ -102,7 +102,7 @@ def test_shelf_and_rack_membership_writes_are_idempotent(client, auth_headers) -
 
 
 def test_tags_on_shelves_and_racks_do_not_match_work_tag_filters(client, auth_headers) -> None:
-    headers = auth_headers("editor")
+    headers = auth_headers("librarian")
     work = _create_work(client, headers, "Tagged Work")
     shelf = _create_shelf(client, headers, "Tagged Shelf")
     rack = _create_rack(client, headers, "Tagged Rack")

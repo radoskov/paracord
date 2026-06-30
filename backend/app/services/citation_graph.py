@@ -56,13 +56,22 @@ def build_citation_graph(
     scope_type: ScopeType,
     scope_id: uuid.UUID | None = None,
     node_mode: NodeMode = "local_only",
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> CitationGraph:
-    """Build the citation graph for a scope."""
-    scope_works = _scope_works(db, scope_type=scope_type, scope_id=scope_id)
+    """Build the citation graph for a scope.
+
+    ``visible_ids`` (Phase H access control) restricts which local works may appear as nodes or
+    resolution targets: only works in this set are graphed. ``None`` means unrestricted
+    (admin/owner). The scope set and the local resolution index are both filtered, so a hidden
+    work can never surface as a node, an edge target, or a resolved-title leak.
+    """
+    scope_works = _scope_works(
+        db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids
+    )
     if not scope_works:
         return CitationGraph(summary=_summary([], [], scope_count=0, unresolved=0))
 
-    local_index = _local_work_index(db)
+    local_index = _local_work_index(db, visible_ids=visible_ids)
 
     nodes: dict[str, GraphNode] = {str(work.id): _local_node(work) for work in scope_works.values()}
     edge_weights: dict[tuple[str, str], int] = defaultdict(int)
@@ -81,6 +90,15 @@ def build_citation_graph(
             unresolved += 1
             continue
         target_node, resolution = resolved
+        # Access control: never surface a hidden local work as an edge target (a persisted
+        # ``resolved_work_id`` could otherwise point at a work outside the caller's visibility).
+        if (
+            visible_ids is not None
+            and target_node.work_id is not None
+            and target_node.work_id not in visible_ids
+        ):
+            unresolved += 1
+            continue
         # Persist the resolution result so subsequent queries don't need to re-resolve.
         if reference.resolution_status == "unresolved":
             reference.resolution_status = resolution
@@ -114,7 +132,11 @@ def build_citation_graph(
 
 
 def _scope_works(
-    db: Session, *, scope_type: ScopeType, scope_id: uuid.UUID | None
+    db: Session,
+    *,
+    scope_type: ScopeType,
+    scope_id: uuid.UUID | None,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> dict[uuid.UUID, Work]:
     if scope_type == "library":
         works = db.scalars(select(Work)).all()
@@ -138,13 +160,21 @@ def _scope_works(
         ).all()
     else:
         raise ValueError(f"Unsupported graph scope: {scope_type}")
+    if visible_ids is not None:
+        works = [work for work in works if work.id in visible_ids]
     return {work.id: work for work in works}
 
 
-def _local_work_index(db: Session) -> dict[str, Work]:
-    """Map ``doi:<doi>`` / ``arxiv:<base>`` identifier keys to local works."""
+def _local_work_index(db: Session, *, visible_ids: set[uuid.UUID] | None = None) -> dict[str, Work]:
+    """Map ``doi:<doi>`` / ``arxiv:<base>`` identifier keys to local works.
+
+    When ``visible_ids`` is provided, hidden works are excluded so a reference can never resolve to
+    (and leak the title/year/DOI of) a work the caller may not see.
+    """
     index: dict[str, Work] = {}
     for work in db.scalars(select(Work)).all():
+        if visible_ids is not None and work.id not in visible_ids:
+            continue
         for key in _identifier_keys(doi=work.doi, arxiv_id=work.arxiv_id):
             index.setdefault(key, work)
     return index

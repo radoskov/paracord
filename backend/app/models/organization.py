@@ -18,6 +18,8 @@ class Shelf(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    # Access level (Phase H): one of ``open`` / ``visible`` / ``private``. See app.services.access.
+    access_level: Mapped[str] = mapped_column(String(16), default="open")
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
@@ -42,6 +44,8 @@ class Rack(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    # Access level (Phase H): one of ``open`` / ``visible`` / ``private``. See app.services.access.
+    access_level: Mapped[str] = mapped_column(String(16), default="open")
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,

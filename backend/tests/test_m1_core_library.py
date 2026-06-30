@@ -193,9 +193,9 @@ def test_m1_read_endpoints_return_file_shelf_and_rack_memberships(db_session, ow
     )
     db_session.commit()
 
-    assert list_files(limit=100, db=db_session)[0].id == file.id
-    assert list_shelf_works(shelf.id, db=db_session)[0].id == work.id
-    assert list_rack_shelves(rack.id, db=db_session)[0].id == shelf.id
+    assert list_files(limit=100, db=db_session, actor=owner)[0].id == file.id
+    assert list_shelf_works(shelf.id, db=db_session, actor=owner)[0].id == work.id
+    assert list_rack_shelves(rack.id, db=db_session, actor=owner)[0].id == shelf.id
 
 
 def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> None:
@@ -231,6 +231,7 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
                 tag_id=filters.get("tag_id"),
                 limit=100,
                 db=db_session,
+                actor=owner,
             )
         ]
 
@@ -266,6 +267,7 @@ def test_work_list_filters_by_extraction_status(db_session, owner: User) -> None
                 tag_id=None,
                 limit=100,
                 db=db_session,
+                actor=owner,
                 **filters,
             )
         }
@@ -375,11 +377,11 @@ def test_m1_archive_and_unlink_endpoints(db_session, owner: User) -> None:
     )
     db_session.commit()
 
-    update_shelf(shelf.id, ShelfUpdate(status="archived"), db=db_session, _=owner)
-    update_rack(rack.id, RackUpdate(status="archived"), db=db_session, _=owner)
-    remove_work_from_shelf(shelf.id, work.id, db=db_session, _=owner)
-    remove_shelf_from_rack(rack.id, shelf.id, db=db_session, _=owner)
-    remove_tag_link(tag.id, "work", work.id, db=db_session, _=owner)
+    update_shelf(shelf.id, ShelfUpdate(status="archived"), db=db_session, actor=owner)
+    update_rack(rack.id, RackUpdate(status="archived"), db=db_session, actor=owner)
+    remove_work_from_shelf(shelf.id, work.id, db=db_session, actor=owner)
+    remove_shelf_from_rack(rack.id, shelf.id, db=db_session, actor=owner)
+    remove_tag_link(tag.id, "work", work.id, db=db_session, actor=owner)
 
     assert db_session.get(Shelf, shelf.id).status == "archived"
     assert db_session.get(Rack, rack.id).status == "archived"

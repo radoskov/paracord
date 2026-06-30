@@ -10,6 +10,7 @@ from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.source import Source
+from app.models.user import User
 from app.models.work import Work
 from app.services.extraction import extract_and_store, store_parsed_extraction
 from app.services.storage import file_ids_pending_extraction
@@ -221,7 +222,9 @@ def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path
     assert mention.source_tei_id == raw_tei.id
     assert mention.page == 3
     assert mention.pdf_coordinates == [{"page": 3, "x": 123.4, "y": 456.7, "w": 12.0, "h": 10.5}]
-    contexts = get_work_citation_contexts(work.id, db=db_session)
+    # Admin actor bypasses ACLs (no users table in this narrow schema, so keep it unpersisted).
+    actor = User(username="extract-actor", password_hash="x", role="admin")
+    contexts = get_work_citation_contexts(work.id, db=db_session, actor=actor)
     assert len(contexts) == 2
     assert contexts[0].reference_title.startswith("Neural Machine Translation")
     assert contexts[0].context_sentence.endswith("translation quality [1].")

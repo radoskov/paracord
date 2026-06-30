@@ -35,7 +35,8 @@ def server_root(tmp_path, monkeypatch):
 
 
 def test_m1_import_organize_search_read(client, auth_headers, server_root, no_queue):
-    h = auth_headers("editor")
+    # The organize step creates shelves/racks (librarian+ in Phase H).
+    h = auth_headers("librarian")
 
     # import a configured server folder
     src = client.post(

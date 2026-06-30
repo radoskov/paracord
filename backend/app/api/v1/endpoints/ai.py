@@ -8,19 +8,24 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_min_role
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.ai import TopicAssignment
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
+from app.services import access
+from app.services.access_settings import get_default_access_level
 from app.services.summarization import summarize_scope
 from app.services.topic_modeling import model_topics
 from app.utils.normalization import normalize_title
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
-EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+# AI scope reads (summaries/topics) need at least an editor; shelf creation from a topic needs a
+# librarian. Ladder-based so admin/owner always pass.
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
+LIBRARIAN_DEP = Depends(require_min_role(Role.LIBRARIAN))
 
 
 class ScopeSummaryRequest(BaseModel):
@@ -44,9 +49,16 @@ class ScopeSummaryResponse(BaseModel):
 def create_scope_summary(
     payload: ScopeSummaryRequest,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = EDITOR_DEP,
 ) -> ScopeSummaryResponse:
-    """Generate (replacing prior) an extractive summary over a library/shelf/rack scope."""
+    """Generate (replacing prior) an extractive summary over a library/shelf/rack scope.
+
+    Access control: a shelf/rack scope requires SEE on that container, and only papers the caller
+    may SEE feed the summary."""
+    if not access.can_see_scope_container(
+        db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
     try:
         summary, work_count = summarize_scope(
             db,
@@ -54,6 +66,7 @@ def create_scope_summary(
             scope_id=payload.scope_id,
             summary_type=payload.summary_type,
             max_sentences=max(3, min(payload.max_sentences, 20)),
+            visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -102,11 +115,18 @@ class TopicModelResponse(BaseModel):
 def create_topic_model(
     payload: TopicRequest,
     db: Session = DB_DEP,
-    _: User = EDITOR_DEP,
+    actor: User = EDITOR_DEP,
 ) -> TopicModelResponse:
-    """Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments."""
+    """Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments.
+
+    Access control: a shelf/rack scope requires SEE on that container, and only papers the caller
+    may SEE are clustered."""
     from app.services.ai_config import get_ai_config
 
+    if not access.can_see_scope_container(
+        db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
     cfg = get_ai_config(db)
     backend = payload.backend or cfg.topic_backend
     try:
@@ -117,6 +137,7 @@ def create_topic_model(
             max_topics=max(1, min(payload.max_topics, 20)),
             backend=backend,
             embedding_model=payload.embedding_model or cfg.topic_embedding_model,
+            visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -130,7 +151,9 @@ class TopicActionRequest(BaseModel):
     name: str  # tag name / shelf name
 
 
-def _topic_work_ids(db: Session, model_id: str, topic_id: int) -> list[uuid.UUID]:
+def _topic_work_ids(
+    db: Session, model_id: str, topic_id: int, *, visible: set[uuid.UUID] | None
+) -> list[uuid.UUID]:
     ids = list(
         db.scalars(
             select(TopicAssignment.work_id).where(
@@ -138,6 +161,8 @@ def _topic_work_ids(db: Session, model_id: str, topic_id: int) -> list[uuid.UUID
             )
         ).all()
     )
+    if visible is not None:
+        ids = [i for i in ids if i in visible]
     if not ids:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No works for that topic")
     return ids
@@ -147,8 +172,12 @@ def _topic_work_ids(db: Session, model_id: str, topic_id: int) -> list[uuid.UUID
 def accept_topic_as_tag(
     payload: TopicActionRequest, db: Session = DB_DEP, actor: User = EDITOR_DEP
 ) -> dict:
-    """Create a tag from a topic and apply it to the topic's works (SPEC §8.15.3)."""
-    work_ids = _topic_work_ids(db, payload.topic_model_id, payload.topic_id)
+    """Create a tag from a topic and apply it to the topic's works (SPEC §8.15.3).
+
+    Only papers the caller may SEE are tagged."""
+    work_ids = _topic_work_ids(
+        db, payload.topic_model_id, payload.topic_id, visible=access.visible_work_ids(db, actor)
+    )
     normalized = normalize_title(payload.name)
     tag = db.scalar(select(Tag).where(Tag.normalized_name == normalized))
     if tag is None:
@@ -174,11 +203,20 @@ def accept_topic_as_tag(
 
 @router.post("/topics/create-shelf", status_code=status.HTTP_201_CREATED)
 def create_shelf_from_topic(
-    payload: TopicActionRequest, db: Session = DB_DEP, actor: User = EDITOR_DEP
+    payload: TopicActionRequest, db: Session = DB_DEP, actor: User = LIBRARIAN_DEP
 ) -> dict:
-    """Create a shelf from a topic and add the topic's works to it (SPEC §8.15.3)."""
-    work_ids = _topic_work_ids(db, payload.topic_model_id, payload.topic_id)
-    shelf = Shelf(name=payload.name, created_by_user_id=actor.id)
+    """Create a shelf from a topic and add the topic's works to it (SPEC §8.15.3).
+
+    Creating a shelf is a librarian+ action; only papers the caller may SEE are added. The new
+    shelf takes the global default access level."""
+    work_ids = _topic_work_ids(
+        db, payload.topic_model_id, payload.topic_id, visible=access.visible_work_ids(db, actor)
+    )
+    shelf = Shelf(
+        name=payload.name,
+        access_level=get_default_access_level(db),
+        created_by_user_id=actor.id,
+    )
     db.add(shelf)
     db.flush()
     for position, work_id in enumerate(work_ids):
