@@ -8,6 +8,7 @@
     type AuditEvent,
     type UserRole,
   } from '../api/client';
+  import AiModelsPanel from '../components/AiModelsPanel.svelte';
 
   const PRIVILEGES: { key: AgentPrivilege; label: string; hint: string }[] = [
     { key: 'can_index', label: 'index', hint: 'Accept manifests (file listings) from this agent.' },
@@ -371,6 +372,11 @@
         </div>
       {/if}
     </section>
+
+    <!-- AI & Models -->
+    <div class="surface admin-section">
+      <AiModelsPanel {client} />
+    </div>
 
     <!-- Audit Events -->
     <section class="surface admin-section audit-section">

@@ -316,6 +316,34 @@ export interface ScopeSummaryResponse {
   work_count: number;
 }
 
+export interface AiConfig {
+  embedding_provider: string;
+  embedding_model: string | null;
+  summary_provider: string;
+  summary_model: string;
+  topic_backend: string;
+  topic_embedding_model: string | null;
+  ollama_url: string;
+}
+
+export interface AiProviderInfo {
+  available: boolean;
+  note: string | null;
+}
+
+export interface AiProviders {
+  embedding: Record<string, AiProviderInfo>;
+  summary: Record<string, AiProviderInfo>;
+  topic: Record<string, AiProviderInfo>;
+  ollama_reachable: boolean;
+}
+
+export interface AiModel {
+  provider: string;
+  name: string;
+  size_bytes: number | null;
+}
+
 export type UserRole = 'owner' | 'editor' | 'reader';
 
 export interface AdminUser {
@@ -744,6 +772,44 @@ export class ApiClient {
       method: 'PATCH',
       body: privileges,
     });
+  }
+
+  // --- AI provider config + model management (owner) ---
+  async getAiConfig(): Promise<{ config: AiConfig; allowed: Record<string, string[]> }> {
+    return this.request('/api/v1/admin/ai-config');
+  }
+
+  async updateAiConfig(
+    changes: Partial<AiConfig>,
+  ): Promise<{ config: AiConfig; reindex_job_id: string | null }> {
+    return this.request('/api/v1/admin/ai-config', { method: 'PUT', body: changes });
+  }
+
+  async getAiProviders(): Promise<AiProviders> {
+    return this.request('/api/v1/admin/ai/providers');
+  }
+
+  async listAiModels(): Promise<{ models: AiModel[] }> {
+    return this.request('/api/v1/admin/ai/models');
+  }
+
+  async pullAiModel(provider: string, model: string): Promise<{ job_id: string; status: string }> {
+    return this.request('/api/v1/admin/ai/models/pull', {
+      method: 'POST',
+      body: { provider, model },
+    });
+  }
+
+  async deleteAiModel(provider: string, model: string): Promise<unknown> {
+    return this.request('/api/v1/admin/ai/models', { method: 'DELETE', body: { provider, model } });
+  }
+
+  async reindexEmbeddings(): Promise<{ job_id: string; status: string }> {
+    return this.request('/api/v1/admin/ai/reindex', { method: 'POST' });
+  }
+
+  async getReindexStatus(): Promise<{ model_name: string; indexed: number; total: number }> {
+    return this.request('/api/v1/admin/ai/reindex/status');
   }
 
   async renameAgent(agentId: string, name: string): Promise<AgentRecord> {
