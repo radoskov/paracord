@@ -996,3 +996,77 @@ closed by Stages 1–9 / WORKPLAN_NEXT). Status of the previously-open items:
 config + needs-OCR signal ship); pgvector ANN index + default-on (exact `<=>`, gated, ships);
 topic-model table split (`topic_models`/`topics`/`work_topics`); `metadata_assertions.value` as typed
 JSONB; graph version-collapse; a browser-level (Playwright) E2E.
+
+---
+
+# AUDIT — Efficiency & spec-satisfaction review (2026-06-30)
+
+A look-back review of algorithmic efficiency and how close the implementation now sits to
+`SPECIFICATION.md`, after the functional-gap closure above. Snapshot of the tree at this date:
+**271 backend test functions** (default SQLite run green; the 8 Postgres-gated tests in
+`test_migration_parity.py` + `test_pg_integration.py` self-skip without a DB and pass via
+`make test-migrations` / a stack with Postgres up), **24 Alembic migrations** (model↔migration
+parity + structural autogenerate-clean both asserted on Postgres), frontend build + vitest green.
+
+## Specification satisfaction snapshot
+
+Verdicts: **DONE** = matches the spec for the intended single-user scale; **BASELINE** = a real,
+working, deliberately-lightweight implementation with a documented upgrade path; **PARTIAL** = works
+but a sub-feature is missing; **DEFERRED** = intentionally not built yet.
+
+| Spec area | Verdict | Note |
+|---|---|---|
+| Auth / roles / sessions / audit (§7, §10) | **DONE** | throttling, change-pw + revoke, `/auth/me`, view/export audit events, owner admin UI |
+| Import (§8.1) | **DONE** | server-folder, upload, arXiv/DOI identifier, BibTeX, RIS, CSL-JSON; agent teleport |
+| Organize: shelves/racks/tags/queue (§8.17.1) | **DONE** | manual reading-queue order; tag colour/description; multi-membership |
+| Keyword + structured search (§8.7/§14) | **DONE** | `author:`/`year:`/`has:`/`tag:`/`venue:`/`type:`/`title:` + title/abstract/DOI/venue free text |
+| Semantic search (§8.15) | **BASELINE** | provider seam (hash-BOW default; ST/Ollama GUI-selectable); read-only; pgvector gated |
+| PDF reader + annotations (§8.8) | **DONE** | PDF.js, coordinate-anchored highlights, marker↔ref jumps; annotation search + export |
+| Metadata review/provenance (§8.12) | **DONE** | assertions, conflict UI, pick-canonical, per-field lock, Enrich |
+| Extraction / GROBID (§8.3, §9.3) | **PARTIAL** | TEI + coordinates + config + keywords + needs-OCR **signal**; no actual OCR/ML extractor run |
+| Enrichment (§8.5) | **DONE** | arXiv/Crossref/OpenAlex/Semantic-Scholar, SSRF-hardened, provenance + per-field locks |
+| Duplicates/versions/multiwork (§8.4) | **DONE** | exact/DOI/arXiv/fuzzy (blocking + rapidfuzz), full review UI, background scan |
+| Citation contexts + graph (§8.9/§8.10) | **DONE** | Cytoscape graph, click-to-open, import-missing-ref; *version-collapse* deferred |
+| Summaries (§8.11/§8.14) | **DONE** | per-work + shelf/rack/library scope; extractive default + `local_llm` (Ollama) seam |
+| Topics + related (§8.15.3/§8.17.2) | **BASELINE** | TF-IDF default + embedding/BERTopic-style backend; accept-as-tag, shelf-from-topic, related-papers |
+| Export / bibliography (§8.17.3/§8.17.4) | **DONE** | 8 formats + APA/IEEE/Chicago styles, scopes, key overrides, preview/copy; live (recomputed per call) |
+| Local agent / teleport (§6.2/§11/§32) | **DONE** | persistent tool-managed agent, privileges, import actions, durable index, CLI + web GUI |
+| AI provider management (WORKPLAN_NEXT §8) | **DONE** | DB-backed config, GUI model pull/detect/reindex |
+| Production / ops / backup (§8.16, M8) | **DONE (core)** | multi-stage prod build, `prod-smoke`, `backup`/`restore`; full deploy hardening ongoing |
+
+**Bottom line:** every spec area is now at least a working BASELINE; the only non-functional gap is
+a *real* OCR/ML extractor (§8.3) — the rest are either DONE or lightweight-but-real baselines with a
+documented upgrade path. No spec area is a stub.
+
+## Efficiency findings
+
+All are acceptable at the stated single-user / hundreds–few-thousand-paper scale; none is a
+correctness bug. Listed worst-leverage-first. Detailed remediation in `FOLLOWUPS.md` → "Efficiency
+follow-ups".
+
+- **E1 — Export author lookup is N+1.** `export_service.py:66` calls `_work_authors(db, work)` once
+  per work (a `MetadataAssertion` query each), so exporting a large shelf/library is O(n) queries.
+  *Fix:* one batched query for all `authors` assertions keyed by `entity_id`. **MEDIUM.**
+- **E2 — `paper.viewed` writes + commits on every `GET /works/{id}`** (`works.py` `get_work`). A read
+  endpoint now does an `INSERT` + `COMMIT` per call; heavy browsing inflates `audit_events` and adds
+  write load on a hot path. *Fix:* sample/debounce (e.g. skip if the same user viewed the same work
+  in the last N minutes) or make view-audit opt-in. **LOW/MEDIUM.**
+- **E3 — `require_agent_token` commits on every authenticated agent request** (`deps.py:86`, the
+  `last_seen_at` stamp). An extra write + commit per agent call, and committing inside a dependency
+  is a smell. *Fix:* throttle the stamp (only if stale by > a minute) or move it into the endpoints
+  that already commit. **LOW.**
+- **E4 — Semantic/related/lexical search scan in Python** (`semantic_search.py:107,208,234`). The
+  non-pgvector embedding path and `_lexical_search` load every embedding/work into Python per query
+  (O(n)). Known and acceptable (H2/H7); pgvector covers the embedding scale path when enabled but
+  `related_works` and lexical mode do not use it. *Fix:* route `related_works` through the pgvector
+  path too; push lexical to a Postgres full-text index at scale. **LOW (scale-only).**
+- **E5 — `reindex_status` loads all works to produce two counts** (`semantic_search.py:182`). It
+  materializes every `Work` in Python just to count those with text. *Fix:* two SQL `COUNT`s (works
+  with non-empty title/abstract; embeddings for the model). **LOW.**
+- **E6 — `get_ai_config` calls `db.rollback()` on a missing-table error** (`ai_config.py:69`). Safe
+  today (only narrow unit-test schemas lack the table, and callers read config before writing) but a
+  read helper that can roll back the caller's transaction is a latent foot-gun. *Fix:* use a nested
+  transaction / savepoint, or detect table presence without provoking an error. **LOW.**
+- **E7 — Repeated server-folder full rescans have no incremental cache** (import path, per the
+  original §6 review). Acceptable now; add mtime/hash incremental scanning + a watch state before
+  very large libraries. **LOW (scale-only).**
