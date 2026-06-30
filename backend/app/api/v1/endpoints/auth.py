@@ -3,22 +3,60 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_authenticated_user
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.schemas.auth import LoginRequest, TokenResponse
+from app.models.user import User
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse
+from app.services import login_throttle
 from app.services.audit import record_event
-from app.services.auth import authenticate_user, create_user_session, revoke_token
+from app.services.auth import (
+    authenticate_user,
+    change_password,
+    create_user_session,
+    hash_token,
+    revoke_all_user_sessions,
+    revoke_token,
+)
 
 router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    """Authenticate a user and create a revocable bearer-token session."""
-    user = authenticate_user(db, payload.username, payload.password)
+    """Authenticate a user and create a revocable bearer-token session.
+
+    Repeated failures for a username are throttled (SPEC §7.2): after the configured number of
+    failures within the window the account is temporarily locked with a ``Retry-After`` hint.
+    """
+    settings = get_settings()
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
+    throttle_key = payload.username.strip().lower()
+
+    locked, retry_after = login_throttle.lock_state(
+        throttle_key,
+        max_failures=settings.login_max_failures,
+        window_minutes=settings.login_lockout_minutes,
+    )
+    if locked:
+        record_event(
+            db,
+            "auth.login_locked",
+            ip_address=client_ip,
+            user_agent=user_agent,
+            details={"username": payload.username},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    user = authenticate_user(db, payload.username, payload.password)
     if user is None:
+        login_throttle.record_failure(throttle_key, window_minutes=settings.login_lockout_minutes)
         record_event(
             db,
             "auth.login_failure",
@@ -32,11 +70,8 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
             detail="Invalid username or password",
         )
 
-    token, _session = create_user_session(
-        db,
-        user,
-        ttl_minutes=get_settings().session_ttl_minutes,
-    )
+    login_throttle.clear(throttle_key)
+    token, _session = create_user_session(db, user, ttl_minutes=settings.session_ttl_minutes)
     record_event(
         db,
         "auth.login_success",
@@ -46,6 +81,40 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     )
     db.commit()
     return TokenResponse(access_token=token)
+
+
+@router.post("/change-password")
+def change_own_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str | int]:
+    """Change the caller's password and revoke their other sessions (the current one is kept)."""
+    try:
+        change_password(
+            db,
+            user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    _, _, raw_token = (authorization or "").partition(" ")
+    kept = hash_token(raw_token.strip()) if raw_token else None
+    revoked = revoke_all_user_sessions(db, user.id, except_token_hash=kept)
+    record_event(
+        db,
+        "auth.password_changed",
+        actor_user_id=user.id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        details={"sessions_revoked": revoked},
+    )
+    db.commit()
+    return {"status": "ok", "sessions_revoked": revoked}
 
 
 @router.post("/logout")

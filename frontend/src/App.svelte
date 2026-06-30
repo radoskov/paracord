@@ -67,6 +67,27 @@
     token = '';
     window.localStorage.removeItem('paracord_token');
   }
+
+  // Change-password modal
+  let showChangePw = false;
+  let curPw = '';
+  let newPw = '';
+  let pwMsg = '';
+  let pwBusy = false;
+
+  async function submitChangePassword(): Promise<void> {
+    pwBusy = true;
+    pwMsg = '';
+    try {
+      const result = await client.changePassword(curPw, newPw);
+      pwMsg = `Password changed (${result.sessions_revoked} other session(s) signed out).`;
+      curPw = newPw = '';
+    } catch (error) {
+      pwMsg = error instanceof Error ? error.message : 'Change failed';
+    } finally {
+      pwBusy = false;
+    }
+  }
 </script>
 
 <main>
@@ -81,6 +102,10 @@
           {#each TABS as tab}
             <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
           {/each}
+          <button type="button" class="signout secondary" on:click={() => { showChangePw = true; pwMsg = ''; }}
+            title="Change your password">
+            Password
+          </button>
           <button type="button" class="signout" on:click={logout} title="Sign out of PaRacORD">
             Sign out
           </button>
@@ -130,6 +155,24 @@
     {/if}
   {/if}
   </div>
+
+  {#if token && showChangePw}
+    <div class="pw-overlay" role="dialog" aria-modal="true" on:click|self={() => (showChangePw = false)}>
+      <div class="pw-box card">
+        <h2>Change password</h2>
+        <form on:submit|preventDefault={submitChangePassword}>
+          <label>Current password<input type="password" bind:value={curPw} autocomplete="current-password" /></label>
+          <label>New password<input type="password" bind:value={newPw} autocomplete="new-password" /></label>
+          <div class="pw-actions">
+            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}>Change</button>
+            <button type="button" class="secondary" on:click={() => (showChangePw = false)}>Close</button>
+          </div>
+          {#if newPw && newPw.length < 8}<p class="hintline">New password must be at least 8 characters.</p>{/if}
+          {#if pwMsg}<p class="muted">{pwMsg}</p>{/if}
+        </form>
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -229,6 +272,32 @@
   .login {
     margin: 4rem auto 0;
     max-width: 26rem;
+  }
+
+  .pw-overlay {
+    align-items: center;
+    background: rgba(20, 28, 38, 0.5);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    position: fixed;
+    z-index: 50;
+  }
+
+  .pw-box {
+    max-width: 22rem;
+    width: 92vw;
+  }
+
+  .pw-box form {
+    display: grid;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+
+  .pw-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .login form {

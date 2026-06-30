@@ -764,6 +764,16 @@ export class ApiClient {
     });
   }
 
+  async changePassword(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ status: string; sessions_revoked: number }> {
+    return this.request('/api/v1/auth/change-password', {
+      method: 'POST',
+      body: { current_password: currentPassword, new_password: newPassword },
+    });
+  }
+
   async getJobs(limit = 25): Promise<QueueStatus> {
     return this.request<QueueStatus>(`/api/v1/jobs?limit=${limit}`);
   }

@@ -19,7 +19,8 @@ The full policy lives in [`docs/runbooks/secrets_management.md`](docs/runbooks/s
 
 - **Light, non-secret config** (URLs, hostnames, IP addresses, ports, flags) is provided through environment variables loaded from a local `.env` file and/or `config/*.local.yaml`. Only `*.example` files with placeholder values are committed.
 - **Serious machine secrets** (database passwords, `PARACORD_SECRET_KEY`, agent tokens, API keys) are read from the environment / a secret store and referenced in YAML by env-var name (the `*_env` keys), never inlined. They are never committed in any form.
-- **User passwords** are stored only as bcrypt hashes via `hash_password` / `verify_password` in `backend/app/core/security.py` — one-way, never reversibly encoded, never logged. Other sensitive stored fields that must remain recoverable are **encrypted at rest** with a key supplied from the environment.
+- **User passwords** are stored only as bcrypt hashes via `hash_password` / `verify_password` in `backend/app/core/security.py` — one-way, never reversibly encoded, never logged. **Bearer tokens** (user sessions, agent access, enrollment) are likewise stored only as SHA-256 hashes, never in plaintext.
+- **At rest:** the database holds bibliographic data plus the one-way hashes above; there are currently **no reversibly-encrypted application fields**, so at-rest confidentiality of the corpus relies on the operator's disk/volume encryption (documented in the deployment runbook). `PARACORD_SECRET_KEY` is read from the environment and **reserved** for future field-level encryption (Fernet); when unset, the app runs without field encryption rather than failing.
 - **Personal data** (usernames, emails) lives in the database, never in source, fixtures, logs, or examples. The only personal data in the repository is the git author name/email in commit metadata.
 - *Clearly fake* placeholders and test values are allowed; mark unavoidable realistic test values with `# pragma: allowlist secret`.
 
@@ -61,6 +62,7 @@ PaRacORD is local-first and built only from open-source, auditable components (G
 - The only outbound traffic is **opt-in metadata enrichment and GROBID consolidation**, and it carries only **bibliographic identifiers** — titles, authors, DOIs, arXiv IDs, and raw reference strings.
 - The system never transmits PDF contents, full text, annotations, notes, your shelf/rack/collection structure, filesystem paths, or any bulk export of your library to a third party.
 - Every external request is recorded as a `metadata.enrichment_called` audit event, so egress is fully visible to the owner.
+- Outbound enrichment requests are **SSRF-hardened**: identifiers are percent-encoded into the URL (never able to alter the target) and redirects that leave the API's own host are refused, so a crafted DOI/arXiv id or a hostile upstream cannot pivot the request to a link-local or metadata endpoint.
 - Enrichment is configurable per service and can be disabled entirely; consolidation can be pointed at a self-hosted biblio-glutton instance for zero third-party calls.
 
 See also [Secrets and credential handling](#secrets-and-credential-handling).

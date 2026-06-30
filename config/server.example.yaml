@@ -7,12 +7,15 @@ server:
   secret_key_env: PARACORD_SECRET_KEY
 
 security:
-  guest_access_enabled: false
+  # No guest/anonymous access exists by design; the role set is asserted guest-free at startup.
   allowed_roles:
     - owner
     - editor
     - reader
   session_ttl_minutes: 720
+  # Failed-login throttling (per username, in-process sliding window).
+  login_max_failures: 5
+  login_lockout_minutes: 15
   failed_login_lockout:
     enabled: true
     max_attempts: 8

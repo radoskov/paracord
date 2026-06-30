@@ -81,3 +81,31 @@ def revoke_token(db: Session, token: str) -> UserSession | None:
     session.revoked_at = datetime.now(UTC)
     db.flush()
     return session
+
+
+def revoke_all_user_sessions(db: Session, user_id, *, except_token_hash: str | None = None) -> int:
+    """Revoke all active sessions for a user (optionally keeping one). Returns count revoked."""
+    now = datetime.now(UTC)
+    sessions = db.scalars(
+        select(UserSession).where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+    ).all()
+    revoked = 0
+    for session in sessions:
+        if except_token_hash is not None and session.token_hash == except_token_hash:
+            continue
+        session.revoked_at = now
+        revoked += 1
+    db.flush()
+    return revoked
+
+
+def change_password(db: Session, user: User, *, current_password: str, new_password: str) -> None:
+    """Verify the current password and set a new hash (raises ValueError on mismatch/weakness)."""
+    if not verify_password(current_password, user.password_hash):
+        raise ValueError("Current password is incorrect")
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters")
+    if new_password == current_password:
+        raise ValueError("New password must differ from the current password")
+    user.password_hash = hash_password(new_password)
+    db.flush()

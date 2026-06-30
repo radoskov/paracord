@@ -27,6 +27,24 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Stage 7 — auth & egress hardening.**
+  - **Failed-login throttling** (`login_throttle`): after `login_max_failures` failures for a
+    username within `login_lockout_minutes`, `/auth/login` returns **429** with a `Retry-After`
+    hint; a successful login clears the counter. In-process sliding window (fits the single-node
+    deployment), config-driven via the `security:` block.
+  - **In-app change-password** (`POST /auth/change-password`): verifies the current password, sets
+    the new hash, and **revokes the user's other sessions** (keeps the current one). Surfaced in the
+    web header via a "Password" dialog.
+  - **SSRF-hardened enrichment**: identifiers are percent-encoded into the request path and
+    redirects that leave the API's own host are refused (blocks pivots to link-local/metadata
+    endpoints via a crafted DOI/arXiv id or hostile upstream).
+  - **Removed the dead `guest_access_enabled` flag** (no guest access exists; the role set is
+    already asserted guest-free at startup). `PARACORD_SECRET_KEY` is now a real setting reserved
+    for future field encryption.
+  - **SECURITY.md reconciled with reality**: bearer tokens are stored as SHA-256 hashes; there are
+    no reversibly-encrypted fields today (at-rest confidentiality relies on volume encryption);
+    documented the new SSRF protections.
+
 - **Stage 6 — AI provider hardening (SPEC §20 M7).** Lexical baselines stay the default; heavier
   local providers are opt-in and degrade gracefully (no new hard dependency).
   - **Embeddings off the read path (H2):** `semantic_search` is now **read-only** — it ranks stored

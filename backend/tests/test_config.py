@@ -41,8 +41,6 @@ server:
   bind_port: 9000
   allow_lan_access: true
   public_base_url: http://paracord.local:9000
-security:
-  guest_access_enabled: false
 services:
   database_url: postgresql+psycopg://example/example
 """,
@@ -58,7 +56,6 @@ services:
     assert settings.bind_port == 9000
     assert settings.lan_mode is True
     assert settings.public_base_url == "http://paracord.local:9000"
-    assert settings.guest_access_enabled is False
     assert settings.database_url == "postgresql+psycopg://example/example"
 
 

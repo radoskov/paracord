@@ -10,6 +10,7 @@ user-confirmed. Outbound requests carry only bibliographic identifiers (see SECU
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from urllib.parse import quote, urlsplit
 
 import httpx2 as httpx
 from lxml import etree
@@ -166,13 +167,42 @@ def parse_semantic_scholar(payload: dict) -> ExternalMetadata | None:
     )
 
 
+# --- SSRF-hardened outbound HTTP (SPEC §7, M5) ------------------------------
+#
+# Identifiers are attacker-influenced (a DOI/arXiv id can be anything the user typed), so they are
+# percent-encoded into the path and never allowed to alter the target. Redirects are followed but a
+# redirect that leaves the API's own host is refused — closing the SSRF pivot to link-local / metadata
+# endpoints (e.g. 169.254.169.254) via a crafted identifier or a hostile API.
+
+
+class ExternalFetchError(RuntimeError):
+    """An outbound enrichment request was refused (e.g. a cross-host redirect)."""
+
+
+def _idseg(identifier: str) -> str:
+    """Percent-encode an identifier for safe use as a single URL path segment."""
+    return quote(identifier.strip(), safe="")
+
+
+def _get(url: str, *, params: dict | None = None, headers: dict | None = None) -> httpx.Response:
+    """GET ``url`` following only same-host redirects (SSRF guard)."""
+    expected_host = urlsplit(url).hostname
+    with httpx.Client(timeout=30, headers=headers or {}, follow_redirects=True) as client:
+        response = client.get(url, params=params)
+    for hop in [*response.history, response]:
+        if urlsplit(str(hop.url)).hostname != expected_host:
+            raise ExternalFetchError(
+                f"Refusing cross-host redirect from {expected_host} to {urlsplit(str(hop.url)).hostname}"
+            )
+    return response
+
+
 # --- live fetchers (injectable; only call out per enabled source) -----------
 
 
 def fetch_arxiv(arxiv_id: str, **_kwargs) -> ExternalMetadata | None:
     """Fetch metadata for an arXiv id from the public arXiv API."""
-    with httpx.Client(timeout=30, follow_redirects=True) as client:
-        response = client.get(ARXIV_API, params={"id_list": arxiv_id, "max_results": 1})
+    response = _get(ARXIV_API, params={"id_list": arxiv_id, "max_results": 1})
     response.raise_for_status()
     return parse_arxiv_atom(response.text)
 
@@ -181,8 +211,7 @@ def fetch_crossref_by_doi(doi: str, *, mailto: str | None = None) -> ExternalMet
     """Fetch metadata for a DOI from the Crossref REST API."""
     # A mailto puts the request in Crossref's "polite pool" (faster, recommended).
     headers = {"User-Agent": f"PaRacORD/0.0 (mailto:{mailto})"} if mailto else {}
-    with httpx.Client(timeout=30, headers=headers, follow_redirects=True) as client:
-        response = client.get(f"{CROSSREF_API}/{doi}")
+    response = _get(f"{CROSSREF_API}/{_idseg(doi)}", headers=headers)
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -193,8 +222,7 @@ def fetch_openalex(doi: str, *, mailto: str | None = None, **_kwargs) -> Externa
     """Fetch metadata for a DOI from the OpenAlex API."""
     # A mailto puts the request in OpenAlex's faster "polite pool".
     params = {"mailto": mailto} if mailto else {}
-    with httpx.Client(timeout=30, follow_redirects=True) as client:
-        response = client.get(f"{OPENALEX_API}/doi:{doi}", params=params)
+    response = _get(f"{OPENALEX_API}/doi:{_idseg(doi)}", params=params)
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -206,16 +234,14 @@ def fetch_semantic_scholar(
 ) -> ExternalMetadata | None:
     """Fetch metadata from Semantic Scholar by arXiv id (preferred) or DOI."""
     if arxiv_id:
-        identifier = f"arXiv:{_arxiv_base(arxiv_id)}"
+        identifier = f"arXiv:{_idseg(_arxiv_base(arxiv_id))}"
     elif doi:
-        identifier = f"DOI:{doi}"
+        identifier = f"DOI:{_idseg(doi)}"
     else:
         return None
-    with httpx.Client(timeout=30, follow_redirects=True) as client:
-        response = client.get(
-            f"{SEMANTIC_SCHOLAR_API}/{identifier}",
-            params={"fields": SEMANTIC_SCHOLAR_FIELDS},
-        )
+    response = _get(
+        f"{SEMANTIC_SCHOLAR_API}/{identifier}", params={"fields": SEMANTIC_SCHOLAR_FIELDS}
+    )
     if response.status_code == 404:
         return None
     response.raise_for_status()

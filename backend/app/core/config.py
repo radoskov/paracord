@@ -42,12 +42,14 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["lan_mode"] = server["allow_lan_access"]
     if "public_base_url" in server:
         values["public_base_url"] = server["public_base_url"]
-    if "guest_access_enabled" in security:
-        values["guest_access_enabled"] = security["guest_access_enabled"]
     if "allowed_roles" in security:
         values["allowed_roles"] = security["allowed_roles"]
     if "session_ttl_minutes" in security:
         values["session_ttl_minutes"] = security["session_ttl_minutes"]
+    if "login_max_failures" in security:
+        values["login_max_failures"] = security["login_max_failures"]
+    if "login_lockout_minutes" in security:
+        values["login_lockout_minutes"] = security["login_lockout_minutes"]
     if "database_url" in services:
         values["database_url"] = services["database_url"]
     if "redis_url" in services:
@@ -117,7 +119,8 @@ class Settings(BaseSettings):
     grobid_coordinate_elements: list[str] = ["ref", "biblStruct", "s", "p"]
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
-    guest_access_enabled: bool = False
+    # No guest/anonymous access exists by design; the role set is asserted guest-free at startup
+    # (see app.core.security.assert_no_guest_roles). There is intentionally no guest_access flag.
     allowed_roles: list[str] = ["owner", "editor", "reader"]
     session_ttl_minutes: int = Field(default=720, alias="PARACORD_SESSION_TTL_MINUTES")
     managed_library_root: str = "./storage/library"
