@@ -841,6 +841,20 @@ export class ApiClient {
     });
   }
 
+  async searchAnnotations(q: string, annotationType?: string): Promise<Annotation[]> {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (annotationType) params.set('annotation_type', annotationType);
+    return this.request<Annotation[]>(`/api/v1/works/annotations/search?${params.toString()}`);
+  }
+
+  async exportAnnotations(
+    workId: string,
+    format: 'markdown' | 'text' = 'markdown',
+  ): Promise<{ filename: string; content_type: string; content: string }> {
+    return this.request(`/api/v1/works/${workId}/annotations/export?format=${format}`);
+  }
+
   async changePassword(
     currentPassword: string,
     newPassword: string,

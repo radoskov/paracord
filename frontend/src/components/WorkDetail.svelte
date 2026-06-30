@@ -102,6 +102,18 @@
     }, 'Saved');
   }
 
+  async function exportNotes(): Promise<void> {
+    await run(async () => {
+      const r = await client.exportAnnotations(work.id, 'markdown');
+      const url = URL.createObjectURL(new Blob([r.content], { type: r.content_type }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = r.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   async function enrich(): Promise<void> {
     await run(async () => {
       const result = await client.enrichWork(work.id);
@@ -228,6 +240,8 @@
   <div class="bar">
     <h2>{form.canonical_title || 'Untitled paper'}</h2>
     <div class="bar-actions">
+      <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
+        title="Download this paper's annotations as Markdown">Export notes</button>
       <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading}
         title="Delete this paper (files are kept)">Delete</button>
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>

@@ -551,6 +551,73 @@ async def upload_work_file(
     return file_obj
 
 
+@router.get("/annotations/search", response_model=list[AnnotationRead])
+def search_annotations(
+    q: str | None = Query(default=None),
+    annotation_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = DB_DEP,
+) -> list[Annotation]:
+    """Search annotations across all works by selected text / note body (SPEC §8.8.7)."""
+    stmt = select(Annotation)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(Annotation.selected_text.ilike(like), Annotation.content_markdown.ilike(like))
+        )
+    if annotation_type:
+        stmt = stmt.where(Annotation.annotation_type == annotation_type)
+    stmt = stmt.order_by(Annotation.created_at.desc()).limit(limit)
+    return list(db.scalars(stmt).all())
+
+
+@router.get("/{work_id}/annotations/export")
+def export_work_annotations(
+    work_id: uuid.UUID,
+    output_format: str = Query(default="markdown", pattern="^(markdown|text)$", alias="format"),
+    db: Session = DB_DEP,
+) -> dict[str, str]:
+    """Export a work's annotations as Markdown or plain text (SPEC §8.17.4)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    rows = list(
+        db.scalars(
+            select(Annotation)
+            .where(Annotation.work_id == work_id)
+            .order_by(Annotation.page, Annotation.created_at)
+        ).all()
+    )
+    title = work.canonical_title or "Untitled paper"
+    lines = (
+        [f"# Annotations — {title}", ""]
+        if output_format == "markdown"
+        else [f"Annotations — {title}", ""]
+    )
+    for a in rows:
+        loc = f"p.{a.page}" if a.page is not None else "—"
+        if output_format == "markdown":
+            lines.append(f"## {a.annotation_type} ({loc})")
+            if a.selected_text:
+                lines.append(f"> {a.selected_text}")
+            if a.content_markdown:
+                lines.append(a.content_markdown)
+            lines.append("")
+        else:
+            lines.append(f"[{a.annotation_type} {loc}]")
+            if a.selected_text:
+                lines.append(f'  "{a.selected_text}"')
+            if a.content_markdown:
+                lines.append(f"  {a.content_markdown}")
+    content = "\n".join(lines) + "\n"
+    extension = "md" if output_format == "markdown" else "txt"
+    return {
+        "filename": f"annotations-{work_id}.{extension}",
+        "content_type": "text/markdown" if output_format == "markdown" else "text/plain",
+        "content": content,
+    }
+
+
 @router.get("/{work_id}/annotations", response_model=list[AnnotationRead])
 def list_work_annotations(
     work_id: uuid.UUID,
