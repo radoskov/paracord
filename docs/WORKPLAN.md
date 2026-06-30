@@ -364,3 +364,100 @@ Stages 1–5 are done — the single-machine loop, the reader/graph, the full UI
 remote-workstation agent teleport all work. **Stage 6 (AI provider hardening) is next**: move
 embeddings off the read path and put summaries/topics/search behind provider interfaces (keeping
 the lexical baselines as defaults). Everything in Stage 7 is intentionally last.
+
+---
+
+# Round: UI / agent / reader improvements (2026-06-30)
+
+In-vivo review round. Four phases, each implemented + tested + committed by a dedicated agent. Run
+in a coordinated **sequence** (see "Execution & collision-safety") so they never collide on the
+shared dev stack or the git index. Effort: **S** ≈ hours · **M** ≈ half-day · **L** ≈ multi-session.
+
+## Resolved decisions (from discussion)
+- **Reader tabs for Readers:** browse-all, hide actions — Reader sees Library, Shelves, Racks, Tags,
+  Insights, Profile; **hide Import, Jobs, Duplicates** (editor+); Admin/Events stay owner-only.
+- **PDF reader:** one fully-capable PDF.js reader (add a **text layer**); **no** separate
+  native-viewer toggle (the existing "New tab ↗" button is the native/distraction-free escape hatch).
+- **In-reader search behavior (confirmed):** **in-app search = whole document** (scans every page via
+  `getTextContent()`, jumps to + highlights matches); **browser Ctrl+F = visible/rendered pages only**
+  (page view = current page; smooth-scroll = pages rendered into view). This split is intended.
+- **Agent metadata:** sync extracted **title + authors** from server back to the agent now (enables
+  agent-side search/sort by title/authors).
+- **Agent teleport:** agent-initiated, **push directly when the owner has granted `can_teleport`**.
+- **change-password copy:** behavior is correct (it does revoke other sessions); fix the wording only.
+
+## Judgment calls (will do unless told otherwise)
+- Reference shorthand uses the `marker_text` of a linked `CitationMention` (numeric "[69]" or
+  author-year, whichever GROBID captured) — no new column/migration needed.
+- The agent "monitored/once" last-used preference persists in the agent web GUI's `localStorage`.
+
+## Phase 1 — Access & profile polish  *(S)*
+Files: `frontend/src/App.svelte`, `frontend/src/pages/ProfilePage.svelte`, `frontend/src/App.test.ts`.
+- [ ] 1. **Header grouping** — username + Profile link in one rounded-rect chip (a user-menu unit).
+- [ ] 2. **Profile role badge → top-right** of the Account card.
+- [ ] 3. **Roles & access: show only the user's own role** (don't advertise the privilege ladder).
+  Self-contained descriptions: Reader = "Browse, search and read papers; cannot modify the library.";
+  Editor = "Browse, search and read papers; import, edit, enrich and delete papers."; Owner = that +
+  "manage users, agents, AI settings and the audit log."
+- [ ] 4. **Change-password copy fix** — "Signs you out everywhere else (other browsers/devices). This
+  tab stays signed in." (behavior unchanged).
+- [ ] 5. **Role-gated tabs** — `roles: ['owner','editor']` on Import, Jobs, Duplicates; update
+  `App.test.ts`.
+
+## Phase 2 — Library: references/citations, import refresh, Read robustness  *(M)*
+Files: `frontend/src/components/WorkDetail.svelte`, `frontend/src/pages/LibraryPage.svelte`,
+`frontend/src/api/client.ts`, `backend/app/api/v1/endpoints/works.py`, files read schema.
+- [ ] 6. **Reference ↔ citation cross-link** — derived shorthand/label per reference (from a linked
+  `CitationMention.marker_text`, one join, no migration); show as a leading column/badge.
+- [ ] 7. **Group entries in rounded-rect cards** — References and In-text-citations lists.
+- [ ] 8. **Refresh library list on import** — `onImported` callback WorkDetail → LibraryPage reloads
+  the works list.
+- [ ] 9. **Read-button robustness** — `content_available` in the file read schema (false for
+  `extracted_discarded` / missing location); clear label + disabled Read w/ tooltip; surface failure
+  reason.
+- [ ] 10. **Search by hash + full hash (server GUI)** — full hash visible + copy-on-click; library
+  search matches a file `sha256` → owning paper.
+
+## Phase 3 — Agent GUI overhaul  *(L)*  — internal order: **#11 before #15**
+Files: `agent/paperracks_agent/{web.py,client.py,state.py,agent_ops.py,config.py}`,
+`backend/app/api/v1/endpoints/agents.py`, `backend/app/schemas/agent.py`.
+- [ ] 11. **Server→agent metadata sync** — server returns extracted title + authors in the agent
+  file-status response; agent stores them in `state.sqlite3` (new columns).
+- [ ] 12. **Agent-initiated teleport** — backend endpoint accepting an agent-offered teleport when
+  `can_teleport` is granted; **Request teleport** button per file in the agent GUI.
+- [ ] 13. **Local Read** — agent route `GET /api/files/{local_file_id}/view` (resolves `real_path`
+  locally); **Read** button opens it in a new tab.
+- [ ] 14. **Full hash + copy-on-click** in the agent table.
+- [ ] 15. **Search / sort / filter** — search over filename + hash + title + authors; sort by any
+  column (incl. title); filter by action and state.
+- [ ] 16. **Add-folder/file dialog** — monitored/once as a radio/toggle remembering the last choice.
+- [ ] 17. **Server status light** — green = reachable + approved; yellow = reachable but error
+  (pending/revoked/unregistered/other); red = unreachable.
+
+## Phase 4 — PDF reader overhaul  *(L)*  — internal order: **#18 before #19–#21**
+Files: `frontend/src/components/PdfReader.svelte`, `frontend/src/components/WorkDetail.svelte`,
+`frontend/src/api/client.ts`, `backend/app/api/v1/endpoints/works.py`,
+`backend/app/models/annotation.py` (+ DELETE endpoint).
+- [ ] 18. **PDF.js text layer** (foundation) — selectable text layer over each page. Unblocks 19–21.
+- [ ] 19. **Working search** — highlight matches in the text layer; next/prev across all pages;
+  Ctrl+F on rendered pages.
+- [ ] 20. **Annotations that work** — selection → highlight/note/copy with accurate coords; persist +
+  render highlight boxes; **delete** (new backend DELETE + client + per-note button); click a note
+  jumps to its page/anchor.
+- [ ] 21. **Citation ↔ reference navigation** — citation-overlay click switches tab **and scrolls to +
+  flashes** the matching entry (both directions).
+- [ ] 22. **View ergonomics** — paged ↔ smooth-scroll toggle (remembered) + drag-to-pan the zoomed
+  page.
+
+## Dependencies
+- Phase 3: #11 before #15. Phase 4: #18 before #19–#21.
+- **Phase 2 and Phase 4 edit the same files** (`WorkDetail.svelte`, `works.py`, `client.ts`) → must
+  not run concurrently. Phases otherwise independent.
+
+## Execution & collision-safety
+The dev stack is a single shared working tree, bind-mounted into Docker with `uvicorn --reload` +
+Vite HMR, and a single git index. Concurrent agents would collide at **build/test time** (a
+whole-project build compiles another agent's half-finished edits) and on **commits**. So the four
+phase agents run **sequentially** (P1 → P2 → P3 → P4): each implements, tests (frontend build +
+vitest; backend pytest where relevant), and commits to `main` (no branch), then the next starts.
+Within a phase, the internal order above is honored by that phase's agent.
