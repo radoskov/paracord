@@ -11,9 +11,18 @@ Vectors are stored as JSON and ranked with the cosine similarity here (no pgvect
 which is adequate for a single-user library; a pgvector index is a future scaling step.
 """
 
+from __future__ import annotations
+
 import hashlib
+import logging
 import math
 import re
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 256
 DEFAULT_EMBEDDING_MODEL = "hash-bow-v1"
@@ -34,6 +43,80 @@ def embed_text(text: str, *, dim: int = EMBEDDING_DIM) -> list[float]:
     if norm == 0.0:
         return vector
     return [value / norm for value in vector]
+
+
+# --- Embedding provider interface (SPEC §8.15, Stage 6) ---------------------
+#
+# The default provider is the dependency-free hash-BOW embedder above. Heavier local providers
+# (sentence-transformers, Ollama) are opt-in via settings and **degrade to hash-BOW** if their
+# library/service is unavailable, so a normal install never gains a hard dependency. Stored
+# embeddings carry their ``model_name`` so vectors from different providers are never compared.
+
+
+class EmbeddingProvider(Protocol):
+    model_name: str
+
+    def embed(self, text: str) -> list[float]: ...
+
+
+class HashBowProvider:
+    """Deterministic feature-hashing bag-of-words — the default + test provider."""
+
+    model_name = DEFAULT_EMBEDDING_MODEL
+
+    def embed(self, text: str) -> list[float]:
+        return embed_text(text)
+
+
+class SentenceTransformerProvider:
+    """Opt-in local sentence-transformers embedder (no network egress after model download)."""
+
+    def __init__(self, model_name: str) -> None:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415 (optional dep)
+
+        self.model_name = f"st:{model_name}"
+        self._model = SentenceTransformer(model_name)
+
+    def embed(self, text: str) -> list[float]:
+        return [float(x) for x in self._model.encode(text or "", normalize_embeddings=True)]
+
+
+class OllamaProvider:
+    """Opt-in Ollama embeddings endpoint (local daemon)."""
+
+    def __init__(self, model_name: str, base_url: str) -> None:
+        self.model_name = f"ollama:{model_name}"
+        self._model = model_name
+        self._base_url = base_url.rstrip("/")
+
+    def embed(self, text: str) -> list[float]:
+        import httpx2 as httpx  # noqa: PLC0415
+
+        with httpx.Client(timeout=30) as client:
+            response = client.post(
+                f"{self._base_url}/api/embeddings",
+                json={"model": self._model, "prompt": text or ""},
+            )
+            response.raise_for_status()
+            return [float(x) for x in response.json()["embedding"]]
+
+
+def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvider:
+    """Return the configured embedding provider, falling back to hash-BOW on any failure."""
+    if settings is None:
+        from app.core.config import get_settings  # noqa: PLC0415
+
+        settings = get_settings()
+    provider = getattr(settings, "embedding_provider", "hash_bow")
+    model = getattr(settings, "embedding_model", None)
+    try:
+        if provider == "sentence_transformers":
+            return SentenceTransformerProvider(model or "sentence-transformers/all-MiniLM-L6-v2")
+        if provider == "ollama":
+            return OllamaProvider(model or "nomic-embed-text", settings.ollama_url)
+    except Exception as exc:  # noqa: BLE001 - optional providers degrade, never break a request
+        logger.warning("Embedding provider %r unavailable (%s); using hash-BOW.", provider, exc)
+    return HashBowProvider()
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:

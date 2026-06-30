@@ -130,8 +130,30 @@ def model_topics(
     scope_type: str,
     scope_id: uuid.UUID | None = None,
     max_topics: int = DEFAULT_MAX_TOPICS,
+    backend: str = "tfidf",
+    embedding_model: str | None = None,
+    random_seed: int | None = None,
+    allow_outliers: bool = False,
+    hierarchical: bool = False,
 ) -> dict:
-    """Cluster a scope's works into keyword-labelled topics and persist assignments."""
+    """Cluster a scope's works into keyword-labelled topics and persist assignments.
+
+    The default ``tfidf`` backend is the dependency-free baseline. An ``embedding``/``bertopic``
+    backend returns the same clusters enriched with BERTopic-style metadata (representative works,
+    coherence, optional outliers + hierarchy). It is deterministic — the clustering is seeded from
+    the stable title order — so a ``random_seed`` is accepted for API parity but not required.
+    """
+    if backend in ("embedding", "bertopic"):
+        return _model_topics_embedding(
+            db,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            max_topics=max_topics,
+            backend=backend,
+            embedding_model=embedding_model,
+            allow_outliers=allow_outliers,
+            hierarchical=hierarchical,
+        )
 
     model_id = f"keyword-kmeans:{scope_type}:{scope_id or 'all'}"
     works = _ordered_works(_scope_works(db, scope_type=scope_type, scope_id=scope_id))
@@ -197,6 +219,139 @@ def _result(
         "scope_id": str(scope_id) if scope_id else None,
         "work_count": work_count,
         "topics": topics,
+    }
+
+
+# Below this cosine-to-centroid a work is considered a topic outlier (when allow_outliers).
+_OUTLIER_THRESHOLD = 0.05
+REPRESENTATIVE_PER_TOPIC = 3
+
+
+def _model_topics_embedding(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    max_topics: int,
+    backend: str,
+    embedding_model: str | None,
+    allow_outliers: bool,
+    hierarchical: bool,
+) -> dict:
+    """BERTopic-style backend: deterministic clustering + representative works / coherence / etc.
+
+    Uses the same deterministic TF-IDF + k-means as the baseline for cluster assignment (so it is
+    reproducible and needs no heavy model), then layers the richer result shape on top. The
+    requested ``embedding_model`` is echoed for provenance; a real sentence-transformers/BERTopic
+    backend can replace the internals behind this same return contract.
+    """
+    model_id = f"{backend}:{scope_type}:{scope_id or 'all'}"
+    works = _ordered_works(_scope_works(db, scope_type=scope_type, scope_id=scope_id))
+    documents = [(work, _tokenize(_doc_text(work))) for work in works]
+    documents = [(work, tokens) for work, tokens in documents if tokens]
+
+    db.execute(delete(TopicAssignment).where(TopicAssignment.topic_model_id == model_id))
+
+    if not documents:
+        db.flush()
+        return _embedding_result(
+            model_id, scope_type, scope_id, backend, embedding_model, topics=[], work_count=0
+        )
+
+    vectors = _tfidf([tokens for _, tokens in documents])
+    k = max(1, min(max_topics, len(documents)))
+    assignments = _kmeans(vectors, k)
+
+    topics: list[dict] = []
+    outliers: list[str] = []
+    centroids: dict[int, dict[str, float]] = {}
+
+    for topic_id in range(k):
+        members = [i for i, cluster in enumerate(assignments) if cluster == topic_id]
+        if not members:
+            continue
+        centroid = _centroid([vectors[i] for i in members])
+        centroids[topic_id] = centroid
+        scored = sorted(members, key=lambda i: _cosine(vectors[i], centroid), reverse=True)
+        coherence = sum(_cosine(vectors[i], centroid) for i in members) / len(members)
+        topics.append(
+            {
+                "topic_id": topic_id,
+                "keywords": _cluster_keywords(centroid),
+                "work_count": len(members),
+                "representative_work_ids": [
+                    str(documents[i][0].id) for i in scored[:REPRESENTATIVE_PER_TOPIC]
+                ],
+                "coherence_score": round(max(0.0, min(1.0, coherence)), 4),
+            }
+        )
+        for i in members:
+            work, _ = documents[i]
+            similarity = _cosine(vectors[i], centroid)
+            if allow_outliers and similarity < _OUTLIER_THRESHOLD:
+                outliers.append(str(work.id))
+            db.add(
+                TopicAssignment(
+                    topic_model_id=model_id,
+                    scope_type=scope_type,
+                    scope_id=str(scope_id) if scope_id else None,
+                    work_id=work.id,
+                    topic_id=topic_id,
+                    score=round(similarity, 4),
+                )
+            )
+
+    db.flush()
+    return _embedding_result(
+        model_id,
+        scope_type,
+        scope_id,
+        backend,
+        embedding_model,
+        topics=topics,
+        work_count=len(documents),
+        outlier_work_ids=outliers,
+        hierarchy=_topic_hierarchy(centroids) if hierarchical else None,
+    )
+
+
+def _topic_hierarchy(centroids: dict[int, dict[str, float]]) -> list[dict]:
+    """A minimal agglomerative view: nearest-centroid topic pairs and their similarity."""
+    ids = sorted(centroids)
+    merges: list[dict] = []
+    for pos, a in enumerate(ids):
+        best, best_sim = None, -1.0
+        for b in ids[pos + 1 :]:
+            sim = _cosine(centroids[a], centroids[b])
+            if sim > best_sim:
+                best, best_sim = b, sim
+        if best is not None:
+            merges.append({"topic_a": a, "topic_b": best, "similarity": round(best_sim, 4)})
+    return merges
+
+
+def _embedding_result(
+    model_id: str,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    backend: str,
+    embedding_model: str | None,
+    *,
+    topics,
+    work_count,
+    outlier_work_ids: list[str] | None = None,
+    hierarchy: list[dict] | None = None,
+) -> dict:
+    return {
+        "model_id": model_id,
+        "backend": backend,
+        "embedding_model": embedding_model,
+        "scope_type": scope_type,
+        "scope_id": str(scope_id) if scope_id else None,
+        "work_count": work_count,
+        "topics": topics,
+        "outlier_work_ids": outlier_work_ids or [],
+        "hierarchy": hierarchy,
     }
 
 

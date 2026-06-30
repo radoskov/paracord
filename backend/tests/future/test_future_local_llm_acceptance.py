@@ -1,14 +1,11 @@
-"""Future acceptance tests for local-LLM summaries.
+"""Acceptance tests for the local-LLM summary provider (Stage 6).
 
-The current summarizer is local extractive/abstract-only. This test captures the
-later Ollama/llama.cpp contract while remaining disabled now.
+The provider is opt-in (``summary_llm_enabled`` + Ollama). When it is disabled/unreachable — as in
+CI — it degrades to the extractive engine while still recording the requested model, prompt
+version, and the source sections that fed it, so the contract below holds with no hard dependency.
 """
 
 from __future__ import annotations
-
-import pytest
-
-pytestmark = pytest.mark.skip(reason="future stage: local LLM summary provider")
 
 
 def test_local_llm_summary_records_model_prompt_and_source_sections(client, auth_headers) -> None:

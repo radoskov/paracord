@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
@@ -69,20 +70,29 @@ class TopicRequest(BaseModel):
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
     max_topics: int = 5
+    # 'tfidf' (default baseline) or 'embedding'/'bertopic' (richer, deterministic). None → config.
+    backend: Literal["tfidf", "embedding", "bertopic"] | None = None
+    embedding_model: str | None = None
 
 
 class TopicRead(BaseModel):
     topic_id: int
     keywords: list[str]
     work_count: int
+    representative_work_ids: list[str] = []
+    coherence_score: float | None = None
 
 
 class TopicModelResponse(BaseModel):
     model_id: str
+    backend: str | None = None
+    embedding_model: str | None = None
     scope_type: str
     scope_id: str | None = None
     work_count: int
     topics: list[TopicRead]
+    outlier_work_ids: list[str] = []
+    hierarchy: list[dict] | None = None
 
 
 @router.post("/topics", response_model=TopicModelResponse)
@@ -91,13 +101,16 @@ def create_topic_model(
     db: Session = DB_DEP,
     _: User = EDITOR_DEP,
 ) -> TopicModelResponse:
-    """Run the lightweight (no-LLM) topic model over a scope and store the assignments."""
+    """Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments."""
+    backend = payload.backend or get_settings().topic_backend
     try:
         result = model_topics(
             db,
             scope_type=payload.scope_type,
             scope_id=payload.scope_id,
             max_topics=max(1, min(payload.max_topics, 20)),
+            backend=backend,
+            embedding_model=payload.embedding_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

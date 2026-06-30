@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 QUEUE_NAME = "paracord"
 EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
+EMBED_JOB = "app.workers.jobs.embed_work_job"
 
 
 def get_queue():
@@ -47,7 +48,17 @@ def enqueue_enrichment(work_id) -> str | None:
         return None
 
 
-_FUNC_LABELS = {EXTRACT_JOB: "extract", ENRICH_JOB: "enrich"}
+def enqueue_embedding(work_id) -> str | None:
+    """Best-effort enqueue of an embedding-index job (keeps embeddings off the search read path)."""
+    try:
+        job = get_queue().enqueue(EMBED_JOB, str(work_id))
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue embedding for work %s: %s", work_id, exc)
+        return None
+
+
+_FUNC_LABELS = {EXTRACT_JOB: "extract", ENRICH_JOB: "enrich", EMBED_JOB: "embed"}
 
 
 def clear_jobs(which: str = "finished_failed") -> dict:

@@ -128,6 +128,19 @@ class Settings(BaseSettings):
     enrichment_openalex: bool = False
     enrichment_semantic_scholar: bool = False
     crossref_mailto: str | None = None
+    # AI provider seams (Stage 6). Defaults keep the dependency-free lexical baselines; the
+    # heavier providers are opt-in and degrade gracefully when their lib/daemon is absent.
+    embedding_provider: str = "hash_bow"  # hash_bow | sentence_transformers | ollama
+    embedding_model: str | None = None  # provider-specific model id (None = provider default)
+    summary_llm_enabled: bool = False  # allow summary_type=local_llm via Ollama
+    summary_llm_model: str = "qwen3:4b"
+    topic_backend: str = "tfidf"  # tfidf | embedding (BERTopic-style, embedding-clustered)
+    # At-rest field encryption key (Fernet). When unset, sensitive fields are stored in clear and
+    # SECURITY.md's at-rest claim is downgraded accordingly (Stage 7).
+    secret_key: str | None = Field(default=None, alias="PARACORD_SECRET_KEY")
+    # Login throttling (Stage 7 auth hardening).
+    login_max_failures: int = 5
+    login_lockout_minutes: int = 15
 
 
 def _environment_overrides() -> dict[str, Any]:

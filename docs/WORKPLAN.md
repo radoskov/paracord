@@ -293,18 +293,22 @@ focused vertical (audit "Agent M1").
 Move the lightweight baselines behind provider interfaces so a real local model can drop in without
 a rewrite. **Keep the hash-BOW / TF-IDF / extractive providers as the default + test providers.**
 
-9. **H2 — Embeddings off the read path.** Generate embeddings on import / background RQ job, not
-   inside `POST /search/semantic`; use upsert / `ON CONFLICT DO NOTHING` on `(entity_type,
-   entity_id, model_name)`. Introduce an embedding-provider interface (`hash_bow` default;
-   `sentence-transformers`/`ollama` opt-in).
-   *DoD:* a normal search performs no writes; concurrent searches don't race; provider is swappable.
+9. **H2 — Embeddings off the read path. ✅ DONE (2026-06-30).** `semantic_search` is read-only
+   (ranks stored vectors + embeds the query in memory; no writes). Embeddings are built on import
+   via a background `embed_work_job` (enqueued on work-create + after enrichment) and on demand via
+   `POST /search/reindex`; `index_one_work` replaces per-`(entity,model)`, and the bulk indexer uses
+   a savepoint + `IntegrityError` guard so concurrent indexing is race-safe. An embedding-provider
+   interface (`get_embedding_provider`) selects `hash_bow` (default) / `sentence_transformers` /
+   `ollama`, each storing its own `model_name`. *DoD met:* `test_semantic_search_is_read_only_*`
+   asserts no writes; the API path is read-only; provider is swappable.
 
-10. **Summaries & topics provider interface + semantic dual-mode.** Per maintainer note, offer the
-    user a **choice of semantic-search modes** (lexical vs. embedding) rather than silently picking
-    one. Add provider seams for local-LLM summaries (Ollama, opt-in) and a BERTopic option for
-    topics, keeping the current deterministic baselines.
-    *DoD:* enable `test_future_local_llm_acceptance.py` and `test_future_topic_modeling_acceptance.py`
-    behind opt-in config; baselines remain the default with no new hard dependency.
+10. **Summaries & topics provider interface + semantic dual-mode. ✅ DONE (2026-06-30).**
+    `POST /search/semantic` takes `mode=embedding|lexical`. Summaries gained a `local_llm` tier
+    (Ollama opt-in, graceful extractive fallback recording the requested model + `source_sections`).
+    `model_topics` gained an `embedding`/`bertopic` backend with representative works / coherence /
+    outliers / hierarchy, echoing the requested `embedding_model`. *DoD met:*
+    `test_future_local_llm_acceptance.py` and `test_future_topic_modeling_acceptance.py` are enabled;
+    the lexical/TF-IDF/extractive baselines remain the defaults with no new hard dependency.
 
 ---
 

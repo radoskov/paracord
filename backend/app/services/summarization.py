@@ -1,14 +1,16 @@
-"""Local, dependency-free paper summarization (SPEC §8.14, tiers 0 and 1).
+"""Local paper summarization (SPEC §8.14).
 
 Tier 0 ("abstract") stores the work's abstract verbatim. Tier 1 ("extractive") runs a small
 frequency-based extractive summarizer over the richest text available (abstract + GROBID body
-text) — no network calls and no LLM, so it is safe to run locally and is fully deterministic.
-Tier 2 (local-LLM abstractive via Ollama) is intentionally not implemented here.
+text) — no network calls and no LLM, fully deterministic. Tier 2 ("local_llm") is an **opt-in**
+abstractive summary via a local Ollama daemon; when it is disabled or unreachable it **degrades**
+to the extractive engine while still recording the requested model + the source sections that fed
+it, so the result is always honest about provenance and no hard dependency is introduced.
 
-Every summary is persisted with provenance (``model_name`` + ``prompt_version``) so the source
-of a stored summary is always recoverable.
+Every summary is persisted with provenance (``model_name`` + ``prompt_version``).
 """
 
+import logging
 import math
 import re
 import uuid
@@ -16,17 +18,21 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.models.ai import Summary
 from app.models.citation import RawTeiDocument
 from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
 from app.services.tei_parser import extract_body_text
 
+logger = logging.getLogger(__name__)
+
 # Sentinel used as entity_id for library-scoped summaries (no real entity row).
 _LIBRARY_SCOPE_ID = uuid.UUID(int=0)
 
-SUPPORTED_SUMMARY_TYPES = ("abstract", "extractive")
+SUPPORTED_SUMMARY_TYPES = ("abstract", "extractive", "local_llm")
 PROMPT_VERSION = "v1"
+LLM_PROMPT_VERSION = "local-llm-v1"
 
 # A deliberately small English stop-word set; enough to bias scoring toward content words
 # without pulling in an NLP dependency.
@@ -147,19 +153,80 @@ def work_source_text(db: Session, work: Work) -> str:
     return "\n".join(parts).strip()
 
 
+def _source_section_labels(db: Session, work: Work) -> list[str]:
+    """Which sources feed a work's summary, for provenance (abstract / extracted body text)."""
+    labels: list[str] = []
+    if work.abstract:
+        labels.append("abstract")
+    tei = db.scalar(select(RawTeiDocument).where(RawTeiDocument.work_id == work.id))
+    if tei is not None:
+        labels.append("body")
+    return labels
+
+
+def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
+    """Call a local Ollama daemon for an abstractive summary. Raises on any failure."""
+    import httpx2 as httpx
+
+    prompt = (
+        "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
+        "method, and key result. Respond with the summary only.\n\n" + text[:12000]
+    )
+    with httpx.Client(timeout=120) as client:
+        response = client.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False},
+        )
+        response.raise_for_status()
+        return (response.json().get("response") or "").strip()
+
+
 def summarize_work(
-    db: Session, work: Work, *, summary_type: str = "extractive", max_sentences: int = 5
+    db: Session,
+    work: Work,
+    *,
+    summary_type: str = "extractive",
+    max_sentences: int = 5,
+    model_name: str | None = None,
+    settings: Settings | None = None,
 ) -> Summary:
-    """Create (replacing any prior summary of the same type) a provenance-tagged summary."""
+    """Create (replacing any prior summary of the same type) a provenance-tagged summary.
+
+    For ``local_llm`` the returned Summary carries a transient ``source_sections`` attribute (the
+    sources that fed it); the API surfaces it. When the LLM is disabled/unreachable the text is the
+    extractive fallback but the requested model is still recorded, with a fallback note in
+    ``source_sections``.
+    """
     if summary_type not in SUPPORTED_SUMMARY_TYPES:
         raise ValueError(f"Unsupported summary type: {summary_type}")
 
+    settings = settings or get_settings()
+    source_sections: list[str] = []
+    prompt_version = PROMPT_VERSION
+
     if summary_type == "abstract":
         text = (work.abstract or "").strip()
-        model_name = "tier0-abstract"
+        stored_model = "tier0-abstract"
+    elif summary_type == "local_llm":
+        stored_model = model_name or settings.summary_llm_model
+        prompt_version = LLM_PROMPT_VERSION
+        source_text = work_source_text(db, work)
+        source_sections = _source_section_labels(db, work)
+        text = ""
+        if settings.summary_llm_enabled and source_text:
+            try:
+                text = _ollama_summarize(
+                    source_text, model=stored_model, base_url=settings.ollama_url
+                )
+            except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
+                logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
+        if not text:
+            text = summarize_extractive(source_text, max_sentences=max_sentences)
+            if text:
+                source_sections.append("extractive-fallback")
     else:
         text = summarize_extractive(work_source_text(db, work), max_sentences=max_sentences)
-        model_name = "tier1-extractive-frequency"
+        stored_model = "tier1-extractive-frequency"
 
     if not text:
         raise ValueError("No text available to summarize")
@@ -177,11 +244,13 @@ def summarize_work(
         entity_id=work.id,
         summary_type=summary_type,
         text=text,
-        model_name=model_name,
-        prompt_version=PROMPT_VERSION,
+        model_name=stored_model,
+        prompt_version=prompt_version,
     )
     db.add(summary)
     db.flush()
+    # Transient (non-persisted) provenance for the API response.
+    summary.source_sections = source_sections
     return summary
 
 

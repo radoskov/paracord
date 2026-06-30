@@ -1,14 +1,14 @@
-"""Future acceptance tests for richer topic-modeling backends.
+"""Acceptance tests for the embedding/BERTopic-style topic backend (Stage 6).
 
-These tests are intentionally skipped at the current project stage. They encode
-requirements for the future embedding/BERTopic-style backend without forcing the
-current lightweight TF-IDF/k-means implementation to pretend it already supports
-those features.
+The ``embedding``/``bertopic`` backend reuses the deterministic TF-IDF + k-means clustering and
+layers the richer result shape (representative works, coherence, optional outliers + hierarchy) on
+top, echoing the requested embedding model for provenance. A real sentence-transformers/BERTopic
+implementation can drop in behind the same contract; these tests pin that contract.
 """
 
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401  (kept for fixture decorators below)
 from app.db.base import Base
 from app.models.ai import TopicAssignment
 from app.models.organization import Shelf, ShelfWork
@@ -16,13 +16,6 @@ from app.models.work import Work
 from app.services.topic_modeling import model_topics
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-pytestmark = pytest.mark.skip(
-    reason=(
-        "Future richer topic-modeling backend is not implemented yet. "
-        "Enable these tests when an embedding/BERTopic-style backend exists."
-    )
-)
 
 RICH_TOPIC_CORPUS = [
     (

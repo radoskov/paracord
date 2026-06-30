@@ -67,11 +67,28 @@ def _seed(db) -> None:
 
 def test_semantic_search_ranks_relevant_work_first(db_session) -> None:
     _seed(db_session)
-    hits = semantic_search(db_session, "transformer attention model", limit=3)
+    # auto_index builds embeddings for this direct-call test; the API path is read-only.
+    hits = semantic_search(db_session, "transformer attention model", limit=3, auto_index=True)
     assert hits, "expected at least one hit"
     assert hits[0].work.canonical_title == "Attention Is All You Need"
     # Scores are sorted descending.
     assert all(hits[i].score >= hits[i + 1].score for i in range(len(hits) - 1))
+
+
+def test_semantic_search_is_read_only_without_index(db_session) -> None:
+    """A search must not write embeddings (H2): with none indexed, embedding mode returns empty."""
+    from app.models.ai import Embedding
+
+    _seed(db_session)
+    assert semantic_search(db_session, "transformer attention") == []
+    assert db_session.scalar(select(func.count()).select_from(Embedding)) == 0
+
+
+def test_lexical_search_needs_no_embeddings(db_session) -> None:
+    _seed(db_session)
+    hits = semantic_search(db_session, "transformer attention", mode="lexical")
+    assert hits
+    assert hits[0].work.canonical_title == "Attention Is All You Need"
 
 
 def test_search_lazily_indexes_then_caches(db_session) -> None:
@@ -106,6 +123,9 @@ def test_semantic_search_api(client, auth_headers, db) -> None:
         )
     )
     db.commit()
+    # Build embeddings off the read path first (reindex requires editor+).
+    reindex = client.post("/api/v1/search/reindex", headers=auth_headers("editor"))
+    assert reindex.status_code == 200
     r = client.post(
         "/api/v1/search/semantic",
         headers=auth_headers("reader"),
@@ -116,3 +136,8 @@ def test_semantic_search_api(client, auth_headers, db) -> None:
     assert isinstance(body["items"], list)
     assert body["items"][0]["title"] == "Graph Neural Networks"
     assert body["items"][0]["score"] > 0
+
+
+def test_reindex_requires_editor(client, auth_headers) -> None:
+    assert client.post("/api/v1/search/reindex", headers=auth_headers("reader")).status_code == 403
+    assert client.post("/api/v1/search/reindex", headers=auth_headers("editor")).status_code == 200

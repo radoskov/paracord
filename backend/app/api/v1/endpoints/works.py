@@ -24,7 +24,7 @@ from app.services.audit import record_event
 from app.services.storage import attach_uploaded_pdf_to_work
 from app.services.summarization import list_work_summaries, summarize_work
 from app.utils.normalization import normalize_doi, normalize_title
-from app.workers.queue import enqueue_enrichment, enqueue_extraction
+from app.workers.queue import enqueue_embedding, enqueue_enrichment, enqueue_extraction
 
 _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
 
@@ -164,6 +164,7 @@ def create_work(
     db.add(work)
     db.commit()
     db.refresh(work)
+    enqueue_embedding(work.id)  # index off the search read path (best-effort)
     return work
 
 
@@ -344,6 +345,7 @@ class AnnotationRead(BaseModel):
 class SummaryCreate(BaseModel):
     summary_type: str = "extractive"
     max_sentences: int = 5
+    model_name: str | None = None  # for summary_type=local_llm (Ollama model id)
 
 
 class SummaryRead(BaseModel):
@@ -354,6 +356,7 @@ class SummaryRead(BaseModel):
     text: str
     model_name: str | None = None
     prompt_version: str | None = None
+    source_sections: list[str] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -570,6 +573,7 @@ def create_summary(
             work,
             summary_type=payload.summary_type,
             max_sentences=payload.max_sentences,
+            model_name=payload.model_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

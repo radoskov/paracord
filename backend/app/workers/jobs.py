@@ -47,19 +47,40 @@ def extract_pdf_job(file_id: str) -> None:
 
 
 def enrich_work_job(work_id: str) -> None:
-    """Enrich a work from external metadata sources (arXiv/Crossref)."""
+    """Enrich a work from external metadata sources (arXiv/Crossref), then (re)index its embedding."""
     import uuid
 
     from app.core.config import get_settings
     from app.db.session import SessionLocal
     from app.models.work import Work
     from app.services.metadata_enrichment import enrich_work
+    from app.workers.queue import enqueue_embedding
 
     with SessionLocal() as db:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
         enrich_work(db, work, settings=get_settings())
+        db.commit()
+    # Embeddings are built off the search read path; (re)index now that title/abstract are settled.
+    enqueue_embedding(work_id)
+
+
+def embed_work_job(work_id: str) -> None:
+    """(Re)index a work's embedding with the configured provider (keeps search read-only)."""
+    import uuid
+
+    from app.core.config import get_settings
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+    from app.services.embeddings import get_embedding_provider
+    from app.services.semantic_search import index_one_work
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None:
+            return
+        index_one_work(db, work, provider=get_embedding_provider(get_settings()))
         db.commit()
 
 

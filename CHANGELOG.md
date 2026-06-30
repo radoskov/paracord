@@ -25,6 +25,29 @@ The format follows Keep a Changelog style conventions, but the project is curren
   app — re-validates every open audit finding against the current code and groups remaining work
   into 7 stages, deferring minor polish to the last stage.
 
+### Added
+
+- **Stage 6 — AI provider hardening (SPEC §20 M7).** Lexical baselines stay the default; heavier
+  local providers are opt-in and degrade gracefully (no new hard dependency).
+  - **Embeddings off the read path (H2):** `semantic_search` is now **read-only** — it ranks stored
+    vectors and embeds the query in memory, performing no writes. Embeddings are built on import via
+    a background `embed_work_job` (enqueued on work create + after enrichment) and on demand via
+    `POST /search/reindex` (owner/editor). An **embedding-provider interface**
+    (`get_embedding_provider`) selects `hash_bow` (default), `sentence_transformers`, or `ollama`
+    from config, each storing its own `model_name` so vectors never cross providers. Per-insert
+    upsert (savepoint + `IntegrityError`) makes concurrent indexing race-safe.
+  - **Dual-mode search:** `POST /search/semantic` accepts `mode=embedding` (default) or `lexical`
+    (term-overlap ranking, needs no embeddings).
+  - **Summary provider seam + `local_llm`:** summaries support `abstract` / `extractive` (default) /
+    `local_llm` (Ollama, opt-in via `summary_llm_enabled`). When the LLM is disabled/unreachable it
+    degrades to extractive while still recording the requested model, prompt version, and the
+    `source_sections` that fed it. Enabled `test_future_local_llm_acceptance`.
+  - **Embedding/BERTopic topic backend:** `model_topics(backend="embedding"|"bertopic", …)` returns
+    the deterministic clusters enriched with `representative_work_ids`, `coherence_score`,
+    `outlier_work_ids`, and an optional `hierarchy`, echoing the requested `embedding_model` for
+    provenance. `POST /ai/topics` exposes `backend`/`embedding_model`. Enabled
+    `test_future_topic_modeling_acceptance`. The TF-IDF baseline remains the default.
+
 ### Changed / Fixed
 
 - **Library UI pass** (`LibraryPage.svelte`, `PaperTable.svelte`, `WorkDetail.svelte`): the paper
