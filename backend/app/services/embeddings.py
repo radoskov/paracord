@@ -101,19 +101,30 @@ class OllamaProvider:
             return [float(x) for x in response.json()["embedding"]]
 
 
-def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvider:
-    """Return the configured embedding provider, falling back to hash-BOW on any failure."""
-    if settings is None:
-        from app.core.config import get_settings  # noqa: PLC0415
+def get_embedding_provider(settings: Settings | None = None, *, db=None) -> EmbeddingProvider:
+    """Return the active embedding provider, falling back to hash-BOW on any failure.
 
-        settings = get_settings()
-    provider = getattr(settings, "embedding_provider", "hash_bow")
-    model = getattr(settings, "embedding_model", None)
+    When ``db`` is given, the owner-managed runtime config (``ai_config``) decides the provider;
+    otherwise the static ``Settings`` defaults are used (back-compat / no-DB call sites).
+    """
+    if db is not None:
+        from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+        cfg = get_ai_config(db, settings=settings)
+        provider, model, ollama_url = cfg.embedding_provider, cfg.embedding_model, cfg.ollama_url
+    else:
+        if settings is None:
+            from app.core.config import get_settings  # noqa: PLC0415
+
+            settings = get_settings()
+        provider = getattr(settings, "embedding_provider", "hash_bow")
+        model = getattr(settings, "embedding_model", None)
+        ollama_url = settings.ollama_url
     try:
         if provider == "sentence_transformers":
             return SentenceTransformerProvider(model or "sentence-transformers/all-MiniLM-L6-v2")
         if provider == "ollama":
-            return OllamaProvider(model or "nomic-embed-text", settings.ollama_url)
+            return OllamaProvider(model or "nomic-embed-text", ollama_url)
     except Exception as exc:  # noqa: BLE001 - optional providers degrade, never break a request
         logger.warning("Embedding provider %r unavailable (%s); using hash-BOW.", provider, exc)
     return HashBowProvider()

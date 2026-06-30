@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
-from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
@@ -102,7 +101,10 @@ def create_topic_model(
     _: User = EDITOR_DEP,
 ) -> TopicModelResponse:
     """Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments."""
-    backend = payload.backend or get_settings().topic_backend
+    from app.services.ai_config import get_ai_config
+
+    cfg = get_ai_config(db)
+    backend = payload.backend or cfg.topic_backend
     try:
         result = model_topics(
             db,
@@ -110,7 +112,7 @@ def create_topic_model(
             scope_id=payload.scope_id,
             max_topics=max(1, min(payload.max_topics, 20)),
             backend=backend,
-            embedding_model=payload.embedding_model,
+            embedding_model=payload.embedding_model or cfg.topic_embedding_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

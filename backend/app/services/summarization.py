@@ -201,6 +201,9 @@ def summarize_work(
         raise ValueError(f"Unsupported summary type: {summary_type}")
 
     settings = settings or get_settings()
+    from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+    ai_cfg = get_ai_config(db, settings=settings)
     source_sections: list[str] = []
     prompt_version = PROMPT_VERSION
 
@@ -208,15 +211,17 @@ def summarize_work(
         text = (work.abstract or "").strip()
         stored_model = "tier0-abstract"
     elif summary_type == "local_llm":
-        stored_model = model_name or settings.summary_llm_model
+        stored_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
         source_text = work_source_text(db, work)
         source_sections = _source_section_labels(db, work)
         text = ""
-        if settings.summary_llm_enabled and source_text:
+        # The LLM is attempted only when the owner has selected it (ai_config) — otherwise we go
+        # straight to the deterministic fallback, so disabled/CI installs never hit the network.
+        if ai_cfg.summary_provider == "local_llm" and source_text:
             try:
                 text = _ollama_summarize(
-                    source_text, model=stored_model, base_url=settings.ollama_url
+                    source_text, model=stored_model, base_url=ai_cfg.ollama_url
                 )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)

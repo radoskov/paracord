@@ -70,7 +70,6 @@ def embed_work_job(work_id: str) -> None:
     """(Re)index a work's embedding with the configured provider (keeps search read-only)."""
     import uuid
 
-    from app.core.config import get_settings
     from app.db.session import SessionLocal
     from app.models.work import Work
     from app.services.embeddings import get_embedding_provider
@@ -80,7 +79,7 @@ def embed_work_job(work_id: str) -> None:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
-        index_one_work(db, work, provider=get_embedding_provider(get_settings()))
+        index_one_work(db, work, provider=get_embedding_provider(db=db))
         db.commit()
 
 
@@ -99,6 +98,28 @@ def scan_duplicates_job() -> None:
         for file in db.scalars(select(File)).all():
             scan_duplicate_candidates(db, file=file)
         db.commit()
+
+
+def reindex_embeddings_job() -> None:
+    """Build embeddings for the active provider over every work missing one (WORKPLAN_NEXT 8F)."""
+    from app.db.session import SessionLocal
+    from app.services.embeddings import get_embedding_provider
+    from app.services.semantic_search import ensure_work_embeddings
+
+    with SessionLocal() as db:
+        ensure_work_embeddings(db, provider=get_embedding_provider(db=db))
+        db.commit()
+
+
+def pull_model_job(provider: str, model: str) -> None:
+    """Download/pull an AI model (Ollama / sentence-transformers). Raises on failure (8C)."""
+    from app.db.session import SessionLocal
+    from app.services.ai_config import get_ai_config
+    from app.services.model_management import pull_model
+
+    with SessionLocal() as db:
+        ollama_url = get_ai_config(db).ollama_url
+    pull_model(provider, model, ollama_url=ollama_url)
 
 
 def summarize_scope_job(scope_type: str, scope_id: str | None = None) -> None:

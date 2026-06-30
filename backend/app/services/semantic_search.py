@@ -12,7 +12,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -129,6 +129,18 @@ def _store_embedding(
     return True
 
 
+def reindex_status(db: Session, *, provider: EmbeddingProvider | None = None) -> dict:
+    """Report embedding-index coverage for the active model: ``{model_name, indexed, total}``."""
+    provider = provider or HashBowProvider()
+    total = sum(1 for w in db.scalars(select(Work)).all() if _work_text(w))
+    indexed = db.scalar(
+        select(func.count())
+        .select_from(Embedding)
+        .where(Embedding.entity_type == "work", Embedding.model_name == provider.model_name)
+    )
+    return {"model_name": provider.model_name, "indexed": int(indexed or 0), "total": total}
+
+
 def _lexical_search(db: Session, query: str, *, limit: int) -> list[SearchHit]:
     """Rank works by query-term overlap with title + abstract (no embeddings required)."""
     terms = {t for t in _WORD.findall(query.lower()) if len(t) > 1}
@@ -169,7 +181,7 @@ def semantic_search(
     if mode == "lexical":
         return _lexical_search(db, query, limit=limit)
 
-    provider = provider or get_embedding_provider()
+    provider = provider or get_embedding_provider(db=db)
     if auto_index:
         ensure_work_embeddings(db, provider=provider)
 

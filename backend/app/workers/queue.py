@@ -16,6 +16,8 @@ EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
 EMBED_JOB = "app.workers.jobs.embed_work_job"
 DEDUP_JOB = "app.workers.jobs.scan_duplicates_job"
+REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
+PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
 
 
 def get_queue():
@@ -69,11 +71,31 @@ def enqueue_duplicate_scan() -> str | None:
         return None
 
 
+def enqueue_reindex() -> str | None:
+    """Best-effort enqueue of a full embedding reindex for the active provider."""
+    try:
+        return get_queue().enqueue(REINDEX_JOB).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue reindex: %s", exc)
+        return None
+
+
+def enqueue_model_pull(provider: str, model: str) -> str | None:
+    """Best-effort enqueue of a model download/pull (long-running; tracked as a job)."""
+    try:
+        return get_queue().enqueue(PULL_MODEL_JOB, provider, model, job_timeout=3600).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue model pull %s/%s: %s", provider, model, exc)
+        return None
+
+
 _FUNC_LABELS = {
     EXTRACT_JOB: "extract",
     ENRICH_JOB: "enrich",
     EMBED_JOB: "embed",
     DEDUP_JOB: "dedup-scan",
+    REINDEX_JOB: "reindex",
+    PULL_MODEL_JOB: "model-pull",
 }
 
 

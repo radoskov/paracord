@@ -66,6 +66,6 @@ def reindex_embeddings(db: Session = DB_DEP, _: User = EDITOR_DEP) -> dict[str, 
 
     Embeddings are normally created on import in the background; this rebuilds them on demand (e.g.
     after a bulk import while the worker was down, or after switching embedding providers)."""
-    added = ensure_work_embeddings(db, provider=get_embedding_provider())
+    added = ensure_work_embeddings(db, provider=get_embedding_provider(db=db))
     db.commit()
     return {"indexed": added, "status": "ok"}
