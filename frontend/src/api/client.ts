@@ -11,6 +11,8 @@ export interface Work {
   reading_status: ReadingStatus;
   confirmed_fields?: string[];
   keywords?: string[];
+  // Per-paper representative topic terms (Phase K); shown separately from keywords.
+  topics?: string[];
   // The user who created this paper (null for system/loose-imported papers). Drives the
   // "can I modify this paper" gate: a contributor may only edit their own papers.
   created_by_user_id: string | null;
@@ -797,6 +799,14 @@ export class ApiClient {
 
   async enrichWork(workId: string): Promise<{ job_id: string | null; status: string }> {
     return this.request(`/api/v1/works/${workId}/enrich`, { method: 'POST' });
+  }
+
+  async topicWork(workId: string): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/topics`, { method: 'POST' });
+  }
+
+  async keywordsWork(workId: string): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/keywords`, { method: 'POST' });
   }
 
   async listWorkFiles(workId: string): Promise<WorkFile[]> {

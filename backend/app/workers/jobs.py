@@ -122,6 +122,65 @@ def pull_model_job(provider: str, model: str) -> None:
     pull_model(provider, model, ollama_url=ollama_url)
 
 
+def topic_work_job(work_id: str) -> None:
+    """Run per-paper topic modeling for a work and persist ``work.topics`` (Phase K).
+
+    Idempotent and a no-op if the work is missing. Honors the admin-configured topic backend for
+    provenance; the ranking is the deterministic single-doc baseline.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+    from app.services.ai_config import get_ai_config
+    from app.services.topic_modeling import extract_paper_topics
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None:
+            return
+        config = get_ai_config(db)
+        work.topics = extract_paper_topics(
+            db,
+            work=work,
+            backend=config.topic_backend,
+            embedding_model=config.topic_embedding_model,
+        )
+        db.commit()
+
+
+def keywords_work_job(work_id: str) -> None:
+    """Re-run keyword extraction for a work over abstract + latest stored TEI body (Phase K).
+
+    Falls back to title + abstract when no TEI body is stored. Idempotent; no-op if work missing.
+    """
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.citation import RawTeiDocument
+    from app.models.work import Work
+    from app.services.keyword_extraction import extract_keywords
+    from app.services.tei_parser import extract_body_text
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None:
+            return
+        body = ""
+        tei = db.scalar(
+            select(RawTeiDocument)
+            .where(RawTeiDocument.work_id == work.id)
+            .order_by(RawTeiDocument.created_at.desc())
+        )
+        if tei is not None:
+            body = extract_body_text(tei.tei_xml) or ""
+        source = " ".join(part for part in (work.canonical_title, work.abstract, body) if part)
+        work.keywords = extract_keywords(source, top_k=12)
+        db.commit()
+
+
 def summarize_scope_job(scope_type: str, scope_id: str | None = None) -> None:
     """Run local summary pipeline for a scope."""
     _ = (scope_type, scope_id)

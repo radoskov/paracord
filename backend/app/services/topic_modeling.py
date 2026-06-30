@@ -210,6 +210,59 @@ def model_topics(
     return _result(model_id, scope_type, scope_id, topics=topics, work_count=len(documents))
 
 
+def extract_paper_topics(
+    db: Session,
+    *,
+    work: Work,
+    backend: str = "tfidf",
+    embedding_model: str | None = None,
+    max_topics: int = DEFAULT_MAX_TOPICS,
+) -> list[str]:
+    """Return up to ``max_topics`` representative topic terms for a single paper (Phase K).
+
+    A corpus topic model (k-means over many docs) is meaningless for one document, so this is a
+    deterministic single-doc term ranker: tokenize the paper's title + abstract + latest stored TEI
+    body (reusing the module tokenizer + stopword set), rank terms by frequency (ties broken
+    alphabetically for reproducibility) and return the top ``max_topics``. The admin-configured
+    ``backend``/``embedding_model`` are accepted for provenance parity with ``model_topics`` (an
+    embedding/BERTopic backend can replace the internals later behind this same signature), but the
+    ranking is the same deterministic baseline regardless of backend. Returns ``[]`` for empty text.
+    """
+    _ = (backend, embedding_model)  # provenance only; deterministic ranking is backend-agnostic.
+    tokens = _tokenize(_paper_text(db, work))
+    if not tokens:
+        return []
+    counts = Counter(tokens)
+    # Frequency desc, then term asc — deterministic across runs and platforms.
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return [term for term, _ in ranked[: max(0, max_topics)]]
+
+
+def _paper_text(db: Session, work: Work) -> str:
+    """Title + abstract + latest stored TEI body for a single paper (Phase K topic source).
+
+    Falls back to just title+abstract (via ``_doc_text``) when no TEI body is stored or it can't be
+    parsed. The TEI lookup is best-effort: a DB/parse hiccup must not break topic extraction.
+    """
+    parts = [_doc_text(work)]
+    try:
+        from app.models.citation import RawTeiDocument
+        from app.services.tei_parser import extract_body_text
+
+        tei = db.scalar(
+            select(RawTeiDocument)
+            .where(RawTeiDocument.work_id == work.id)
+            .order_by(RawTeiDocument.created_at.desc())
+        )
+        if tei is not None:
+            body = extract_body_text(tei.tei_xml)
+            if body:
+                parts.append(body)
+    except Exception:  # noqa: BLE001 - best effort; degrade to title+abstract.
+        pass
+    return " ".join(part for part in parts if part)
+
+
 def _result(
     model_id: str,
     scope_type: str,

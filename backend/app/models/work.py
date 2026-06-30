@@ -37,6 +37,9 @@ class Work(Base):
     confirmed_fields: Mapped[list | None] = mapped_column(_JSONB, default=list)
     # Deterministic keyphrases from extraction (SPEC §8.15.1), most salient first.
     keywords: Mapped[list | None] = mapped_column(_JSONB, default=list)
+    # Per-paper representative topic terms (SPEC §8.15, Phase K), most salient first. Mirrors
+    # ``keywords``; populated on demand via the per-paper Topic action / topic_work_job.
+    topics: Mapped[list | None] = mapped_column(_JSONB, default=list)
     # The user who created this work (Phase H access control). NULL = system/agent/import origin,
     # which is treated as a "loose" (no-owner) paper; contributor own-only edits key off this.
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -37,7 +37,13 @@ from app.services.web_find import (
     iter_find_candidates,
 )
 from app.utils.normalization import normalize_doi, normalize_title
-from app.workers.queue import enqueue_embedding, enqueue_enrichment, enqueue_extraction
+from app.workers.queue import (
+    enqueue_embedding,
+    enqueue_enrichment,
+    enqueue_extraction,
+    enqueue_keywords,
+    enqueue_topics,
+)
 
 _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
 
@@ -132,6 +138,8 @@ class WorkRead(BaseModel):
     canonical_metadata_source: str | None = None
     confirmed_fields: list[str] = []
     keywords: list[str] = []
+    # Per-paper representative topic terms (Phase K); rendered separately from keywords.
+    topics: list[str] = []
     # The owning user (Phase H). NULL = system/agent/import "loose" paper. Drives the frontend's
     # contributor own-only edit affordance.
     created_by_user_id: uuid.UUID | None = None
@@ -140,7 +148,7 @@ class WorkRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_validator("confirmed_fields", "keywords", mode="before")
+    @field_validator("confirmed_fields", "keywords", "topics", mode="before")
     @classmethod
     def _none_to_list(cls, value: object) -> object:
         # Pre-migration rows have NULL for these JSONB columns; treat NULL as an empty list so the
@@ -1212,6 +1220,46 @@ def extract_work_endpoint(
             )
         job_ids.append(job_id)
     return {"status": "queued", "queued": len(job_ids), "job_ids": job_ids}
+
+
+@router.post("/{work_id}/topics", status_code=status.HTTP_202_ACCEPTED)
+def topic_work_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> dict[str, str | None]:
+    """Queue per-paper topic modeling for a work (representative topic terms; no precondition)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    job_id = enqueue_topics(work_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Topic queue unavailable",
+        )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/{work_id}/keywords", status_code=status.HTTP_202_ACCEPTED)
+def keywords_work_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> dict[str, str | None]:
+    """Queue per-paper keyword extraction for a work (re-runs RAKE over its text; no precondition)."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    job_id = enqueue_keywords(work_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Keyword queue unavailable",
+        )
+    return {"job_id": job_id, "status": "queued"}
 
 
 class WebCandidateRead(BaseModel):

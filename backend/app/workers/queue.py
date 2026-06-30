@@ -18,6 +18,8 @@ EMBED_JOB = "app.workers.jobs.embed_work_job"
 DEDUP_JOB = "app.workers.jobs.scan_duplicates_job"
 REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
+TOPIC_JOB = "app.workers.jobs.topic_work_job"
+KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
 
 
 def get_queue():
@@ -61,6 +63,26 @@ def enqueue_embedding(work_id) -> str | None:
         return None
 
 
+def enqueue_topics(work_id) -> str | None:
+    """Best-effort enqueue of a per-paper topic-modeling job. Returns the job id, or None."""
+    try:
+        job = get_queue().enqueue(TOPIC_JOB, str(work_id))
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue topics for work %s: %s", work_id, exc)
+        return None
+
+
+def enqueue_keywords(work_id) -> str | None:
+    """Best-effort enqueue of a per-paper keyword-extraction job. Returns the job id, or None."""
+    try:
+        job = get_queue().enqueue(KEYWORDS_JOB, str(work_id))
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue keywords for work %s: %s", work_id, exc)
+        return None
+
+
 def enqueue_duplicate_scan() -> str | None:
     """Best-effort enqueue of a full-library duplicate scan (kept off the request path)."""
     try:
@@ -93,6 +115,8 @@ _FUNC_LABELS = {
     EXTRACT_JOB: "extract",
     ENRICH_JOB: "enrich",
     EMBED_JOB: "embed",
+    TOPIC_JOB: "topic",
+    KEYWORDS_JOB: "keywords",
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",
     PULL_MODEL_JOB: "model-pull",
@@ -262,15 +286,15 @@ def queue_status(limit: int = 25) -> dict:
         def _target(job) -> tuple[str | None, str | None]:
             """(kind, id) of the paper this job acts on — ('file'|'work', uuid-str) or (None, None).
 
-            EXTRACT job's first arg is a File id; ENRICH/EMBED a Work id. Dedup/reindex/
-            model-pull act on no single paper.
+            EXTRACT job's first arg is a File id; ENRICH/EMBED/TOPIC/KEYWORDS a Work id.
+            Dedup/reindex/model-pull act on no single paper.
             """
             args = list(getattr(job, "args", None) or [])
             if not args:
                 return None, None
             if job.func_name == EXTRACT_JOB:
                 return "file", str(args[0])
-            if job.func_name in (ENRICH_JOB, EMBED_JOB):
+            if job.func_name in (ENRICH_JOB, EMBED_JOB, TOPIC_JOB, KEYWORDS_JOB):
                 return "work", str(args[0])
             return None, None
 

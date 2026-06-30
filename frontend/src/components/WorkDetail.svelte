@@ -220,6 +220,24 @@
     });
   }
 
+  async function topic(): Promise<void> {
+    await run(async () => {
+      const result = await client.topicWork(work.id);
+      message =
+        `Topic modeling ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab for progress.';
+    });
+  }
+
+  async function keywords(): Promise<void> {
+    await run(async () => {
+      const result = await client.keywordsWork(work.id);
+      message =
+        `Keyword extraction ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab for progress.';
+    });
+  }
+
   async function findOnWeb(): Promise<void> {
     showFindModal = true;
     findResults = [];
@@ -560,6 +578,15 @@
         title="Search the library for this keyword">{kw}</button>{/each}
     </div>
   {/if}
+  {#if work.topics && work.topics.length}
+    <div class="topics">
+      <span class="topics-label">Topics</span>
+      <div class="topic-chips">
+        {#each work.topics as t}<button type="button" class="topic" on:click={() => searchKeyword(t)}
+          title="Search the library for this topic">{t}</button>{/each}
+      </div>
+    </div>
+  {/if}
 
   <details open>
     <summary>Details</summary>
@@ -600,7 +627,15 @@
           title={canModify
             ? 'Search legitimate scholarly sources for this paper’s PDF and attach it'
             : INSUFFICIENT_ROLE}>Find on web</button>
-        <!-- future: Extract topics / Summarize buttons go here (same Actions sub-row). -->
+        <button type="button" class="secondary" on:click={topic} disabled={loading || !canModify}
+          title={canModify
+            ? 'Extract representative topic terms for this paper'
+            : INSUFFICIENT_ROLE}>Topic</button>
+        <button type="button" class="secondary" on:click={keywords} disabled={loading || !canModify}
+          title={canModify
+            ? 'Re-extract keywords for this paper from its text'
+            : INSUFFICIENT_ROLE}>Keyword</button>
+        <!-- future: Summarize button goes here (same Actions sub-row). -->
       </div>
       {#if canModify && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
       {#if canModify && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
@@ -1233,6 +1268,47 @@
 
   .kw:hover {
     background: #dbe3ec;
+  }
+
+  /* Topics: same chip shape as keywords but a distinct accent + a labelled divider, so a paper's
+     topics read as a separate block from its keywords. */
+  .topics {
+    align-items: baseline;
+    border-top: 1px dashed #e0d6ef;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+  }
+
+  .topics-label {
+    color: #6b4ea3;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .topic-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .topic {
+    background: #f1ecfb;
+    border: 1px solid #d9cdef;
+    border-radius: 10px;
+    color: #5a3f8c;
+    cursor: pointer;
+    font-size: 0.72rem;
+    min-height: auto;
+    padding: 0.05rem 0.45rem;
+  }
+
+  .topic:hover {
+    background: #e6dcf7;
   }
 
   .lock {

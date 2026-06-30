@@ -646,7 +646,7 @@ Batch of 10 findings. Resolved decisions:
 - [x] **Phase J — Batch import (5) + import-to-rack/shelf (6).** Raw-citation batch import (Crossref/
   OpenAlex default, GROBID option) + staging/confirm UI; import-page option to drop a work straight
   into a rack/shelf. ImportPage + backend. (After H for shelf ACLs.)
-- [ ] **Phase K — Topic & keyword buttons (item 7).** Per-paper **Topic** (BERTopic) + **Keyword**
+- [x] **Phase K — Topic & keyword buttons (item 7).** Per-paper **Topic** (BERTopic) + **Keyword**
   extraction buttons beside Enrich/Extract; show topics below the title, visually separated from
   keywords. WorkDetail + backend triggers (investigate existing infra).
 - [ ] **Phase L — Conflict remove (8) + job order (9).** Add "remove" (delete assertion) buttons to
