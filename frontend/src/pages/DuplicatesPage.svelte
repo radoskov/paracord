@@ -8,6 +8,7 @@
     type DuplicateCandidateStatus,
     type DuplicateSplitSegment,
   } from '../api/client';
+  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -127,7 +128,8 @@
           <option value="ignored">Ignored</option>
           <option value="">All</option>
         </select>
-        <button type="button" on:click={scan} disabled={loading} title="Re-scan the whole library for duplicates">
+        <button type="button" on:click={scan} disabled={loading || !$canEdit}
+          title={$canEdit ? 'Re-scan the whole library for duplicates' : INSUFFICIENT_ROLE}>
           Scan now
         </button>
       </div>
@@ -154,22 +156,22 @@
             <p class="muted">{signals(c)}</p>
             <div class="actions">
               {#if canResolveAsWork(c)}
-                <button type="button" on:click={() => apply(c, 'merge_works')} disabled={loading || c.status !== 'open'}
-                  title="Merge these two papers into one canonical paper">Merge</button>
-                <button type="button" class="secondary" on:click={() => apply(c, 'link_as_version')} disabled={loading || c.status !== 'open'}
-                  title="Keep both but link one as a version of the other">Link version</button>
+                <button type="button" on:click={() => apply(c, 'merge_works')} disabled={loading || !$canEdit || c.status !== 'open'}
+                  title={$canEdit ? 'Merge these two papers into one canonical paper' : INSUFFICIENT_ROLE}>Merge</button>
+                <button type="button" class="secondary" on:click={() => apply(c, 'link_as_version')} disabled={loading || !$canEdit || c.status !== 'open'}
+                  title={$canEdit ? 'Keep both but link one as a version of the other' : INSUFFICIENT_ROLE}>Link version</button>
               {/if}
               {#if canResolveAsFile(c)}
-                <button type="button" on:click={() => apply(c, 'mark_duplicate_file')} disabled={loading || c.status !== 'open'}
-                  title="Mark one file as a duplicate copy">Mark duplicate</button>
+                <button type="button" on:click={() => apply(c, 'mark_duplicate_file')} disabled={loading || !$canEdit || c.status !== 'open'}
+                  title={$canEdit ? 'Mark one file as a duplicate copy' : INSUFFICIENT_ROLE}>Mark duplicate</button>
               {/if}
-              <button type="button" class="secondary" on:click={() => apply(c, 'keep_separate')} disabled={loading || c.status !== 'open'}
-                title="These are genuinely different — keep them separate">Keep separate</button>
-              <button type="button" class="secondary" on:click={() => apply(c, 'ignore')} disabled={loading || c.status !== 'open'}
-                title="Dismiss this candidate without a decision">Ignore</button>
+              <button type="button" class="secondary" on:click={() => apply(c, 'keep_separate')} disabled={loading || !$canEdit || c.status !== 'open'}
+                title={$canEdit ? 'These are genuinely different — keep them separate' : INSUFFICIENT_ROLE}>Keep separate</button>
+              <button type="button" class="secondary" on:click={() => apply(c, 'ignore')} disabled={loading || !$canEdit || c.status !== 'open'}
+                title={$canEdit ? 'Dismiss this candidate without a decision' : INSUFFICIENT_ROLE}>Ignore</button>
               {#if c.status !== 'open'}
-                <button type="button" class="secondary" on:click={() => reopen(c)} disabled={loading}
-                  title="Reopen this resolved candidate">Reopen</button>
+                <button type="button" class="secondary" on:click={() => reopen(c)} disabled={loading || !$canEdit}
+                  title={$canEdit ? 'Reopen this resolved candidate' : INSUFFICIENT_ROLE}>Reopen</button>
               {/if}
             </div>
             {#if canSplit(c)}
@@ -180,10 +182,10 @@
                   value={splitDrafts[c.id] ?? ''}
                   on:input={(e) => (splitDrafts = { ...splitDrafts, [c.id]: e.currentTarget.value })}
                   placeholder="One per line:  Title | start page | end page"
-                  disabled={loading || c.status !== 'open'}
+                  disabled={loading || !$canEdit || c.status !== 'open'}
                 ></textarea>
-                <button type="button" on:click={() => split(c)} disabled={loading || c.status !== 'open'}
-                  title="Create separate papers from the page ranges above">Split file</button>
+                <button type="button" on:click={() => split(c)} disabled={loading || !$canEdit || c.status !== 'open'}
+                  title={$canEdit ? 'Create separate papers from the page ranges above' : INSUFFICIENT_ROLE}>Split file</button>
               </div>
             {/if}
           </article>
