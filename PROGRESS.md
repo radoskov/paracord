@@ -8,6 +8,20 @@
 > (2) "semantic search" and "topic modeling" are honest **lexical/TF-IDF approximations**, not
 > embedding/BERTopic implementations.
 
+## Stage 6 + 7 complete (2026-06-30)
+
+The `docs/WORKPLAN.md` stages are implemented through Stage 7. **Stage 6 (AI provider hardening):**
+embeddings are built off the search read path (import / RQ / `POST /search/reindex`); search is
+read-only with an `embedding`/`lexical` mode; embedding/summary/topic **provider seams**
+(`hash_bow` + extractive + TF-IDF defaults; `sentence_transformers`/`ollama`/`local_llm`/`bertopic`
+opt-in, degrading gracefully). Both AI future acceptance tests are enabled. **Stage 7:** login
+throttling, in-app change-password + session revocation, SSRF-hardened enrichment, removed the dead
+guest flag, `SECURITY.md` reconciled, selection-scope export + preview/copy, `paper.viewed`/
+`file.downloaded` audit events, fuzzy-dedup blocking (+ rapidfuzz/RQ), `make prod-smoke` +
+`make backup`/`restore`. Full backend suite green (233) + migration parity green. The remaining tail
+(pgvector/H7, CSL citeproc styles, the C3/C4 FK+JSONB migration, a Postgres integration suite) is
+non-blocking and tracked in WORKPLAN Stage 7.
+
 ## Current status
 
 **Milestones 0–7 have an implemented vertical for every acceptance contract (all

@@ -17,18 +17,22 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 > agent redesign v2 (SPEC §32): persistent tool-managed agent, privileges, import actions, durable
 > state index, CLI, and a local web GUI.
 >
-> Several M3–M7 features are deliberate **lightweight baselines** (iframe reader not PDF.js;
-> text-edge-list not Cytoscape; hash-BOW "semantic" search; TF-IDF topics; extractive summaries)
-> ; the reader/graph UI (Stage 3), metadata-review UI (Stage 4), and agent teleport (Stage 5 +
-> SPEC §32) have since been built — the largest remaining gap is the AI provider layer (M6/H2).
+> The reader/graph UI (Stage 3), metadata-review UI (Stage 4), agent teleport (Stage 5 + SPEC §32),
+> the AI provider layer (Stage 6 — embeddings off the read path, summary/topic/embedding provider
+> seams with the lexical baselines kept as defaults), and most Stage-7 hardening (auth throttling +
+> change-password, SSRF guard, view audit events, dedup blocking, backup/restore, prod-smoke) are
+> all built. The lexical/TF-IDF/extractive engines remain the defaults; heavier providers
+> (sentence-transformers, Ollama, BERTopic, rapidfuzz) are opt-in. The remaining tail is the
+> non-blocking polish in `docs/WORKPLAN.md` Stage 7 (pgvector/H7, CSL citeproc styles, the C3/C4
+> FK+JSONB migration, a Postgres integration suite).
 >
 > **The ordered plan to finish the app is `docs/WORKPLAN.md` (2026-06-29)** — it re-validates the
 > audit against current code and sequences the remaining work in 7 stages, front-loading
 > whole-area unblockers (managed-path extraction fix, GROBID coordinates, PDF.js + Cytoscape,
 > metadata UI, agent teleport, AI provider seams) and deferring minor polish to the last stage.
 > See also `PROGRESS.md` → "Start here (next agent)".
-> The two unchecked M0 items (login rate limiting, in-app password change) are hardening and
-> are deliberately deferred in favour of building the product.
+> The two formerly-deferred M0 hardening items (login rate limiting, in-app password change) are
+> now **DONE** in Stage 7.
 
 ## M0: Foundation (developer skeleton) — DONE (auth hardening deferred)
 
@@ -105,14 +109,22 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 - Citation context display; related-papers suggestions.
 - Shelf/rack citation summaries; missing-references view.
 
-## M7: Local AI and topics
+## M7: Local AI and topics — provider seams DONE (2026-06-30)
 
-- Embeddings and pgvector storage; semantic search.
-- Local summaries; human/external summaries (with provenance).
-- BERTopic keyword and topic suggestions; shelf/rack topic summaries.
-- Optional ML extraction path (Nougat/Marker) for hard documents.
+- Embeddings + semantic search — **DONE** (Stage 6 H2): built off the read path (import / RQ /
+  reindex), read-only search, provider interface (`hash_bow` default; `sentence_transformers` /
+  `ollama` opt-in). pgvector storage is deferred until a real embedding model is the default (H7).
+- Local summaries with provenance — **DONE**: extractive/abstract defaults + opt-in `local_llm`
+  (Ollama) with graceful fallback and `source_sections`.
+- Topic suggestions — **DONE**: TF-IDF baseline + an `embedding`/`bertopic` backend
+  (representative works, coherence, outliers, hierarchy). Real BERTopic can drop in behind it.
+- Optional ML extraction path (Nougat/Marker) for hard documents — still future.
 
-## M8: Polish, backup, and deployment hardening
+## M8: Polish, backup, and deployment hardening — substantially DONE (2026-06-30)
 
-- Backup/restore; LAN deployment docs; security checklist.
-- Performance tuning; error-handling polish; full E2E test suite.
+- Backup/restore — **DONE** (`make backup`/`restore` + `docs/runbooks/backup_restore.md`).
+- Security checklist — auth throttling, in-app change-password + session revocation, SSRF-hardened
+  egress, `SECURITY.md` reconciled (Stage 7). LAN deployment docs exist; prod smoke = `make
+  prod-smoke`.
+- Performance — fuzzy-dedup blocking + background full-scan (H3).
+- Remaining: full E2E suite, CSL citeproc styles, pgvector (H7), and the C3/C4 FK/JSONB migration.
