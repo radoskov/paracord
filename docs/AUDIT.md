@@ -1070,3 +1070,26 @@ follow-ups".
 - **E7 — Repeated server-folder full rescans have no incremental cache** (import path, per the
   original §6 review). Acceptable now; add mtime/hash incremental scanning + a watch state before
   very large libraries. **LOW (scale-only).**
+
+### Resolution — all efficiency findings fixed (2026-06-30)
+
+E1–E7 were all implemented (commit `9ec7d64`); the look-back above is retained for context.
+
+| Finding | Fix shipped |
+|---|---|
+| E1 | `export_service._authors_by_work` batches all works' authors in one query (no N+1). |
+| E2 | `paper.viewed` is debounced by an in-process per-(user, work) TTL — repeat views skip the INSERT+COMMIT. |
+| E3 | `require_agent_token` stamps `last_seen_at` (and commits) only when stale > 60s. |
+| E4 | `related_works` ranks via the pgvector `<=>` path when `pgvector_enabled`, else Python cosine. |
+| E5 | `reindex_status` uses two SQL `COUNT`s instead of materializing every `Work`. |
+| E6 | `get_ai_config` probes table presence (`has_table`, memoized) instead of provoke-then-`rollback`. |
+| E7 (server) | `import_server_folder` skips SHA-256 + PDF-preview for files unchanged since the last scan (`mtime ≤ Location.last_verified_at`) and refreshes the verification time. |
+
+**E7 — local agent scan verified + fixed.** The agent previously **re-hashed every PDF on every
+scan** (`build_manifest_item` → full `hash_file` read), so a monitored folder synced every
+`refresh_interval` (default 30 s) re-read the whole corpus each cycle. Fixed: the agent's
+`state.sqlite3` now stores each file's `mtime`, and `scan_managed(config, state)` reuses the cached
+content hash when `(path, size, mtime)` is unchanged — an unchanged PDF is now a cheap `stat()`
+instead of a full read+SHA-256. Existing agent DBs are migrated in place (idempotent `ALTER TABLE
+… ADD COLUMN mtime`). Covered by `test_scan_reuses_cached_hash_for_unchanged_files` (26 agent tests
+green) and `test_import_server_folder_skips_rehash_for_unchanged_files` (server side).
