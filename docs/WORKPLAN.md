@@ -654,8 +654,19 @@ Batch of 10 findings. Resolved decisions:
 - [ ] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
   help/explanations (what each model does, when it's used, why something is disabled, BERTopic
   out-of-the-box status).
+- [ ] **Phase N — Paper shelf-membership UI (added 2026-07-01).** In the paper view (Library tab):
+  a **"Put into…"** button → popup with a rack+shelf picker to add the paper to a shelf (works even
+  when the paper is already in shelves — a paper can be in many). And a **"Where is this?"** /
+  locations view listing every rack/shelf the paper is in, with **remove** buttons — all gated by
+  rights: only shelves the user can SEE are listed, and add/remove requires modify access (role +
+  group grant per the rack/shelf ACL). Reuses Phase J's `ShelfPicker` + the ACL-checked
+  `add_work_to_shelf_checked` / `remove_work_from_shelf` helpers; needs a backend "shelves containing
+  this work" read (filtered to visible). Files: WorkDetail.svelte, ShelfPicker.svelte, shelves/works
+  endpoints, client.ts. **After H (ACL) and J (picker + helpers).**
 
 ## Dependencies & collision-safety
 - **Phase H first / foundational** — it changes the `Role` enum + adds ACL the others build on; J's
   import-to-shelf and the paper/rack/shelf gating depend on it. I, L, M, K are largely independent of
   H. Phases run sequentially (shared backend tests + git); read-only design passes pipeline.
+- **Phase N after H + J** — it reuses J's shelf-picker and ACL-checked add/remove helpers and the H
+  access layer; schedule it once those exist.
