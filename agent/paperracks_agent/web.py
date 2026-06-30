@@ -388,7 +388,15 @@ td,th{text-align:left;padding:.35rem;border-bottom:1px solid #eef1f4;vertical-al
 .filters{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem}
 .filters input{flex:1;min-width:10rem}
 th.sortable{cursor:pointer;user-select:none}
-.titlecell{max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filetable{table-layout:fixed}
+.filetable td{overflow-wrap:anywhere;word-break:break-word}
+.titlecell{overflow-wrap:anywhere;word-break:break-word}
+.pathcell{overflow-wrap:anywhere;word-break:break-word}
+.radios{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem;font-size:.85rem}
+.radiogroup{display:inline-flex;gap:.4rem;align-items:center;flex-wrap:wrap;
+  border:1px solid #e3e8ee;border-radius:6px;padding:.2rem .5rem}
+.radiogroup>span{color:#64717f}
+.radiogroup label{display:inline-flex;gap:.2rem;align-items:center}
 .modal{position:fixed;inset:0;background:rgba(20,28,38,.5);display:none;align-items:center;justify-content:center;z-index:20}
 .modal.open{display:flex}
 .modal .box{background:#fff;border-radius:10px;width:min(40rem,92vw);max-height:84vh;display:flex;flex-direction:column}
@@ -457,10 +465,19 @@ th.sortable{cursor:pointer;user-select:none}
         <label>action <select id="fAction" onchange="renderFiles()"><option value="">all</option>
           <option value="index_only">index_only</option><option value="index_and_extract">index_and_extract</option><option value="teleport">teleport</option></select></label>
         <label>state <select id="fState" onchange="renderFiles()"><option value="">all</option></select></label>
-        <label>sort <select id="fSort" onchange="renderFiles()">
-          <option value="file">file</option><option value="title">title</option>
-          <option value="action">action</option><option value="state">state</option>
-          <option value="hash">hash</option></select></label>
+      </div>
+      <div class="radios">
+        <span class="radiogroup"><span>sort by</span>
+          <label><input type="radio" name="fSortField" value="file" onchange="saveSort();renderFiles()"> file</label>
+          <label><input type="radio" name="fSortField" value="title" onchange="saveSort();renderFiles()"> title</label>
+          <label><input type="radio" name="fSortField" value="action" onchange="saveSort();renderFiles()"> action</label>
+          <label><input type="radio" name="fSortField" value="state" onchange="saveSort();renderFiles()"> state</label>
+          <label><input type="radio" name="fSortField" value="hash" onchange="saveSort();renderFiles()"> hash</label>
+        </span>
+        <span class="radiogroup"><span>order</span>
+          <label><input type="radio" name="fSortDir" value="asc" onchange="saveSort();renderFiles()"> asc</label>
+          <label><input type="radio" name="fSortDir" value="desc" onchange="saveSort();renderFiles()"> desc</label>
+        </span>
       </div>
       <div id="files"></div>
     </div>
@@ -583,7 +600,10 @@ function renderFiles(){
   const q=document.getElementById('fSearch').value.trim().toLowerCase();
   const fAction=document.getElementById('fAction').value;
   const fSt=fState.value;
-  const sort=document.getElementById('fSort').value;
+  const sortR=document.querySelector('input[name=fSortField]:checked');
+  const sort=sortR?sortR.value:'file';
+  const dirR=document.querySelector('input[name=fSortDir]:checked');
+  const dir=dirR?dirR.value:'asc';
   let rows=files.filter(f=>{
     if(fAction&&f.action!==fAction)return false;
     if(fSt&&f.processing_state!==fSt)return false;
@@ -593,17 +613,21 @@ function renderFiles(){
   });
   const key=f=>({file:(f.virtual_path||f.local_file_id),title:(f.extracted_title||''),
     action:f.action,state:f.processing_state,hash:f.local_file_id})[sort]||'';
-  rows.sort((a,b)=>String(key(a)).toLowerCase().localeCompare(String(key(b)).toLowerCase()));
+  rows.sort((a,b)=>{const cmp=String(key(a)).toLowerCase().localeCompare(String(key(b)).toLowerCase());return dir==='desc'?-cmp:cmp;});
   const el=document.getElementById('files');
   if(!files.length){el.innerHTML='<p class="muted">No files indexed yet — add a folder, then “Sync now”.</p>';return;}
   if(!rows.length){el.innerHTML='<p class="muted">No files match the current filters.</p>';return;}
-  el.innerHTML='<table><tr><th>file</th><th>id (hash)</th><th>title</th><th>action</th><th>state</th><th></th></tr>'+
+  el.innerHTML='<table class="filetable">'+
+    '<col style="width:26%"><col style="width:16%"><col style="width:26%">'+
+    '<col style="width:10%"><col style="width:12%"><col style="width:10%">'+
+    '<tr><th>file</th><th>id (hash)</th><th>title</th><th>action</th><th>state</th><th></th></tr>'+
     rows.map(f=>{
       const title=f.extracted_title?`<span class="titlecell" title="${esc(f.extracted_title)}${f.extracted_authors?'\n'+esc(f.extracted_authors):''}">${esc(f.extracted_title)}</span>`:'<span class="muted">—</span>';
       const teleported=(f.processing_state==='teleported')||(f.teleport_status==='complete');
       const offerBtn=(canTeleport&&!teleported&&!f.blocked&&f.present)
         ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')">offer teleport</button>`:'';
-      return `<tr><td>${esc(f.virtual_path||f.local_file_id.slice(0,10))}${f.present?'':' <span class="bad">(removed)</span>'}</td>`+
+      const gone=f.present?'':' <span class="bad" title="The original file is no longer present in the indexed folder on this workstation — the agent can no longer see it. The server still keeps the indexed copy and metadata.">(file no longer on this workstation)</span>';
+      return `<tr><td class="pathcell">${esc(f.virtual_path||f.local_file_id.slice(0,10))}${gone}</td>`+
         `<td><span class="pill mono" data-hash="${esc(f.local_file_id)}" onclick="copyHash('${f.local_file_id}')" title="click to copy full hash (the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span>`+
         `<span class="fullhash">${esc(f.local_file_id)}</span></td>`+
         `<td>${title}</td>`+
@@ -655,6 +679,15 @@ function savePMode(){try{localStorage.setItem('pMode',pMode());}catch(e){}}
 function loadPMode(){let v='monitored';try{v=localStorage.getItem('pMode')||'monitored';}catch(e){}
   const r=document.querySelector(`input[name=pMode][value="${v}"]`)||document.querySelector('input[name=pMode][value="monitored"]');
   if(r)r.checked=true;}
+function fSortField(){const r=document.querySelector('input[name=fSortField]:checked');return r?r.value:'file';}
+function fSortDir(){const r=document.querySelector('input[name=fSortDir]:checked');return r?r.value:'asc';}
+function saveSort(){try{localStorage.setItem('fSortField',fSortField());localStorage.setItem('fSortDir',fSortDir());}catch(e){}}
+function loadSort(){let field='file',dir='asc';
+  try{field=localStorage.getItem('fSortField')||'file';dir=localStorage.getItem('fSortDir')||'asc';}catch(e){}
+  const fr=document.querySelector(`input[name=fSortField][value="${field}"]`)||document.querySelector('input[name=fSortField][value="file"]');
+  if(fr)fr.checked=true;
+  const dr=document.querySelector(`input[name=fSortDir][value="${dir}"]`)||document.querySelector('input[name=fSortDir][value="asc"]');
+  if(dr)dr.checked=true;}
 function pickerOpts(){return {action:document.getElementById('pAction').value,teleport_policy:document.getElementById('pPolicy').value,mode:pMode()};}
 function addPath(path,kind){
   const o=pickerOpts();
@@ -671,6 +704,7 @@ function rejectForever(id){if(!confirm('Reject and block all future requests for
   act(()=>api(`/api/requests/${id}/reject`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({forever:true})}),'Blocked');}
 
 loadPMode();
+loadSort();
 refresh();
 setInterval(refresh,15000);
 </script></body></html>"""

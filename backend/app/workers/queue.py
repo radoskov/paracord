@@ -143,6 +143,87 @@ def clear_jobs(which: str = "finished_failed") -> dict:
         return {"available": False, "error": str(exc), "cleared": 0}
 
 
+def _resolve_paper_targets(jobs: list[dict]) -> None:
+    """Best-effort: fill ``paper_title``/``paper_sha256`` from the DB for paper-targeted jobs.
+
+    Mutates ``jobs`` in place. Guarded so it NEVER raises — the queue endpoint is best-effort and
+    must keep returning even when the DB is unreachable. DB/model imports are local so this module
+    stays import-light (no DB connection at import time).
+    """
+    try:
+        import uuid
+
+        from sqlalchemy import select
+
+        from app.db.session import SessionLocal
+        from app.models.file import File, FileWorkLink
+        from app.models.work import Work
+
+        def _as_uuid(value) -> uuid.UUID | None:
+            try:
+                return uuid.UUID(str(value))
+            except Exception:  # noqa: BLE001 - skip un-parseable ids
+                return None
+
+        file_ids = {
+            uid
+            for j in jobs
+            if j.get("target_kind") == "file" and (uid := _as_uuid(j.get("target_id")))
+        }
+        work_ids = {
+            uid
+            for j in jobs
+            if j.get("target_kind") == "work" and (uid := _as_uuid(j.get("target_id")))
+        }
+        if not file_ids and not work_ids:
+            return
+
+        # title := Work.canonical_title; hash := File.sha256 (Work has no hash). Resolve titles/
+        # hashes for both file- and work-targeted jobs, batched, in one short-lived session.
+        files: dict = {}  # File.id -> (sha256, canonical_title-via-link)
+        works: dict = {}  # Work.id -> (canonical_title, sha256-of-primary-file)
+        with SessionLocal() as db:
+            # File-target jobs: sha256 from File; title from the file's linked Work (if any).
+            for fid in file_ids:
+                file = db.get(File, fid)
+                if file is None:
+                    continue
+                title = None
+                link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == fid))
+                if link is not None:
+                    work = db.get(Work, link.work_id)
+                    title = work.canonical_title if work else None
+                files[fid] = (file.sha256, title)
+            # Work-target jobs: title from Work; sha256 from the work's first/primary linked File.
+            for wid in work_ids:
+                work = db.get(Work, wid)
+                if work is None:
+                    continue
+                sha = None
+                link = db.scalar(select(FileWorkLink).where(FileWorkLink.work_id == wid))
+                if link is not None:
+                    file = db.get(File, link.file_id)
+                    sha = file.sha256 if file else None
+                works[wid] = (work.canonical_title, sha)
+
+        for j in jobs:
+            kind = j.get("target_kind")
+            if kind == "file":
+                fid = _as_uuid(j.get("target_id"))
+                if fid in files:
+                    sha, title = files[fid]
+                    j["paper_sha256"] = sha
+                    j["paper_title"] = title
+            elif kind == "work":
+                wid = _as_uuid(j.get("target_id"))
+                if wid in works:
+                    title, sha = works[wid]
+                    j["paper_title"] = title
+                    j["paper_sha256"] = sha
+    except Exception as exc:  # noqa: BLE001 - best-effort enrichment; never break the endpoint
+        logger.warning("Could not resolve paper targets for jobs: %s", exc)
+
+
 def queue_status(limit: int = 25) -> dict:
     """Introspect the RQ queue: counts, workers, and recent jobs.
 
@@ -178,6 +259,21 @@ def queue_status(limit: int = 25) -> dict:
         def _label(job) -> str:
             return _FUNC_LABELS.get(job.func_name, (job.func_name or "job").rsplit(".", 1)[-1])
 
+        def _target(job) -> tuple[str | None, str | None]:
+            """(kind, id) of the paper this job acts on — ('file'|'work', uuid-str) or (None, None).
+
+            EXTRACT job's first arg is a File id; ENRICH/EMBED a Work id. Dedup/reindex/
+            model-pull act on no single paper.
+            """
+            args = list(getattr(job, "args", None) or [])
+            if not args:
+                return None, None
+            if job.func_name == EXTRACT_JOB:
+                return "file", str(args[0])
+            if job.func_name in (ENRICH_JOB, EMBED_JOB):
+                return "work", str(args[0])
+            return None, None
+
         def _collect(job_ids, fallback_status: str) -> list[dict]:
             rows: list[dict] = []
             for job_id in list(job_ids)[:limit]:
@@ -185,6 +281,7 @@ def queue_status(limit: int = 25) -> dict:
                     job = Job.fetch(job_id, connection=conn)
                 except Exception:  # noqa: BLE001 - job may expire between listing and fetch
                     continue
+                kind, target_id = _target(job)
                 rows.append(
                     {
                         "id": job.id,
@@ -195,6 +292,10 @@ def queue_status(limit: int = 25) -> dict:
                         "error": (job.exc_info or "").strip()[-2000:] or None
                         if fallback_status == "failed"
                         else None,
+                        "target_kind": kind,
+                        "target_id": target_id,
+                        "paper_title": None,
+                        "paper_sha256": None,
                     }
                 )
             return rows
@@ -206,11 +307,13 @@ def queue_status(limit: int = 25) -> dict:
             + _collect(queue.job_ids, "queued")
             + _collect(list(reversed(queue.finished_job_registry.get_job_ids())), "finished")
         )
+        jobs = jobs[:limit]
+        _resolve_paper_targets(jobs)
         return {
             "available": True,
             "workers": Worker.count(connection=conn),
             "counts": counts,
-            "jobs": jobs[:limit],
+            "jobs": jobs,
         }
     except Exception as exc:  # noqa: BLE001 - report unavailability instead of crashing
         return {

@@ -126,6 +126,12 @@
                   <strong>{job.task}</strong>
                   <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
                 </div>
+                {#if job.paper_title || job.paper_sha256}
+                  <div class="paper">
+                    {#if job.paper_title}<span class="paper-title">{job.paper_title}</span>{/if}
+                    {#if job.paper_sha256}<span class="hash" title={job.paper_sha256}>{job.paper_sha256.slice(0, 12)}…</span>{/if}
+                  </div>
+                {/if}
                 {#if job.error}
                   <details class="err-details">
                     <summary>error — {job.error.split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 140)}</summary>
@@ -257,6 +263,29 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .paper {
+    align-items: baseline;
+    color: #5a6675;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+  }
+
+  .paper-title {
+    overflow-wrap: anywhere;
+  }
+
+  .hash {
+    background: #eef1f5;
+    border-radius: 0.25rem;
+    color: #44515f;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    padding: 0.05rem 0.35rem;
   }
 
   .err-details summary {

@@ -465,6 +465,10 @@ export interface JobRecord {
   enqueued_at: string | null;
   ended_at: string | null;
   error: string | null;
+  target_kind?: string | null;
+  target_id?: string | null;
+  paper_title?: string | null;
+  paper_sha256?: string | null;
 }
 
 export interface QueueStatus {
