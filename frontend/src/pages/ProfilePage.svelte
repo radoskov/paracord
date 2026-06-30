@@ -125,7 +125,7 @@
       </form>
     </section>
 
-    <section class="card">
+    <section class="card pw">
       <div class="head">
         <h2>Password</h2>
         <button type="button" class="secondary" on:click={togglePw}>
@@ -148,7 +148,7 @@
       {/if}
     </section>
 
-    <section class="card">
+    <section class="card roles">
       <h2>Roles &amp; access</h2>
       <div class="role-card">
         <strong>
@@ -165,10 +165,35 @@
 
 <style>
   .profile {
+    align-items: start;
     display: grid;
     gap: 1rem;
-    grid-template-columns: 1fr;
-    max-width: 48rem;
+    /* Account + Password stack in the main column; Roles & access is pinned top-right. */
+    grid-template-columns: minmax(0, 1fr) 17rem;
+    max-width: 52rem;
+  }
+  .account {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .pw {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .roles {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  @media (max-width: 720px) {
+    .profile {
+      grid-template-columns: 1fr;
+    }
+    .account,
+    .pw,
+    .roles {
+      grid-column: 1;
+      grid-row: auto;
+    }
   }
   .head {
     align-items: center;
