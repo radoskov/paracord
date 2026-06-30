@@ -461,3 +461,64 @@ whole-project build compiles another agent's half-finished edits) and on **commi
 phase agents run **sequentially** (P1 → P2 → P3 → P4): each implements, tests (frontend build +
 vitest; backend pytest where relevant), and commits to `main` (no branch), then the next starts.
 Within a phase, the internal order above is honored by that phase's agent.
+
+# Round: testing-feedback batch 2 (2026-06-30)
+
+A fresh batch of 20 findings from heavy testing. Resolved decisions:
+- **#5 Find-on-web:** aggregate candidate matches from legitimate scholarly sources (Crossref +
+  OpenAlex metadata; arXiv + Unpaywall + Semantic Scholar OA PDF links; resolved DOI/publisher URL).
+  Show top candidates in a picker; user selects **0…N** to download + attach. Server-side fetch uses
+  the host network, so IP-based institutional access to publisher PDFs works. **No shadow-library
+  sources.** Failed fetch → manual-upload fallback.
+- **#20 Role model:** single immutable **owner** (the `make bootstrap-admin` account) that cannot be
+  disabled/deleted/role-changed and **cannot disable itself**; new **admin** role can do everything
+  except create/disable/remove/role-change another admin or the owner. Only the owner manages admins.
+  Migration: bootstrap account stays owner; **all other current owners → admin**. No self-disable for
+  anyone.
+- **#19 Server roots:** owner-only GUI to add/remove import roots + aliases, stored **DB-backed and
+  merged** with the read-only `server.yaml` entries (no file writes).
+- **#4 Library columns:** user picks which of ~6 columns show + order; localStorage for instant state
+  **plus** persisted to `~/.config/paracord/preferences.yaml` via a backend prefs endpoint. Soft cap.
+- **#16 scanned PDFs:** fit-to-window layout bug is in scope; PDFs with no embedded text (scanned)
+  legitimately have no text layer — OCR is out of scope, external view remains the fallback.
+
+## Phases (sequential impl; design pipelined read-only; commit to `main`, no branch)
+
+- [ ] **Phase A — Security role redesign (#20).** TOP PRIORITY. Add `Role.ADMIN`; Alembic migration
+  (bootstrap owner immutable; other owners → admin); permission deps (owner-only admin management;
+  admin manages editors/readers; block self-disable/self-delete; block disabling/removing owner;
+  admin cannot touch admins/owner); AdminPage UI (assignable roles = reader/editor/admin; owner
+  locked; self-actions disabled); `session.ts`/`client.ts` role types + `canManageUsers`/`isOwner`.
+  Files: models/user, auth deps, endpoints/admin users, alembic, AdminPage.svelte, session.ts, client.ts.
+- [ ] **Phase B — Reader fixes.** #1 Read reopen (modal/objectURL state reset on close); #7 citation
+  click also selects the reference entry in the reader's References tab; #8 note/reference backlink
+  actually changes page + flashes anchor; #9 multiword search (concatenate text-item strings across
+  spans so phrase matches span item boundaries); #13 disable annotation add/highlight/remove for
+  readers (role-gated) with hints; #16 reader fit-to-window (no clipped bottom on browser zoom).
+  Files: PdfReader.svelte, WorkDetail.svelte.
+- [ ] **Phase C — Paper-view actions & links.** #2 note count on the file widget (above hash); #12
+  separate **Enrich** (metadata/refs) and **Extract** (GROBID) buttons (+ room for topics/summarize
+  later); #17 related-papers clickable → switch paper view + show "why related" reason; #18 keyword
+  chips clickable → semantic search in library. Files: WorkDetail.svelte, LibraryPage.svelte, backend
+  works/enrich/extract + related endpoints, client.ts.
+- [ ] **Phase D — Library list.** #3 sortable column headers + **added-at** column (backend sort
+  params); #4 configurable columns (show/hide + order; localStorage + backend prefs file). Files:
+  LibraryPage.svelte, backend works list + new preferences endpoint, client.ts.
+- [ ] **Phase E — Agent GUI + jobs.** #10 fixed title-column width + wrap long titles/paths; #14 sort
+  via radio toggle (below search) + asc/desc radio group; #15 reword "(removed)" to explain (source
+  file gone from the indexed folder on the workstation); #11 jobs list shows processed paper
+  name/hash. Files: agent/paperracks_agent/web.py, JobsPage.svelte, backend jobs endpoint.
+- [ ] **Phase F — Find-on-web (#5).** Backend candidate-search service (Crossref/OpenAlex/Unpaywall/
+  arXiv/Semantic Scholar + DOI resolver), search + download-and-attach endpoints; WorkDetail "Find on
+  web" button → candidate picker modal → select 0…N → download + attach with per-item status.
+  Files: backend new service + endpoints, WorkDetail.svelte, client.ts.
+- [ ] **Phase G — Hover-hint audit (#6).** Cross-cutting pass (run last, over final state): every
+  actionable control has a hint — enabled = what it does; disabled = why (role vs missing
+  prerequisite). Files: LibraryPage.svelte, WorkDetail.svelte, AdminPage.svelte, PdfReader.svelte, etc.
+
+## Dependencies & collision-safety (batch 2)
+- **Phase A first** — it changes the `Role` enum that B/C/D/G reference.
+- WorkDetail.svelte is shared by B, C, F; LibraryPage by C, D; backend app by A, C, D, E, F → phases
+  run **sequentially** (one impl agent at a time; pytest imports the whole app and the git index is
+  shared). Read-only **design** passes pipeline in parallel with the prior phase's implementation.
+- Agent GUI (#10/#14/#15) lives in the agent app (separate test suite) — only the git index is shared.
