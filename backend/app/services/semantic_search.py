@@ -8,12 +8,13 @@ term overlap and needs no embeddings at all — the UI offers both modes.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.ai import Embedding
@@ -32,6 +33,54 @@ _WORD = re.compile(r"[A-Za-z][A-Za-z0-9'-]+")
 class SearchHit:
     work: Work
     score: float
+
+
+# --- optional pgvector acceleration (H7) ------------------------------------
+
+
+def _pgvector_on(db: Session) -> bool:
+    """Whether to use the pgvector ranking path (Postgres + enabled setting)."""
+    from app.core.config import get_settings  # noqa: PLC0415
+
+    return (
+        get_settings().pgvector_enabled
+        and db.bind is not None
+        and db.bind.dialect.name == "postgresql"
+    )
+
+
+def _vec_literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{x:.8g}" for x in vector) + "]"
+
+
+def _write_pgvector(db: Session, embedding_id, vector: list[float]) -> None:
+    """Mirror a stored vector into the pgvector column (best-effort; ignored if unavailable)."""
+    if not _pgvector_on(db):
+        return
+    with contextlib.suppress(SQLAlchemyError):
+        db.execute(
+            text("UPDATE embeddings SET vector_pg = CAST(:v AS vector) WHERE id = :id"),
+            {"v": _vec_literal(vector), "id": str(embedding_id)},
+        )
+
+
+def _pgvector_rank(
+    db: Session, query_vector: list[float], *, model_name: str, limit: int
+) -> list[tuple] | None:
+    """Rank by pgvector cosine distance in the database. Returns (id, score) or None on failure."""
+    try:
+        rows = db.execute(
+            text(
+                "SELECT entity_id, 1 - (vector_pg <=> CAST(:q AS vector)) AS score "
+                "FROM embeddings "
+                "WHERE entity_type = 'work' AND model_name = :m AND vector_pg IS NOT NULL "
+                "ORDER BY vector_pg <=> CAST(:q AS vector) LIMIT :n"
+            ),
+            {"q": _vec_literal(query_vector), "m": model_name, "n": limit},
+        ).all()
+        return [(r[0], float(r[1])) for r in rows]
+    except SQLAlchemyError:
+        return None
 
 
 def _work_text(work: Work) -> str:
@@ -74,10 +123,10 @@ def index_one_work(db: Session, work: Work, *, provider: EmbeddingProvider | Non
     """(Re)embed a single work (per-import background job). Replaces any prior vector for the model
     so an updated title/abstract re-embeds. Returns True if a vector was stored."""
     provider = provider or HashBowProvider()
-    text = _work_text(work)
-    if not text:
+    doc = _work_text(work)
+    if not doc:
         return False
-    vector = provider.embed(text)
+    vector = provider.embed(doc)
     db.execute(
         delete(Embedding).where(
             Embedding.entity_type == "work",
@@ -85,16 +134,16 @@ def index_one_work(db: Session, work: Work, *, provider: EmbeddingProvider | Non
             Embedding.model_name == provider.model_name,
         )
     )
-    db.add(
-        Embedding(
-            entity_type="work",
-            entity_id=work.id,
-            model_name=provider.model_name,
-            dim=len(vector),
-            vector=vector,
-        )
+    row = Embedding(
+        entity_type="work",
+        entity_id=work.id,
+        model_name=provider.model_name,
+        dim=len(vector),
+        vector=vector,
     )
+    db.add(row)
     db.flush()
+    _write_pgvector(db, row.id, vector)
     return True
 
 
@@ -113,19 +162,19 @@ def _store_embedding(
         return False
     savepoint = db.begin_nested()
     try:
-        db.add(
-            Embedding(
-                entity_type="work",
-                entity_id=work_id,
-                model_name=model_name,
-                dim=len(vector),
-                vector=vector,
-            )
+        row = Embedding(
+            entity_type="work",
+            entity_id=work_id,
+            model_name=model_name,
+            dim=len(vector),
+            vector=vector,
         )
+        db.add(row)
         savepoint.commit()
     except IntegrityError:
         savepoint.rollback()  # another indexer won the race; that's fine
         return False
+    _write_pgvector(db, row.id, vector)
     return True
 
 
@@ -186,19 +235,25 @@ def semantic_search(
         ensure_work_embeddings(db, provider=provider)
 
     query_vector = provider.embed(query)
-    rows = db.scalars(
-        select(Embedding).where(
-            Embedding.entity_type == "work", Embedding.model_name == provider.model_name
-        )
-    ).all()
 
-    scored: list[tuple[uuid.UUID, float]] = []
-    for embedding in rows:
-        score = cosine_similarity(query_vector, embedding.vector)
-        if score > 0.0:
-            scored.append((embedding.entity_id, score))
-    scored.sort(key=lambda item: item[1], reverse=True)
-    top = scored[:limit]
+    # Fast path: rank in Postgres via pgvector when enabled (falls through to Python on any miss).
+    top: list[tuple] | None = None
+    if _pgvector_on(db):
+        top = _pgvector_rank(db, query_vector, model_name=provider.model_name, limit=limit)
+
+    if top is None:
+        rows = db.scalars(
+            select(Embedding).where(
+                Embedding.entity_type == "work", Embedding.model_name == provider.model_name
+            )
+        ).all()
+        scored: list[tuple[uuid.UUID, float]] = []
+        for embedding in rows:
+            score = cosine_similarity(query_vector, embedding.vector)
+            if score > 0.0:
+                scored.append((embedding.entity_id, score))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        top = scored[:limit]
 
     works = {
         work.id: work

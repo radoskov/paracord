@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     summary_llm_enabled: bool = False  # allow summary_type=local_llm via Ollama
     summary_llm_model: str = "qwen3:4b"
     topic_backend: str = "tfidf"  # tfidf | embedding (BERTopic-style, embedding-clustered)
+    # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (the JSON-array +
+    # Python-cosine path stays the default + the SQLite path). Additive; default off.
+    pgvector_enabled: bool = False
     # At-rest field encryption key (Fernet). When unset, sensitive fields are stored in clear and
     # SECURITY.md's at-rest claim is downgraded accordingly (Stage 7).
     secret_key: str | None = Field(default=None, alias="PARACORD_SECRET_KEY")
