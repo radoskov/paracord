@@ -1,8 +1,19 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import type { Annotation, CitationContext } from '../api/client';
+import type { Annotation, CitationContext, CurrentUser } from '../api/client';
+import { currentUser } from '../lib/session';
 import PdfReader from './PdfReader.svelte';
+
+const EDITOR: CurrentUser = {
+  id: 'u1',
+  username: 'ed',
+  role: 'editor',
+  display_name: null,
+  email: null,
+  created_at: null,
+  last_login_at: null,
+};
 
 const ANNOTATION: Annotation = {
   id: 'a1',
@@ -41,6 +52,8 @@ const CONTEXT: CitationContext = {
 };
 
 describe('PdfReader', () => {
+  afterEach(() => currentUser.set(null));
+
   // No fileUrl → the PDF.js path is never imported, keeping this deterministic in jsdom.
   it('prompts to open a paper when no URL is set', () => {
     render(PdfReader, { fileId: 'abcdef123456', fileName: 'paper.pdf', fileUrl: null });
@@ -81,6 +94,42 @@ describe('PdfReader', () => {
     });
     await fireEvent.click(screen.getByRole('button', { name: /notes/i }));
     expect(screen.queryByRole('button', { name: /delete annotation/i })).toBeNull();
+  });
+
+  it('disables annotation controls for a reader (no edit role)', async () => {
+    currentUser.set(null); // no role / read-only
+    render(PdfReader, {
+      fileId: 'abcdef123456',
+      fileName: 'paper.pdf',
+      fileUrl: null,
+      annotations: [ANNOTATION],
+      onCreateAnnotation: async () => {},
+      onDeleteAnnotation: async () => {},
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /notes/i }));
+    expect(screen.getByRole('button', { name: /^add$/i })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /delete annotation/i })).toHaveProperty(
+      'disabled',
+      true,
+    );
+  });
+
+  it('enables annotation controls for an editor', async () => {
+    currentUser.set(EDITOR);
+    render(PdfReader, {
+      fileId: 'abcdef123456',
+      fileName: 'paper.pdf',
+      fileUrl: null,
+      annotations: [ANNOTATION],
+      onCreateAnnotation: async () => {},
+      onDeleteAnnotation: async () => {},
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /notes/i }));
+    // The delete button is enabled; the Add button stays disabled only until content is typed.
+    expect(screen.getByRole('button', { name: /delete annotation/i })).toHaveProperty(
+      'disabled',
+      false,
+    );
   });
 
   it('remembers the chosen view mode in localStorage', async () => {

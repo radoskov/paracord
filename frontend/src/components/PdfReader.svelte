@@ -2,6 +2,7 @@
   import { onDestroy, tick } from 'svelte';
 
   import type { Annotation, CitationContext, PdfCoordinateBox } from '../api/client';
+  import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
 
   export let fileId: string;
   export let fileName: string;
@@ -71,13 +72,19 @@
   }
 
   // --- search -------------------------------------------------------------
+  // Separator joining adjacent text items when building a page's full-text string. A single
+  // space lets phrases that span item boundaries (the common case) match, while keeping the
+  // offset→span mapping deterministic (every join contributes exactly one character).
+  const ITEM_SEP = ' ';
   let searchQuery = '';
-  // One entry per occurrence across the whole document.
-  type SearchHit = { page: number; index: number };
+  // One entry per occurrence across the whole document. `start`/`end` are character offsets
+  // into the page's concatenated text so the matching spans can be recovered for highlighting.
+  type SearchHit = { page: number; start: number; end: number };
   let searchHits: SearchHit[] = [];
   let searchPos = -1;
   let searching = false;
-  // Lazily-built per-page text cache: lowercased page text for whole-doc scan.
+  // Lazily-built per-page cache: the lowercased concatenated page text used for the whole-doc
+  // scan. The same join (ITEM_SEP) is replayed over the rendered spans to map offsets back.
   const pageTextCache = new Map<number, string>();
 
   // --- selection → annotation --------------------------------------------
@@ -241,6 +248,23 @@
     void renderPage(n);
   }
 
+  // Switch to the Paper tab and navigate to a page, awaiting the canvas mount + render so a
+  // follow-up flash lands on a painted page. Without the tick() the canvas/textLayer may not be
+  // bound yet (we just switched tabs), and renderPage() would early-return — the page would not
+  // change and the flash would target nothing.
+  async function goToPageOnPaperTab(n: number): Promise<void> {
+    tab = 'pdf';
+    await tick();
+    if (viewMode === 'scroll') {
+      currentPage = Math.min(Math.max(1, n), numPages || n);
+      await tick();
+      scrollCanvases.get(currentPage)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      await renderScrollPage(currentPage);
+    } else {
+      await renderPage(n);
+    }
+  }
+
   function zoom(delta: number): void {
     scale = Math.min(3, Math.max(0.5, Math.round((scale + delta) * 10) / 10));
     if (viewMode === 'scroll') resetScrollRender();
@@ -248,13 +272,16 @@
   }
 
   // --- whole-document search ----------------------------------------------
+  // The page's full text is the concatenation of every text item joined by ITEM_SEP, so a query
+  // phrase that crosses item (span) boundaries still matches. The SAME concatenation is replayed
+  // over the rendered text-layer spans (see spanOffsets) to recover which spans to highlight.
   async function pageText(p: number): Promise<string> {
     const cached = pageTextCache.get(p);
     if (cached !== undefined) return cached;
     const page = await pdfDoc.getPage(p);
     const content = await page.getTextContent();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const text = content.items.map((item: any) => item.str ?? '').join(' ').toLowerCase();
+    const text = content.items.map((item: any) => item.str ?? '').join(ITEM_SEP).toLowerCase();
     pageTextCache.set(p, text);
     return text;
   }
@@ -273,12 +300,10 @@
       for (let p = 1; p <= numPages; p += 1) {
         const text = await pageText(p);
         let from = 0;
-        let index = 0;
         for (;;) {
           const at = text.indexOf(query, from);
           if (at === -1) break;
-          hits.push({ page: p, index });
-          index += 1;
+          hits.push({ page: p, start: at, end: at + query.length });
           from = at + query.length;
         }
       }
@@ -304,52 +329,76 @@
     else goTo(target.page);
   }
 
-  // Highlight matching spans of the rendered text layer for the current page.
+  // Map each rendered text-layer span to its [start,end) char range in the page's concatenated
+  // text, replaying the ITEM_SEP join. The text layer renders one span per text item in document
+  // order, so walking the spans reproduces the same offsets used when scanning for matches.
+  function spanOffsets(spans: HTMLSpanElement[]): { start: number; end: number }[] {
+    const ranges: { start: number; end: number }[] = [];
+    let offset = 0;
+    spans.forEach((span, i) => {
+      const len = (span.textContent ?? '').length;
+      ranges.push({ start: offset, end: offset + len });
+      offset += len;
+      // A separator sits between consecutive items, matching items.join(ITEM_SEP).
+      if (i < spans.length - 1) offset += ITEM_SEP.length;
+    });
+    return ranges;
+  }
+
+  // Highlight matching spans of the rendered text layer for the current page. A hit is a char
+  // range in the page text; every span that overlaps a hit range is highlighted, so phrases that
+  // span multiple items light up all their pieces.
   function applySearchHighlights(): void {
     if (!textLayerEl) return;
-    const query = searchQuery.trim().toLowerCase();
     const spans = Array.from(textLayerEl.querySelectorAll('span')) as HTMLSpanElement[];
     for (const span of spans) span.classList.remove('search-hl', 'current');
-    if (!query || !searchHits.length) return;
+    if (!searchQuery.trim() || !searchHits.length) return;
+    const ranges = spanOffsets(spans);
+    const pageHits = searchHits.filter((h) => h.page === currentPage);
+    if (!pageHits.length) return;
     const activeHit = searchHits[searchPos];
-    let matched = -1;
+    const overlaps = (h: SearchHit, r: { start: number; end: number }): boolean =>
+      r.start < h.end && r.end > h.start;
     let first: HTMLSpanElement | null = null;
     let active: HTMLSpanElement | null = null;
-    for (const span of spans) {
-      const text = (span.textContent ?? '').toLowerCase();
-      if (!text.includes(query)) continue;
+    spans.forEach((span, i) => {
+      const r = ranges[i];
+      if (!pageHits.some((h) => overlaps(h, r))) return;
       span.classList.add('search-hl');
       first ??= span;
-      matched += 1;
-      if (activeHit && activeHit.page === currentPage && matched === activeHit.index) {
+      if (activeHit && activeHit.page === currentPage && overlaps(activeHit, r)) {
         span.classList.add('current');
-        active = span;
+        active ??= span;
       }
-    }
+    });
     (active ?? first)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   // --- citation ↔ reference navigation ------------------------------------
-  function jumpToContext(context: CitationContext): void {
+  async function jumpToContext(context: CitationContext): Promise<void> {
     const box = context.pdf_coordinates?.[0];
-    tab = 'pdf';
-    if (box) {
-      goTo(box.page);
-      flash(`ctx:${context.id}`);
-    } else if (context.page) {
-      goTo(context.page);
-    }
+    const page = box?.page ?? context.page;
+    if (!page) return;
+    await goToPageOnPaperTab(page);
+    flash(`ctx:${context.id}`);
   }
 
-  // Direction A: an in-text overlay was clicked → ask the parent to reveal the reference,
-  // and flash the matching context entry within the reader's References tab as well.
+  // Scroll-to + flash a context entry inside the reader's own References (contexts) tab.
+  async function revealContextInTab(contextId: string): Promise<void> {
+    tab = 'contexts';
+    await tick();
+    const el = document.getElementById(`reader-ctx-${contextId}`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    flash(`ctx:${contextId}`);
+  }
+
+  // Direction A: an in-text overlay was clicked → reveal the reference in BOTH places: the
+  // parent paper view's References block (via the callback) and the reader's own References tab.
   function onOverlayClick(context: CitationContext): void {
-    flash(`ctx:${context.id}`);
     if (context.reference_id && onNavigateToReference) {
       onNavigateToReference(context.reference_id);
-    } else {
-      tab = 'contexts';
     }
+    void revealContextInTab(context.id);
   }
 
   // Direction B: jump to the first in-text mention of a reference, cycling on repeat.
@@ -362,16 +411,15 @@
     mentionCycle = (mentionCycle + 1) % mentions.length;
     const context = mentions[mentionCycle];
     const box = context.pdf_coordinates?.[0];
-    tab = 'pdf';
     if (box) {
-      goTo(box.page);
-      await tick();
+      await goToPageOnPaperTab(box.page);
       flash(`ctx:${context.id}`);
     }
   }
 
   // --- selection → annotation --------------------------------------------
   function captureSelection(): void {
+    if (!$canEdit) return;
     const selection = window.getSelection();
     const text = selection?.toString().trim() ?? '';
     if (!text) return;
@@ -419,12 +467,13 @@
     await onDeleteAnnotation(annotationId);
   }
 
-  // Click a note → jump to its page/anchor and flash the highlight box.
-  function jumpToAnnotation(annotation: Annotation): void {
-    tab = 'pdf';
+  // Click a note → jump to its page/anchor and flash the highlight box. Sequence the tab switch
+  // + render before flashing so the anchor exists on a painted page (see goToPageOnPaperTab).
+  async function jumpToAnnotation(annotation: Annotation): Promise<void> {
     const boxes = (annotation.coordinates as { boxes?: PdfCoordinateBox[] } | null)?.boxes ?? [];
     const target = boxes[0]?.page ?? annotation.page;
-    if (target) goTo(target);
+    if (!target) return;
+    await goToPageOnPaperTab(target);
     flash(`ann:${annotation.id}`);
   }
 
@@ -643,7 +692,15 @@
             <button type="button" on:click={() => stepSearch(1)} aria-label="Next match">›</button>
           {/if}
         </form>
-        <button type="button" class="select-btn" on:click={captureSelection}>
+        <button
+          type="button"
+          class="select-btn"
+          on:click={captureSelection}
+          disabled={!$canEdit}
+          title={$canEdit
+            ? 'Capture the selected text as a highlight annotation'
+            : INSUFFICIENT_ROLE}
+        >
           Highlight selection
         </button>
       </div>
@@ -734,7 +791,7 @@
     {:else}
       <div class="context-list">
         {#each contexts as context (context.id)}
-          <article class:flash={flashKey === `ctx:${context.id}`}>
+          <article id={`reader-ctx-${context.id}`} class:flash={flashKey === `ctx:${context.id}`}>
             <header>
               <strong>{context.marker_text ?? 'citation'}</strong>
               <span>{context.section_label ?? 'section unknown'}</span>
@@ -765,15 +822,15 @@
     {/if}
   {:else}
     <form class="annotation-form" on:submit|preventDefault={createAnnotation}>
-      <select bind:value={annotationType} disabled={!onCreateAnnotation}>
+      <select bind:value={annotationType} disabled={!$canEdit || !onCreateAnnotation}>
         <option value="note">Note</option>
         <option value="highlight">Highlight</option>
         <option value="page_anchor">Page anchor</option>
         <option value="citation_note">Citation note</option>
       </select>
-      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" />
-      <input bind:value={selectedText} placeholder="Selected text" />
-      <textarea bind:value={annotationContent} placeholder="Note"></textarea>
+      <input bind:value={annotationPage} inputmode="numeric" placeholder="Page" disabled={!$canEdit} />
+      <input bind:value={selectedText} placeholder="Selected text" disabled={!$canEdit} />
+      <textarea bind:value={annotationContent} placeholder="Note" disabled={!$canEdit}></textarea>
       {#if selectionBoxes?.length}
         <small class="coord-note">
           Anchored at p.{selectionBoxes[0].page} ({selectionBoxes.length} box{selectionBoxes.length >
@@ -782,9 +839,14 @@
             : ''} from selection)
         </small>
       {/if}
-      <button type="submit" disabled={!onCreateAnnotation || (!selectedText && !annotationContent)}>
+      <button
+        type="submit"
+        disabled={!$canEdit || !onCreateAnnotation || (!selectedText && !annotationContent)}
+        title={$canEdit ? 'Save this note/highlight' : INSUFFICIENT_ROLE}
+      >
         Add
       </button>
+      {#if !$canEdit}<small class="role-hint">{INSUFFICIENT_ROLE} — reading is read-only.</small>{/if}
     </form>
 
     {#if annotations.length === 0}
@@ -803,7 +865,8 @@
                   type="button"
                   class="ann-delete"
                   aria-label="Delete annotation"
-                  title="Delete this note"
+                  title={$canEdit ? 'Delete this note' : INSUFFICIENT_ROLE}
+                  disabled={!$canEdit}
                   on:click={() => removeAnnotation(annotation.id)}
                 >
                   ✕
@@ -1071,7 +1134,8 @@
     color: #b3261e;
   }
 
-  .coord-note {
+  .coord-note,
+  .role-hint {
     grid-column: 1 / -1;
   }
 

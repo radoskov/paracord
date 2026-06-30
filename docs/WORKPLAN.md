@@ -490,7 +490,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   admin cannot touch admins/owner); AdminPage UI (assignable roles = reader/editor/admin; owner
   locked; self-actions disabled); `session.ts`/`client.ts` role types + `canManageUsers`/`isOwner`.
   Files: models/user, auth deps, endpoints/admin users, alembic, AdminPage.svelte, session.ts, client.ts.
-- [ ] **Phase B — Reader fixes.** #1 Read reopen (modal/objectURL state reset on close); #7 citation
+- [x] **Phase B — Reader fixes.** #1 Read reopen (modal/objectURL state reset on close); #7 citation
   click also selects the reference entry in the reader's References tab; #8 note/reference backlink
   actually changes page + flashes anchor; #9 multiword search (concatenate text-item strings across
   spans so phrase matches span item boundaries); #13 disable annotation add/highlight/remove for

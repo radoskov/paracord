@@ -221,9 +221,11 @@
   }
 
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
+    // Always start from a clean reader state so a re-open after close works every time — never
+    // early-return on stale `showReader`/`readerUrl`/`readerFile` left over from a prior session.
+    closeReader();
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
-      clearReader();
       readerUrl = URL.createObjectURL(blob);
       readerFile = file;
       readerJumpReferenceId = jumpReferenceId;
@@ -261,6 +263,9 @@
   }
 
   function closeReader(): void {
+    // Fully reset the modal/objectURL state so the {#if showReader && readerUrl} guard drops the
+    // reader and a later open re-triggers it. Leaving any of these set blocks the reactive re-open
+    // (the bug: clicking "Read" again did nothing until a refresh/tab switch remounted the panel).
     showReader = false;
     clearReader();
   }
