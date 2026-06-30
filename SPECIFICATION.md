@@ -3,8 +3,8 @@
 **Project codename:** PaRacORD
 **Document type:** implementation specification and multi-agent build guide
 **Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser
-**Document date:** 2026-06-23
-**Status:** v1.0 implementation-ready draft
+**Document date:** 2026-06-23 (revised 2026-07-01)
+**Status:** v1.0 implementation-ready draft. This is a destination document: it describes the agreed feature set. Most of it is built; access control (groups, the full role ladder, rack/shelf ACL), raw-citation batch import, the per-paper topic/keyword actions, and a few smaller items in the 2026-07-01 round are the defined target and are noted as in-progress where relevant (see §20).
 
 ## Contents
 
@@ -243,11 +243,39 @@ GROBID and Ollama must not be directly exposed to the LAN by default. They shoul
 1. There is no anonymous access.
 2. There is no guest read-only access.
 3. Every user must have an explicit named account.
-4. MVP roles:
-   - `owner`: full system control, user management, credential recovery configuration, backups, deletion.
-   - `editor`: library editing, imports, metadata changes, annotations, exports, and shelf/rack management.
-   - `reader`: authenticated reading, searching, and export where enabled by owner policy.
-5. Optional post-MVP roles may include custom permissions, but no default guest role shall be shipped.
+4. No default guest role shall be shipped.
+
+#### 7.1.1 Roles (implemented)
+
+The currently implemented role model is a four-tier privilege hierarchy:
+
+- `owner`: the single immutable bootstrap account (created by `make bootstrap-admin`). Full system control: user management, agents, AI/model settings, audit log, backups, deletion. The owner **cannot be disabled, deleted, role-changed, or self-disabled**, and is the only role that may manage `admin` users.
+- `admin`: manages users (readers/editors), agents, AI/model settings, find-on-web policy/allowed-hosts, server import roots, and the audit log. An admin **cannot create, disable, remove, or role-change another admin or the owner**, and **cannot disable itself**.
+- `editor`: library editing — imports, metadata edits, enrichment/extraction, annotations, exports, and shelf/rack management.
+- `reader`: authenticated reading, searching, and export. Readers see Library, Shelves, Racks, Tags, Insights, and Profile, but Import, Jobs, and Duplicates are hidden (editor+) and Admin/Events are owner/admin-only.
+
+Disabling a user forces an immediate logout (active sessions are revoked). The migration that introduced `admin` keeps the bootstrap account as `owner` and moves any other pre-existing owners to `admin`.
+
+Each user has a **Profile** tab showing an editable appearance/display name and a read-only display of *their own* role (with a self-contained description; the full privilege ladder is not advertised). Admins/owner can reset a user's password.
+
+#### 7.1.2 Role ladder and access control (target — in progress)
+
+The agreed end-state replaces the four-tier model with a linear ladder and adds group-based, per-collection access control. This is the defined target (see §7.9 and §20); it is not yet implemented.
+
+Role ladder (lowest to highest):
+
+```text
+reader < contributor < editor < librarian < admin < owner
+```
+
+- `reader`: read all accessible content.
+- `contributor`: + create/edit/delete **own** papers (where `created_by` is self); no rack/shelf changes.
+- `editor`: + create/edit/delete **any accessible** paper; no rack/shelf changes.
+- `librarian`: + create/edit/delete racks and shelves and organize papers within them.
+- `admin`: + manage users, groups, grants, default-grant sets, agents, AI, and audit. Sees and does everything except managing other admins or the owner.
+- `owner`: + manage admins; immutable singleton, as in 7.1.1.
+
+The existing `editor` role is preserved across the migration.
 
 ### 7.2 Authentication
 
@@ -368,6 +396,7 @@ timestamp
 4. GROBID, PostgreSQL, Redis, and Ollama bind only to Docker internal network or localhost.
 5. URL importers must block private/LAN IP ranges by default to avoid server-side request forgery.
 6. Allow fetching from private URLs only if owner enables `allow_private_url_imports`.
+7. The **find-on-web** downloader (§8.18) enforces an always-on SSRF guard: it rejects non-http(s) schemes and any host resolving to a private/loopback/link-local/reserved IP (all A/AAAA records checked), and re-applies the check on **every redirect hop**.
 
 ### 7.8 Data egress and privacy
 
@@ -379,6 +408,32 @@ The system is local-first and built only from open-source, auditable components 
 4. Every external request is logged as a `metadata.enrichment_called` audit event (service, query type, entity IDs) so egress is fully visible to the owner.
 5. Enrichment is configurable per service and can be fully disabled; consolidation may be pointed at a self-hosted biblio-glutton instance for zero third-party calls.
 6. Secrets and credentials are never committed to version control; see `docs/runbooks/secrets_management.md`.
+
+### 7.9 User groups and collection access control (target — in progress)
+
+This subsection specifies the agreed group/ACL model that accompanies the role ladder (§7.1.2). It is the defined target and is not yet implemented.
+
+**Groups (Linux-like).**
+
+1. A `Group` has a unique name, an `is_personal` flag, and an optional `personal_user_id`.
+2. Each user automatically gets a **personal group** named exactly their username, created with the user and deleted with the user (usernames are unique and immutable).
+3. A user may belong to many groups (user↔group is many-to-many).
+4. A `GroupGrant` grants a group access to a target rack or shelf.
+5. Owner/admins manage groups, membership, and grants, and configure a **default grant set** applied to new personal groups.
+
+**Rack/shelf access levels.**
+
+1. Each rack and shelf has `access_level ∈ {open, visible, private}` (default configurable; default `open`).
+2. **SEE:** `open`/`visible` are visible to everyone; `private` is visible only to group members holding a grant (admin/owner always see all).
+3. **MODIFY structure** (librarian and above): `open` requires only the role; `visible`/`private` require the role **and** a group grant ("not even a librarian without a grant").
+
+**Paper visibility.**
+
+1. A paper's SEE permission is the **most-permissive** over the shelves that contain it.
+2. A paper in no shelf falls back to the global default (`open`); admins/owner see all.
+3. **MODIFY** (contributor = own papers only; editor and above = any visible paper) requires SEE plus modify access via a governing shelf (`open` → role; `visible`/`private` → role + grant). A loose paper (in no shelf) is treated as `open`.
+
+Visibility filtering applies to list endpoints, and modify guards apply to mutations; the design pass formalizes the full multi-shelf matrix.
 
 ---
 
@@ -400,9 +455,22 @@ The system shall ingest:
 10. RIS;
 11. CSL JSON;
 12. CSV/TSV metadata lists;
-13. Zotero-compatible exports where practical.
+13. Zotero-compatible exports where practical;
+14. **raw citation/title lists** — free-text, one citation or title per line (see §8.1.1).
 
 Each ingestion creates an `ImportBatch` with source type, timestamp, user, agent/server source, errors, warnings, processing status, and generated work/file IDs.
+
+An import (any input type) may optionally target a specific **rack and/or shelf**, dropping the resulting works straight into that collection at import time (subject to §7.9 access control once that lands).
+
+#### 8.1.1 Raw-citation batch import (target — in progress)
+
+A batch-import flow accepts a block of raw citations/titles, one per line, and resolves each line to a work:
+
+1. By default, each line is looked up via Crossref/OpenAlex; **GROBID's citation parser is a selectable option** for parsing reference strings.
+2. A **staging UI** shows the parsed fields per line so the user can confirm/edit before committing.
+3. A line with no match becomes a **title-only draft** work.
+
+This is the defined target and is not yet implemented.
 
 ### 8.2 PDF extraction
 
@@ -697,6 +765,8 @@ Rules:
 7. User edits are highest priority by default.
 8. Metadata source trust level is configurable.
 9. Every external request shall be logged as `metadata.enrichment_called`, including service, query type, and work/reference IDs.
+10. Metadata operations on a paper are exposed as **separate, explicit actions** rather than one bulk "process": **Enrich** (DOI/arXiv metadata + references via the online connectors), **Extract** (GROBID full-text/structured extraction), and the **Topic**/**Keyword** actions of §8.15.
+11. The metadata-conflict review lets the user **use this** (promote/lock an assertion as canonical) and **remove/resolve** (delete a competing assertion). User-confirmed/locked fields are never silently overwritten by later enrichment.
 
 ### 8.13 Citation export
 
@@ -836,6 +906,7 @@ Requirements:
 6. Allow creating shelves from topics.
 7. Allow freezing a topic model to prevent accidental drift.
 8. Allow rerunning topic models after substantial imports.
+9. Expose per-paper **Topic** (BERTopic) and **Keyword** extraction actions on the paper view, alongside Enrich/Extract (§8.12). On the paper detail view, topics are shown **below the title**, visually separated from keywords. *(Scope-level topic modeling and automatic keyword extraction during GROBID extraction exist today; the per-paper Topic/Keyword action buttons are the defined target and are in progress.)*
 
 Suggested embedding models:
 
@@ -874,6 +945,21 @@ These build on existing data (reading status, embeddings, annotations, exports) 
 2. **Related papers.** On each paper's detail view, surface embedding-based nearest neighbours (semantic similarity from 8.15) with the shelves/tags they already belong to. The related set can be promoted to a search/graph/export scope.
 3. **Live shelf/rack bibliography.** A shelf or rack can expose an always-current bibliography (e.g. BibTeX) that re-renders when its works change, so it can be referenced directly while writing. Implemented on top of the export service (8.13) with cached, invalidate-on-change output.
 4. **Annotation and note search ("where did I read X").** Full-text search over annotation text, highlighted selections, and notes (already listed as searchable fields in 8.7), with results linking back to the exact page/coordinates in the reader.
+
+### 8.18 Find-on-web (find and attach a missing PDF)
+
+For a work that has metadata but no attached PDF, **find-on-web** searches legitimate scholarly sources for candidate copies and lets the user attach 0…N of them. No shadow-library sources are used.
+
+1. **Candidate search** aggregates across **Crossref, OpenAlex, arXiv, Unpaywall, and Semantic Scholar** plus a resolved DOI/publisher URL. Crossref/OpenAlex contribute metadata matches; arXiv/Unpaywall/Semantic Scholar contribute open-access PDF links. Server-side fetch uses the host network, so IP-based institutional access works.
+2. The picker shows a **searched-paper header** (title/authors/year/venue/DOI/arXiv) to validate candidates against, and a **ranked candidate list** with source and open-access badges. Search streams **live per-source progress** (querying → done(count)/failed) over an NDJSON stream, falling back to a non-streaming search on error.
+3. Every candidate carries a resolved **platform** (final host after following the redirect chain) and an always-available **View** link (resolved/landing URL). Candidates with a direct PDF link can be selected for download; PDF-less candidates offer View only (open and attach manually).
+4. A **sticky download bar** (select all/none, "download selected (N)", "N/M downloaded") downloads selected items one at a time so per-row and total status update live. Each item ends in a per-item status; failures fall back to **manual upload**.
+5. **Download security.** Always-on hard blocks (applied on every redirect hop): non-http(s) schemes, the private/internal-IP SSRF guard (§7.7), and a built-in **shadow-library denylist** — these always win and store nothing. On top of that:
+   - a positive **allowed-hosts** set: a built-in safe open-access allowlist (arXiv, Unpaywall, OpenAlex, Semantic Scholar, DOI resolver, PubMed Central, Europe PMC, bioRxiv/medRxiv, Zenodo, DOAJ, Crossref) merged with a DB-backed owner/admin-managed list (defaults are not removable);
+   - a curated **known-publisher** host set (IEEE/ACM/Springer/Elsevier/Wiley/Nature/AAAI/…);
+   - three **owner-set download-policy modes**: `restricted` (allow-list only; default), `careful` (allow-list ∪ known-publishers), `unrestricted` (any host, with per-download **confirmation** for hosts that are neither allow-listed nor known). Allow-list/known hosts never prompt; denylisted/SSRF hosts are always blocked regardless of mode.
+
+The downloaded bytes are %PDF/SHA-256 validated before attaching. Admin/owner manage the allowed-hosts list and download policy in the Admin UI.
 
 ---
 
@@ -921,7 +1007,7 @@ username unique
 password_hash
 display_name
 email optional
-role: owner | editor | reader
+role: owner | admin | editor | reader   # ladder target: reader | contributor | editor | librarian | admin | owner (§7.1.2)
 is_active
 created_at
 last_login_at
@@ -1630,14 +1716,18 @@ Shelves
 Racks
 Files
 Graphs
-Imports
-Duplicates
+Imports        (editor+; hidden for readers)
+Duplicates     (editor+; hidden for readers)
 Topics
 Search
 Exports
-Admin
-Settings
+Admin          (admin/owner)
+AI & Models    (admin/owner; dedicated tab — target, in progress)
+Events / Audit (admin/owner)
+Settings / Profile
 ```
+
+Tabs are role-gated: readers see Library, Shelves, Racks, Tags, Insights, and Profile; Import/Jobs/Duplicates require editor+; Admin/AI/Events are admin/owner. The header groups the username and the Profile link into one user-menu chip.
 
 ### 13.2 Dashboard
 
@@ -1681,13 +1771,19 @@ summary status
 Requirements:
 
 1. virtualized table;
-2. sortable columns;
-3. saved filters;
-4. bulk actions;
-5. quick add to shelf/rack/tag;
-6. export selected;
-7. duplicate warning badges;
-8. multi-file/multi-work indicators.
+2. sortable columns (clickable headers, backend sort params), including an **added-at** column;
+3. **configurable columns** — the user chooses which columns show and their order; state is held in `localStorage` for instant response and persisted per-user to a server prefs file (`~/.config/paracord/preferences.yaml`) via a preferences endpoint;
+4. saved filters;
+5. bulk actions;
+6. quick add to shelf/rack/tag;
+7. export selected;
+8. duplicate warning badges;
+9. multi-file/multi-work indicators;
+10. **references ↔ in-text-citation cross-linking** and a derived shorthand/label per reference (from a linked `CitationMention.marker_text`), with References and in-text-citations grouped in cards;
+11. **hash search** — full SHA-256 visible with copy-on-click; library search matches a file's `sha256` to its owning paper;
+12. **refresh on import** — the list reloads when a work is imported from the detail view;
+13. clickable **related papers** (with a "why related" reason) and clickable **keyword chips** that run a semantic search;
+14. role-gated controls with hover hints throughout (enabled = what it does; disabled = why).
 
 ### 13.4 Shelf view
 
@@ -1751,20 +1847,27 @@ Topics/tags
 History/audit
 ```
 
-The Overview/Related papers area surfaces embedding-based nearest neighbours (8.17) with their existing shelves/tags.
+The Overview/Related papers area surfaces embedding-based nearest neighbours (8.17) with their existing shelves/tags; related papers are clickable (switch to that paper) and show a "why related" reason. Keyword chips are clickable and run a semantic search.
+
+Per-paper actions are exposed as separate buttons: **Enrich** (metadata/refs), **Extract** (GROBID), **Topic** and **Keyword** (§8.15, in progress), and **Find on web** (§8.18) for works without an attached PDF. The file widget shows a note count and the full file hash with copy-on-click. Topics, when present, render below the title, separated from keywords. Action availability is role-gated with hover hints. Editing/contributing follows §7.1.2/§7.9 once access control lands.
 
 ### 13.8 PDF reader view
 
+A single, fully-capable PDF.js reader with a **selectable text layer** over each page (no separate native-viewer mode; the "New tab ↗" button is the distraction-free/native escape hatch).
+
 Requirements:
 
-1. PDF.js viewer;
-2. highlight/citation overlays;
-3. side panel with metadata, references, notes, citation contexts;
-4. click citation marker -> reference detail;
-5. click reference -> citation mentions;
-6. add note/highlight;
-7. show page anchors from citation contexts;
-8. open external reader button if agent/local helper supports it.
+1. PDF.js viewer with a text layer (selectable text, copy);
+2. **whole-document search** — in-app search scans every page (`getTextContent()`), highlights matches in the text layer, and steps next/prev across all pages; multi-word phrases match across span boundaries. Browser **Ctrl+F** covers visible/rendered pages (this split is intentional);
+3. **working annotations** — selection → highlight / note / copy with accurate coordinates; highlights persist and re-render as boxes; per-note **delete** (backend DELETE endpoint); clicking a note jumps to its page/anchor. Annotation add/highlight/delete is disabled for readers (role-gated, with hints);
+4. **citation ↔ reference navigation (both directions)** — clicking a citation overlay switches to the References tab and scrolls to + flashes the matching entry; clicking a reference jumps to its citation mentions;
+5. side panel with metadata, references, notes, citation contexts;
+6. show page anchors from citation contexts;
+7. **view ergonomics** — paged ↔ smooth-scroll toggle (remembered), drag-to-pan the zoomed page, and fit-to-window layout (no clipped bottom under browser zoom);
+8. reliable reopen (modal/object-URL state resets on close);
+9. open external reader / new-tab button.
+
+Scanned PDFs with no embedded text legitimately have no text layer; OCR is out of scope and external view is the fallback.
 
 ### 13.9 Graph view
 
@@ -1816,14 +1919,16 @@ ignore
 
 ### 13.11 Admin UI
 
-Owner-only.
+Admin-and-owner area, with owner-only controls where noted. Assignable roles in the user manager are reader/editor/admin (owner is locked; an admin cannot touch admins/owner; self-disable/self-delete are blocked — see §7.1.1).
 
 Features:
 
 ```text
-user management
-agent enrollment/revocation
-configured server roots
+user management (role assignment, disable with forced logout, password reset)
+agent enrollment/revocation and per-agent privileges (§32.8)
+server import roots (owner-only: add/remove DB-backed roots merged with server.yaml)
+find-on-web allowed hosts (admin/owner: defaults locked, DB entries removable)
+find-on-web download policy (owner-only: restricted | careful | unrestricted)
 LAN bind warning/status
 metadata connector settings
 GROBID/Ollama status
@@ -1833,6 +1938,10 @@ backup/restore
 credential recovery instructions
 security warnings
 ```
+
+**AI & Models** is its own dedicated tab (target — in progress) with help explaining what each model does, when it is used, why a control is disabled, and the BERTopic out-of-the-box status. *(Today the AI/Models panel is embedded in the Admin page; promoting it to a standalone tab is the defined target.)*
+
+**Server import roots** (owner-only): a GUI to add/remove import roots with aliases, stored in a DB-backed `import_roots` table and **merged read-only** with `server.yaml`'s `storage.server_allowed_roots` (the YAML set is never written; YAML wins on an alias clash). One merged set feeds both server-folder import validation (same absolute/existing-directory checks and path-containment guard) and the listing API.
 
 ---
 
@@ -2158,6 +2267,8 @@ Acceptance:
 
 The ordering is value-first and dependency-sound: it front-loads the complete single-machine loop — import → organize → extract → read → export (Milestones 1–4) — so the tool is genuinely useful early, then adds the remote-machine agent (5) and the heavier analytical layers, citation graph (6) and local AI/topics (7), before final hardening (8). `ROADMAP.md` is a condensed mirror of this list and `WORK_SPLIT.md` maps the work packages onto it.
 
+**Status (2026-07-01).** Milestones 0–7 are substantially built, and the system has been through several in-vivo testing rounds. Beyond the original milestones, the following are **implemented**: the `admin` role and immutable-owner model (§7.1.1); the PDF.js text-layer reader with whole-document search, working annotations, and bidirectional citation↔reference navigation (§13.8); library configurable/sortable columns, hash search, and reference↔citation cross-linking (§13.3); separate Enrich/Extract actions; the agent web-GUI overhaul (§32.7); owner-only server import roots; UI-wide hover hints; and **find-on-web** with live streaming search, resolved platform/redirect-following, the safe-OA allowlist + denylist + SSRF guard, and the three owner-set download-policy modes (§8.18). The following are **agreed and in progress** (the 2026-07-01 round, see "Milestone 9" below): the linear role ladder and group/collection access control (§7.1.2, §7.9), raw-citation batch import and import-into-rack/shelf (§8.1.1), the per-paper Topic/Keyword action buttons (§8.15), the metadata-conflict **remove/resolve** action (§8.12), and the dedicated **AI & Models** tab (§13.11). No dates or completion metrics are asserted here beyond done/in-progress.
+
 ### Milestone 0: foundation
 
 Deliverables:
@@ -2375,6 +2486,31 @@ Exit criteria:
 2. LAN mode is documented and safe by default;
 3. all critical tests pass;
 4. system is usable as a personal production tool.
+
+### Milestone 9: access control, batch import, and modeling actions (in progress)
+
+The agreed next round (2026-07-01). It deepens the security model and rounds out import/extraction ergonomics.
+
+Deliverables:
+
+```text
+role ladder: reader | contributor | editor | librarian | admin | owner (§7.1.2)
+user groups + personal groups + group→rack/shelf grants + default grant sets (§7.9)
+rack/shelf access levels (open | visible | private) + paper visibility inheritance (§7.9)
+raw-citation batch import (Crossref/OpenAlex; GROBID parser option) with a staging/confirm UI (§8.1.1)
+import directly into a rack/shelf (§8.1)
+per-paper Topic (BERTopic) and Keyword extraction actions (§8.15)
+metadata-conflict remove/resolve action (§8.12)
+jobs list newest-first (done); AI & Models as its own tab (§13.11)
+find-on-web full redirect chain → true final host; download attempts resolved/landing URL (done, §8.18)
+```
+
+Exit criteria:
+
+1. visibility filtering on list endpoints and modify guards enforce the role ladder + group grants + rack/shelf access levels;
+2. a user can paste raw citations and confirm parsed fields before committing, importing directly into a chosen rack/shelf;
+3. per-paper Topic/Keyword actions run and topics render below the title, separated from keywords;
+4. metadata-conflict review can remove a competing assertion as well as promote one.
 
 ---
 
@@ -2820,10 +2956,24 @@ Implement only your assigned section of PaRacORD. Preserve the no-guest, no-arbi
 
 ## 32. Local agent & teleport — redesign v2 (review draft)
 
-**Status:** DRAFT for maintainer review (2026-06-29). Once accepted this supersedes and expands
-§11; §6.2 (deployment) and §7.5 (agent security) still apply. **Not yet implemented.** The current
-`enroll`/`sync`/`teleport`/`serve` CLI, the `AgentFile` table, `POST /agents/manifest`, and
-`POST /imports/teleport` are the v1 foundation that this design evolves.
+**Status:** Accepted; supersedes and expands §11. §6.2 (deployment) and §7.5 (agent security) still
+apply. Much of this is now built — notably the local web GUI and its management features (§32.7).
+Some pieces (e.g. the full teleport-request approve/reject-forever/unblock workflow and per-entry
+`teleport_policy = ask`) may still be partial. The single persistent agent, the
+`index_only`/`index_and_extract`/`teleport` action model, agent-initiated teleport when
+`can_teleport` is granted, the durable `state.sqlite3` index, and per-agent privileges are the
+agreed model.
+
+Recent agent-GUI work (2026-06-30 rounds) added: server→agent **title + authors** metadata sync
+(stored in `state.sqlite3`, enabling agent-side search/sort by title/authors); a per-file
+**Request teleport** button (agent-initiated push when `can_teleport`); a local **Read** button
+(`GET /api/files/{local_file_id}/view`, resolving the real path locally); **full hash + copy** in
+the table; **search/sort/filter** over filename/hash/title/authors with action/state filters
+(sort via radio toggles + asc/desc, monitored/once as a remembered radio); a **green/yellow/red
+server status light** (green = reachable+approved, yellow = reachable but error, red = unreachable);
+a **fixed-width, wrapping title column**; and clearer wording for a removed source file ("source
+file gone from the indexed folder on the workstation"). Server-side, the jobs list shows the
+processed paper's title + hash and is ordered newest-first.
 
 ### 32.1 Goals and principles
 
