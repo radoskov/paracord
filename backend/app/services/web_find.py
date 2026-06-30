@@ -44,9 +44,12 @@ logic as the denylist (see :func:`_host_matches`): an exact host, a parent-domai
 import difflib
 import hashlib
 import inspect
+import ipaddress
 import logging
 import re
+import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -124,6 +127,82 @@ DEFAULT_ALLOWED_HOSTS = frozenset(
     }
 )
 
+# Built-in curated set of well-known journal / conference publisher hosts (find-on-web v2). These
+# are NOT auto-allowed: they only widen the download gate in the ``careful`` and ``unrestricted``
+# download-policy modes (see ``app.services.web_find_settings``). In ``restricted`` mode only the
+# merged allow-list (DEFAULT_ALLOWED_HOSTS ∪ DB rows) is permitted; this set is ignored. Matched
+# suffix-aware (see ``_host_matches``), so a bare host also covers its subdomains. The shadow-library
+# denylist and the private/internal-IP guard ALWAYS win over this list.
+KNOWN_PUBLISHER_HOSTS = frozenset(
+    {
+        # IEEE
+        "ieee.org",
+        "ieeexplore.ieee.org",
+        # ACM
+        "dl.acm.org",
+        "acm.org",
+        # Springer
+        "springer.com",
+        "link.springer.com",
+        # Elsevier
+        "sciencedirect.com",
+        "elsevier.com",
+        # Wiley
+        "wiley.com",
+        "onlinelibrary.wiley.com",
+        # Nature
+        "nature.com",
+        # Taylor & Francis
+        "tandfonline.com",
+        # SAGE
+        "sagepub.com",
+        "journals.sagepub.com",
+        # MDPI
+        "mdpi.com",
+        # JSTOR
+        "jstor.org",
+        # Cambridge
+        "cambridge.org",
+        # Oxford
+        "academic.oup.com",
+        "oup.com",
+        # APS
+        "aps.org",
+        "journals.aps.org",
+        # ACS
+        "pubs.acs.org",
+        "acs.org",
+        # RSC
+        "pubs.rsc.org",
+        "rsc.org",
+        # Science / AAAS
+        "science.org",
+        # PNAS
+        "pnas.org",
+        # PLOS
+        "plos.org",
+        "journals.plos.org",
+        # Frontiers
+        "frontiersin.org",
+        # ACL Anthology
+        "aclanthology.org",
+        # OpenReview
+        "openreview.net",
+        # PMLR
+        "proceedings.mlr.press",
+        # NeurIPS
+        "proceedings.neurips.cc",
+        "papers.nips.cc",
+        # CVF
+        "openaccess.thecvf.com",
+        # USENIX
+        "usenix.org",
+        # AAAI
+        "aaai.org",
+        "ojs.aaai.org",
+    }
+)
+
 
 @dataclass
 class WebCandidate:
@@ -197,6 +276,64 @@ def _is_allowed_host(url: str, allowed_hosts: set[str]) -> bool:
     if not host:
         return False
     return any(_host_matches(host, pattern) for pattern in allowed_hosts)
+
+
+# --- SSRF / internal-IP guard (find-on-web v2; ALWAYS enforced, every hop) --
+#
+# A download URL must use http(s) and must NOT resolve to a private/loopback/link-local/reserved
+# IP. This blocks SSRF to the host network and cloud metadata endpoints even in ``unrestricted``
+# mode. The DNS resolver is injectable for tests (NEVER a real lookup in CI).
+
+
+def _ip_is_internal(ip: str) -> bool:
+    """Return True if ``ip`` is a private/loopback/link-local/reserved/multicast address.
+
+    Covers RFC1918 (10/8, 172.16/12, 192.168/16), 127/8 loopback, 169.254/16 link-local,
+    the IPv6 equivalents (::1, fc00::/7, fe80::/10), and other non-public ranges.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True  # unparsable → treat as unsafe
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    )
+
+
+def _default_resolver(host: str) -> list[str]:
+    """Resolve ``host`` to all of its IP addresses (A + AAAA). Injectable for tests."""
+    infos = socket.getaddrinfo(host, None)
+    return sorted({info[4][0] for info in infos})
+
+
+def _scheme_is_http(url: str) -> bool:
+    return urlsplit(url).scheme.lower() in ("http", "https")
+
+
+def _host_resolves_internal(
+    url: str, *, resolver: Callable[[str], list[str]] | None = None
+) -> bool:
+    """Return True if ``url``'s host resolves to (or literally is) an internal/private IP.
+
+    Every resolved address is checked; if ANY is internal the host is unsafe. A resolution
+    failure (NXDOMAIN, etc.) is treated as unsafe (fail closed).
+    """
+    host = _host(url)
+    if not host:
+        return True
+    resolve = resolver or _default_resolver
+    try:
+        ips = resolve(host)
+    except Exception:  # noqa: BLE001 - any resolution failure fails closed
+        return True
+    if not ips:
+        return True
+    return any(_ip_is_internal(ip) for ip in ips)
 
 
 # --- helpers ----------------------------------------------------------------
@@ -522,12 +659,19 @@ def find_candidates(
     settings,
     sources: list[str] | None = None,
     fetchers: dict | None = None,
+    on_progress: Callable[[dict], None] | None = None,
 ) -> dict:
     """Search enabled sources for candidate matches; return ranked candidates + degraded list.
 
     ``fetchers`` lets tests inject per-source callables. A source whose fetcher raises, times
     out, or is skipped for the wall-clock budget is reported in ``degraded_sources`` — the
     search never fails as a whole.
+
+    ``on_progress`` (find-on-web v2) is an optional callback invoked with one progress event dict
+    as each source starts and finishes, so a streaming caller can surface live progress. It is
+    invoked with ``{"type":"source","source":<name>,"status":"querying"}`` when a source begins and
+    ``{"type":"source","source":<name>,"status":"done","count":N}`` (or ``"status":"failed"``) as it
+    finishes. The non-streaming return value is unchanged.
     """
     title = (work.canonical_title or "").strip()
     authors = _work_authors(db, work)
@@ -559,6 +703,13 @@ def find_candidates(
     if not title:
         return {"candidates": [], "degraded_sources": [], "queried_sources": []}
 
+    def _emit(event: dict) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(event)
+            except Exception as exc:  # noqa: BLE001 - progress must never abort the search
+                logger.warning("find-on-web progress callback failed: %s", exc)
+
     start = time.monotonic()
     for name in selected:
         runner = registry.get(name)
@@ -566,20 +717,25 @@ def find_candidates(
             continue
         if time.monotonic() - start > total_budget:
             degraded.append(name)  # wall-clock budget exhausted; skip remaining
+            _emit({"type": "source", "source": name, "status": "failed"})
             continue
         queried.append(name)
+        _emit({"type": "source", "source": name, "status": "querying"})
         source_start = time.monotonic()
         try:
             result = runner()
         except Exception as exc:  # noqa: BLE001 - one source must never abort the search
             logger.warning("find-on-web source %s failed: %s", name, exc)
             degraded.append(name)
+            _emit({"type": "source", "source": name, "status": "failed"})
             continue
         if time.monotonic() - source_start > per_source_timeout:
             # Returned, but over its slice; keep results, flag as degraded for transparency.
             logger.info("find-on-web source %s exceeded per-source timeout", name)
             degraded.append(name)
-        collected.extend(result or [])
+        result = result or []
+        collected.extend(result)
+        _emit({"type": "source", "source": name, "status": "done", "count": len(result)})
 
     # Unpaywall OA backfill for DOI-bearing candidates that still lack a PDF link.
     if unpaywall_email and ("unpaywall" not in degraded):
@@ -615,40 +771,117 @@ def find_candidates(
 
 
 class DownloadRefused(RuntimeError):
-    """A download URL was refused by the legitimacy/SSRF guard before any bytes were fetched."""
+    """A download URL was refused by a HARD BLOCK (denylist / internal-IP / bad scheme).
+
+    Hard blocks are ALWAYS enforced regardless of the download-policy mode and win over everything.
+    Raised before (or mid-stream on a redirect, before) any PDF bytes are accepted.
+    """
+
+
+# --- host classification (find-on-web v2) -----------------------------------
+#
+# Every hop (the candidate URL, each redirect, and the final host) is classified. Outcomes:
+#   * "hard_block"        — ALWAYS refused regardless of mode (bad scheme / internal IP / denylist).
+#   * "error"             — mode gate refusal (host not allowed in this mode).
+#   * "needs_confirmation"— unrestricted mode, unknown public host, not yet confirmed.
+#   * "allow"             — permitted.
+# The denylist + internal-IP guard win over the allow/known lists in every mode.
+
+
+def _classify_download_host(
+    url: str,
+    *,
+    policy: str,
+    merged_allowed: set[str],
+    resolver: Callable[[str], list[str]] | None = None,
+    check_ip: bool = True,
+) -> tuple[str, str]:
+    """Classify one download hop. Returns ``(outcome, reason)``.
+
+    ``outcome`` ∈ {``hard_block``, ``error``, ``needs_confirmation``, ``allow``}. The HARD BLOCKS
+    (bad scheme, internal/private IP, shadow-library denylist) are checked first and always win.
+
+    ``check_ip`` resolves the host and blocks private/internal addresses (SSRF guard). It is the
+    network-path streamer that does the real per-hop resolution; the pre-fetch policy gate in
+    :func:`download_and_attach` leaves it off so the pure-policy decision needs no DNS (an injected
+    test streamer never connects).
+    """
+    host = _host(url)
+    # --- HARD BLOCKS (always, regardless of mode) ---
+    if not _scheme_is_http(url):
+        return "hard_block", "refused: only http(s) downloads are allowed"
+    if _is_denied_host(url):
+        return "hard_block", f"refused: shadow-library host {host!r}"
+    if check_ip and _host_resolves_internal(url, resolver=resolver):
+        return "hard_block", f"refused: host {host!r} resolves to a private/internal address"
+    # --- mode gate on the (public, non-denied) host ---
+    in_allowed = _is_allowed_host(url, merged_allowed)
+    in_known = any(_host_matches(host, p) for p in KNOWN_PUBLISHER_HOSTS)
+    if policy == "restricted":
+        if in_allowed:
+            return "allow", ""
+        return "error", "Host not in the allowed-downloads list (an owner/admin can add it)"
+    if policy == "careful":
+        if in_allowed or in_known:
+            return "allow", ""
+        return (
+            "error",
+            "Host is not on the allow-list or the known-publisher list "
+            "(an owner/admin can add it, or switch to unrestricted mode)",
+        )
+    # unrestricted
+    if in_allowed or in_known:
+        return "allow", ""
+    return (
+        "needs_confirmation",
+        "This host is not on the allow-list or known-publisher list. "
+        "Confirm you want to download from it.",
+    )
 
 
 def _stream_pdf(
-    url: str, *, timeout: float, max_bytes: int, allowed_hosts: set[str] | None = None
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int,
+    policy: str | None = None,
+    merged_allowed: set[str] | None = None,
+    resolver: Callable[[str], list[str]] | None = None,
 ) -> bytes | None:
-    """Stream a candidate URL, enforcing the deny/allow lists on every hop + size/PDF validation.
+    """Stream a candidate URL, re-classifying EVERY redirect hop + size/PDF validation.
 
     Returns the PDF bytes, or None when the response is not a real PDF (HTML/login wall, wrong
-    content-type, missing %PDF magic). Raises DownloadRefused for a denied host on any hop, a final
-    host not on ``allowed_hosts`` (when provided), and ValueError when the size cap is exceeded.
-
-    The denylist is re-checked on EVERY hop (denylist always wins). The allowlist is checked on the
-    final (post-redirect) host — and, defensively, on every hop — so a redirect can neither escape
-    to a denied host nor land on a host outside the allowlist.
+    content-type, missing %PDF magic). Raises ``DownloadRefused`` for a HARD BLOCK on any hop
+    (bad scheme / internal IP / denylist) or — when ``policy``/``merged_allowed`` are supplied —
+    for a hop whose host fails the mode gate (a redirect must not escape the policy). Raises
+    ``ValueError`` when the size cap is exceeded.
     """
-    if _is_denied_host(url):
-        raise DownloadRefused(f"Refusing download from shadow-library host {_host(url)!r}")
+    # Hard-block + (when configured) mode-gate the initial URL before any request.
+    if policy is not None and merged_allowed is not None:
+        outcome, reason = _classify_download_host(
+            url, policy=policy, merged_allowed=merged_allowed, resolver=resolver
+        )
+        if outcome in ("hard_block", "error", "needs_confirmation"):
+            raise DownloadRefused(reason)
+    elif _is_denied_host(url) or _host_resolves_internal(url, resolver=resolver):
+        raise DownloadRefused(f"Refusing download from host {_host(url)!r}")
     headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
     with (
         httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client,
         client.stream("GET", url) as response,
     ):
-        # Re-check the denylist on every redirect hop AND the final host.
+        # Re-classify every redirect hop AND the final host (denylist + IP guard always win).
         for hop in [*response.history, response]:
             hop_url = str(hop.url)
-            if _is_denied_host(hop_url):
-                raise DownloadRefused(
-                    f"Refusing redirect to shadow-library host {_host(hop_url)!r}"
+            if policy is not None and merged_allowed is not None:
+                outcome, reason = _classify_download_host(
+                    hop_url, policy=policy, merged_allowed=merged_allowed, resolver=resolver
                 )
-            if allowed_hosts is not None and not _is_allowed_host(hop_url, allowed_hosts):
-                raise DownloadRefused(
-                    f"Host {_host(hop_url)!r} is not in the allowed-downloads list"
-                )
+                if outcome != "allow":
+                    raise DownloadRefused(reason)
+            else:
+                if _is_denied_host(hop_url) or _host_resolves_internal(hop_url, resolver=resolver):
+                    raise DownloadRefused(f"Refusing redirect to host {_host(hop_url)!r}")
         if response.status_code >= 400:
             return None
         content_type = (response.headers.get("content-type") or "").lower()
@@ -674,59 +907,89 @@ def download_and_attach(
     source: str,
     actor,
     settings,
-    allowed_urls: set[str] | None = None,
+    confirmed: bool = False,
     file_read=None,
     streamer=None,
+    resolver: Callable[[str], list[str]] | None = None,
 ) -> dict:
-    """Download a surfaced candidate PDF and attach it to ``work``.
+    """Download a candidate PDF and attach it to ``work`` under the global download-policy.
 
     Returns a per-item status dict (never raises): ``attached`` / ``deduped`` /
-    ``manual_upload_needed`` / ``error``. ``allowed_urls`` is the anti-SSRF allowlist of URLs
-    the search actually surfaced; a URL not in it is refused.
+    ``manual_upload_needed`` / ``error`` / ``blocked`` / ``needs_confirmation``.
+
+    Host classification runs on EVERY hop (candidate URL + each redirect + final host):
+      * HARD BLOCK (always, any mode): non-http(s) scheme, a host resolving to a private/internal
+        IP (SSRF guard), or a shadow-library denylist host → ``{"status":"blocked", ...}``, stores
+        nothing.
+      * Mode gate on the (public, non-denied) host:
+          - ``restricted``  : allow iff host ∈ merged allow-list, else ``error``.
+          - ``careful``     : allow iff host ∈ allow-list ∪ KNOWN_PUBLISHER_HOSTS, else ``error``.
+          - ``unrestricted``: allow-list/known → allow; otherwise ``needs_confirmation`` unless the
+            caller set ``confirmed=true``, in which case allow.
+
+    Downloading from the allow-list (or known-publisher list) NEVER requires confirmation. The
+    denylist + internal-IP guard always win over everything.
     """
     timeout = float(getattr(settings, "web_find_download_timeout", 60.0))
     max_bytes = int(getattr(settings, "web_find_max_download_bytes", 100 * 1024 * 1024))
     stream = streamer or _stream_pdf
-    # Merge the built-in default allowlist with the owner/admin-managed DB rows. Imported lazily to
-    # avoid a circular import (web_find_allowed_hosts imports DEFAULT_ALLOWED_HOSTS from this module).
+    # Imported lazily to avoid a circular import (web_find_allowed_hosts and web_find_settings both
+    # import names from this module).
     from app.services.web_find_allowed_hosts import merged_allowed_hosts
+    from app.services.web_find_settings import get_download_policy
 
-    allowed_hosts = merged_allowed_hosts(db)
-    # Only hand the allowlist to streamers that accept it (the real _stream_pdf re-checks every
-    # redirect hop). An injected/patched test streamer keeps its (url, timeout, max_bytes) shape.
+    merged_allowed = merged_allowed_hosts(db)
+    policy = get_download_policy(db)
+    # Only hand the policy/host context to the real streamer (it re-classifies every redirect hop).
+    # An injected/patched test streamer keeps its original (url, timeout, max_bytes) shape.
     try:
-        stream_accepts_hosts = "allowed_hosts" in inspect.signature(stream).parameters
+        stream_params = inspect.signature(stream).parameters
+        stream_accepts_policy = "policy" in stream_params and "merged_allowed" in stream_params
     except (TypeError, ValueError):
-        stream_accepts_hosts = False
+        stream_accepts_policy = False
 
     try:
         if not candidate_url:
             return {"status": "error", "reason": "missing download url"}
-        if allowed_urls is not None and candidate_url not in allowed_urls:
-            return {"status": "error", "reason": "url was not surfaced by this search"}
-        # Denylist always wins, checked first.
-        if _is_denied_host(candidate_url):
-            return {"status": "error", "reason": "refused: shadow-library source"}
-        # Positive allowlist on the candidate host; the streamer re-checks the final/redirect host.
-        if not _is_allowed_host(candidate_url, allowed_hosts):
+        # Classify the candidate host first (scheme + denylist hard blocks always win; then the
+        # mode gate). The private/internal-IP SSRF guard is deferred to the network-path streamer,
+        # which resolves + re-classifies every hop (so an injected test streamer needs no DNS).
+        outcome, reason = _classify_download_host(
+            candidate_url,
+            policy=policy,
+            merged_allowed=merged_allowed,
+            resolver=resolver,
+            check_ip=False,
+        )
+        if outcome == "hard_block":
+            return {"status": "blocked", "reason": reason}
+        if outcome == "error":
+            return {"status": "error", "reason": reason}
+        # In unrestricted mode an unknown public host needs an explicit confirmation; a confirmed
+        # item falls through to allow.
+        if outcome == "needs_confirmation" and not confirmed:
             return {
-                "status": "error",
-                "reason": "Host not in the allowed-downloads list (an owner/admin can add it)",
+                "status": "needs_confirmation",
+                "url": candidate_url,
+                "reason": reason,
             }
         try:
-            # The real streamer enforces the deny/allow lists on every redirect hop too; an
-            # injected test streamer keeps the original (url, timeout, max_bytes) signature.
-            if stream_accepts_hosts:
+            # The real streamer re-classifies every redirect hop under the same policy; an injected
+            # test streamer keeps the original (url, timeout, max_bytes) signature.
+            if stream_accepts_policy:
                 pdf_bytes = stream(
                     candidate_url,
                     timeout=timeout,
                     max_bytes=max_bytes,
-                    allowed_hosts=allowed_hosts,
+                    policy=policy,
+                    merged_allowed=merged_allowed,
+                    resolver=resolver,
                 )
             else:
                 pdf_bytes = stream(candidate_url, timeout=timeout, max_bytes=max_bytes)
         except DownloadRefused as exc:
-            return {"status": "error", "reason": str(exc)}
+            # A redirect that escaped the policy / hit a hard block mid-stream.
+            return {"status": "blocked", "reason": str(exc)}
         except ValueError:
             return {"status": "error", "reason": "file exceeds the download size cap"}
         except Exception as exc:  # noqa: BLE001 - network/parse failure → manual fallback

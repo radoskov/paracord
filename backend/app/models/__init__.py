@@ -14,6 +14,7 @@ from app.models.session import UserSession
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.web_find_allowed_host import WebFindAllowedHost
+from app.models.web_find_settings import WebFindSettings
 from app.models.work import Work, WorkVersion
 
 __all__ = [
@@ -47,6 +48,7 @@ __all__ = [
     "User",
     "UserSession",
     "WebFindAllowedHost",
+    "WebFindSettings",
     "Work",
     "WorkVersion",
 ]

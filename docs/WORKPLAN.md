@@ -543,3 +543,19 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   always wins. Admin-or-owner endpoints (`require_admin`) list (default-locked vs DB-removable) / add
   (hostname-validated, deduped) / remove (defaults non-removable), audit-logged. AdminPage "Find-on-web
   allowed hosts" section gated by `canManageUsers`.
+- [x] **find-on-web v2 backend (download-policy modes + known-publisher list + SSRF/internal-IP guard +
+  per-item confirmation + streaming search progress).** Owner-only global `web_find_download_policy` ∈
+  {`restricted`,`careful`,`unrestricted`} (default `restricted`), stored in a single-row
+  `web_find_settings` table (migration `0027_web_find_settings`); GET/SET via `require_owner`
+  endpoints, audit-logged. Curated built-in `KNOWN_PUBLISHER_HOSTS` (IEEE/ACM/Springer/Elsevier/Wiley/
+  Nature/…/AAAI), suffix-matched like the allow/denylist. `download_and_attach`/`_stream_pdf`
+  re-classify EVERY hop: ALWAYS-ON hard blocks (non-http(s) scheme, private/loopback/link-local/
+  reserved-IP SSRF guard resolving all A/AAAA, shadow-library denylist) return `blocked` and store
+  nothing in every mode; then a mode gate (`restricted`=allow-list only, `careful`=allow-list∪known,
+  `unrestricted`=allow-list/known→allow else `needs_confirmation` unless the item set `confirmed=true`).
+  Allow-list/known hosts never need confirmation. The old "re-run search to rebuild a surfaced-URL
+  allowlist" step is dropped (host policy + IP guard + denylist now provide SSRF protection). Download
+  item schema gains `confirmed: bool`; per-item statuses now include `needs_confirmation` (+ `url`) and
+  `blocked`. New EDITOR-gated NDJSON streaming endpoint `POST /works/{id}/find-on-web/stream` emits per-
+  source `querying`/`done`(`count`)/`failed` lines then a final `result` line via a `find_candidates`
+  `on_progress` callback; the non-streaming endpoint is unchanged.

@@ -14,6 +14,7 @@ from app.models.audit import AuditEvent
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.web_find_allowed_host import WebFindAllowedHost
+from app.models.web_find_settings import WebFindSettings
 from app.models.work import Work
 from app.services import web_find
 from app.services.web_find import (
@@ -39,6 +40,7 @@ from app.services.web_find_allowed_hosts import (
     merged_allowed_hosts,
     remove_allowed_host,
 )
+from app.services.web_find_settings import set_download_policy
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -79,8 +81,14 @@ def db_session(tmp_path):
             FileWorkLink.__table__,
             Location.__table__,
             WebFindAllowedHost.__table__,
+            WebFindSettings.__table__,
         ],
     )
+    # Reset the per-engine table-presence memo so the policy probe sees this fresh schema.
+    web_find_settings_mod = __import__(
+        "app.services.web_find_settings", fromlist=["_TABLE_PRESENT"]
+    )
+    web_find_settings_mod._TABLE_PRESENT.clear()
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     with session_local() as session:
         yield session
@@ -347,7 +355,6 @@ def test_download_and_attach_success(db_session, tmp_path, monkeypatch):
         source="openalex",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls={"https://arxiv.org/pdf/1512.03385.pdf"},
         streamer=fake_stream,
     )
     assert out["status"] == "attached"
@@ -368,7 +375,6 @@ def test_download_dedup_returns_deduped(db_session, tmp_path):
         source="arxiv",
         actor=_Actor(),
         settings=settings,
-        allowed_urls=None,
         streamer=fake_stream,
     )
     assert first["status"] == "attached"
@@ -379,7 +385,6 @@ def test_download_dedup_returns_deduped(db_session, tmp_path):
         source="arxiv",
         actor=_Actor(),
         settings=settings,
-        allowed_urls=None,
         streamer=fake_stream,
     )
     assert second["status"] == "deduped"
@@ -398,7 +403,6 @@ def test_download_non_pdf_manual_upload_no_file(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=html_stream,
     )
     assert out["status"] == "manual_upload_needed"
@@ -418,14 +422,14 @@ def test_download_oversized_errors_no_file(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=big_stream,
     )
     assert out["status"] == "error"
     assert db_session.scalar(select(File)) is None
 
 
-def test_download_url_not_surfaced_refused(db_session, tmp_path):
+def test_download_unknown_host_restricted_errors(db_session, tmp_path):
+    """Default (restricted) mode refuses a host that is not on the merged allow-list."""
     work = _seed_work(db_session)
     out = download_and_attach(
         db_session,
@@ -434,14 +438,14 @@ def test_download_url_not_surfaced_refused(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls={"https://arxiv.org/pdf/1.pdf"},
         streamer=lambda *a, **k: _PDF_BYTES,
     )
     assert out["status"] == "error"
     assert db_session.scalar(select(File)) is None
 
 
-def test_download_denied_host_refused(db_session, tmp_path):
+def test_download_denied_host_blocked(db_session, tmp_path):
+    """A shadow-library host is a HARD BLOCK in every mode (stores nothing)."""
     work = _seed_work(db_session)
     out = download_and_attach(
         db_session,
@@ -450,10 +454,9 @@ def test_download_denied_host_refused(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=lambda *a, **k: _PDF_BYTES,
     )
-    assert out["status"] == "error"
+    assert out["status"] == "blocked"
     assert "shadow" in out["reason"].lower()
 
 
@@ -547,7 +550,6 @@ def test_download_non_allowlisted_host_refused_no_file(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,  # surfaced check skipped; allowlist must still refuse
         streamer=lambda *a, **k: _PDF_BYTES,
     )
     assert out["status"] == "error"
@@ -564,7 +566,6 @@ def test_download_allowlisted_default_host_attaches(db_session, tmp_path):
         source="arxiv",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=lambda *a, **k: _PDF_BYTES,
     )
     assert out["status"] == "attached"
@@ -582,7 +583,6 @@ def test_download_db_added_host_attaches(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=lambda *a, **k: _PDF_BYTES,
     )
     assert out["status"] == "attached"
@@ -603,9 +603,173 @@ def test_denylist_wins_even_if_added_to_allowlist(db_session, tmp_path):
         source="crossref",
         actor=_Actor(),
         settings=_attach_settings(tmp_path),
-        allowed_urls=None,
         streamer=lambda *a, **k: _PDF_BYTES,
     )
-    assert out["status"] == "error"
+    assert out["status"] == "blocked"
     assert "shadow" in out["reason"].lower()
     assert db_session.scalar(select(File)) is None
+
+
+# --- find-on-web v2: download-policy mode gate + SSRF/IP guard + streaming ----
+
+# A known-publisher host (in KNOWN_PUBLISHER_HOSTS but NOT in the merged allow-list defaults).
+_KNOWN_PUBLISHER_URL = "https://ieeexplore.ieee.org/document/123.pdf"
+# A host on neither the allow-list nor the known-publisher list.
+_UNKNOWN_URL = "https://random.example/paper.pdf"
+
+
+def _download(db, tmp_path, url, *, confirmed=False):
+    return download_and_attach(
+        db,
+        work=_seed_work(db),
+        candidate_url=url,
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        confirmed=confirmed,
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+
+
+def test_mode_restricted_blocks_non_allowlist_host(db_session, tmp_path):
+    set_download_policy(db_session, policy="restricted")
+    db_session.commit()
+    # A known-publisher host is NOT enough in restricted mode.
+    out = _download(db_session, tmp_path, _KNOWN_PUBLISHER_URL)
+    assert out["status"] == "error"
+    assert "allowed-downloads" in out["reason"].lower()
+
+
+def test_mode_careful_allows_known_publisher_host(db_session, tmp_path):
+    set_download_policy(db_session, policy="careful")
+    db_session.commit()
+    out = _download(db_session, tmp_path, _KNOWN_PUBLISHER_URL)
+    assert out["status"] == "attached"
+    # But a totally unknown host is still refused in careful mode.
+    out2 = _download(db_session, tmp_path, _UNKNOWN_URL)
+    assert out2["status"] == "error"
+
+
+def test_mode_unrestricted_allowlisted_host_no_confirmation(db_session, tmp_path):
+    set_download_policy(db_session, policy="unrestricted")
+    db_session.commit()
+    # Allow-list/known hosts must NEVER require confirmation, even in unrestricted mode.
+    out = _download(db_session, tmp_path, "https://arxiv.org/pdf/x.pdf")
+    assert out["status"] == "attached"
+    out2 = _download(db_session, tmp_path, _KNOWN_PUBLISHER_URL)
+    assert out2["status"] == "attached"
+
+
+def test_mode_unrestricted_unknown_host_needs_confirmation_then_attaches(db_session, tmp_path):
+    set_download_policy(db_session, policy="unrestricted")
+    db_session.commit()
+    # Unknown public host, not yet confirmed → needs_confirmation, nothing stored.
+    out = _download(db_session, tmp_path, _UNKNOWN_URL, confirmed=False)
+    assert out["status"] == "needs_confirmation"
+    assert out["url"] == _UNKNOWN_URL
+    assert db_session.scalar(select(File)) is None
+    # Re-sent with confirmed=true → attaches.
+    out2 = _download(db_session, tmp_path, _UNKNOWN_URL, confirmed=True)
+    assert out2["status"] == "attached"
+
+
+def test_denied_host_blocked_in_every_mode_incl_unrestricted_confirmed(db_session, tmp_path):
+    for policy in ("restricted", "careful", "unrestricted"):
+        set_download_policy(db_session, policy=policy)
+        db_session.commit()
+        out = _download(db_session, tmp_path, "https://sci-hub.se/x.pdf", confirmed=True)
+        assert out["status"] == "blocked", policy
+        assert "shadow" in out["reason"].lower()
+        assert db_session.scalar(select(File)) is None
+
+
+@pytest.mark.parametrize(
+    "ip",
+    ["10.0.0.5", "127.0.0.1", "169.254.169.254", "192.168.1.1", "::1", "fc00::1"],
+)
+def test_internal_ip_host_blocked_in_every_mode(db_session, tmp_path, ip):
+    """A host resolving to a private/loopback/link-local IP is a HARD BLOCK in every mode."""
+
+    def fake_resolver(host):
+        return [ip]
+
+    for policy in ("restricted", "careful", "unrestricted"):
+        set_download_policy(db_session, policy=policy)
+        db_session.commit()
+        out = download_and_attach(
+            db_session,
+            work=_seed_work(db_session),
+            candidate_url="https://arxiv.org/pdf/x.pdf",  # an allow-listed host name…
+            source="crossref",
+            actor=_Actor(),
+            settings=_attach_settings(tmp_path),
+            confirmed=True,
+            # …that resolves to an internal IP → SSRF guard blocks it before any fetch.
+            resolver=fake_resolver,
+            streamer=web_find._stream_pdf,  # real streamer does the per-hop IP guard
+        )
+        assert out["status"] == "blocked", policy
+        assert "internal" in out["reason"].lower() or "private" in out["reason"].lower()
+        assert db_session.scalar(select(File)) is None
+
+
+def test_ip_guard_helpers():
+    assert web_find._ip_is_internal("10.0.0.1") is True
+    assert web_find._ip_is_internal("127.0.0.1") is True
+    assert web_find._ip_is_internal("169.254.0.1") is True
+    assert web_find._ip_is_internal("::1") is True
+    assert web_find._ip_is_internal("8.8.8.8") is False
+    assert web_find._ip_is_internal("not-an-ip") is True  # unparsable → unsafe
+
+
+def test_known_publisher_host_matching():
+    allowed_empty: set[str] = set()
+    # careful mode: known publisher allowed.
+    out, _ = web_find._classify_download_host(
+        _KNOWN_PUBLISHER_URL, policy="careful", merged_allowed=allowed_empty, check_ip=False
+    )
+    assert out == "allow"
+    out2, _ = web_find._classify_download_host(
+        _UNKNOWN_URL, policy="careful", merged_allowed=allowed_empty, check_ip=False
+    )
+    assert out2 == "error"
+
+
+def test_non_http_scheme_blocked():
+    out, reason = web_find._classify_download_host(
+        "ftp://arxiv.org/x.pdf", policy="unrestricted", merged_allowed=set(), check_ip=False
+    )
+    assert out == "hard_block"
+    assert "http" in reason.lower()
+
+
+def test_find_candidates_streaming_progress_events(db_session):
+    """find_candidates fires per-source querying/done(failed) progress callbacks in order."""
+    work = _seed_work(db_session)
+
+    def boom():
+        raise RuntimeError("down")
+
+    fetchers = {
+        "crossref": lambda: [
+            WebCandidate(source="crossref", title="Deep Residual Learning", year=2016)
+        ],
+        "openalex": boom,
+        "arxiv": lambda: [],
+        "semanticscholar": lambda: [],
+    }
+    events: list[dict] = []
+    result = find_candidates(
+        db_session,
+        work,
+        settings=Settings(),
+        sources=["crossref", "openalex"],
+        fetchers=fetchers,
+        on_progress=events.append,
+    )
+    # crossref: querying then done(count=1); openalex: querying then failed.
+    assert events[0] == {"type": "source", "source": "crossref", "status": "querying"}
+    assert events[1] == {"type": "source", "source": "crossref", "status": "done", "count": 1}
+    assert events[2] == {"type": "source", "source": "openalex", "status": "querying"}
+    assert events[3] == {"type": "source", "source": "openalex", "status": "failed"}
+    assert "openalex" in result["degraded_sources"]

@@ -1,9 +1,12 @@
 """Work endpoints."""
 
+import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -1145,6 +1148,9 @@ class WebFindDownloadItem(BaseModel):
     candidate_id: str
     url: str
     source: str
+    # find-on-web v2: in ``unrestricted`` mode, a host not on the allow-list/known-publisher list
+    # returns ``needs_confirmation``; the client re-sends the item with ``confirmed=true`` to proceed.
+    confirmed: bool = False
 
 
 class WebFindDownloadRequest(BaseModel):
@@ -1153,8 +1159,11 @@ class WebFindDownloadRequest(BaseModel):
 
 class WebFindDownloadResult(BaseModel):
     candidate_id: str
+    # One of: attached | deduped | manual_upload_needed | error | blocked | needs_confirmation.
     status: str
     reason: str | None = None
+    # Present (with the candidate/final URL) only when status == "needs_confirmation".
+    url: str | None = None
     file: WorkFileRead | None = None
 
 
@@ -1226,10 +1235,14 @@ def find_on_web_download_endpoint(
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> WebFindDownloadResponse:
-    """Download 0…N selected candidate PDFs and attach them to a paper (#5).
+    """Download 0…N selected candidate PDFs and attach them to a paper (find-on-web v2).
 
-    Per-item status: ``attached`` / ``deduped`` / ``manual_upload_needed`` / ``error``. A failed
-    item never aborts the others. An empty ``items`` list is a no-op.
+    Per-item status: ``attached`` / ``deduped`` / ``manual_upload_needed`` / ``error`` /
+    ``blocked`` / ``needs_confirmation``. The host classification + download-policy mode gate run
+    on every redirect hop inside ``download_and_attach``: a shadow-library / private-IP / bad-scheme
+    host is ``blocked`` (stores nothing) in every mode; in ``unrestricted`` mode an unknown public
+    host returns ``needs_confirmation`` (with the URL) unless the item set ``confirmed=true``. A
+    failed item never aborts the others; an empty ``items`` list is a no-op.
     """
     work = db.get(Work, work_id)
     if work is None:
@@ -1238,13 +1251,6 @@ def find_on_web_download_endpoint(
     if not getattr(settings, "web_find_enabled", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
     results: list[WebFindDownloadResult] = []
-    # Anti-SSRF: re-run the search and only allow downloading a URL it actually surfaced. This
-    # prevents a client from coaxing the server into fetching an arbitrary attacker URL.
-    allowed_urls: set[str] = set()
-    if payload.items:
-        surfaced = find_candidates(db, work, settings=settings)["candidates"]
-        for cand in surfaced:
-            allowed_urls.update(u for u in (cand.pdf_url, cand.landing_url) if u)
     for item in payload.items:
         outcome = download_and_attach(
             db,
@@ -1253,7 +1259,7 @@ def find_on_web_download_endpoint(
             source=item.source,
             actor=actor,
             settings=settings,
-            allowed_urls=allowed_urls,
+            confirmed=item.confirmed,
             file_read=_file_read,
         )
         results.append(
@@ -1261,10 +1267,73 @@ def find_on_web_download_endpoint(
                 candidate_id=item.candidate_id,
                 status=outcome["status"],
                 reason=outcome.get("reason"),
+                url=outcome.get("url"),
                 file=outcome.get("file"),
             )
         )
     return WebFindDownloadResponse(results=results)
+
+
+@router.post("/{work_id}/find-on-web/stream")
+def find_on_web_stream_endpoint(
+    work_id: uuid.UUID,
+    payload: WebFindRequest | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> StreamingResponse:
+    """Stream find-on-web search progress as NDJSON (find-on-web v2). EDITOR-gated.
+
+    Emits one JSON object per line (``application/x-ndjson``):
+      * ``{"type":"source","source":<name>,"status":"querying"}`` as each source starts,
+      * ``{"type":"source","source":<name>,"status":"done","count":N}`` / ``"status":"failed"``
+        as each source finishes,
+      * a final ``{"type":"result","candidates":[...],"degraded_sources":[...],
+        "queried_sources":[...]}`` line.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    settings = get_settings()
+    if not getattr(settings, "web_find_enabled", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Find-on-web is disabled")
+    sources = payload.sources if payload else None
+
+    def _generate() -> Iterator[str]:
+        events: list[dict] = []
+        result = find_candidates(
+            db,
+            work,
+            settings=settings,
+            sources=sources,
+            on_progress=events.append,
+        )
+        # The orchestrator runs synchronously; flush its collected per-source progress events first,
+        # then the final result line. (find_candidates is sequential, so events are already ordered.)
+        for event in events:
+            yield json.dumps(event) + "\n"
+        record_event(
+            db,
+            "web_find.searched",
+            actor_user_id=actor.id,
+            entity_type="work",
+            entity_id=str(work_id),
+            details={
+                "queried": result["queried_sources"],
+                "degraded": result["degraded_sources"],
+                "count": len(result["candidates"]),
+                "streamed": True,
+            },
+        )
+        db.commit()
+        final = {
+            "type": "result",
+            "candidates": [_candidate_read(c).model_dump() for c in result["candidates"]],
+            "degraded_sources": result["degraded_sources"],
+            "queried_sources": result["queried_sources"],
+        }
+        yield json.dumps(final) + "\n"
+
+    return StreamingResponse(_generate(), media_type="application/x-ndjson")
 
 
 @router.post("/{work_id}/metadata/select", response_model=WorkRead)

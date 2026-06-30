@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_owner
 from app.db.session import get_db
 from app.models.user import User
 from app.services.audit import record_event
@@ -21,10 +21,51 @@ from app.services.web_find_allowed_hosts import (
     list_merged_hosts,
     remove_allowed_host,
 )
+from app.services.web_find_settings import (
+    DOWNLOAD_POLICIES,
+    get_download_policy,
+    set_download_policy,
+)
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
 ADMIN_DEP = Depends(require_admin)
+OWNER_DEP = Depends(require_owner)
+
+
+class WebFindDownloadPolicyOut(BaseModel):
+    policy: str
+    allowed: list[str]
+
+
+class WebFindDownloadPolicyUpdate(BaseModel):
+    policy: str
+
+
+@router.get("/web-find/download-policy", response_model=WebFindDownloadPolicyOut)
+def get_web_find_download_policy(db: Session = DB_DEP, _owner: User = OWNER_DEP) -> dict:
+    """Return the global find-on-web download-policy mode + allowed values. Owner-only."""
+    return {"policy": get_download_policy(db), "allowed": list(DOWNLOAD_POLICIES)}
+
+
+@router.put("/web-find/download-policy", response_model=WebFindDownloadPolicyOut)
+def set_web_find_download_policy(
+    payload: WebFindDownloadPolicyUpdate, db: Session = DB_DEP, owner: User = OWNER_DEP
+) -> dict:
+    """Set the global find-on-web download-policy mode (restricted/careful/unrestricted). Owner-only."""
+    try:
+        policy = set_download_policy(db, policy=payload.policy, actor_user_id=owner.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    record_event(
+        db,
+        "web_find.download_policy_changed",
+        actor_user_id=owner.id,
+        entity_type="web_find_settings",
+        details={"policy": policy},
+    )
+    db.commit()
+    return {"policy": policy, "allowed": list(DOWNLOAD_POLICIES)}
 
 
 class WebFindAllowedHostCreate(BaseModel):

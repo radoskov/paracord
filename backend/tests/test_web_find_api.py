@@ -219,3 +219,128 @@ def test_download_reader_forbidden(client, auth_headers, work_id):
         json={"items": [{"candidate_id": "c1", "url": "https://x/x.pdf", "source": "openalex"}]},
     )
     assert resp.status_code == 403
+
+
+# --- find-on-web v2: download-policy modes, confirmation, streaming ----------
+
+
+def _set_policy(client, auth_headers, policy):
+    h = auth_headers("owner")
+    resp = client.put("/api/v1/admin/web-find/download-policy", headers=h, json={"policy": policy})
+    assert resp.status_code == 200, resp.text
+    return resp
+
+
+def test_download_denied_host_blocked(client, auth_headers, monkeypatch, work_id):
+    monkeypatch.setattr(
+        "app.services.web_find._stream_pdf", lambda url, *, timeout, max_bytes: _PDF_BYTES
+    )
+    h = auth_headers("editor")
+    resp = client.post(
+        f"/api/v1/works/{work_id}/find-on-web/download",
+        headers=h,
+        json={"items": [{"candidate_id": "c1", "url": "https://sci-hub.se/x.pdf", "source": "x"}]},
+    )
+    result = resp.json()["results"][0]
+    assert result["status"] == "blocked"
+    assert "shadow" in result["reason"].lower()
+
+
+def test_download_unrestricted_needs_confirmation_then_confirmed_attaches(
+    client, auth_headers, monkeypatch, work_id
+):
+    monkeypatch.setattr(
+        "app.services.web_find._stream_pdf", lambda url, *, timeout, max_bytes: _PDF_BYTES
+    )
+    monkeypatch.setattr("app.services.web_find.enqueue_extraction", lambda fid: None)
+    _set_policy(client, auth_headers, "unrestricted")
+    h = auth_headers("editor")
+    url = "https://random-publisher.example/x.pdf"
+    # First call: not confirmed → needs_confirmation, carries the URL, no file.
+    first = client.post(
+        f"/api/v1/works/{work_id}/find-on-web/download",
+        headers=h,
+        json={"items": [{"candidate_id": "c1", "url": url, "source": "x"}]},
+    ).json()["results"][0]
+    assert first["status"] == "needs_confirmation"
+    assert first["url"] == url
+    assert first["file"] is None
+    # Re-send with confirmed=true → attaches.
+    second = client.post(
+        f"/api/v1/works/{work_id}/find-on-web/download",
+        headers=h,
+        json={"items": [{"candidate_id": "c1", "url": url, "source": "x", "confirmed": True}]},
+    ).json()["results"][0]
+    assert second["status"] == "attached"
+
+
+def test_download_policy_get_set_owner_only(client, auth_headers):
+    # Owner can GET and SET.
+    owner = auth_headers("owner")
+    got = client.get("/api/v1/admin/web-find/download-policy", headers=owner)
+    assert got.status_code == 200
+    assert got.json()["policy"] == "restricted"  # default
+    assert set(got.json()["allowed"]) == {"restricted", "careful", "unrestricted"}
+    put = client.put(
+        "/api/v1/admin/web-find/download-policy", headers=owner, json={"policy": "careful"}
+    )
+    assert put.status_code == 200
+    assert put.json()["policy"] == "careful"
+    # Non-owners are forbidden on both GET and SET.
+    for role in ("admin", "editor", "reader"):
+        h = auth_headers(role)
+        assert client.get("/api/v1/admin/web-find/download-policy", headers=h).status_code == 403
+        assert (
+            client.put(
+                "/api/v1/admin/web-find/download-policy", headers=h, json={"policy": "careful"}
+            ).status_code
+            == 403
+        )
+
+
+def test_download_policy_rejects_unknown_mode(client, auth_headers):
+    owner = auth_headers("owner")
+    resp = client.put(
+        "/api/v1/admin/web-find/download-policy", headers=owner, json={"policy": "yolo"}
+    )
+    assert resp.status_code == 400
+
+
+def test_find_on_web_stream_emits_ndjson_sequence(client, auth_headers, monkeypatch, work_id):
+    """The streaming endpoint emits per-source querying/done lines then a final result line."""
+    import json
+
+    def fake_find(db, work, *, settings, sources=None, fetchers=None, on_progress=None):
+        for name in ("crossref", "openalex"):
+            on_progress({"type": "source", "source": name, "status": "querying"})
+            on_progress({"type": "source", "source": name, "status": "done", "count": 1})
+        return {
+            "candidates": [
+                WebCandidate(source="openalex", title="Deep Residual Learning", year=2016)
+            ],
+            "degraded_sources": [],
+            "queried_sources": ["crossref", "openalex"],
+        }
+
+    monkeypatch.setattr("app.api.v1.endpoints.works.find_candidates", fake_find)
+    h = auth_headers("editor")
+    resp = client.post(f"/api/v1/works/{work_id}/find-on-web/stream", headers=h, json={})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/x-ndjson")
+    lines = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    # 4 per-source progress lines + 1 final result line.
+    assert lines[0] == {"type": "source", "source": "crossref", "status": "querying"}
+    assert lines[1] == {"type": "source", "source": "crossref", "status": "done", "count": 1}
+    assert lines[2] == {"type": "source", "source": "openalex", "status": "querying"}
+    assert lines[3] == {"type": "source", "source": "openalex", "status": "done", "count": 1}
+    final = lines[-1]
+    assert final["type"] == "result"
+    assert len(final["candidates"]) == 1
+    assert final["queried_sources"] == ["crossref", "openalex"]
+    assert final["degraded_sources"] == []
+
+
+def test_find_on_web_stream_reader_forbidden(client, auth_headers, work_id):
+    h = auth_headers("reader")
+    resp = client.post(f"/api/v1/works/{work_id}/find-on-web/stream", headers=h, json={})
+    assert resp.status_code == 403
