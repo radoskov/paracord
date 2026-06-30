@@ -501,7 +501,7 @@ A fresh batch of 20 findings from heavy testing. Resolved decisions:
   later); #17 related-papers clickable → switch paper view + show "why related" reason; #18 keyword
   chips clickable → semantic search in library. Files: WorkDetail.svelte, LibraryPage.svelte, backend
   works/enrich/extract + related endpoints, client.ts.
-- [ ] **Phase D — Library list.** #3 sortable column headers + **added-at** column (backend sort
+- [x] **Phase D — Library list.** #3 sortable column headers + **added-at** column (backend sort
   params); #4 configurable columns (show/hide + order; localStorage + backend prefs file). Files:
   LibraryPage.svelte, backend works list + new preferences endpoint, client.ts.
 - [ ] **Phase E — Agent GUI + jobs.** #10 fixed title-column width + wrap long titles/paths; #14 sort

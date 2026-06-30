@@ -1,10 +1,22 @@
 <script lang="ts">
-  import type { ReadingStatus, Work } from '../api/client';
+  import type { ReadingStatus, Work, WorkSortKey } from '../api/client';
+  import { type ColumnDef, type ColumnId, LIBRARY_COLUMNS } from '../lib/columns';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
+  import { formatDate } from '../lib/ui';
 
   export let works: Work[] = [];
   export let selectedWorkId: string | null = null;
   export let compact = false;
+
+  // Ordered, visible columns to render. Defaults to the registry's default-visible set so callers
+  // that don't pass `columns` get the standard library table.
+  export let columns: ColumnDef[] = LIBRARY_COLUMNS.filter((c) => c.default);
+
+  // Optional sorting (clickable headers). Off by default so other callers are unaffected.
+  export let sortable = false;
+  export let sortKey: WorkSortKey | null = null;
+  export let sortOrder: 'asc' | 'desc' = 'desc';
+  export let onSort: (key: WorkSortKey) => void = () => {};
 
   // Optional multi-select (checkbox column). Off by default so other callers are unaffected.
   export let selectable = false;
@@ -16,7 +28,10 @@
   export let onSelect: (work: Work) => void | Promise<void> = () => {};
   export let onStatusChange: (work: Work, status: ReadingStatus) => void = () => {};
 
-  $: colCount = (compact ? 4 : 5) + (selectable ? 1 : 0);
+  // In compact mode hide the lower-priority Venue column (keeps the old compact behaviour without
+  // the nth-child CSS hack).
+  $: shownColumns = compact ? columns.filter((c) => c.id !== 'venue') : columns;
+  $: colCount = shownColumns.length + (selectable ? 1 : 0);
 
   const readingStatuses: ReadingStatus[] = [
     'unread',
@@ -29,6 +44,10 @@
 
   function titleFor(work: Work): string {
     return work.canonical_title?.trim() || 'Untitled paper';
+  }
+
+  function isActive(col: ColumnDef): boolean {
+    return sortable && !!col.sortKey && col.sortKey === sortKey;
   }
 </script>
 
@@ -46,13 +65,24 @@
           />
         </th>
       {/if}
-      <th>Title</th>
-      <th>Year</th>
-      <th>Venue</th>
-      <th>Status</th>
-      {#if !compact}
-        <th>DOI</th>
-      {/if}
+      {#each shownColumns as col (col.id)}
+        <th>
+          {#if sortable && col.sortKey}
+            <button
+              type="button"
+              class="sort"
+              class:active={isActive(col)}
+              on:click={() => onSort(col.sortKey as WorkSortKey)}
+              title="Sort by {col.label.toLowerCase()}"
+            >
+              {col.label}
+              {#if isActive(col)}<span class="indicator">{sortOrder === 'asc' ? '▲' : '▼'}</span>{/if}
+            </button>
+          {:else}
+            {col.label}
+          {/if}
+        </th>
+      {/each}
     </tr>
   </thead>
   <tbody>
@@ -61,7 +91,7 @@
         <td colspan={colCount} class="empty">No papers</td>
       </tr>
     {:else}
-      {#each works as work}
+      {#each works as work (work.id)}
         <tr
           class:selected={work.id === selectedWorkId}
           on:click={() => onSelect(work)}
@@ -78,30 +108,46 @@
               />
             </td>
           {/if}
-          <td>
-            <strong>{titleFor(work)}</strong>
-            {#if work.arxiv_id}
-              <span>{work.arxiv_id}</span>
+          {#each shownColumns as col (col.id)}
+            {#if col.id === 'title'}
+              <td>
+                <strong>{titleFor(work)}</strong>
+                {#if work.arxiv_id}
+                  <span>{work.arxiv_id}</span>
+                {/if}
+              </td>
+            {:else if col.id === 'year'}
+              <td>{work.year ?? '-'}</td>
+            {:else if col.id === 'venue'}
+              <td>{work.venue ?? '-'}</td>
+            {:else if col.id === 'status'}
+              <td on:click|stopPropagation>
+                <select
+                  value={work.reading_status}
+                  disabled={!$canEdit}
+                  title={$canEdit ? '' : INSUFFICIENT_ROLE}
+                  on:change={(event) =>
+                    onStatusChange(work, event.currentTarget.value as ReadingStatus)}
+                >
+                  {#each readingStatuses as status}
+                    <option value={status}>{status}</option>
+                  {/each}
+                </select>
+              </td>
+            {:else if col.id === 'added_at'}
+              <td>{formatDate(work.created_at)}</td>
+            {:else if col.id === 'doi'}
+              <td>{work.doi ?? '-'}</td>
+            {:else if col.id === 'keywords'}
+              <td>
+                {#if work.keywords?.length}
+                  <span class="keywords">
+                    {#each work.keywords.slice(0, 5) as kw}<span class="kw">{kw}</span>{/each}
+                  </span>
+                {:else}-{/if}
+              </td>
             {/if}
-          </td>
-          <td>{work.year ?? '-'}</td>
-          <td>{work.venue ?? '-'}</td>
-          <td on:click|stopPropagation>
-            <select
-              value={work.reading_status}
-              disabled={!$canEdit}
-              title={$canEdit ? '' : INSUFFICIENT_ROLE}
-              on:change={(event) =>
-                onStatusChange(work, event.currentTarget.value as ReadingStatus)}
-            >
-              {#each readingStatuses as status}
-                <option value={status}>{status}</option>
-              {/each}
-            </select>
-          </td>
-          {#if !compact}
-            <td>{work.doi ?? '-'}</td>
-          {/if}
+          {/each}
         </tr>
       {/each}
     {/if}
@@ -131,6 +177,27 @@
     text-transform: uppercase;
   }
 
+  .sort {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: inherit;
+    min-height: auto;
+    padding: 0;
+    text-transform: inherit;
+  }
+
+  .sort.active {
+    color: #2d3e50;
+  }
+
+  .indicator {
+    font-size: 0.7rem;
+    margin-left: 0.15rem;
+  }
+
   tr {
     cursor: pointer;
   }
@@ -157,9 +224,21 @@
     min-width: 7rem;
   }
 
-  .compact th:nth-child(3),
-  .compact td:nth-child(3) {
-    display: none;
+  .keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin: 0;
+  }
+
+  .kw {
+    background: #eef2f6;
+    border-radius: 999px;
+    color: #44515f;
+    display: inline-block;
+    font-size: 0.72rem;
+    margin: 0;
+    padding: 0.05rem 0.45rem;
   }
 
   .empty {

@@ -144,6 +144,18 @@ _MISSING_FIELDS = {
     "arxiv_id": Work.arxiv_id,
 }
 
+# SAFE sort allowlist: client sort key → Work column. The raw `sort` string is NEVER interpolated
+# into the query; an unknown/None key falls back to the default below. This blocks column injection.
+_SORT_COLUMNS = {
+    "title": Work.canonical_title,
+    "year": Work.year,
+    "venue": Work.venue,
+    "added_at": Work.created_at,
+    "updated_at": Work.updated_at,
+    "reading_status": Work.reading_status,
+}
+_DEFAULT_SORT_COLUMN = Work.updated_at
+
 
 @router.get("", response_model=list[WorkRead])
 def list_works(
@@ -155,6 +167,8 @@ def list_works(
     has_pdf: bool | None = None,
     has_references: bool | None = None,
     missing: str | None = None,
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = DB_DEP,
 ) -> list[Work]:
@@ -257,7 +271,12 @@ def list_works(
         stmt = stmt.where(
             column.is_(None) if name == "year" else or_(column.is_(None), column == "")
         )
-    stmt = stmt.distinct().order_by(Work.updated_at.desc()).limit(limit)
+    # SAFE sort: look the key up in the allowlist (never interpolate the raw string); fall back to
+    # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
+    # order when the sort column has ties.
+    sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
+    direction = sort_column.asc() if order == "asc" else sort_column.desc()
+    stmt = stmt.distinct().order_by(direction, Work.id).limit(limit)
     return list(db.scalars(stmt).all())
 
 

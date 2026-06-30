@@ -53,6 +53,9 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
       OLLAMA_URL: "http://ollama:11434"
+      # Per-user UI preferences land on the persisted library volume (the container's ~/.config is
+      # neither mounted nor persistent), so column choices survive restarts.
+      PARACORD_PREFERENCES_PATH: "/app/storage/preferences.yaml"
     depends_on:
       postgres:
         condition: service_healthy

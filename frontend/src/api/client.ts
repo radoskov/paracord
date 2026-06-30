@@ -312,6 +312,15 @@ export interface DuplicateSplitSegment {
   label?: string;
 }
 
+// Sort keys the backend list_works endpoint accepts (SAFE allowlist, mirrored server-side).
+export type WorkSortKey =
+  | 'title'
+  | 'year'
+  | 'venue'
+  | 'added_at'
+  | 'updated_at'
+  | 'reading_status';
+
 export interface WorkQuery {
   q?: string;
   readingStatus?: string;
@@ -321,6 +330,19 @@ export interface WorkQuery {
   hasPdf?: boolean;
   hasReferences?: boolean;
   missing?: string[];
+  sort?: WorkSortKey;
+  order?: 'asc' | 'desc';
+}
+
+// Per-user UI preferences (durable copy of the library column choices; see lib/columns.ts).
+export interface LibraryColumnPrefs {
+  order: string[];
+  visible: string[];
+  sort: { key: string; order: 'asc' | 'desc' };
+}
+
+export interface UserPreferences {
+  library_columns?: LibraryColumnPrefs;
 }
 
 export interface IdentifierImportResponse {
@@ -485,12 +507,22 @@ export class ApiClient {
     if (query.hasPdf !== undefined) params.set('has_pdf', String(query.hasPdf));
     if (query.hasReferences !== undefined) params.set('has_references', String(query.hasReferences));
     if (query.missing?.length) params.set('missing', query.missing.join(','));
+    if (query.sort) params.set('sort', query.sort);
+    if (query.order) params.set('order', query.order);
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return this.request<Work[]>(`/api/v1/works${suffix}`);
   }
 
   async getWork(workId: string): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}`);
+  }
+
+  async getPreferences(): Promise<UserPreferences> {
+    return this.request<UserPreferences>('/api/v1/preferences');
+  }
+
+  async putPreferences(prefs: UserPreferences): Promise<UserPreferences> {
+    return this.request<UserPreferences>('/api/v1/preferences', { method: 'PUT', body: prefs });
   }
 
   async importReferenceAsWork(referenceId: string): Promise<Work> {

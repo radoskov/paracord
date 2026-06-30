@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     health,
     imports,
     jobs,
+    preferences,
     racks,
     search,
     shelves,
@@ -89,4 +90,8 @@ api_router.include_router(ai.router, prefix="/ai", tags=["ai"], dependencies=aut
 api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"], dependencies=auth_required)
 api_router.include_router(
     search.router, prefix="/search", tags=["search"], dependencies=auth_required
+)
+# Per-user UI preferences (any authenticated user manages their own blob).
+api_router.include_router(
+    preferences.router, prefix="/preferences", tags=["preferences"], dependencies=auth_required
 )

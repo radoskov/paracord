@@ -124,6 +124,13 @@ class Settings(BaseSettings):
     allowed_roles: list[str] = ["owner", "editor", "reader"]
     session_ttl_minutes: int = Field(default=720, alias="PARACORD_SESSION_TTL_MINUTES")
     managed_library_root: str = "./storage/library"
+    # Per-user UI preferences file (YAML). Defaults to the XDG-ish ~/.config path for bare-metal;
+    # docker-compose overrides this to /app/storage/preferences.yaml (the persisted library volume),
+    # since the container's ~/.config is neither mounted nor persistent.
+    preferences_path: str = Field(
+        default="~/.config/paracord/preferences.yaml",
+        alias="PARACORD_PREFERENCES_PATH",
+    )
     server_allowed_roots: list[Any] = []
     enrichment_enabled: bool = True
     enrichment_arxiv: bool = True

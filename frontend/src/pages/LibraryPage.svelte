@@ -9,11 +9,21 @@
     type Shelf,
     type Tag,
     type Work,
+    type WorkSortKey,
   } from '../api/client';
+  import ColumnPicker from '../components/ColumnPicker.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
   import Modal from '../components/Modal.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
+  import {
+    type ColumnId,
+    type ColumnPrefs,
+    loadColumnPrefs,
+    normalizeColumnPrefs,
+    saveColumnPrefs,
+    visibleColumnDefs,
+  } from '../lib/columns';
   import { pendingLibrarySearch, selectedWorkId } from '../lib/selection';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
@@ -52,6 +62,19 @@
   let loading = false;
   let message = '';
 
+  // Column preferences (which columns show, in what order) + current sort. localStorage is applied
+  // synchronously on mount (no flash); the backend prefs file is the durable source we reconcile to.
+  let columnPrefs: ColumnPrefs = loadColumnPrefs();
+  let showColumns = false;
+  let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
+  $: sortKey = columnPrefs.sort.key;
+  $: sortOrder = columnPrefs.sort.order;
+  $: visibleColumns = visibleColumnDefs(columnPrefs);
+
+  // Default sort direction when a user first clicks a column: newest/highest-first for date/numeric
+  // columns, A→Z for text columns.
+  const DESC_FIRST: WorkSortKey[] = ['added_at', 'updated_at', 'year'];
+
   onMount(async () => {
     await run(async () => {
       [shelves, racks, tags] = await Promise.all([
@@ -60,10 +83,53 @@
         client.listTags(),
       ]);
     });
+    // Reconcile with the backend (durable source); tolerate failure (keep the localStorage copy).
+    try {
+      const remote = await client.getPreferences();
+      if (remote?.library_columns) {
+        columnPrefs = normalizeColumnPrefs(remote.library_columns);
+        saveColumnPrefs(columnPrefs); // write the merged result back to localStorage
+      }
+    } catch {
+      /* offline / read-only backend — the localStorage copy stands */
+    }
     await loadWorks();
     const remembered = get(selectedWorkId);
     if (remembered) selected = works.find((w) => w.id === remembered) ?? null;
   });
+
+  // Persist column prefs: localStorage immediately (instant + offline-safe), backend debounced.
+  function persistColumnPrefs(): void {
+    saveColumnPrefs(columnPrefs);
+    if (savePrefsTimer) clearTimeout(savePrefsTimer);
+    savePrefsTimer = setTimeout(() => {
+      void client
+        .putPreferences({ library_columns: columnPrefs })
+        .catch(() => {
+          // Read-only backend (503) or offline: localStorage already holds the change.
+          message = 'Column layout saved locally only (server storage is read-only).';
+        });
+    }, 600);
+  }
+
+  function applyColumns(next: { order: ColumnId[]; visible: ColumnId[] }): void {
+    columnPrefs = normalizeColumnPrefs({ ...columnPrefs, ...next });
+    persistColumnPrefs();
+  }
+
+  function handleSort(key: WorkSortKey): void {
+    const order: 'asc' | 'desc' =
+      key === columnPrefs.sort.key
+        ? columnPrefs.sort.order === 'asc'
+          ? 'desc'
+          : 'asc'
+        : DESC_FIRST.includes(key)
+          ? 'desc'
+          : 'asc';
+    columnPrefs = { ...columnPrefs, sort: { key, order } };
+    persistColumnPrefs();
+    void loadWorks();
+  }
 
   // A keyword chip (or other tab) requested a Library search — consume it once and run it.
   const unsubscribePendingSearch = pendingLibrarySearch.subscribe((req) => {
@@ -74,6 +140,9 @@
     void loadWorks();
   });
   onDestroy(unsubscribePendingSearch);
+  onDestroy(() => {
+    if (savePrefsTimer) clearTimeout(savePrefsTimer);
+  });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -100,6 +169,37 @@
     };
   }
 
+  // Re-sort an already-loaded set by the active column (used for the semantic-ranked set, which
+  // can't be sorted server-side without losing the similarity ranking).
+  function sortWorksClientSide(items: Work[]): Work[] {
+    const { key, order } = columnPrefs.sort;
+    const dir = order === 'asc' ? 1 : -1;
+    const value = (w: Work): string | number => {
+      switch (key) {
+        case 'title':
+          return (w.canonical_title ?? '').toLowerCase();
+        case 'year':
+          return w.year ?? -Infinity;
+        case 'venue':
+          return (w.venue ?? '').toLowerCase();
+        case 'reading_status':
+          return w.reading_status;
+        case 'added_at':
+          return w.created_at ?? '';
+        case 'updated_at':
+        default:
+          return w.updated_at ?? '';
+      }
+    };
+    return [...items].sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // stable id tiebreaker (mirrors backend)
+    });
+  }
+
   async function loadWorks(): Promise<void> {
     await run(async () => {
       if (searchMode === 'semantic' && search.trim()) {
@@ -109,14 +209,21 @@
           client.listWorks(structuredQuery()),
         ]);
         const byId = new Map(filtered.map((w) => [w.id, w]));
-        works = ranked.items.map((i) => byId.get(i.work_id)).filter((w): w is Work => !!w);
+        const ordered = ranked.items.map((i) => byId.get(i.work_id)).filter((w): w is Work => !!w);
+        // Re-sort the ranked set client-side so the chosen column ordering applies in semantic mode.
+        works = sortWorksClientSide(ordered);
         if (works.length === 0 && ranked.items.length === 0) {
           message =
             'No semantic matches. Embeddings are built on first search; if this stays empty, ' +
             'no papers have indexable text yet.';
         }
       } else {
-        works = await client.listWorks({ q: search, ...structuredQuery() });
+        works = await client.listWorks({
+          q: search,
+          ...structuredQuery(),
+          sort: columnPrefs.sort.key,
+          order: columnPrefs.sort.order,
+        });
       }
       // Drop selections that fell out of the result set.
       const present = new Set(works.map((w) => w.id));
@@ -343,8 +450,12 @@
       </form>
       <div class="bar">
         <span class="muted">{works.length} papers{message ? ` · ${message}` : ''}</span>
-        <button type="button" class="secondary" on:click={() => (showNew = true)} disabled={!$canEdit}
-          title={$canEdit ? 'Create a paper by hand (you can attach a PDF afterwards)' : INSUFFICIENT_ROLE}>+ New paper</button>
+        <span class="bar-actions">
+          <button type="button" class="secondary" on:click={() => (showColumns = true)}
+            title="Choose which columns show and their order">Columns</button>
+          <button type="button" class="secondary" on:click={() => (showNew = true)} disabled={!$canEdit}
+            title={$canEdit ? 'Create a paper by hand (you can attach a PDF afterwards)' : INSUFFICIENT_ROLE}>+ New paper</button>
+        </span>
       </div>
       {#if selectedIds.length > 0}
         <div class="batch">
@@ -386,6 +497,11 @@
       {:else}
         <PaperTable
           {works}
+          columns={visibleColumns}
+          sortable
+          {sortKey}
+          {sortOrder}
+          onSort={handleSort}
           selectedWorkId={selected?.id ?? null}
           onSelect={selectWork}
           onStatusChange={updateStatus}
@@ -426,6 +542,15 @@
       {#if !canCreate}<p class="hintline">Enter at least one identifier to enable “Create paper”.</p>{/if}
     </form>
   </Modal>
+{/if}
+
+{#if showColumns}
+  <ColumnPicker
+    order={columnPrefs.order}
+    visible={columnPrefs.visible}
+    onApply={applyColumns}
+    onClose={() => (showColumns = false)}
+  />
 {/if}
 
 <style>
@@ -526,6 +651,11 @@
     display: flex;
     justify-content: space-between;
     margin-top: 0.6rem;
+  }
+
+  .bar-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .batch {
