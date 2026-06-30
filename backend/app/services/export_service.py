@@ -48,6 +48,7 @@ def export_bibliography(
     scope_type: str,
     output_format: str,
     scope_id: str | None = None,
+    work_ids: list[str] | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> str:
     """Export bibliography content for a scope.
@@ -57,7 +58,7 @@ def export_bibliography(
     """
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported export format: {output_format}")
-    works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id)
+    works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids)
     entries = [_Entry(work=work, authors=_work_authors(db, work)) for work in works]
     _assign_keys(entries)
     content = _RENDERERS[output_format](entries)
@@ -73,7 +74,16 @@ def export_bibliography(
     return content
 
 
-def _resolve_works(db: Session, *, scope_type: str, scope_id: str | None) -> list[Work]:
+def _resolve_works(
+    db: Session, *, scope_type: str, scope_id: str | None, work_ids: list[str] | None = None
+) -> list[Work]:
+    if scope_type in ("selection", "search"):
+        # An explicit set of works (multi-select in the library, or a search result set).
+        if not work_ids:
+            raise ValueError(f"work_ids is required for {scope_type} export")
+        ids = [uuid.UUID(w) for w in work_ids]
+        found = {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(ids))).all()}
+        return [found[i] for i in ids if i in found]  # preserve caller order
     if scope_type == "work":
         if not scope_id:
             raise ValueError("scope_id is required for work export")

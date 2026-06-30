@@ -281,7 +281,7 @@ def test_stream_file_uses_configured_server_folder_location(
     )
     db_session.commit()
 
-    response = stream_file(file.id, db=db_session)
+    response = stream_file(file.id, db=db_session, actor=owner)
 
     assert Path(response.path) == pdf_path
     assert response.media_type == "application/pdf"
@@ -318,7 +318,7 @@ def test_stream_file_rejects_location_outside_configured_root(
     db_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        stream_file(file.id, db=db_session)
+        stream_file(file.id, db=db_session, actor=owner)
     assert exc_info.value.status_code == 403
 
 

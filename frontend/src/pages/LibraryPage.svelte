@@ -10,6 +10,7 @@
     type Tag,
     type Work,
   } from '../api/client';
+  import ExportDialog from '../components/ExportDialog.svelte';
   import Modal from '../components/Modal.svelte';
   import PaperTable from '../components/PaperTable.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
@@ -330,6 +331,11 @@
               {/each}
             </select>
           </label>
+          <ExportDialog
+            label="selection"
+            fetchExport={(format) =>
+              client.exportCitations({ scope_type: 'selection', work_ids: selectedIds, format })}
+          />
           <button type="button" class="link" on:click={() => (selectedIds = [])}>Clear</button>
         </div>
       {/if}

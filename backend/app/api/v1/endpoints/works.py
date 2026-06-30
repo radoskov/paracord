@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_authenticated_user, require_roles
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.ai import Embedding, Summary
@@ -31,6 +31,7 @@ _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upl
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+AUTH_DEP = Depends(require_authenticated_user)
 
 # Work columns a metadata assertion can be promoted into (mirrors the enrichment service).
 _PROMOTABLE_FIELDS = {"title", "abstract", "year", "venue", "doi"}
@@ -169,11 +170,19 @@ def create_work(
 
 
 @router.get("/{work_id}", response_model=WorkRead)
-def get_work(work_id: uuid.UUID, db: Session = DB_DEP) -> Work:
-    """Return one work."""
+def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> Work:
+    """Return one work (records a `paper.viewed` audit event, §7.6)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    record_event(
+        db,
+        "paper.viewed",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work_id),
+    )
+    db.commit()
     return work
 
 

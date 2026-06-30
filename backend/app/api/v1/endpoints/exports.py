@@ -28,6 +28,7 @@ def export_scope(
             db,
             scope_type=payload.scope_type,
             scope_id=scope_id,
+            work_ids=payload.work_ids,
             output_format=payload.format,
             actor_user_id=actor.id,
         )

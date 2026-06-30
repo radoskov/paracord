@@ -181,16 +181,8 @@
       <ExportDialog
         label={`rack "${selected.name}"`}
         disabled={loading}
-        onExport={(format) => client
-          .exportCitations({ scope_type: 'rack', scope_id: selected!.id, format })
-          .then((r) => {
-            const url = URL.createObjectURL(new Blob([r.content], { type: r.content_type }));
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = r.filename;
-            a.click();
-            URL.revokeObjectURL(url);
-          })}
+        fetchExport={(format) =>
+          client.exportCitations({ scope_type: 'rack', scope_id: selected!.id, format })}
       />
     {/if}
   </div>

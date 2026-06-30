@@ -27,6 +27,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Stage 7 — export polish + view audit events.**
+  - **Selection / search export scope:** `POST /exports` accepts `scope_type: "selection"` (or
+    `"search"`) with `work_ids`, exporting an explicit set in caller order. Wired into the library
+    multi-select batch bar.
+  - **Export dialog: preview + copy-to-clipboard + download.** `ExportDialog` can self-fetch and
+    offers Preview / Copy / Download (shelves, racks, and selection use it); all formats
+    (BibTeX/BibLaTeX/RIS/CSL-JSON/Markdown/HTML/text) supported.
+  - **View audit events (§7.6):** `GET /works/{id}` records `paper.viewed` and `GET
+    /files/{id}/stream` records `file.downloaded` (the stream now requires authentication, closing
+    an unauthenticated-read gap), both attributed to the acting user.
 - **Stage 7 — auth & egress hardening.**
   - **Failed-login throttling** (`login_throttle`): after `login_max_failures` failures for a
     username within `login_lockout_minutes`, `/auth/login` returns **429** with a `Retry-After`

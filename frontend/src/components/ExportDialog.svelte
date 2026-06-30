@@ -1,29 +1,104 @@
 <script lang="ts">
-  import { EXPORT_FORMATS, type ExportFormat } from '../api/client';
+  import { EXPORT_FORMATS, type ExportFormat, type ExportResponse } from '../api/client';
 
   export let label = '';
   export let disabled = false;
+  // Legacy mode: parent performs the export/download itself.
   export let onExport: (format: ExportFormat) => void | Promise<void> = () => {};
+  // Rich mode: when provided, this dialog fetches and offers Preview / Copy / Download.
+  export let fetchExport: ((format: ExportFormat) => Promise<ExportResponse>) | null = null;
 
   let format: ExportFormat = 'bibtex';
+  let preview = '';
+  let status = '';
+  let busy = false;
+
+  async function fetchContent(): Promise<ExportResponse | null> {
+    if (!fetchExport) return null;
+    busy = true;
+    status = '';
+    try {
+      return await fetchExport(format);
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Export failed';
+      return null;
+    } finally {
+      busy = false;
+    }
+  }
+
+  function download(r: ExportResponse): void {
+    const url = URL.createObjectURL(new Blob([r.content], { type: r.content_type }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = r.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function doPreview(): Promise<void> {
+    const r = await fetchContent();
+    if (r) {
+      preview = r.content;
+      status = `${r.filename} — ${r.content.length} chars`;
+    }
+  }
+
+  async function doCopy(): Promise<void> {
+    const r = await fetchContent();
+    if (!r) return;
+    preview = r.content;
+    try {
+      await navigator.clipboard.writeText(r.content);
+      status = 'Copied to clipboard';
+    } catch {
+      status = 'Copy unavailable — content shown in the preview below';
+    }
+  }
+
+  async function doDownload(): Promise<void> {
+    const r = await fetchContent();
+    if (r) {
+      download(r);
+      status = `Downloaded ${r.filename}`;
+    }
+  }
 </script>
 
 <div class="export">
-  <label>
-    Export {label}
-    <select bind:value={format} {disabled}>
-      {#each EXPORT_FORMATS as option (option.value)}
-        <option value={option.value}>{option.label}</option>
-      {/each}
-    </select>
-  </label>
-  <button type="button" on:click={() => onExport(format)} {disabled}>Export</button>
+  <div class="row">
+    <label>
+      Export {label}
+      <select bind:value={format} disabled={disabled || busy}>
+        {#each EXPORT_FORMATS as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </label>
+    {#if fetchExport}
+      <button type="button" class="secondary" on:click={doPreview} disabled={disabled || busy}>Preview</button>
+      <button type="button" class="secondary" on:click={doCopy} disabled={disabled || busy}>Copy</button>
+      <button type="button" on:click={doDownload} disabled={disabled || busy}>Download</button>
+    {:else}
+      <button type="button" on:click={() => onExport(format)} disabled={disabled || busy}>Export</button>
+    {/if}
+  </div>
+  {#if status}<p class="status">{status}</p>{/if}
+  {#if preview}
+    <textarea class="preview" readonly rows="8">{preview}</textarea>
+  {/if}
 </div>
 
 <style>
   .export {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .row {
     align-items: end;
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
@@ -32,5 +107,17 @@
     flex-direction: column;
     font-size: 0.8rem;
     gap: 0.25rem;
+  }
+
+  .status {
+    color: #64717f;
+    font-size: 0.8rem;
+    margin: 0;
+  }
+
+  .preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    width: 100%;
   }
 </style>

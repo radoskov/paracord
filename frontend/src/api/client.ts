@@ -77,7 +77,7 @@ export interface CitationGraphResponse {
   summary: Record<string, number>;
 }
 
-export type ExportScopeType = 'work' | 'shelf' | 'rack';
+export type ExportScopeType = 'work' | 'shelf' | 'rack' | 'selection' | 'search';
 export type ExportFormat = 'bibtex' | 'biblatex' | 'ris' | 'csl-json' | 'markdown' | 'html' | 'text';
 
 export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
@@ -853,7 +853,8 @@ export class ApiClient {
 
   async exportCitations(payload: {
     scope_type: ExportScopeType;
-    scope_id: string;
+    scope_id?: string | null;
+    work_ids?: string[];
     format: ExportFormat;
   }): Promise<ExportResponse> {
     return this.request<ExportResponse>('/api/v1/exports', { method: 'POST', body: payload });

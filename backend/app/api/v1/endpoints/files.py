@@ -9,18 +9,20 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_roles
+from app.api.deps import require_authenticated_user, require_roles
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.file import File
 from app.models.user import User
+from app.services.audit import record_event
 from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_roles(Role.OWNER, Role.EDITOR))
+AUTH_DEP = Depends(require_authenticated_user)
 
 
 class FileRead(BaseModel):
@@ -77,8 +79,10 @@ def extract_file(
 
 
 @router.get("/{file_id}/stream")
-def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
-    """Stream a PDF from a server-folder or managed-library location."""
+def stream_file(
+    file_id: uuid.UUID, db: Session = DB_DEP, actor: User | None = AUTH_DEP
+) -> FileResponse:
+    """Stream a PDF from a server-folder or managed-library location (records a view audit event)."""
     file = db.get(File, file_id)
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -91,6 +95,16 @@ def stream_file(file_id: uuid.UUID, db: Session = DB_DEP) -> FileResponse:
 
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not available")
+
+    # §7.6 — record who viewed/downloaded which file.
+    record_event(
+        db,
+        "file.downloaded",
+        actor_user_id=actor.id if actor else None,
+        entity_type="file",
+        entity_id=str(file_id),
+    )
+    db.commit()
     return FileResponse(
         path,
         media_type=file.mime_type or "application/pdf",
