@@ -10,6 +10,18 @@
   import AiModelsPanel from '../components/AiModelsPanel.svelte';
   import Modal from '../components/Modal.svelte';
 
+  // Static reference shown under the Users widget so an owner can understand each role
+  // before assigning it. Kept in sync with ProfilePage's own-role description.
+  const ROLE_GUIDE: { role: UserRole; label: string; blurb: string }[] = [
+    { role: 'reader', label: 'Reader', blurb: 'Browse, search and read papers; cannot modify the library.' },
+    { role: 'editor', label: 'Editor', blurb: 'Everything a reader can do, plus import, edit, enrich and delete papers.' },
+    {
+      role: 'owner',
+      label: 'Owner',
+      blurb: 'Everything an editor can do, plus manage users, agents, AI settings and the audit log.',
+    },
+  ];
+
   const PRIVILEGES: { key: AgentPrivilege; label: string; hint: string }[] = [
     { key: 'can_index', label: 'index', hint: 'Accept manifests (file listings) from this agent.' },
     { key: 'can_extract', label: 'extract', hint: 'Accept upload-for-extraction (PDF discarded after, preview kept).' },
@@ -304,6 +316,16 @@
           {/each}
         </div>
       {/if}
+
+      <div class="role-guide">
+        <h3>What each role can do</h3>
+        {#each ROLE_GUIDE as r}
+          <div class="role-guide-item">
+            <span class="role-badge role-{r.role}">{r.label}</span>
+            <span>{r.blurb}</span>
+          </div>
+        {/each}
+      </div>
     </section>
 
     <!-- Agents -->
@@ -620,6 +642,33 @@
 
   .role-owner { background: #fde68a; color: #78350f; }
   .role-editor { background: #bfdbfe; color: #1e3a5f; }
+  .role-reader { background: #e2e8f0; color: #44515f; }
+
+  .role-guide {
+    margin-top: 0.9rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .role-guide h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: #44515f;
+  }
+
+  .role-guide-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .role-guide-item .role-badge {
+    flex: 0 0 auto;
+  }
   .role-approved { background: #bbf7d0; color: #14532d; }
   .role-pending { background: #fef9c3; color: #713f12; }
 
