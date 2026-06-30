@@ -8,6 +8,9 @@
   export let value = '';
   export let label = 'Add to shelf';
   export let disabled = false;
+  // When true, hide shelves the caller can't modify (uses the `can_modify` hint from listShelves).
+  // Default false keeps every existing caller (BatchImport/ImportPage) showing all visible shelves.
+  export let modifiableOnly = false;
 
   let shelves: Shelf[] = [];
   let filter = '';
@@ -24,12 +27,13 @@
     }
   });
 
-  // The server only lists shelves the caller may SEE; it can't yet say which are *modifiable*
-  // client-side, so we show all of them and rely on the backend's 403 at commit time if the user
-  // lacks modify access. (Follow-up: surface a `modifiable` hint on ShelfRead to pre-filter.)
+  // The server lists shelves the caller may SEE and (since Phase N) flags which are modifiable.
+  // When `modifiableOnly`, drop the ones the caller can't modify so the picker can't offer a
+  // doomed add; otherwise show all visible shelves and rely on the backend's 403 at commit time.
+  $: visible = modifiableOnly ? shelves.filter((s) => s.can_modify) : shelves;
   $: filtered = filter.trim()
-    ? shelves.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase()))
-    : shelves;
+    ? visible.filter((s) => s.name.toLowerCase().includes(filter.trim().toLowerCase()))
+    : visible;
 </script>
 
 <div class="shelf-picker">

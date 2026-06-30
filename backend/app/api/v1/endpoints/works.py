@@ -20,7 +20,7 @@ from app.models.citation import CitationMention, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
-from app.models.organization import RackShelf, ShelfWork, Tag, TagLink
+from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
@@ -161,6 +161,30 @@ class RelatedWorkRead(BaseModel):
     score: float
     shared_keywords: list[str] = []
     reason: str
+
+
+class WorkShelfRackRef(BaseModel):
+    """A rack that contains one of a paper's shelves (SEE-filtered)."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class WorkShelfMembership(BaseModel):
+    """A shelf that contains a paper, with the caller's modify-flag and its containing racks.
+
+    ``can_modify`` reflects ``access.can_modify_shelf`` for the caller (the librarian-floor
+    STRUCTURE rule), so the UI can gate the per-shelf Remove button. ``racks`` is filtered to the
+    racks the caller may SEE (a shelf may sit in 0..N racks).
+    """
+
+    id: uuid.UUID
+    name: str
+    access_level: str
+    can_modify: bool
+    racks: list[WorkShelfRackRef] = []
 
 
 def _looks_like_hash(text: str) -> bool:
@@ -463,6 +487,53 @@ def related_papers(
             )
         )
     return related
+
+
+@router.get("/{work_id}/shelves", response_model=list[WorkShelfMembership])
+def list_work_shelves(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[WorkShelfMembership]:
+    """Return every shelf containing this paper that the caller may SEE ("Where is this?").
+
+    Guarded like ``get_work`` (404 if the paper is missing or the caller can't see it). Each shelf
+    is annotated with its ``access_level``, a ``can_modify`` flag (the librarian-floor STRUCTURE
+    rule via ``access.can_modify_shelf`` — NOT the paper-edit rule), and its containing racks,
+    themselves SEE-filtered (a private rack without a grant is omitted even when the shelf shows).
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    # Shelves containing this work, intersected with the shelves the caller may SEE.
+    shelves = list(
+        db.scalars(
+            access.visible_shelves_query(db, actor)
+            .join(ShelfWork, ShelfWork.shelf_id == Shelf.id)
+            .where(ShelfWork.work_id == work_id)
+            .order_by(Shelf.name)
+        ).all()
+    )
+    memberships: list[WorkShelfMembership] = []
+    for shelf in shelves:
+        # Containing racks, filtered to the racks the caller may SEE (admin/owner unfiltered).
+        racks = list(
+            db.scalars(
+                access.visible_racks_query(db, actor)
+                .join(RackShelf, RackShelf.rack_id == Rack.id)
+                .where(RackShelf.shelf_id == shelf.id)
+                .order_by(Rack.name)
+            ).all()
+        )
+        memberships.append(
+            WorkShelfMembership(
+                id=shelf.id,
+                name=shelf.name,
+                access_level=shelf.access_level,
+                can_modify=access.can_modify_shelf(db, actor, shelf),
+                racks=[WorkShelfRackRef(id=r.id, name=r.name) for r in racks],
+            )
+        )
+    return memberships
 
 
 @router.get("/{work_id}", response_model=WorkRead)

@@ -130,8 +130,28 @@ export interface Shelf {
   description: string | null;
   status: string;
   access_level: AccessLevel;
+  // Whether the requesting caller may modify this shelf's structure/membership (librarian floor +
+  // grant). Defaulted server-side; used by ShelfPicker's `modifiableOnly` pre-filter.
+  can_modify?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// One rack containing a paper's shelf (from GET /works/{id}/shelves; SEE-filtered).
+export interface WorkShelfRackRef {
+  id: string;
+  name: string;
+}
+
+// A shelf a paper belongs to, with the caller's modify flag and the racks that contain it.
+export interface WorkShelfMembership {
+  id: string;
+  name: string;
+  access_level: AccessLevel;
+  // Whether the caller may add/remove papers on this shelf (librarian floor + grant). Gates the
+  // per-shelf Remove button alongside the canManageStructure store.
+  can_modify: boolean;
+  racks: WorkShelfRackRef[];
 }
 
 export interface Rack {
@@ -992,6 +1012,12 @@ export class ApiClient {
 
   async listShelfWorks(shelfId: string): Promise<Work[]> {
     return this.request<Work[]>(`/api/v1/shelves/${shelfId}/works`);
+  }
+
+  // "Where is this?": the shelves (with containing racks) a paper belongs to that the caller can
+  // SEE, each carrying a per-shelf can_modify flag for gating the Remove button.
+  async listWorkShelves(workId: string): Promise<WorkShelfMembership[]> {
+    return this.request<WorkShelfMembership[]>(`/api/v1/works/${workId}/shelves`);
   }
 
   async addWorkToShelf(shelfId: string, workId: string): Promise<void> {

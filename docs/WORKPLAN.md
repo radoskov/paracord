@@ -654,7 +654,7 @@ Batch of 10 findings. Resolved decisions:
 - [ ] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
   help/explanations (what each model does, when it's used, why something is disabled, BERTopic
   out-of-the-box status).
-- [ ] **Phase N — Paper shelf-membership UI (added 2026-07-01).** In the paper view (Library tab):
+- [x] **Phase N — Paper shelf-membership UI (added 2026-07-01).** In the paper view (Library tab):
   a **"Put into…"** button → popup with a rack+shelf picker to add the paper to a shelf (works even
   when the paper is already in shelves — a paper can be in many). And a **"Where is this?"** /
   locations view listing every rack/shelf the paper is in, with **remove** buttons — all gated by

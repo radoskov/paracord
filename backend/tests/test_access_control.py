@@ -495,3 +495,151 @@ def test_admin_access_settings_roundtrip(client, auth_headers):
     )
     assert r.status_code == 200
     assert r.json()["default_access_level"] == "visible"
+
+
+# --------------------------------------------------------------------------------------------------
+# Phase N — paper shelf-membership read (GET /works/{id}/shelves) + can_modify + rack nesting
+# --------------------------------------------------------------------------------------------------
+def _add_shelf_to_rack(db, rack, shelf):
+    from app.models.organization import RackShelf
+
+    db.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    db.commit()
+
+
+def test_list_work_shelves_only_see_able(client, db, make_user):
+    reader = make_user("n-see-reader", role="reader")
+    admin = make_user("n-see-admin", role="admin")
+    open_s = _shelf(db, name="n-open", access_level="open")
+    private_s = _shelf(db, name="n-private", access_level="private")
+    work = _work(db, title="n-shared")
+    _add_to_shelf(db, open_s, work)
+    _add_to_shelf(db, private_s, work)
+    # reader sees only the open shelf (the private one is hidden, even though the paper is on it)
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, reader))
+    assert r.status_code == 200
+    names = {s["name"] for s in r.json()}
+    assert names == {"n-open"}
+    # admin bypasses and sees both
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, admin))
+    assert {s["name"] for s in r.json()} == {"n-open", "n-private"}
+
+
+def test_list_work_shelves_can_modify_open(client, db, make_user):
+    librarian = make_user("n-mod-lib", role="librarian")
+    editor = make_user("n-mod-ed", role="editor")
+    reader = make_user("n-mod-reader", role="reader")
+    open_s = _shelf(db, name="n-mod-open", access_level="open")
+    work = _work(db, title="n-mod-work")
+    _add_to_shelf(db, open_s, work)
+    # open shelf: librarian may modify by role; editor/reader may not
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, librarian))
+    assert r.json()[0]["can_modify"] is True
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, editor))
+    assert r.json()[0]["can_modify"] is False
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, reader))
+    assert r.json()[0]["can_modify"] is False
+
+
+def test_list_work_shelves_can_modify_visible_needs_grant(client, db, make_user):
+    librarian = make_user("n-vis-lib", role="librarian")
+    admin = make_user("n-vis-admin", role="admin")
+    visible_s = _shelf(db, name="n-vis", access_level="visible")
+    work = _work(db, title="n-vis-work")
+    _add_to_shelf(db, visible_s, work)
+    # visible shelf: librarian without a grant cannot modify
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, librarian))
+    assert r.json()[0]["can_modify"] is False
+    # admin always can
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, admin))
+    assert r.json()[0]["can_modify"] is True
+    # a grant unlocks modify for the librarian
+    _grant(db, librarian, "shelf", visible_s.id)
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, librarian))
+    assert r.json()[0]["can_modify"] is True
+
+
+def test_list_work_shelves_rack_nesting_see_filtered(client, db, make_user):
+    librarian = make_user("n-rack-lib", role="librarian")
+    admin = make_user("n-rack-admin", role="admin")
+    shelf = _shelf(db, name="n-rack-shelf", access_level="open")
+    open_rack = _rack(db, name="n-open-rack", access_level="open")
+    private_rack = _rack(db, name="n-private-rack", access_level="private")
+    work = _work(db, title="n-rack-work")
+    _add_to_shelf(db, shelf, work)
+    _add_shelf_to_rack(db, open_rack, shelf)
+    _add_shelf_to_rack(db, private_rack, shelf)
+    # librarian sees the shelf, but the private rack (no grant) is omitted from racks
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, librarian))
+    racks = {x["name"] for x in r.json()[0]["racks"]}
+    assert racks == {"n-open-rack"}
+    # admin bypass sees both racks
+    r = client.get(f"/api/v1/works/{work.id}/shelves", headers=_headers(db, admin))
+    assert {x["name"] for x in r.json()[0]["racks"]} == {"n-open-rack", "n-private-rack"}
+
+
+def test_list_work_shelves_404_hidden_and_missing(client, db, make_user):
+    reader = make_user("n-404-reader", role="reader")
+    private_s = _shelf(db, name="n-404-priv", access_level="private")
+    hidden = _work(db, title="n-404-hidden")
+    _add_to_shelf(db, private_s, hidden)
+    # the work is on a private shelf only -> reader can't see it -> 404
+    r = client.get(f"/api/v1/works/{hidden.id}/shelves", headers=_headers(db, reader))
+    assert r.status_code == 404
+    # a missing work id -> 404
+    r = client.get(f"/api/v1/works/{uuid.uuid4()}/shelves", headers=_headers(db, reader))
+    assert r.status_code == 404
+
+
+def test_add_remove_work_to_shelf_acl(client, db, make_user):
+    editor = make_user("n-acl-ed", role="editor")
+    librarian = make_user("n-acl-lib", role="librarian")
+    open_s = _shelf(db, name="n-acl-open", access_level="open")
+    private_s = _shelf(db, name="n-acl-priv", access_level="private")
+    work = _work(db, title="n-acl-work")
+    _add_to_shelf(db, open_s, work)  # keep it see-able for everyone
+    # editor (below librarian floor) is rejected by the require_librarian dep
+    r = client.post(
+        f"/api/v1/shelves/{open_s.id}/works",
+        headers=_headers(db, editor),
+        json={"work_id": str(work.id)},
+    )
+    assert r.status_code == 403
+    # librarian may add on an open shelf
+    r = client.post(
+        f"/api/v1/shelves/{open_s.id}/works",
+        headers=_headers(db, librarian),
+        json={"work_id": str(work.id)},
+    )
+    assert r.status_code == 204
+    # librarian WITHOUT a grant cannot add on a private shelf
+    r = client.post(
+        f"/api/v1/shelves/{private_s.id}/works",
+        headers=_headers(db, librarian),
+        json={"work_id": str(work.id)},
+    )
+    assert r.status_code == 403
+    # with a grant, the add succeeds and the remove is ACL-gated the same way
+    _grant(db, librarian, "shelf", private_s.id)
+    r = client.post(
+        f"/api/v1/shelves/{private_s.id}/works",
+        headers=_headers(db, librarian),
+        json={"work_id": str(work.id)},
+    )
+    assert r.status_code == 204
+    r = client.delete(
+        f"/api/v1/shelves/{private_s.id}/works/{work.id}", headers=_headers(db, librarian)
+    )
+    assert r.status_code == 204
+
+
+def test_list_shelves_carries_can_modify(client, db, make_user):
+    librarian = make_user("n-ls-lib", role="librarian")
+    _shelf(db, name="n-ls-open", access_level="open")
+    _shelf(db, name="n-ls-vis", access_level="visible")
+    r = client.get("/api/v1/shelves", headers=_headers(db, librarian))
+    assert r.status_code == 200
+    by_name = {s["name"]: s for s in r.json()}
+    # open -> librarian modifiable by role; visible -> needs a grant (not modifiable yet)
+    assert by_name["n-ls-open"]["can_modify"] is True
+    assert by_name["n-ls-vis"]["can_modify"] is False

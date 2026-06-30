@@ -62,6 +62,10 @@ class ShelfRead(BaseModel):
     description: str | None = None
     status: str
     access_level: str
+    # Whether the requesting caller may modify this shelf's structure/membership (librarian floor +
+    # per-shelf grant). Defaulted so existing callers/serializers are unaffected; populated by
+    # ``list_shelves`` so the "Put into…" picker can pre-filter to modifiable shelves.
+    can_modify: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -95,10 +99,16 @@ def _guard_modify_shelf(db: Session, actor: User, shelf: Shelf) -> None:
 
 
 @router.get("", response_model=list[ShelfRead])
-def list_shelves(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[Shelf]:
-    """List shelves the caller may see."""
+def list_shelves(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[ShelfRead]:
+    """List shelves the caller may see, each annotated with the caller's ``can_modify`` flag."""
     stmt = access.visible_shelves_query(db, actor).order_by(Shelf.name)
-    return list(db.scalars(stmt).all())
+    shelves = list(db.scalars(stmt).all())
+    return [
+        ShelfRead.model_validate(shelf).model_copy(
+            update={"can_modify": access.can_modify_shelf(db, actor, shelf)}
+        )
+        for shelf in shelves
+    ]
 
 
 @router.post("", response_model=ShelfRead, status_code=status.HTTP_201_CREATED)

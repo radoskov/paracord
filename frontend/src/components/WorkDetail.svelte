@@ -17,12 +17,14 @@
     type WebFindStreamEvent,
     type Work,
     type WorkFile,
+    type WorkShelfMembership,
   } from '../api/client';
   import { pendingLibrarySearch } from '../lib/selection';
-  import { canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
+  import ShelfPicker from './ShelfPicker.svelte';
 
   export let client: ApiClient;
   export let work: Work;
@@ -176,6 +178,38 @@
       related = await client.getRelatedWorks(work.id, 8);
       relatedLoaded = true;
     });
+  }
+
+  // Organization / "Where is this?" — the shelves (and their racks) this paper sits in. Lazy-loaded
+  // on first <details> open (like Related papers). Add/remove are STRUCTURE ops gated on the
+  // librarian floor ($canManageStructure) + the per-shelf can_modify flag, NOT canModify.
+  let locations: WorkShelfMembership[] = [];
+  let locationsLoaded = false;
+  let showPutInto = false;
+  let putIntoShelfId = '';
+  async function loadLocations(): Promise<void> {
+    await run(async () => {
+      locations = await client.listWorkShelves(work.id);
+      locationsLoaded = true;
+    });
+  }
+
+  async function addToShelf(): Promise<void> {
+    if (!putIntoShelfId) return;
+    const shelfId = putIntoShelfId;
+    await run(async () => {
+      await client.addWorkToShelf(shelfId, work.id);
+      await loadLocations();
+      showPutInto = false;
+      putIntoShelfId = '';
+    }, 'Added to shelf');
+  }
+
+  async function removeFromShelf(shelfId: string): Promise<void> {
+    await run(async () => {
+      await client.removeWorkFromShelf(shelfId, work.id);
+      await loadLocations();
+    }, 'Removed from shelf');
   }
 
   async function importReference(referenceId: string): Promise<void> {
@@ -779,6 +813,45 @@
     <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
   </details>
 
+  <details on:toggle={(e) => e.currentTarget.open && !locationsLoaded && loadLocations()}>
+    <summary>Organization — where is this?</summary>
+    <div class="org-head">
+      <button type="button" class="secondary" on:click={() => (showPutInto = true)}
+        disabled={loading || !$canManageStructure}
+        title={$canManageStructure ? 'Add this paper to a shelf' : INSUFFICIENT_ROLE}>Put into…</button>
+    </div>
+    {#if !locationsLoaded}
+      <p class="hintline">Open to see which shelves (and racks) this paper is on.</p>
+    {:else if locations.length === 0}
+      <p class="empty">This paper isn’t in any shelf you can see.</p>
+    {:else}
+      <ul class="locations">
+        {#each locations as shelf (shelf.id)}
+          {#if shelf.racks.length}
+            {#each shelf.racks as rack (rack.id)}
+              <li class="entry-card location-row">
+                <span class="loc-path"><span class="loc-rack">{rack.name}</span> › <span class="loc-shelf">{shelf.name}</span></span>
+                <button type="button" class="secondary small" on:click={() => removeFromShelf(shelf.id)}
+                  disabled={loading || !shelf.can_modify}
+                  title={shelf.can_modify ? 'Remove this paper from the shelf' : INSUFFICIENT_ROLE}>Remove</button>
+              </li>
+            {/each}
+          {:else}
+            <li class="entry-card location-row">
+              <span class="loc-path"><span class="loc-shelf">{shelf.name}</span></span>
+              <button type="button" class="secondary small" on:click={() => removeFromShelf(shelf.id)}
+                disabled={loading || !shelf.can_modify}
+                title={shelf.can_modify ? 'Remove this paper from the shelf' : INSUFFICIENT_ROLE}>Remove</button>
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
+    {#if !$canManageStructure}
+      <p class="hintline">Only librarians and admins can change a paper’s shelves.</p>
+    {/if}
+  </details>
+
   <details class="references-block" open={references.length > 0}>
     <summary>References ({references.length})</summary>
     {#if references.length === 0}
@@ -993,6 +1066,20 @@
           title="Skip this download">Cancel</button>
         <button type="button" on:click={() => resolveConfirm(true)}
           title="Download from this host anyway">Download anyway</button>
+      </div>
+    </div>
+  </Modal>
+{/if}
+
+{#if showPutInto}
+  <Modal title="Put into a shelf" onClose={() => (showPutInto = false)}>
+    <div class="putinto">
+      <ShelfPicker {client} bind:value={putIntoShelfId} modifiableOnly />
+      <div class="putinto-actions">
+        <button type="button" class="secondary" on:click={() => (showPutInto = false)}
+          title="Close without adding">Cancel</button>
+        <button type="button" on:click={addToShelf} disabled={loading || !putIntoShelfId}
+          title={putIntoShelfId ? 'Add this paper to the chosen shelf' : 'Choose a shelf first'}>Add</button>
       </div>
     </div>
   </Modal>
@@ -1647,6 +1734,52 @@
     color: #1d4ed8;
     font-size: 0.85rem;
     font-weight: 700;
+  }
+
+  .org-head {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .locations {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+  }
+
+  .location-row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+
+  .loc-path {
+    overflow-wrap: anywhere;
+  }
+
+  .loc-rack {
+    color: #64748b;
+  }
+
+  .loc-shelf {
+    font-weight: 600;
+  }
+
+  .putinto {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .putinto-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
   }
 
   .confirmwrap {
