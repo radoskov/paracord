@@ -140,7 +140,7 @@ describe('WorkDetail find-on-web picker (v2)', () => {
     expect(screen.getByText('1/1 downloaded')).toBeTruthy();
   });
 
-  it('renders platform labels, a View link + disabled Download for PDF-less candidates, and enables Download for PDF candidates', async () => {
+  it('renders platform labels, a View link, and enables Download for any candidate with a fetchable URL (pdf, resolved, or landing)', async () => {
     const client = makeClient();
     render(WorkDetail, { client: client as never, work: WORK });
 
@@ -151,20 +151,51 @@ describe('WorkDetail find-on-web picker (v2)', () => {
     expect(screen.getByText(/via arxiv\.org/)).toBeTruthy();
     expect(screen.getByText(/via sciencedirect\.com/)).toBeTruthy();
 
-    // The PDF-less candidate (c2) keeps a working View link (targets its resolved_url), shows the
-    // "no direct PDF" reason, and is NOT a dead "no link" state.
+    // The PDF-less candidate (c2) keeps a working View link (targets its resolved_url) and shows
+    // the "no direct PDF — we'll try the landing page" reason.
     const viewLinks = screen.getAllByRole('link', { name: /View/i }) as HTMLAnchorElement[];
     expect(viewLinks.length).toBe(2);
     expect(
       viewLinks.some((a) => a.href === 'https://www.sciencedirect.com/science/article/pii/123'),
     ).toBe(true);
-    expect(screen.getByText(/No direct PDF link — open/)).toBeTruthy();
+    expect(screen.getByText(/No direct PDF link/)).toBeTruthy();
 
-    // c1 (has pdf_url) → checkbox enabled; c2 (no pdf_url) → checkbox disabled with a reason.
+    // item 4: c1 (pdf_url) AND c2 (resolved_url only, no pdf_url) are both attemptable → both
+    // checkboxes enabled. c2's hint explains the publisher/landing-page fallback.
     const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
     expect(checkboxes[0].disabled).toBe(false);
-    expect(checkboxes[1].disabled).toBe(true);
-    expect(checkboxes[1].title).toMatch(/No direct PDF link/);
+    expect(checkboxes[1].disabled).toBe(false);
+    expect(checkboxes[1].title).toMatch(/publisher\/landing page/i);
+  });
+
+  it('downloads a PDF-less candidate by attempting its resolved/landing URL', async () => {
+    const downloadWebCandidates = vi.fn().mockResolvedValue({
+      results: [
+        { candidate_id: 'c2', status: 'manual_upload_needed', reason: 'login wall', file: null },
+      ],
+    });
+    const client = makeClient({ downloadWebCandidates });
+    render(WorkDetail, { client: client as never, work: WORK });
+
+    await fireEvent.click(screen.getByRole('button', { name: /find on web/i }));
+    await screen.findByText(/Deep Residual Learning for Image Recognition/);
+
+    // Select the PDF-less candidate (c2) and download — it sends c2's resolved_url as the item URL.
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+    await fireEvent.click(checkboxes[1]);
+    await fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
+
+    await waitFor(() =>
+      expect(downloadWebCandidates).toHaveBeenCalledWith('w1', [
+        {
+          candidate_id: 'c2',
+          url: 'https://www.sciencedirect.com/science/article/pii/123',
+          source: 'crossref',
+        },
+      ]),
+    );
+    // The publisher page needed a browser session → manual-upload fallback surfaces.
+    expect(await screen.findByText(/Could not download automatically/)).toBeTruthy();
   });
 
   it('shows a manual-upload fallback when a download cannot complete', async () => {

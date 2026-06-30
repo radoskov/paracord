@@ -532,6 +532,24 @@ def test_resolve_final_url_degrades_to_none_on_timeout(monkeypatch):
     assert out is None
 
 
+def test_resolve_final_url_returns_final_host_after_multi_hop(monkeypatch):
+    # A DOI bounces linkhub.elsevier.com → www.sciencedirect.com (item 4): the resolved URL is the
+    # TRUE final host (sciencedirect.com), NOT the first elsevier hop and not a domain collapse.
+    client = _ResolveClient(
+        "https://www.sciencedirect.com/science/article/pii/X",
+        history_urls=[
+            "https://doi.org/10.1016/x",
+            "https://linkinghub.elsevier.com/retrieve/pii/X",
+        ],
+    )
+    monkeypatch.setattr(web_find.httpx, "Client", lambda **kw: client)
+    out = resolve_final_url(
+        "https://doi.org/10.1016/x", timeout=4.0, resolver=lambda h: ["93.184.216.34"]
+    )
+    assert out == "https://www.sciencedirect.com/science/article/pii/X"
+    assert web_find._host(out) == "www.sciencedirect.com"
+
+
 def test_find_candidates_populates_platform_from_resolution(db_session, monkeypatch):
     work = _seed_work(db_session)
     client = _ResolveClient("https://www.sciencedirect.com/science/article/pii/X")
@@ -716,6 +734,105 @@ def test_download_denied_host_blocked(db_session, tmp_path):
     )
     assert out["status"] == "blocked"
     assert "shadow" in out["reason"].lower()
+
+
+# --- find-on-web item 4: attempt the resolved/landing URL (no direct pdf_url) ---
+#
+# A candidate with only a resolved_url / landing_url is ATTEMPTED (the caller hands that URL in as
+# candidate_url): it attaches when the fetch yields a real %PDF, and falls back to
+# manual_upload_needed for an HTML/login/paywall page — and ALL security gates still apply to the
+# attempted URL.
+
+
+def test_download_landing_url_without_pdf_attaches_when_pdf(db_session, tmp_path):
+    """A landing/resolved URL (no direct pdf_url) that serves a real PDF is attached."""
+    work = _seed_work(db_session)
+
+    def fake_stream(url, *, timeout, max_bytes):
+        return _PDF_BYTES  # the landing URL happened to serve a real PDF
+
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://zenodo.org/record/123",  # allow-listed landing URL, no .pdf
+        source="openalex",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=fake_stream,
+    )
+    assert out["status"] == "attached"
+    assert db_session.scalar(select(File)) is not None
+
+
+def test_download_landing_url_html_manual_upload_no_file(db_session, tmp_path):
+    """A landing/resolved URL that serves HTML (publisher login/paywall) → manual_upload_needed."""
+    work = _seed_work(db_session)
+
+    def html_stream(url, *, timeout, max_bytes):
+        return None  # not a real PDF (HTML/login/paywall)
+
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://europepmc.org/article/landing",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=html_stream,
+    )
+    assert out["status"] == "manual_upload_needed"
+    assert db_session.scalar(select(File)) is None
+
+
+def test_download_attempted_landing_url_denylist_blocked(db_session, tmp_path):
+    """The denylist still HARD-BLOCKS an attempted landing/resolved URL (stores nothing)."""
+    work = _seed_work(db_session)
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://sci-hub.se/10.1/x",  # attempted (no pdf_url), still blocked
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "blocked"
+    assert db_session.scalar(select(File)) is None
+
+
+def test_download_attempted_landing_url_mode_gate_errors(db_session, tmp_path):
+    """The policy-mode gate still refuses an attempted landing URL on an off-allow-list host."""
+    work = _seed_work(db_session)
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://unknown-publisher.example/article",  # not allow-listed
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),  # default restricted mode
+        streamer=lambda *a, **k: _PDF_BYTES,
+    )
+    assert out["status"] == "error"
+    assert db_session.scalar(select(File)) is None
+
+
+def test_download_attempted_landing_url_internal_ip_blocked(db_session, tmp_path):
+    """The SSRF guard still HARD-BLOCKS an attempted landing URL resolving to an internal IP."""
+    work = _seed_work(db_session)
+    set_download_policy(db_session, policy="unrestricted")
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://internal.example/article",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        confirmed=True,  # even confirmed, the IP guard wins
+        streamer=web_find._stream_pdf,  # real streamer does the per-hop IP guard
+        resolver=lambda h: ["10.0.0.7"],
+    )
+    assert out["status"] == "blocked"
+    assert db_session.scalar(select(File)) is None
 
 
 # --- download-host allowlist (batch 2 #5 hardening) -------------------------

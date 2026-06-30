@@ -640,7 +640,7 @@ Batch of 10 findings. Resolved decisions:
   group↔rack/shelf grants + rack/shelf `access_level` + roles `contributor`/`librarian` + the full
   permission matrix (visibility filtering on list endpoints + modify guards) + admin UI
   (groups/membership/grants/defaults, role assignment) + frontend gating. Migrations. **Design first.**
-- [ ] **Phase I — Find-on-web redirect/download fix (item 4).** Full redirect chain → true final host;
+- [x] **Phase I — Find-on-web redirect/download fix (item 4).** Full redirect chain → true final host;
   download attempts pdf_url then resolved/landing (%PDF-validate, manual fallback). web_find/works.py
   + WorkDetail. (Independent of H.)
 - [ ] **Phase J — Batch import (5) + import-to-rack/shelf (6).** Raw-citation batch import (Crossref/

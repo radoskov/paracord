@@ -266,9 +266,17 @@
     selectedIds = next;
   }
 
-  // Only candidates with a direct PDF URL can be auto-downloaded; PDF-less ones (landing/resolved
-  // only) are opened via "View" and attached manually.
-  $: downloadableCandidates = findResults.filter((c) => c.pdf_url);
+  // The URL we attempt for a candidate: a direct PDF if it has one, else its resolved (final
+  // post-redirect) URL, else its landing URL. The backend fetches whatever we send, %PDF-validates
+  // it, and falls back to manual_upload_needed for an HTML/login/paywall page.
+  function fetchUrl(c: WebCandidate): string | null {
+    return c.pdf_url ?? c.resolved_url ?? c.landing_url ?? null;
+  }
+
+  // A candidate is download-attemptable when it has ANY fetchable URL (find-on-web item 4): a
+  // direct pdf_url attaches outright; a resolved/landing URL is tried, attaching when it serves a
+  // real PDF and falling back to manual download via "View" when the site needs a browser session.
+  $: downloadableCandidates = findResults.filter((c) => fetchUrl(c) !== null);
   $: allDownloadableSelected =
     downloadableCandidates.length > 0 &&
     downloadableCandidates.every((c) => selectedIds.has(c.candidate_id));
@@ -302,10 +310,10 @@
 
   async function downloadSelected(): Promise<void> {
     const items: WebFindDownloadItem[] = findResults
-      .filter((c) => selectedIds.has(c.candidate_id) && c.pdf_url)
+      .filter((c) => selectedIds.has(c.candidate_id) && fetchUrl(c) !== null)
       .map((c) => ({
         candidate_id: c.candidate_id,
-        url: c.pdf_url as string,
+        url: fetchUrl(c) as string,
         source: c.source,
       }));
     if (items.length === 0) return;
@@ -874,10 +882,12 @@
                   type="checkbox"
                   checked={selectedIds.has(cand.candidate_id)}
                   on:change={() => toggleCandidate(cand.candidate_id)}
-                  disabled={!cand.pdf_url}
+                  disabled={fetchUrl(cand) === null}
                   title={cand.pdf_url
                     ? 'Select this candidate to download its PDF and attach'
-                    : 'No direct PDF link — open “View” to download it manually, then attach'}
+                    : fetchUrl(cand) !== null
+                      ? 'Try to download from the publisher/landing page and attach; if the site needs a browser session it falls back to manual download via “View”'
+                      : 'No link to fetch — attach the PDF manually'}
                 />
               </label>
               <div class="cand-main">
@@ -897,7 +907,7 @@
                   {/if}
                 </div>
                 {#if !cand.pdf_url && (cand.resolved_url || cand.landing_url)}
-                  <span class="cand-status warn">No direct PDF link — open “View” to download it manually, then attach.</span>
+                  <span class="cand-status warn">No direct PDF link — we’ll try the publisher/landing page; if it needs a browser session, use “View” to download manually, then attach.</span>
                 {:else if !(cand.pdf_url || cand.resolved_url || cand.landing_url)}
                   <span class="cand-status warn">No link to open — attach the PDF manually.</span>
                 {/if}

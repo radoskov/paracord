@@ -350,6 +350,21 @@ def _host_resolves_internal(
 # It is the ONLY cross-host follower in this module and STILL enforces the shadow-library denylist
 # and the private/internal-IP SSRF guard on EVERY hop. It never downloads a body (HEAD, falling
 # back to a GET whose stream is closed immediately). Best-effort: any failure → ``None``.
+#
+# It follows the ENTIRE HTTP-redirect chain to the very end (e.g. a DOI →
+# linkhub.elsevier.com → www.sciencedirect.com resolves to the *sciencedirect.com* final host, NOT
+# the first ``linkhub.elsevier.com`` hop), and ``platform`` is the host of that final URL — the
+# real final host (``www.sciencedirect.com``), never a registrable-domain collapse. The redirect
+# cap is raised well above httpx's default so long publisher chains complete.
+#
+# LIMITATION: only HTTP 30x (Location-header) redirects are followed. A few publishers bounce
+# through an HTML ``<meta http-equiv="refresh">`` / JavaScript redirect that httpx cannot see; for
+# those the resolved host is the last HTTP hop and ``View`` still lands the user where the browser
+# will then meta-refresh onward. (We never read the body here, so we cannot parse a meta-refresh.)
+
+# Redirect cap for resolve_final_url / _stream_pdf: high enough that a multi-hop publisher chain
+# (DOI resolver → link hub → publisher → CDN) completes rather than tripping httpx's default of 20.
+_REDIRECT_CAP = 30
 
 
 def resolve_final_url(
@@ -362,7 +377,10 @@ def resolve_final_url(
 
     The denylist + private/internal-IP guard are checked on the initial URL and on EVERY redirect
     hop (and the final URL). If any hop is denied, internal, or non-http(s), resolution stops and
-    returns ``None`` (treated as unresolved). No response body is ever read.
+    returns ``None`` (treated as unresolved). No response body is ever read. The full HTTP-redirect
+    chain is followed to the end, so the returned URL's host is the TRUE final host (e.g.
+    ``www.sciencedirect.com`` for a DOI that bounces via ``linkhub.elsevier.com``), not the first
+    hop.
     """
     if not url or not _scheme_is_http(url):
         return None
@@ -378,7 +396,12 @@ def resolve_final_url(
         return None
     headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; resolve view target)"}
     try:
-        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            follow_redirects=True,
+            max_redirects=_REDIRECT_CAP,
+        ) as client:
             try:
                 response = client.head(url)
             except httpx.HTTPError:
@@ -1037,7 +1060,12 @@ def _stream_pdf(
         raise DownloadRefused(f"Refusing download from host {_host(url)!r}")
     headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
     with (
-        httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client,
+        httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            follow_redirects=True,
+            max_redirects=_REDIRECT_CAP,
+        ) as client,
         client.stream("GET", url) as response,
     ):
         # Re-classify every redirect hop AND the final host (denylist + IP guard always win).
@@ -1083,6 +1111,14 @@ def download_and_attach(
     resolver: Callable[[str], list[str]] | None = None,
 ) -> dict:
     """Download a candidate PDF and attach it to ``work`` under the global download-policy.
+
+    ``candidate_url`` is whichever URL the caller chose to attempt — a direct ``pdf_url`` when one
+    exists, otherwise the candidate's ``resolved_url`` (final post-redirect URL) or its
+    ``landing_url`` (find-on-web item 4). We fetch it, follow its redirect chain, and %PDF-validate
+    the result: a real PDF is stored; an HTML/login/paywall page (no ``%PDF`` magic / wrong
+    content-type) yields ``manual_upload_needed`` and stores nothing. ALL the security gates apply
+    to whichever URL is actually fetched (and to every redirect hop): the shadow-library denylist,
+    the private/internal-IP SSRF guard, the policy-mode gate, and the needs_confirmation handshake.
 
     Returns a per-item status dict (never raises): ``attached`` / ``deduped`` /
     ``manual_upload_needed`` / ``error`` / ``blocked`` / ``needs_confirmation``.
