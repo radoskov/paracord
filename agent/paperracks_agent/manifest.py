@@ -26,14 +26,15 @@ def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def build_manifest_item(path: Path) -> ManifestItem:
+def build_manifest_item(path: Path, *, known_hash: str | None = None) -> ManifestItem:
     """Build a manifest item for one PDF.
 
     ``local_file_id`` is the content hash, so it is stable across rescans and exposes no
     filesystem path to the server. ``display_path`` is the file name only — a human label,
-    never a server-usable path.
+    never a server-usable path. ``known_hash`` skips re-reading the file when the caller already
+    holds a valid hash for it (incremental scan — file unchanged by size + mtime).
     """
-    file_hash = hash_file(path)
+    file_hash = known_hash or hash_file(path)
     return ManifestItem(
         local_file_id=file_hash,
         path=path,

@@ -17,12 +17,14 @@ CREATE TABLE IF NOT EXISTS files (
     real_path       TEXT NOT NULL,
     sha256          TEXT NOT NULL,
     size_bytes      INTEGER NOT NULL DEFAULT 0,
+    mtime           REAL,
     import_action   TEXT NOT NULL DEFAULT 'index_only',
     teleport_policy TEXT NOT NULL DEFAULT 'ask',
     processing_state TEXT NOT NULL DEFAULT 'indexed',
     teleport_blocked INTEGER NOT NULL DEFAULT 0,
     present         INTEGER NOT NULL DEFAULT 1
 );
+CREATE INDEX IF NOT EXISTS ix_files_real_path ON files (real_path);
 """
 
 
@@ -57,6 +59,10 @@ class AgentState:
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        # Migrate a pre-existing DB that lacks the mtime column (added for incremental scans).
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(files)")}
+        if "mtime" not in columns:
+            self._conn.execute("ALTER TABLE files ADD COLUMN mtime REAL")
         self._conn.commit()
 
     def close(self) -> None:
@@ -72,18 +78,20 @@ class AgentState:
         virtual_path: str | None = None,
         import_action: str = "index_only",
         teleport_policy: str = "ask",
+        mtime: float | None = None,
     ) -> None:
         """Insert/refresh a file, preserving processing_state and block on update."""
         self._conn.execute(
             """
-            INSERT INTO files (local_file_id, virtual_path, real_path, sha256, size_bytes,
+            INSERT INTO files (local_file_id, virtual_path, real_path, sha256, size_bytes, mtime,
                                import_action, teleport_policy, present)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(local_file_id) DO UPDATE SET
                 virtual_path=excluded.virtual_path,
                 real_path=excluded.real_path,
                 sha256=excluded.sha256,
                 size_bytes=excluded.size_bytes,
+                mtime=excluded.mtime,
                 import_action=excluded.import_action,
                 teleport_policy=excluded.teleport_policy,
                 present=1
@@ -94,11 +102,23 @@ class AgentState:
                 real_path,
                 sha256,
                 size_bytes,
+                mtime,
                 import_action,
                 teleport_policy,
             ),
         )
         self._conn.commit()
+
+    def hash_cache(self) -> dict[str, tuple[int, float | None, str]]:
+        """Map ``real_path`` → ``(size_bytes, mtime, local_file_id)`` for incremental scans.
+
+        Lets a rescan skip re-hashing a file whose path/size/mtime are unchanged (the content hash
+        is the ``local_file_id``), turning a full re-read of the corpus into a cheap stat per file.
+        """
+        rows = self._conn.execute(
+            "SELECT real_path, size_bytes, mtime, local_file_id FROM files"
+        ).fetchall()
+        return {r["real_path"]: (r["size_bytes"], r["mtime"], r["local_file_id"]) for r in rows}
 
     def forget(self, local_file_id: str) -> bool:
         """Drop a file from the local index (the on-disk file is untouched). Returns True if a row went."""

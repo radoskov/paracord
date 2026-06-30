@@ -63,7 +63,8 @@ def export_bibliography(
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported export format: {output_format}")
     works = _resolve_works(db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids)
-    entries = [_Entry(work=work, authors=_work_authors(db, work)) for work in works]
+    authors_by_work = _authors_by_work(db, works)
+    entries = [_Entry(work=work, authors=authors_by_work.get(work.id, [])) for work in works]
     _assign_keys(entries)
     if citation_keys:
         for entry in entries:
@@ -129,23 +130,37 @@ def _resolve_works(
     raise ValueError(f"Unsupported export scope: {scope_type}")
 
 
-def _work_authors(db: Session, work: Work) -> list[str]:
-    """Resolve a work's authors from its best metadata assertion (``A; B; C``)."""
-    value = db.scalars(
-        select(MetadataAssertion.value)
+def _split_authors(value: str | None) -> list[str]:
+    return [name.strip() for name in (value or "").split(";") if name.strip()] if value else []
+
+
+def _authors_by_work(db: Session, works: list[Work]) -> dict[uuid.UUID, list[str]]:
+    """Resolve authors for all works in **one** query (E1: avoids the per-work N+1).
+
+    Orders by entity then best-assertion (canonical, then confidence), so the first row seen for
+    each work is its best ``authors`` assertion.
+    """
+    ids = [w.id for w in works]
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(MetadataAssertion.entity_id, MetadataAssertion.value)
         .where(
             MetadataAssertion.entity_type == "work",
-            MetadataAssertion.entity_id == work.id,
+            MetadataAssertion.entity_id.in_(ids),
             MetadataAssertion.field_name == "authors",
         )
         .order_by(
+            MetadataAssertion.entity_id,
             MetadataAssertion.selected_as_canonical.desc(),
             func.coalesce(MetadataAssertion.confidence, 0).desc(),
         )
-    ).first()
-    if not value:
-        return []
-    return [name.strip() for name in value.split(";") if name.strip()]
+    ).all()
+    best: dict[uuid.UUID, str] = {}
+    for entity_id, value in rows:
+        if entity_id not in best:  # first row per work wins (ordering above)
+            best[entity_id] = value
+    return {wid: _split_authors(value) for wid, value in best.items()}
 
 
 def _assign_keys(entries: list[_Entry]) -> None:

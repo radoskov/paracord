@@ -25,10 +25,28 @@ class ScannedFile:
     virtual_path: str
     action: str
     teleport_policy: str
+    mtime: float | None = None
 
 
-def scan_managed(config: AgentConfig) -> list[ScannedFile]:
-    """Scan all managed folders + files into a flat list of PDFs with their action/policy."""
+def _cached_hash(cache: dict, path: Path) -> tuple[str | None, float]:
+    """Return ``(known_hash_or_None, mtime)`` — reuse the cached content hash when the file's
+    path/size/mtime are unchanged, so an unchanged PDF is not re-read+re-hashed (E7)."""
+    stat = path.stat()
+    entry = cache.get(str(path))
+    if entry is not None:
+        size, mtime, local_file_id = entry
+        if size == stat.st_size and mtime == stat.st_mtime:
+            return local_file_id, stat.st_mtime
+    return None, stat.st_mtime
+
+
+def scan_managed(config: AgentConfig, state: AgentState | None = None) -> list[ScannedFile]:
+    """Scan all managed folders + files into a flat list of PDFs with their action/policy.
+
+    When ``state`` is given, unchanged files (same path/size/mtime) reuse their cached content hash
+    instead of being re-read — an incremental scan (E7).
+    """
+    cache = state.hash_cache() if state is not None else {}
     found: dict[str, ScannedFile] = {}
     for folder in config.folders:
         if not folder.enabled:
@@ -37,7 +55,8 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
         if not root.exists():
             continue
         for path in iter_pdf_files([root]):
-            item = build_manifest_item(path)
+            known, mtime = _cached_hash(cache, path)
+            item = build_manifest_item(path, known_hash=known)
             try:
                 rel = path.resolve().relative_to(root)
                 virtual_path = f"{root.name}/{rel}"
@@ -48,6 +67,7 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
                 path=path,
                 sha256=item.sha256,
                 size_bytes=item.size_bytes,
+                mtime=mtime,
                 virtual_path=virtual_path,
                 action=folder.action,
                 teleport_policy=folder.teleport_policy,
@@ -57,12 +77,14 @@ def scan_managed(config: AgentConfig) -> list[ScannedFile]:
             continue
         path = managed.path.expanduser()
         if path.exists() and path.suffix.lower() == ".pdf":
-            item = build_manifest_item(path)
+            known, mtime = _cached_hash(cache, path)
+            item = build_manifest_item(path, known_hash=known)
             found[item.local_file_id] = ScannedFile(
                 local_file_id=item.local_file_id,
                 path=path,
                 sha256=item.sha256,
                 size_bytes=item.size_bytes,
+                mtime=mtime,
                 virtual_path=path.name,
                 action=managed.action,
                 teleport_policy=managed.teleport_policy,
@@ -112,7 +134,7 @@ def _manifest_payload(scanned: list[ScannedFile]) -> dict:
 
 async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerClient) -> dict:
     """Scan, send the manifest, apply per-file actions, report removals, fulfil allow-requests."""
-    scanned = scan_managed(config)
+    scanned = scan_managed(config, state)
     for s in scanned:
         state.upsert(
             local_file_id=s.local_file_id,
@@ -122,6 +144,7 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
             virtual_path=s.virtual_path,
             import_action=s.action,
             teleport_policy=s.teleport_policy,
+            mtime=s.mtime,
         )
     await client.send_manifest(_manifest_payload(scanned))
 

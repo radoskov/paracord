@@ -141,6 +141,38 @@ def test_import_server_folder_creates_file_work_location_batch_and_audit(
     assert db_session.scalar(select(func.count()).select_from(File)) == 1
 
 
+def test_import_server_folder_skips_rehash_for_unchanged_files(
+    db_session, owner: User, tmp_path: Path, monkeypatch
+) -> None:
+    """A re-scan of an unchanged folder does not re-hash files (E7 incremental scan)."""
+    from app.services import storage
+
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (papers / "p.pdf").write_bytes(b"%PDF-1.4\n% fixture\n")
+    settings = Settings(server_allowed_roots=[{"alias": "main", "path": str(papers)}])
+    source = create_server_folder_source(
+        db_session, settings=settings, name="Main", path_alias="main", actor=owner
+    )
+    db_session.commit()
+    import_server_folder(
+        db_session, source=source, actor=owner
+    )  # first scan hashes + records mtime
+    db_session.commit()
+
+    calls = {"n": 0}
+    real = storage._sha256_file
+
+    def counting(path):
+        calls["n"] += 1
+        return real(path)
+
+    monkeypatch.setattr(storage, "_sha256_file", counting)
+    import_server_folder(db_session, source=source, actor=owner)  # unchanged → no re-hash
+    db_session.commit()
+    assert calls["n"] == 0
+
+
 def test_m1_read_endpoints_return_file_shelf_and_rack_memberships(db_session, owner: User) -> None:
     file = File(
         sha256="a" * 64,

@@ -13,7 +13,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -179,13 +179,28 @@ def _store_embedding(
 def reindex_status(db: Session, *, provider: EmbeddingProvider | None = None) -> dict:
     """Report embedding-index coverage for the active model: ``{model_name, indexed, total}``."""
     provider = provider or HashBowProvider()
-    total = sum(1 for w in db.scalars(select(Work)).all() if _work_text(w))
+    # Two SQL aggregates (E5) — count works that have indexable text, and those embedded for the
+    # active model — rather than materializing every Work row in Python.
+    total = db.scalar(
+        select(func.count())
+        .select_from(Work)
+        .where(
+            or_(
+                func.coalesce(Work.canonical_title, "") != "",
+                func.coalesce(Work.abstract, "") != "",
+            )
+        )
+    )
     indexed = db.scalar(
         select(func.count())
         .select_from(Embedding)
         .where(Embedding.entity_type == "work", Embedding.model_name == provider.model_name)
     )
-    return {"model_name": provider.model_name, "indexed": int(indexed or 0), "total": total}
+    return {
+        "model_name": provider.model_name,
+        "indexed": int(indexed or 0),
+        "total": int(total or 0),
+    }
 
 
 def related_works(
@@ -205,20 +220,29 @@ def related_works(
         )
     )
     query_vector = target.vector if target else provider.embed(_work_text(work))
-    rows = db.scalars(
-        select(Embedding).where(
-            Embedding.entity_type == "work", Embedding.model_name == provider.model_name
-        )
-    ).all()
-    scored: list[tuple[uuid.UUID, float]] = []
-    for emb in rows:
-        if emb.entity_id == work.id:
-            continue
-        score = cosine_similarity(query_vector, emb.vector)
-        if score > 0.0:
-            scored.append((emb.entity_id, score))
-    scored.sort(key=lambda i: i[1], reverse=True)
-    top = scored[:limit]
+
+    # Fast path: rank in Postgres via pgvector when enabled (E4); else Python cosine.
+    top: list[tuple] | None = None
+    if _pgvector_on(db):
+        ranked = _pgvector_rank(db, query_vector, model_name=provider.model_name, limit=limit + 1)
+        if ranked is not None:
+            top = [(wid, score) for wid, score in ranked if wid != work.id][:limit]
+
+    if top is None:
+        rows = db.scalars(
+            select(Embedding).where(
+                Embedding.entity_type == "work", Embedding.model_name == provider.model_name
+            )
+        ).all()
+        scored: list[tuple[uuid.UUID, float]] = []
+        for emb in rows:
+            if emb.entity_id == work.id:
+                continue
+            score = cosine_similarity(query_vector, emb.vector)
+            if score > 0.0:
+                scored.append((emb.entity_id, score))
+        scored.sort(key=lambda i: i[1], reverse=True)
+        top = scored[:limit]
     works = {
         w.id: w for w in db.scalars(select(Work).where(Work.id.in_([wid for wid, _ in top]))).all()
     }

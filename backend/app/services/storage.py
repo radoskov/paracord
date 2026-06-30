@@ -175,12 +175,40 @@ def _assert_inside_root(root: Path, path: Path) -> None:
     path.resolve().relative_to(root.resolve())
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Treat a stored (possibly naive) timestamp as UTC for comparison."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _existing_location(db: Session, source_id: uuid.UUID, pdf_path: Path) -> Location | None:
+    return db.scalar(
+        select(Location).where(
+            Location.source_id == source_id, Location.internal_uri == str(pdf_path)
+        )
+    )
+
+
 def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str, bool]:
+    now = datetime.now(UTC)
+
+    # Incremental scan (E7): if this path was already imported and the file hasn't been modified
+    # since we last verified it, skip the expensive SHA-256 + PDF preview and just refresh liveness.
+    existing_loc = _existing_location(db, source.id, pdf_path)
+    if existing_loc is not None and existing_loc.last_verified_at is not None:
+        mtime = datetime.fromtimestamp(pdf_path.stat().st_mtime, tz=UTC)
+        if mtime <= _as_utc(existing_loc.last_verified_at):
+            existing_loc.last_verified_at = now
+            existing_loc.is_available = True
+            file = db.get(File, existing_loc.file_id)
+            if file is not None:
+                file.last_seen_at = now
+                file.status = "available"
+            return {"created_file": False, "created_work": False}
+
     sha256 = _sha256_file(pdf_path)
     file = db.scalar(select(File).where(File.sha256 == sha256))
     created_file = file is None
     preview = _extract_pdf_preview(pdf_path)
-    now = datetime.now(UTC)
 
     if file is None:
         file = File(
@@ -218,6 +246,10 @@ def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str
                 last_verified_at=now,
             )
         )
+    elif existing_loc is not None:
+        # Same path already located: refresh verification time so a later unchanged scan skips it.
+        existing_loc.last_verified_at = now
+        existing_loc.is_available = True
 
     created_work = False
     if created_file:

@@ -11,11 +11,23 @@ from __future__ import annotations
 import uuid
 from dataclasses import asdict, dataclass
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.ai import AI_CONFIG_SINGLETON_ID, AIConfig
+
+# Per-engine memo of whether the ``ai_config`` table exists (narrow unit-test schemas omit it).
+_TABLE_PRESENT: dict[int, bool] = {}
+
+
+def _ai_config_table_present(db: Session) -> bool:
+    bind = db.get_bind()
+    key = id(bind)
+    if key not in _TABLE_PRESENT:
+        _TABLE_PRESENT[key] = inspect(bind).has_table(AIConfig.__tablename__)
+    return _TABLE_PRESENT[key]
+
 
 # Fields an owner may set via the API, and the known/allowed values for the enum-like ones.
 EDITABLE_FIELDS = (
@@ -62,12 +74,11 @@ def get_ai_config(db: Session, *, settings: Settings | None = None) -> Effective
     """Return the effective AI config (DB row overlaid on Settings defaults)."""
     settings = settings or get_settings()
     cfg = _defaults(settings)
-    try:
-        row = db.get(AIConfig, AI_CONFIG_SINGLETON_ID)
-    except SQLAlchemyError:
-        # The table may be absent in narrow unit-test schemas; fall back to static defaults.
-        db.rollback()
+    # Probe table presence rather than provoking-then-rolling-back an error (E6): a read helper
+    # must never roll back the caller's transaction.
+    if not _ai_config_table_present(db):
         return cfg
+    row = db.get(AIConfig, AI_CONFIG_SINGLETON_ID)
     if row is None:
         return cfg
     for field in EDITABLE_FIELDS:

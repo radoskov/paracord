@@ -107,3 +107,32 @@ def test_blocked_request_is_rejected(tmp_path: Path) -> None:
     asyncio.run(agent_ops.fulfil_requests(config, state, client))
     assert client.rejected == [local_id]
     assert client.teleported == []
+
+
+def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch) -> None:
+    """An unchanged file is not re-hashed on rescan (E7 incremental scan)."""
+    config = _folder(tmp_path, "index_only")
+    state = AgentState(tmp_path / "state.sqlite3")
+    client = FakeClient()
+    asyncio.run(agent_ops.sync(config, state, client))  # first scan: hashes + caches mtime
+
+    calls = {"n": 0}
+    real_hash = agent_ops.build_manifest_item.__globals__["hash_file"]
+
+    def counting_hash(path, chunk_size=1024 * 1024):
+        calls["n"] += 1
+        return real_hash(path, chunk_size)
+
+    monkeypatch.setattr("paperracks_agent.manifest.hash_file", counting_hash)
+    # Rescan with the same (unchanged) file → cache hit, no hashing.
+    agent_ops.scan_managed(config, state)
+    assert calls["n"] == 0
+
+    # Modify the file (content + mtime change) → it is re-hashed.
+    pdf = tmp_path / "papers" / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4\nCHANGED CONTENT")
+    import os
+
+    os.utime(pdf, (pdf.stat().st_atime, pdf.stat().st_mtime + 10))
+    agent_ops.scan_managed(config, state)
+    assert calls["n"] == 1

@@ -37,6 +37,30 @@ AUTH_DEP = Depends(require_authenticated_user)
 
 # Work columns a metadata assertion can be promoted into (mirrors the enrichment service).
 _PROMOTABLE_FIELDS = {"title", "abstract", "year", "venue", "doi"}
+
+# In-process debounce for `paper.viewed` audit events (E2): suppress a repeat view of the same
+# work by the same user within this window so browsing doesn't write a row per click.
+_VIEW_DEBOUNCE_S = 300.0
+_recent_views: dict[tuple[str, str], float] = {}
+
+
+def _should_record_view(user_id: uuid.UUID, work_id: uuid.UUID) -> bool:
+    import time
+
+    key = (str(user_id), str(work_id))
+    now = time.monotonic()
+    last = _recent_views.get(key)
+    if last is not None and now - last < _VIEW_DEBOUNCE_S:
+        return False
+    _recent_views[key] = now
+    if len(_recent_views) > 4096:  # bounded: drop entries older than the window
+        cutoff = now - _VIEW_DEBOUNCE_S
+        for k, ts in list(_recent_views.items()):
+            if ts < cutoff:
+                del _recent_views[k]
+    return True
+
+
 # Map editable Work attribute names → metadata-assertion field names (for per-field locking).
 _WORK_FIELD_TO_ASSERTION = {
     "canonical_title": "title",
@@ -301,18 +325,23 @@ def related_papers(
 
 @router.get("/{work_id}", response_model=WorkRead)
 def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> Work:
-    """Return one work (records a `paper.viewed` audit event, §7.6)."""
+    """Return one work, recording a debounced `paper.viewed` audit event (§7.6).
+
+    The event (an INSERT + COMMIT) is skipped when the same user viewed the same work within
+    ``_VIEW_DEBOUNCE_S`` (E2), so normal browsing doesn't write a row per click.
+    """
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    record_event(
-        db,
-        "paper.viewed",
-        actor_user_id=actor.id,
-        entity_type="work",
-        entity_id=str(work_id),
-    )
-    db.commit()
+    if _should_record_view(actor.id, work_id):
+        record_event(
+            db,
+            "paper.viewed",
+            actor_user_id=actor.id,
+            entity_type="work",
+            entity_id=str(work_id),
+        )
+        db.commit()
     return work
 
 
