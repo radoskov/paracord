@@ -16,6 +16,7 @@
   import ExportDialog from '../components/ExportDialog.svelte';
   import Modal from '../components/Modal.svelte';
   import PaperTable from '../components/PaperTable.svelte';
+  import ShelfPicker from '../components/ShelfPicker.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
   import {
     type ColumnId,
@@ -26,7 +27,7 @@
     visibleColumnDefs,
   } from '../lib/columns';
   import { pendingLibrarySearch, selectedPaperIds, selectedWorkId } from '../lib/selection';
-  import { canEdit, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canEdit, canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -58,6 +59,8 @@
   // multi-select
   let selectedIds: string[] = [];
   let batchStatus: ReadingStatus | '' = '';
+  let showBatchPutInto = false;
+  let batchPutIntoShelfId = '';
 
   // New-paper dialog
   let showNew = false;
@@ -395,6 +398,17 @@
     }, `Set ${ids.length} paper(s) to “${status}”`);
   }
 
+  async function batchPutInto(): Promise<void> {
+    if (!batchPutIntoShelfId) return;
+    const shelfId = batchPutIntoShelfId;
+    const ids = [...selectedIds];
+    await run(async () => {
+      for (const id of ids) await client.addWorkToShelf(shelfId, id);
+      showBatchPutInto = false;
+      batchPutIntoShelfId = '';
+    }, `Added ${ids.length} paper(s) to shelf`);
+  }
+
   function parseIdentifierUrl(url: string): { doi?: string; arxiv_id?: string } {
     const value = url.trim();
     const arxiv = value.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5}(?:v\d+)?)/i);
@@ -589,6 +603,9 @@
             title={canModifySelected ? 'Delete the selected papers (their files stay in the library)' : batchHint}>Delete</button>
           <button type="button" class="secondary" on:click={batchReextract} disabled={loading || !canModifySelected}
             title={canModifySelected ? 'Queue GROBID extraction for every attached file of the selected papers' : batchHint}>Re-extract</button>
+          <button type="button" class="secondary" on:click={() => (showBatchPutInto = true)}
+            disabled={loading || !$canManageStructure}
+            title={$canManageStructure ? 'Add all selected papers to a shelf' : INSUFFICIENT_ROLE}>Put all into…</button>
           <label class="inline">Set status
             <select bind:value={batchStatus} on:change={batchSetStatus} disabled={loading || !canModifySelected}
               title={canModifySelected ? 'Set the reading status for all selected papers' : batchHint}>
@@ -683,6 +700,21 @@
     onApply={applyColumns}
     onClose={() => (showColumns = false)}
   />
+{/if}
+
+{#if showBatchPutInto}
+  <Modal title="Put into a shelf" onClose={() => (showBatchPutInto = false)}>
+    <div class="putinto">
+      <p class="muted">Add {selectedIds.length} selected paper(s) to a shelf.</p>
+      <ShelfPicker {client} bind:value={batchPutIntoShelfId} modifiableOnly />
+      <div class="putinto-actions">
+        <button type="button" class="secondary" on:click={() => (showBatchPutInto = false)}
+          title="Close without adding">Cancel</button>
+        <button type="button" on:click={batchPutInto} disabled={loading || !batchPutIntoShelfId}
+          title={batchPutIntoShelfId ? 'Add the selected papers to the chosen shelf' : 'Choose a shelf first'}>Add</button>
+      </div>
+    </div>
+  </Modal>
 {/if}
 
 <style>
@@ -852,6 +884,17 @@
   .actions {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .putinto {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .putinto-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
   }
 
   @media (max-width: 1000px) {

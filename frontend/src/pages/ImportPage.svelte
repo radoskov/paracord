@@ -212,6 +212,10 @@
   </div>
 
   <div class="card wide">
+    <BatchImport {client} />
+  </div>
+
+  <div class="card wide">
     <h2>Paste BibTeX</h2>
     <p class="muted">Paste one or more BibTeX entries; duplicates (by DOI/title) are skipped.</p>
     <form on:submit|preventDefault={importBibtex} class="stack">
@@ -242,10 +246,6 @@
       <button type="submit" disabled={!cslContent.trim() || loading}
         title={cslContent.trim() ? 'Import the pasted CSL JSON items' : 'Paste CSL JSON first'}>Import CSL JSON</button>
     </form>
-  </div>
-
-  <div class="card wide">
-    <BatchImport {client} />
   </div>
 </section>
 

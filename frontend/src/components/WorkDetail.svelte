@@ -678,6 +678,9 @@
           title={canModify
             ? 'Re-extract keywords for this paper from its text'
             : INSUFFICIENT_ROLE}>Keyword</button>
+        <button type="button" class="secondary" on:click={() => (showPutInto = true)}
+          disabled={loading || !$canManageStructure}
+          title={$canManageStructure ? 'Add this paper to a shelf' : INSUFFICIENT_ROLE}>Put into…</button>
         <!-- future: Summarize button goes here (same Actions sub-row). -->
       </div>
       {#if canModify && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
@@ -831,11 +834,6 @@
 
   <details on:toggle={(e) => e.currentTarget.open && !locationsLoaded && loadLocations()}>
     <summary>Organization — where is this?</summary>
-    <div class="org-head">
-      <button type="button" class="secondary" on:click={() => (showPutInto = true)}
-        disabled={loading || !$canManageStructure}
-        title={$canManageStructure ? 'Add this paper to a shelf' : INSUFFICIENT_ROLE}>Put into…</button>
-    </div>
     {#if !locationsLoaded}
       <p class="hintline">Open to see which shelves (and racks) this paper is on.</p>
     {:else if locations.length === 0}
@@ -1764,12 +1762,6 @@
     color: #1d4ed8;
     font-size: 0.85rem;
     font-weight: 700;
-  }
-
-  .org-head {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
   }
 
   .locations {

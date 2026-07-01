@@ -192,6 +192,7 @@
     gap: 1rem;
     /* Account + Password stack in the main column; Roles & access is pinned top-right. */
     grid-template-columns: minmax(0, 1fr) 17rem;
+    margin: 0 auto;
     max-width: 52rem;
   }
   .account {

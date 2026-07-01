@@ -266,9 +266,25 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .row input,
+  .row select {
+    min-width: 0;
+  }
+
+  .list {
+    min-width: 0;
+  }
+
   .create {
     display: grid;
     gap: 0.5rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .create input,
+  .create select {
+    min-width: 0;
+    width: 100%;
   }
 
   .head-actions {
