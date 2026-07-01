@@ -216,6 +216,11 @@ def test_link_as_version_creates_version_and_relinks_file(db_session, editor: Us
     assert link.work_id == target.id
     assert link.version_id == version.id
     assert link.warning_state == "work_has_multiple_files"
+    # Phase B6: both works join the target's version group (target is the representative).
+    db_session.refresh(target)
+    db_session.refresh(source)
+    assert target.version_group_id == target.id
+    assert source.version_group_id == target.id
 
 
 def test_mark_duplicate_file_marks_file_links(db_session, editor: User) -> None:

@@ -5,6 +5,8 @@
     ApiClient,
     type CitationGraphResponse,
     type GraphNodeMode,
+    type GraphScopeType,
+    type ImportBatch,
     type Rack,
     type ScopeSummaryResponse,
     type SemanticSearchItem,
@@ -13,13 +15,14 @@
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
 
   let shelves: Shelf[] = [];
   let racks: Rack[] = [];
-  let scopeType: 'library' | 'shelf' | 'rack' = 'library';
+  let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let topics: Topic[] = [];
   let summary: ScopeSummaryResponse | null = null;
@@ -28,10 +31,21 @@
   let semanticDegraded = false;
   let loading = false;
   let message = '';
+  // Phase B6 graph scopes.
+  let graphSearchQuery = '';
+  let batches: ImportBatch[] = [];
+  let batchId = '';
+  // Live count of the library multi-selection (mirrored from LibraryPage).
+  let selectedCount = 0;
+  $: selectedCount = $selectedPaperIds.length;
 
   onMount(async () => {
     await run(async () => {
-      [shelves, racks] = await Promise.all([client.listShelves(), client.listRacks()]);
+      [shelves, racks, batches] = await Promise.all([
+        client.listShelves(),
+        client.listRacks(),
+        client.listImportBatches().catch(() => [] as ImportBatch[]),
+      ]);
     });
   });
 
@@ -39,6 +53,11 @@
     scopeType,
     scopeId: scopeType === 'library' ? null : scopeId || null,
   };
+
+  // The classic scopes (library/shelf/rack) drive Topics, Summary and Export; the Phase B6 graph
+  // scopes only apply to the citation graph.
+  $: isClassicScope =
+    scopeType === 'library' || scopeType === 'shelf' || scopeType === 'rack';
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -53,8 +72,37 @@
     }
   }
 
-  async function loadGraph(nodeMode: GraphNodeMode): Promise<CitationGraphResponse> {
-    return client.citationGraph({ scopeType: scope.scopeType, scopeId: scope.scopeId, nodeMode });
+  async function loadGraph(
+    nodeMode: GraphNodeMode,
+    collapseVersions: boolean,
+  ): Promise<CitationGraphResponse> {
+    if (scopeType === 'search_result') {
+      // Run the metadata search now and pass the resulting ids as the explicit work set.
+      const works = await client.listWorks({ q: graphSearchQuery });
+      return client.citationGraph({
+        scopeType,
+        workIds: works.map((w) => w.id),
+        nodeMode,
+        collapseVersions,
+      });
+    }
+    if (scopeType === 'selected_papers') {
+      return client.citationGraph({
+        scopeType,
+        workIds: $selectedPaperIds,
+        nodeMode,
+        collapseVersions,
+      });
+    }
+    if (scopeType === 'import_batch') {
+      return client.citationGraph({ scopeType, scopeId: batchId || null, nodeMode, collapseVersions });
+    }
+    return client.citationGraph({
+      scopeType: scope.scopeType,
+      scopeId: scope.scopeId,
+      nodeMode,
+      collapseVersions,
+    });
   }
 
   async function modelTopics(): Promise<void> {
@@ -84,7 +132,18 @@
     });
   }
 
-  $: scopeReady = scopeType === 'library' || !!scopeId;
+  $: scopeReady =
+    scopeType === 'library'
+      ? true
+      : scopeType === 'shelf' || scopeType === 'rack'
+        ? !!scopeId
+        : scopeType === 'search_result'
+          ? !!graphSearchQuery.trim()
+          : scopeType === 'selected_papers'
+            ? selectedCount > 0
+            : scopeType === 'import_batch'
+              ? !!batchId
+              : false;
 </script>
 
 <section class="layout">
@@ -98,6 +157,9 @@
         <option value="library">Whole library</option>
         <option value="shelf">A shelf</option>
         <option value="rack">A rack</option>
+        <option value="search_result">Search result</option>
+        <option value="selected_papers">Selected papers</option>
+        <option value="import_batch">From import batch</option>
       </select>
       {#if scopeType === 'shelf'}
         <select bind:value={scopeId} aria-label="Shelf" title="Choose the shelf to analyse">
@@ -109,10 +171,33 @@
           <option value="">Choose a rack…</option>
           {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
         </select>
+      {:else if scopeType === 'search_result'}
+        <input
+          bind:value={graphSearchQuery}
+          aria-label="Graph search query"
+          placeholder="Search papers to graph…"
+          title="Papers matching this search are graphed"
+        />
+      {:else if scopeType === 'selected_papers'}
+        <span class="selcount" aria-label="Selected papers count">{selectedCount} paper{selectedCount === 1 ? '' : 's'} selected</span>
+      {:else if scopeType === 'import_batch'}
+        <select bind:value={batchId} aria-label="Import batch" title="Choose the import batch to graph">
+          <option value="">Choose an import batch…</option>
+          {#each batches as batch (batch.id)}
+            <option value={batch.id}>{batch.input_type} · {batch.work_count ?? 0} paper{(batch.work_count ?? 0) === 1 ? '' : 's'} · {new Date(batch.created_at).toLocaleDateString()}</option>
+          {/each}
+        </select>
       {/if}
     </div>
-    {#if !scopeReady}<p class="hintline">Pick a {scopeType} to run analyses on it.</p>{/if}
-    {#if scopeReady}
+    {#if !scopeReady}
+      <p class="hintline">
+        {#if scopeType === 'search_result'}Type a search to graph its results.
+        {:else if scopeType === 'selected_papers'}Select papers in the Library tab to graph them.
+        {:else if scopeType === 'import_batch'}Pick an import batch to graph its papers.
+        {:else}Pick a {scopeType} to run analyses on it.{/if}
+      </p>
+    {/if}
+    {#if scopeReady && isClassicScope}
       <div style="margin-top:0.6rem">
         <ExportDialog
           label={`this ${scopeType}`}
@@ -131,7 +216,7 @@
 
   <div class="card">
     <CitationGraph
-      label={scopeType === 'library' ? '· whole library' : `· selected ${scopeType}`}
+      label={scopeType === 'library' ? '· whole library' : `· ${scopeType.replace('_', ' ')}`}
       disabled={loading || !scopeReady}
       load={loadGraph}
     />
@@ -141,8 +226,8 @@
     <div class="card">
       <div class="head">
         <h2>Topics</h2>
-        <button type="button" on:click={modelTopics} disabled={loading || !scopeReady}
-          title={scopeReady ? 'Cluster the scope’s papers into keyword topics' : `Pick a ${scopeType} first`}>Model topics</button>
+        <button type="button" on:click={modelTopics} disabled={loading || !scopeReady || !isClassicScope}
+          title={isClassicScope ? (scopeReady ? 'Cluster the scope’s papers into keyword topics' : `Pick a ${scopeType} first`) : 'Topics work on a library, shelf or rack scope'}>Model topics</button>
       </div>
       {#if topics.length === 0}
         <p class="empty">No topics yet — click “Model topics”.</p>
@@ -158,8 +243,8 @@
     <div class="card">
       <div class="head">
         <h2>Scope summary</h2>
-        <button type="button" on:click={summarise} disabled={loading || !scopeReady}
-          title={scopeReady ? 'Generate an extractive summary across the scope’s abstracts' : `Pick a ${scopeType} first`}>Summarise</button>
+        <button type="button" on:click={summarise} disabled={loading || !scopeReady || !isClassicScope}
+          title={isClassicScope ? (scopeReady ? 'Generate an extractive summary across the scope’s abstracts' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarise</button>
       </div>
       {#if !summary}
         <p class="empty">No summary yet — click “Summarise”.</p>
@@ -239,6 +324,12 @@
 
   .scope .row {
     grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  }
+
+  .selcount {
+    align-self: center;
+    color: #64717f;
+    font-size: 0.9rem;
   }
 
   .plain {

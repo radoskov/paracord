@@ -81,6 +81,16 @@ def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=Non
     matched = 0
     skipped = 0
     added_to_shelf = 0
+    now = datetime.now(UTC)
+    # Create the batch up front so each new work can carry its import_batch_id (Phase B6).
+    batch = ImportBatch(
+        created_by_user_id=actor.id,
+        input_type="bibtex",
+        status="running",
+        started_at=now,
+    )
+    db.add(batch)
+    db.flush()
 
     def _add_to_shelf(work_id) -> None:
         nonlocal added_to_shelf
@@ -117,6 +127,7 @@ def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=Non
             work_type=entry.entry_type,
             canonical_metadata_source="bibtex",
             created_by_user_id=actor.id,
+            import_batch_id=batch.id,
         )
         db.add(work)
         db.flush()
@@ -136,20 +147,13 @@ def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=Non
         created += 1
         _add_to_shelf(work.id)
 
-    now = datetime.now(UTC)
     stats = {"entries": len(entries), "created": created, "matched": matched, "skipped": skipped}
     if target_shelf_id is not None:
         stats["added_to_shelf"] = added_to_shelf
         stats["target_shelf_id"] = str(target_shelf_id)
-    batch = ImportBatch(
-        created_by_user_id=actor.id,
-        input_type="bibtex",
-        status="completed",
-        stats=stats,
-        started_at=now,
-        finished_at=now,
-    )
-    db.add(batch)
+    batch.status = "completed"
+    batch.stats = stats
+    batch.finished_at = datetime.now(UTC)
     db.flush()
     record_event(
         db,

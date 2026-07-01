@@ -6,6 +6,10 @@ export const selectedWorkId = writable<string | null>(null);
 export const selectedShelfId = writable<string | null>(null);
 export const selectedRackId = writable<string | null>(null);
 
+// The library multi-selection (ids of checked papers), mirrored from LibraryPage so other tabs
+// (e.g. the Insights "Selected papers" graph scope) can operate on the current selection.
+export const selectedPaperIds = writable<string[]>([]);
+
 // A search to run in the Library tab, set from elsewhere (e.g. clicking a keyword chip in a paper's
 // detail). LibraryPage consumes this once on mount/subscription and resets it to null.
 export interface PendingSearch {

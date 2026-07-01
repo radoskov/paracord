@@ -5,7 +5,10 @@
 
   export let label = '';
   export let disabled = false;
-  export let load: (nodeMode: GraphNodeMode) => Promise<CitationGraphResponse> = async () => ({
+  export let load: (
+    nodeMode: GraphNodeMode,
+    collapseVersions: boolean,
+  ) => Promise<CitationGraphResponse> = async () => ({
     nodes: [],
     edges: [],
     summary: {},
@@ -14,6 +17,7 @@
   export let onOpenWork: ((workId: string) => void) | null = null;
 
   let nodeMode: GraphNodeMode = 'local_only';
+  let collapseVersions = false;
   let renderMode: 'graph' | 'list' = 'graph';
   let layout = 'cose';
   let graph: CitationGraphResponse | null = null;
@@ -27,7 +31,7 @@
   async function build(): Promise<void> {
     busy = true;
     try {
-      graph = await load(nodeMode);
+      graph = await load(nodeMode, collapseVersions);
     } finally {
       busy = false;
     }
@@ -169,6 +173,15 @@
         <option value="local_only">Local only</option>
         <option value="include_external">Include external</option>
       </select>
+      <label class="toggle" title="Merge papers linked as versions of one another into one node">
+        <input
+          type="checkbox"
+          bind:checked={collapseVersions}
+          disabled={disabled || busy}
+          aria-label="Collapse works linked as versions into one node"
+        />
+        Collapse versions
+      </label>
       <button type="button" on:click={build} disabled={disabled || busy}
         title="Build the citation graph for the chosen scope">Build graph</button>
     </div>
@@ -222,6 +235,15 @@
 
   .seg {
     display: flex;
+  }
+
+  .toggle {
+    align-items: center;
+    color: #21303d;
+    display: flex;
+    font-size: 0.85rem;
+    font-weight: 700;
+    gap: 0.35rem;
   }
 
   .seg button {

@@ -19,13 +19,19 @@ AUTH_DEP = Depends(require_authenticated_user)
 
 
 class GraphScope(BaseModel):
-    type: Literal["library", "shelf", "rack"]
+    # Kept in sync with citation_graph.ScopeType (Phase B7 appends ``saved_filter``).
+    type: Literal["library", "shelf", "rack", "search_result", "selected_papers", "import_batch"]
     id: uuid.UUID | None = None
+    # Explicit work set for ``search_result``/``selected_papers`` (the frontend runs the search and
+    # passes the resulting ids). Clamped to the caller's visible set in build_citation_graph, so an
+    # attacker's arbitrary ids only ever intersect what they may already see.
+    work_ids: list[uuid.UUID] | None = None
 
 
 class CitationGraphRequest(BaseModel):
     scope: GraphScope
     node_mode: Literal["local_only", "include_external"] = "local_only"
+    collapse_versions: bool = False
 
 
 class GraphNodeRead(BaseModel):
@@ -68,7 +74,9 @@ def citation_graph(
             db,
             scope_type=payload.scope.type,
             scope_id=payload.scope.id,
+            work_ids=payload.scope.work_ids,
             node_mode=payload.node_mode,
+            collapse_versions=payload.collapse_versions,
             visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:

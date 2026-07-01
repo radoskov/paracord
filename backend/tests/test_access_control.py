@@ -306,6 +306,32 @@ def test_http_graph_and_export_never_leak_hidden(client, db, make_user, scope_pa
         assert "leak-secret" not in r.json()["content"]
 
 
+def test_http_graph_selected_papers_scope_clamps_unseen_ids(client, db, make_user):
+    """A reader passing an unseen work id to the explicit-set scope gets it clamped away (Phase B6).
+
+    The frontend passes arbitrary ids for search_result/selected_papers; the visible-set clamp is the
+    real enforcement, so an attacker's ids only intersect what they may already see.
+    """
+    reader = make_user(f"b6-clamp-{uuid.uuid4().hex[:6]}", role="reader")
+    visible = _work(db, title="b6-visible")  # loose (open) -> visible
+    private_s = _shelf(db, name=f"b6-priv-{uuid.uuid4().hex[:6]}", access_level="private")
+    hidden = _work(db, title="b6-hidden-secret")
+    _add_to_shelf(db, private_s, hidden)
+    body = {
+        "scope": {
+            "type": "selected_papers",
+            "work_ids": [str(visible.id), str(hidden.id)],
+        }
+    }
+    r = client.post("/api/v1/graphs/citation", headers=_headers(db, reader), json=body)
+    assert r.status_code == 200
+    ids = {n["work_id"] for n in r.json()["nodes"]}
+    labels = {n["label"] for n in r.json()["nodes"]}
+    assert str(hidden.id) not in ids
+    assert "b6-hidden-secret" not in labels
+    assert str(visible.id) in ids
+
+
 def test_http_semantic_search_filters_hidden(client, db, make_user):
     reader = make_user("h-sem-reader", role="reader")
     private_s = _shelf(db, name="sem-priv", access_level="private")

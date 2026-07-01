@@ -45,6 +45,21 @@ class Work(Base):
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
+    # The import batch that created this work (Phase B6). NULL = manually created / pre-B6 /
+    # non-batch origin. FK SET NULL so deleting a batch never cascades to the paper. Backs the
+    # ``import_batch`` citation-graph scope.
+    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("import_batches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Soft version-grouping key (Phase B6): all works linked as versions of one another share the
+    # representative (canonical) work's id here. NULL = ungrouped. No FK — it is a plain grouping key
+    # (a work may point at its own id). Backs graph version-collapse.
+    version_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

@@ -24,7 +24,7 @@
     saveColumnPrefs,
     visibleColumnDefs,
   } from '../lib/columns';
-  import { pendingLibrarySearch, selectedWorkId } from '../lib/selection';
+  import { pendingLibrarySearch, selectedPaperIds, selectedWorkId } from '../lib/selection';
   import { canEdit, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -344,6 +344,9 @@
 
   $: canCreate = !!(newTitle.trim() || newDoi.trim() || newArxiv.trim() || newUrl.trim());
   $: allSelected = works.length > 0 && selectedIds.length === works.length;
+  // Mirror the multi-selection into the cross-tab store so the Insights "Selected papers" graph
+  // scope can operate on the current selection.
+  $: selectedPaperIds.set(selectedIds);
   // Batch actions modify papers, so only enable them when the user may modify EVERY selected paper
   // (contributor → own papers only; editor+ → any visible paper). The server enforces this too.
   $: canModifySelected =

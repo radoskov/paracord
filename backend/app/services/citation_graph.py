@@ -21,7 +21,11 @@ from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.utils.normalization import normalize_doi
 
-ScopeType = Literal["library", "shelf", "rack"]
+# Flat tuple of scope kinds; Phase B7 appends ``saved_filter`` here and a matching ``_scope_works``
+# branch with no other restructuring. ``search_result`` and ``selected_papers`` resolve from an
+# explicit ``work_ids`` list (mirroring export's selection/search); ``import_batch`` resolves from
+# ``Work.import_batch_id == scope_id``.
+ScopeType = Literal["library", "shelf", "rack", "search_result", "selected_papers", "import_batch"]
 NodeMode = Literal["local_only", "include_external"]
 
 
@@ -55,7 +59,9 @@ def build_citation_graph(
     *,
     scope_type: ScopeType,
     scope_id: uuid.UUID | None = None,
+    work_ids: list[uuid.UUID] | None = None,
     node_mode: NodeMode = "local_only",
+    collapse_versions: bool = False,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> CitationGraph:
     """Build the citation graph for a scope.
@@ -64,9 +70,19 @@ def build_citation_graph(
     resolution targets: only works in this set are graphed. ``None`` means unrestricted
     (admin/owner). The scope set and the local resolution index are both filtered, so a hidden
     work can never surface as a node, an edge target, or a resolved-title leak.
+
+    ``work_ids`` supplies the explicit set for the ``search_result``/``selected_papers`` scopes
+    (mirroring export's selection/search); ``scope_id`` supplies the batch id for ``import_batch``.
+    When ``collapse_versions`` is set, works sharing a ``version_group_id`` are merged into a single
+    representative node in a post-build pass (edges re-aggregated, version-to-version self-loops
+    dropped).
     """
     scope_works = _scope_works(
-        db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids
+        db,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        work_ids=work_ids,
+        visible_ids=visible_ids,
     )
     if not scope_works:
         return CitationGraph(summary=_summary([], [], scope_count=0, unresolved=0))
@@ -124,11 +140,89 @@ def build_citation_graph(
         for (source, target), weight in edge_weights.items()
     ]
     node_list = list(nodes.values())
-    return CitationGraph(
+    graph = CitationGraph(
         nodes=node_list,
         edges=edges,
         summary=_summary(node_list, edges, scope_count=len(scope_works), unresolved=unresolved),
     )
+    if collapse_versions:
+        graph = _collapse_versions(db, graph, visible_ids=visible_ids)
+    return graph
+
+
+def _collapse_versions(
+    db: Session, graph: CitationGraph, *, visible_ids: set[uuid.UUID] | None = None
+) -> CitationGraph:
+    """Merge works that share a ``version_group_id`` into a single representative node.
+
+    Pure post-pass over an already-built graph: builds a ``node id -> representative id`` map, drops
+    non-representative local nodes, remaps every edge's endpoints to their representative, re-sums
+    weights per ``(source, target)`` (deduping parallel edges), and drops any resulting self-loop
+    (the same self-citation rule applied post-collapse — a version citing another version of itself
+    is not a real citation). External nodes always map to themselves (``work_id is None``). Only
+    visible works participate, so the pass can never surface a hidden work.
+    """
+    # Representative per group: the work whose ``version_group_id`` equals its own id; if none such
+    # (e.g. a representative outside the graph/visibility), fall back to the deterministic min member
+    # id so collapse is stable and never picks a hidden work.
+    grouped = db.execute(
+        select(Work.id, Work.version_group_id).where(Work.version_group_id.is_not(None))
+    ).all()
+    members_by_group: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    self_reps: dict[uuid.UUID, uuid.UUID] = {}
+    for work_id, group_id in grouped:
+        if visible_ids is not None and work_id not in visible_ids:
+            continue
+        members_by_group[group_id].append(work_id)
+        if work_id == group_id:
+            self_reps[group_id] = work_id
+    rep_of_work: dict[str, str] = {}
+    for group_id, members in members_by_group.items():
+        rep = self_reps.get(group_id, min(members))
+        for member in members:
+            rep_of_work[str(member)] = str(rep)
+
+    def group_of(node_id: str) -> str:
+        # External nodes and ungrouped locals map to themselves.
+        return rep_of_work.get(node_id, node_id)
+
+    # Count only groups that actually had more than one member present in the graph (i.e. a real
+    # collapse happened for that group).
+    members_in_graph: dict[str, int] = defaultdict(int)
+    for node in graph.nodes:
+        rep = group_of(node.id)
+        if rep in rep_of_work.values() or node.id in rep_of_work:
+            members_in_graph[rep] += 1
+    collapsed_groups = {rep for rep, count in members_in_graph.items() if count > 1}
+
+    # Keep representative + external + ungrouped nodes; drop non-representative group members.
+    kept_nodes = [node for node in graph.nodes if group_of(node.id) == node.id]
+
+    edge_weights: dict[tuple[str, str], int] = defaultdict(int)
+    edge_resolution: dict[tuple[str, str], str] = {}
+    for edge in graph.edges:
+        source = group_of(edge.source)
+        target = group_of(edge.target)
+        if source == target:
+            continue  # drop version-to-version (and other resulting) self-loops
+        key = (source, target)
+        edge_weights[key] += edge.weight
+        # Prefer a local match if any contributing edge resolved locally.
+        if key not in edge_resolution or edge.resolution == "local_match":
+            edge_resolution[key] = edge.resolution
+    edges = [
+        GraphEdge(source=s, target=t, weight=w, resolution=edge_resolution[(s, t)])
+        for (s, t), w in edge_weights.items()
+    ]
+
+    summary = _summary(
+        kept_nodes,
+        edges,
+        scope_count=graph.summary.get("scope_work_count", len(kept_nodes)),
+        unresolved=graph.summary.get("unresolved_reference_count", 0),
+    )
+    summary["collapsed_version_groups"] = len(collapsed_groups)
+    return CitationGraph(nodes=kept_nodes, edges=edges, summary=summary)
 
 
 def _scope_works(
@@ -136,8 +230,12 @@ def _scope_works(
     *,
     scope_type: ScopeType,
     scope_id: uuid.UUID | None,
+    work_ids: list[uuid.UUID] | None = None,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> dict[uuid.UUID, Work]:
+    # Flat if/elif so each scope is self-contained and Phase B7 can append ``saved_filter`` as one
+    # more branch. Every branch feeds the single ``visible_ids`` clamp at the tail — the one place
+    # visibility is enforced, so no branch can leak a hidden work as a node/target.
     if scope_type == "library":
         works = db.scalars(select(Work)).all()
     elif scope_type == "shelf":
@@ -158,6 +256,17 @@ def _scope_works(
             .where(RackShelf.rack_id == scope_id)
             .distinct()
         ).all()
+    elif scope_type in ("search_result", "selected_papers"):
+        # An explicit set of works (a search result set, or the library multi-selection). The
+        # frontend runs the search and passes the resulting ids, mirroring export's
+        # selection/search — an empty set is a valid (empty) scope, not an error.
+        if not work_ids:
+            return {}
+        works = db.scalars(select(Work).where(Work.id.in_(work_ids))).all()
+    elif scope_type == "import_batch":
+        if scope_id is None:
+            raise ValueError("scope id is required for an import-batch graph")
+        works = db.scalars(select(Work).where(Work.import_batch_id == scope_id)).all()
     else:
         raise ValueError(f"Unsupported graph scope: {scope_type}")
     if visible_ids is not None:

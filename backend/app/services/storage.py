@@ -165,7 +165,9 @@ def import_server_folder(
                 continue
             _assert_inside_root(root, pdf_path)
             stats["seen"] += 1
-            result = _import_pdf_path(db, source=source, pdf_path=pdf_path)
+            result = _import_pdf_path(
+                db, source=source, pdf_path=pdf_path, import_batch_id=batch.id
+            )
             stats["created_files"] += int(result["created_file"])
             stats["created_works"] += int(result["created_work"])
             stats["existing_files"] += int(not result["created_file"])
@@ -217,7 +219,13 @@ def _existing_location(db: Session, source_id: uuid.UUID, pdf_path: Path) -> Loc
     )
 
 
-def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str, bool]:
+def _import_pdf_path(
+    db: Session,
+    *,
+    source: Source,
+    pdf_path: Path,
+    import_batch_id: uuid.UUID | None = None,
+) -> dict[str, bool]:
     now = datetime.now(UTC)
 
     # Incremental scan (E7): if this path was already imported and the file hasn't been modified
@@ -290,6 +298,7 @@ def _import_pdf_path(db: Session, *, source: Source, pdf_path: Path) -> dict[str
             canonical_metadata_source="filename",
             arxiv_id=raw_arxiv_id,
             arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
+            import_batch_id=import_batch_id,
         )
         db.add(work)
         db.flush()
@@ -436,21 +445,9 @@ def import_uploaded_pdf(
         db, filename=filename, pdf_bytes=pdf_bytes, settings=settings
     )
 
-    if created_file:
-        title = _title_from_filename(Path(filename))
-        raw_arxiv_id = _arxiv_id_from_filename(Path(filename))
-        work = Work(
-            canonical_title=title,
-            normalized_title=normalize_title(title),
-            canonical_metadata_source="filename",
-            arxiv_id=raw_arxiv_id,
-            arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
-        )
-        db.add(work)
-        db.flush()
-        db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
-
+    # Create the batch before the work so the work can carry its import_batch_id (Phase B6).
     batch = ImportBatch(
+        created_by_user_id=actor.id,
         source_id=None,
         input_type="upload",
         status="complete",
@@ -465,6 +462,22 @@ def import_uploaded_pdf(
     )
     db.add(batch)
     db.flush()
+
+    if created_file:
+        title = _title_from_filename(Path(filename))
+        raw_arxiv_id = _arxiv_id_from_filename(Path(filename))
+        work = Work(
+            canonical_title=title,
+            normalized_title=normalize_title(title),
+            canonical_metadata_source="filename",
+            arxiv_id=raw_arxiv_id,
+            arxiv_base_id=_arxiv_base_id(raw_arxiv_id),
+            import_batch_id=batch.id,
+        )
+        db.add(work)
+        db.flush()
+        db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+
     record_event(
         db,
         "import.upload",

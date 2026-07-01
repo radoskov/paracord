@@ -74,6 +74,37 @@ describe('ApiClient request contracts', () => {
     expect(init.body).toBeInstanceOf(FormData);
   });
 
+  it('serializes citationGraph work_ids and collapse_versions', async () => {
+    fetchMock = vi.fn(async () => jsonResponse({ nodes: [], edges: [], summary: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new ApiClient('http://api.test', 'token-123');
+
+    await client.citationGraph({
+      scopeType: 'selected_papers',
+      workIds: ['w1', 'w2'],
+      nodeMode: 'local_only',
+      collapseVersions: true,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/api/v1/graphs/citation');
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      scope: { type: 'selected_papers', id: null, work_ids: ['w1', 'w2'] },
+      node_mode: 'local_only',
+      collapse_versions: true,
+    });
+  });
+
+  it('requests the import-batches list from the right URL', async () => {
+    const client = new ApiClient('http://api.test', 'token-123');
+
+    await client.listImportBatches();
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://api.test/api/v1/imports/batches');
+  });
+
   it('keeps the supported citation export format set stable', () => {
     expect(EXPORT_FORMATS.map((format) => format.value).sort()).toEqual([
       'biblatex',

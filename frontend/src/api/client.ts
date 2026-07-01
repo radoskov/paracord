@@ -79,7 +79,13 @@ export interface TopicModelResponse {
   topics: Topic[];
 }
 
-export type GraphScopeType = 'library' | 'shelf' | 'rack';
+export type GraphScopeType =
+  | 'library'
+  | 'shelf'
+  | 'rack'
+  | 'search_result'
+  | 'selected_papers'
+  | 'import_batch';
 export type GraphNodeMode = 'local_only' | 'include_external';
 
 export interface GraphNode {
@@ -244,12 +250,14 @@ export interface FileRecord {
 export interface ImportBatch {
   id: string;
   source_id: string | null;
+  created_by_user_id?: string | null;
   input_type: string;
   status: string;
   stats: Record<string, number> | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  work_count?: number;
 }
 
 export interface CitationContext {
@@ -1627,15 +1635,27 @@ export class ApiClient {
   async citationGraph(payload: {
     scopeType: GraphScopeType;
     scopeId?: string | null;
+    workIds?: string[];
     nodeMode: GraphNodeMode;
+    collapseVersions?: boolean;
   }): Promise<CitationGraphResponse> {
     return this.request<CitationGraphResponse>('/api/v1/graphs/citation', {
       method: 'POST',
       body: {
-        scope: { type: payload.scopeType, id: payload.scopeId ?? null },
+        scope: {
+          type: payload.scopeType,
+          id: payload.scopeId ?? null,
+          work_ids: payload.workIds ?? null,
+        },
         node_mode: payload.nodeMode,
+        collapse_versions: payload.collapseVersions ?? false,
       },
     });
+  }
+
+  /** Import batches for the graph's import-batch scope picker (access-filtered, newest first). */
+  async listImportBatches(): Promise<ImportBatch[]> {
+    return this.request<ImportBatch[]>('/api/v1/imports/batches');
   }
 
   async exportCitations(payload: {

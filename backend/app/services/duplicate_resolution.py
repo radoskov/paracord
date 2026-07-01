@@ -189,6 +189,11 @@ def _link_work_candidate_as_version(
     _move_file_links_to_work(db, source_work=source, target_work=target, version=version)
     source.work_type = "version"
     source.canonical_metadata_source = "linked_as_version"
+    # Phase B6 version grouping: the surviving target is the group representative (its
+    # version_group_id equals its own id); the source joins that group. Idempotent when the target
+    # is already a representative of an existing group.
+    target.version_group_id = target.version_group_id or target.id
+    source.version_group_id = target.version_group_id
     source.updated_at = datetime.now(UTC)
     target.updated_at = datetime.now(UTC)
 

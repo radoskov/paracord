@@ -323,6 +323,16 @@ def commit_drafts(
     skipped = 0
     added_to_shelf = 0
     now = datetime.now(UTC)
+    # Create the batch up front so each newly minted work can carry its import_batch_id (Phase B6);
+    # stats are finalized after the loop.
+    batch = ImportBatch(
+        created_by_user_id=actor.id,
+        input_type=input_type,
+        status="running",
+        started_at=now,
+    )
+    db.add(batch)
+    db.flush()
 
     def _add_to_shelf(work_id: uuid.UUID) -> None:
         nonlocal added_to_shelf
@@ -361,6 +371,7 @@ def commit_drafts(
             abstract=draft.abstract,
             canonical_metadata_source=input_type,
             created_by_user_id=actor.id,
+            import_batch_id=batch.id,
         )
         db.add(work)
         db.flush()
@@ -391,15 +402,9 @@ def commit_drafts(
     }
     if target_shelf_id is not None:
         stats["target_shelf_id"] = str(target_shelf_id)
-    batch = ImportBatch(
-        created_by_user_id=actor.id,
-        input_type=input_type,
-        status="completed",
-        stats=stats,
-        started_at=now,
-        finished_at=now,
-    )
-    db.add(batch)
+    batch.status = "completed"
+    batch.stats = stats
+    batch.finished_at = now
     db.flush()
     record_event(
         db,

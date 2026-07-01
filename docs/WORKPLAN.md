@@ -767,7 +767,7 @@ Phases for the approved B-items. Sequential impl (shared backend/frontend + git)
   wired into the extraction pipeline + Docker extraction image (tesseract/ghostscript). Add an
   `extraction`/`ocr_backend` config + admin AI/config toggle to activate full-ML OCR
   (Nougat/Marker) when installed, with availability + install guidance (NO runtime web-UI pip).
-- [ ] **Phase B6 — graph scopes + version-collapse.** Add `search_result`/`selected_papers`/
+- [x] **Phase B6 — graph scopes + version-collapse.** Add `search_result`/`selected_papers`/
   `import_batch` scopes to the citation graph + a version-collapse control (collapse version-linked
   works into one node). Backend `citation_graph.py` + CitationGraph.svelte controls.
 - [ ] **Phase B7 — saved filters.** New `SavedFilter` model (name, query, owner) + CRUD endpoints +

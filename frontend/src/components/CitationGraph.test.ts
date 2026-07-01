@@ -23,7 +23,7 @@ describe('CitationGraph', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
 
-    expect(load).toHaveBeenCalledWith('local_only');
+    expect(load).toHaveBeenCalledWith('local_only', false);
     // Summary renders regardless of render mode.
     expect(screen.getByText(/2 nodes/)).toBeTruthy();
 
@@ -31,5 +31,16 @@ describe('CitationGraph', () => {
     await fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
     expect(screen.getByText('Citing Paper')).toBeTruthy();
     expect(screen.getByText('Cited Paper')).toBeTruthy();
+  });
+
+  it('passes the version-collapse toggle through to load', async () => {
+    const load = vi.fn(async () => GRAPH);
+    render(CitationGraph, { label: '· whole library', load });
+
+    const toggle = screen.getByLabelText(/collapse works linked as versions/i);
+    await fireEvent.click(toggle);
+    await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
+
+    expect(load).toHaveBeenCalledWith('local_only', true);
   });
 });

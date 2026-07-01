@@ -7,10 +7,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_contributor, require_min_role
+from app.api.deps import require_authenticated_user, require_contributor, require_min_role
 from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
@@ -37,6 +37,8 @@ DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 # Paper-creation floor (Phase H/J): contributor+ may import (per-object scoping still applies).
 CONTRIBUTOR_DEP = Depends(require_contributor)
+# Read-only listing floor: any authenticated user (rows are access-filtered to their own).
+AUTH_DEP = Depends(require_authenticated_user)
 
 
 class FolderImportCreate(BaseModel):
@@ -54,12 +56,15 @@ class BibtexImportCreate(BaseModel):
 class ImportBatchRead(BaseModel):
     id: uuid.UUID
     source_id: uuid.UUID | None = None
+    created_by_user_id: uuid.UUID | None = None
     input_type: str
     status: str
     stats: dict | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    # Number of works currently attributed to this batch (Phase B6 picker label).
+    work_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -500,6 +505,48 @@ def batch_commit(
     db.commit()
     db.refresh(batch)
     return batch
+
+
+@router.get("/batches", response_model=list[ImportBatchRead])
+def list_import_batches(
+    limit: int = 100,
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> list[ImportBatchRead]:
+    """List import batches (newest first) for the graph's import-batch scope picker.
+
+    Access-filtered (Phase B6/H): owner/admin see all batches; everyone else sees only batches they
+    created. Each row carries the current work count for a human-readable picker label.
+    """
+    from app.models.work import Work
+    from app.services import access
+
+    stmt = select(ImportBatch).order_by(ImportBatch.created_at.desc()).limit(limit)
+    if not access.is_admin_or_owner(actor):
+        stmt = stmt.where(ImportBatch.created_by_user_id == actor.id)
+    batches = list(db.scalars(stmt).all())
+    counts = dict(
+        db.execute(
+            select(Work.import_batch_id, func.count(Work.id))
+            .where(Work.import_batch_id.in_([b.id for b in batches]))
+            .group_by(Work.import_batch_id)
+        ).all()
+    )
+    return [
+        ImportBatchRead(
+            id=b.id,
+            source_id=b.source_id,
+            created_by_user_id=b.created_by_user_id,
+            input_type=b.input_type,
+            status=b.status,
+            stats=b.stats,
+            created_at=b.created_at,
+            started_at=b.started_at,
+            finished_at=b.finished_at,
+            work_count=counts.get(b.id, 0),
+        )
+        for b in batches
+    ]
 
 
 @router.get("/{batch_id}", response_model=ImportBatchRead)
