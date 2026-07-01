@@ -708,3 +708,20 @@ def test_topic_graph_clamps_to_visible_papers(db):
     graph = build_topic_graph(db, scope_type="library", visible_ids=visible)
     node_ids = {uuid.UUID(n.id) for n in graph.nodes}
     assert node_ids == visible  # the third paper is excluded
+
+
+def test_can_modify_shelf_precomputed_matches_per_query(db, make_user):
+    """The list-optimized precomputed variant must agree with can_modify_shelf (audit #3b)."""
+    librarian = make_user("cmp-lib", role="librarian")
+    open_s = _shelf(db, name="cmp-open", access_level="open")
+    private_s = _shelf(db, name="cmp-priv", access_level="private")
+    granted = access.granted_target_ids(db, librarian, "shelf")
+    for shelf in (open_s, private_s):
+        assert access.can_modify_shelf_precomputed(
+            librarian, shelf, granted_shelf_ids=granted
+        ) == access.can_modify_shelf(db, librarian, shelf)
+    # after a grant on the private shelf, both agree it's now modifiable
+    _grant(db, librarian, "shelf", private_s.id)
+    granted = access.granted_target_ids(db, librarian, "shelf")
+    assert access.can_modify_shelf_precomputed(librarian, private_s, granted_shelf_ids=granted)
+    assert access.can_modify_shelf(db, librarian, private_s)

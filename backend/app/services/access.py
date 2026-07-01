@@ -157,6 +157,18 @@ def can_modify_shelf(db: Session, user: User, shelf: Shelf) -> bool:
     )
 
 
+def can_modify_shelf_precomputed(user: User, shelf: Shelf, *, granted_shelf_ids: set) -> bool:
+    """``can_modify_shelf`` using a pre-fetched grant set — no per-shelf query.
+
+    For listing many shelves the grant/group sets depend only on the user, so the caller fetches
+    ``granted_target_ids(db, user, 'shelf')`` once and reuses it here (audit: efficiency #3b)."""
+    if is_admin_or_owner(user):
+        return True
+    if not role_at_least(user.role, Role.LIBRARIAN):
+        return False
+    return (shelf.access_level or "open") == "open" or shelf.id in granted_shelf_ids
+
+
 # --------------------------------------------------------------------------------------------------
 # Paper (Work) SEE + MODIFY — most-permissive governing shelf, loose = open
 # --------------------------------------------------------------------------------------------------

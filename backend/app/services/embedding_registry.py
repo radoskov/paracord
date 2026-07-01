@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import re
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.embedding_registry import EmbeddingModelRegistry
@@ -134,8 +135,10 @@ def register(
     if existing is not None:
         return (existing.column_name, existing.dim)
 
-    active_count = len(active_models(db))
-    if active_count >= MAX_EMBEDDING_MODELS:
+    # Cap on TOTAL provisioned columns (inactive models keep their vec_* column too), so the cap
+    # actually bounds physical columns on work_chunks (audit: stability #3).
+    total_count = int(db.scalar(select(func.count()).select_from(EmbeddingModelRegistry)) or 0)
+    if total_count >= MAX_EMBEDDING_MODELS:
         raise ValueError(
             f"Embedding-model cap reached ({MAX_EMBEDDING_MODELS}). Delete an unused model first."
         )
@@ -165,18 +168,30 @@ def register(
     except Exception as exc:  # noqa: BLE001 - older pgvector without HNSW: exact scan still works
         logger.warning("Could not build HNSW index on work_chunks.%s (%s).", column, exc)
 
-    db.add(
-        EmbeddingModelRegistry(
-            slug=slug,
-            model_name=model_name,
-            provider=provider,
-            raw_model=raw_model,
-            dim=int(dim),
-            column_name=column,
-            active=True,
+    # Insert the registry row in a SAVEPOINT so a concurrent reindex that registered the same model
+    # first (unique model_name) loses the race gracefully: we roll back just the insert and reuse
+    # the winner's row instead of failing the whole job (audit: stability #1). The DDL above is
+    # IF NOT EXISTS, so it's already idempotent across the racing jobs.
+    try:
+        with db.begin_nested():
+            db.add(
+                EmbeddingModelRegistry(
+                    slug=slug,
+                    model_name=model_name,
+                    provider=provider,
+                    raw_model=raw_model,
+                    dim=int(dim),
+                    column_name=column,
+                    active=True,
+                )
+            )
+    except IntegrityError:
+        winner = db.scalar(
+            select(EmbeddingModelRegistry).where(EmbeddingModelRegistry.model_name == model_name)
         )
-    )
-    db.flush()
+        if winner is not None:
+            return (winner.column_name, winner.dim)
+        raise
     return (column, dim)
 
 

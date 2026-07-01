@@ -317,7 +317,15 @@ def _mean_pooled_by_column(
         ),
         {"ids": [str(w) for w in work_ids]},
     ).all()
-    return {uuid.UUID(str(wid)): _parse_pgvector(v) for wid, v in rows}
+    pooled: dict[uuid.UUID, list[float]] = {}
+    for wid, v in rows:
+        try:
+            pooled[uuid.UUID(str(wid))] = _parse_pgvector(v)
+        except (ValueError, TypeError):
+            # Malformed pooled vector → skip; the caller falls back to embedding the doc text
+            # rather than aborting the whole topic-model / graph request (audit: stability #5).
+            continue
+    return pooled
 
 
 def _paper_dense_vectors(

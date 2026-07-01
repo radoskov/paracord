@@ -104,9 +104,18 @@ def list_shelves(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[ShelfRead
     """List shelves the caller may see, each annotated with the caller's ``can_modify`` flag."""
     stmt = access.visible_shelves_query(db, actor).order_by(Shelf.name)
     shelves = list(db.scalars(stmt).all())
+    # Fetch the caller's shelf grants ONCE (they don't vary per shelf) instead of ~2 queries per
+    # shelf inside can_modify_shelf (audit: efficiency #3b).
+    granted = (
+        set() if access.is_admin_or_owner(actor) else access.granted_target_ids(db, actor, "shelf")
+    )
     return [
         ShelfRead.model_validate(shelf).model_copy(
-            update={"can_modify": access.can_modify_shelf(db, actor, shelf)}
+            update={
+                "can_modify": access.can_modify_shelf_precomputed(
+                    actor, shelf, granted_shelf_ids=granted
+                )
+            }
         )
         for shelf in shelves
     ]

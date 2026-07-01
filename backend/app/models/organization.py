@@ -86,7 +86,13 @@ class ShelfWork(Base):
         Uuid(as_uuid=True), ForeignKey("shelves.id", ondelete="CASCADE"), primary_key=True
     )
     work_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), primary_key=True
+        # index=True: the composite PK leads with shelf_id, but access-control filters query by
+        # work_id alone (governing-shelf / visible-works checks on nearly every request), which the
+        # PK can't serve — a standalone index backs those. (Audit: efficiency #4)
+        Uuid(as_uuid=True),
+        ForeignKey("works.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
     )
     added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -109,7 +115,12 @@ class RackShelf(Base):
         Uuid(as_uuid=True), ForeignKey("racks.id", ondelete="CASCADE"), primary_key=True
     )
     shelf_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("shelves.id", ondelete="CASCADE"), primary_key=True
+        # index=True: rack-scope joins filter by shelf_id, which the (rack_id, shelf_id) PK can't
+        # serve leading-column-wise. (Audit: efficiency #4)
+        Uuid(as_uuid=True),
+        ForeignKey("shelves.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
     )
     added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),

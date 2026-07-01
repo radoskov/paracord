@@ -190,7 +190,8 @@ def list_models(*, ollama_url: str) -> list[dict]:
 def pull_model(provider: str, model: str, *, ollama_url: str) -> dict:
     """Download/pull a model. Blocks until done (run inside an RQ job). Raises on failure."""
     if provider == "ollama":
-        with httpx.Client(timeout=None) as client:
+        # A finite (generous) timeout so a hung daemon can't tie up the worker forever (audit).
+        with httpx.Client(timeout=3600) as client:
             # stream=false → the daemon completes the pull before responding.
             response = client.post(
                 f"{ollama_url.rstrip('/')}/api/pull", json={"name": model, "stream": False}
