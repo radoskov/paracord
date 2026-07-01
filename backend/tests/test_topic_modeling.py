@@ -589,3 +589,78 @@ def test_bertopic_backend_degrades_gracefully_on_tiny_scopes(db_session) -> None
     assert len(result["topics"]) == 1
     assert result["topics"][0]["work_count"] == 1
     assert result["topics"][0]["keywords"]
+
+
+# --- B1: embedding backend clusters on dense vectors, labels from TF-IDF ---
+
+
+def test_parse_pgvector_and_l2_helpers() -> None:
+    from app.services.topic_modeling import _l2, _parse_pgvector
+
+    assert _parse_pgvector("[1,2,3]") == [1.0, 2.0, 3.0]
+    assert _parse_pgvector("[]") == []
+    unit = _l2([3.0, 4.0])
+    assert abs((unit[0] ** 2 + unit[1] ** 2) - 1.0) < 1e-9
+    assert _l2([0.0, 0.0]) == [0.0, 0.0]
+
+
+def test_embedding_backend_falls_back_to_tfidf_on_hash_bow(db_session) -> None:
+    """With only the hash-BOW baseline, the embedding backend clusters via TF-IDF and says so."""
+    shelf = _shelf_with(
+        db_session,
+        [
+            ("Neural machine translation", "attention transformer encoder decoder"),
+            ("Deep learning for vision", "convolution image classification network"),
+        ],
+    )
+    result = model_topics(
+        db_session, scope_type="shelf", scope_id=shelf.id, max_topics=2, backend="embedding"
+    )
+    assert result["backend"] == "embedding"
+    assert result["used_embeddings"] is False  # honest: no real model available
+
+
+def test_embedding_backend_uses_dense_vectors_when_model_active(db_session, monkeypatch) -> None:
+    """An injected real embedding provider makes the backend cluster on dense vectors."""
+    from app.services import embeddings as emb
+
+    class _FakeProvider:
+        model_name = "st:fake-dense"
+
+        def embed(self, text: str):
+            # Two well-separated regions so clustering has real dense signal.
+            return [1.0, 0.0, 0.0] if "translation" in text.lower() else [0.0, 1.0, 0.0]
+
+    monkeypatch.setattr(
+        emb,
+        "resolve_embedding_provider",
+        lambda *a, **k: emb.ResolvedEmbeddingProvider(
+            _FakeProvider(), "sentence_transformers", False
+        ),
+    )
+    # Titles chosen so the deterministic k-means seeds (title-order positions 0 and 2) land in
+    # different dense clusters: sorted casefold order is [trans, trans, vision, vision].
+    shelf = _shelf_with(
+        db_session,
+        [
+            ("Alpha translation model", "translation attention"),
+            ("Beta translation model", "translation alignment"),
+            ("Yak vision model", "vision convolution"),
+            ("Zeta vision model", "vision detection"),
+        ],
+    )
+    result = model_topics(
+        db_session, scope_type="shelf", scope_id=shelf.id, max_topics=2, backend="embedding"
+    )
+    assert result["used_embeddings"] is True
+    assert result["embedding_model"] == "st:fake-dense"
+    assert len(result["topics"]) == 2
+    # The two translation papers cluster together, apart from the two vision papers.
+    by_title = _topic_assignments_by_title(db_session, result["model_id"])
+    assert (
+        by_title["Alpha translation model"]["topic_id"]
+        == by_title["Beta translation model"]["topic_id"]
+    )
+    assert (
+        by_title["Alpha translation model"]["topic_id"] != by_title["Yak vision model"]["topic_id"]
+    )

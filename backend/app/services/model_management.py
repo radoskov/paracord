@@ -66,13 +66,13 @@ def detect_providers(*, ollama_url: str) -> dict:
             "tfidf": {"available": True, "note": "Default, dependency-free."},
             "embedding": {
                 "available": True,
-                "note": "Built-in deterministic TF-IDF clustering "
-                "(does not use embedding vectors yet).",
+                "note": "Clusters on dense embedding vectors when a real embedding model is active; "
+                "falls back to TF-IDF for the hash-BOW baseline.",
             },
             "bertopic": {
                 "available": True,
-                "note": "BERTopic is not installed — using the built-in deterministic TF-IDF "
-                "topic model (same results as 'tfidf', with richer metadata).",
+                "note": "BERTopic is not installed — using the embedding backend (dense clustering "
+                "when a real model is active); real BERTopic is deferred.",
             },
         },
         # Extraction / OCR backends. Keyed by the ``ocr_backend`` enum (none|ocrmypdf|full_ml) so

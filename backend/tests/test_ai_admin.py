@@ -52,13 +52,13 @@ def test_providers_detection_and_reindex_status(client, auth_headers, monkeypatc
     assert body["embedding"]["ollama"]["available"] is False
     assert body["embedding"]["ollama"]["note"]
 
-    # The topic backends are honest: BERTopic is not installed, and both non-default backends are
-    # the built-in TF-IDF stand-in (neither uses embedding vectors).
+    # The topic backends are honest: BERTopic is deferred/not installed, and the embedding backend
+    # clusters on dense vectors when a real model is active (else TF-IDF fallback).
     assert body["bertopic_installed"] is False
     bertopic_note = body["topic"]["bertopic"]["note"]
     assert "not installed" in bertopic_note
-    assert "built-in" in bertopic_note.lower()
-    assert "does not use embedding vectors" in body["topic"]["embedding"]["note"]
+    assert "deferred" in bertopic_note.lower()
+    assert "embedding vectors" in body["topic"]["embedding"]["note"]
 
     status = client.get("/api/v1/admin/ai/reindex/status", headers=owner)
     assert status.status_code == 200

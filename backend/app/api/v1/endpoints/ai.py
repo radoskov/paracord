@@ -109,6 +109,9 @@ class TopicModelResponse(BaseModel):
     topics: list[TopicRead]
     outlier_work_ids: list[str] = []
     hierarchy: list[dict] | None = None
+    # True when the embedding backend clustered on real dense vectors; False = TF-IDF fallback
+    # (hash-BOW baseline) so the UI can be honest about which backend actually ran (B1).
+    used_embeddings: bool = False
 
 
 @router.post("/topics", response_model=TopicModelResponse)

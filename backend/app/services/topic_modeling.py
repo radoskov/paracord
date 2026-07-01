@@ -15,7 +15,7 @@ import re
 import uuid
 from collections import Counter
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from app.models.ai import TopicAssignment
@@ -285,6 +285,91 @@ _OUTLIER_THRESHOLD = 0.05
 REPRESENTATIVE_PER_TOPIC = 3
 
 
+def _is_postgres(db: Session) -> bool:
+    return db.bind is not None and db.bind.dialect.name == "postgresql"
+
+
+def _l2(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in vec))
+    return [x / norm for x in vec] if norm else vec
+
+
+def _parse_pgvector(value) -> list[float]:
+    """Parse pgvector's text form ('[a,b,c]') into a float list."""
+    s = str(value).strip().strip("[]")
+    return [float(x) for x in s.split(",")] if s else []
+
+
+def _mean_pooled_by_column(
+    db: Session, work_ids: list[uuid.UUID], column: str
+) -> dict[uuid.UUID, list[float]]:
+    """Mean-pool each work's stored chunk vectors under ``column`` (pgvector ``avg``), Postgres-only.
+
+    Reuses vectors already computed at index time instead of re-embedding the whole scope — the
+    difference between a topic-model button that returns in a moment vs. one that re-runs the model
+    over every paper. ``column`` is a registry-provisioned name (^vec_[a-z0-9_]+$)."""
+    if not work_ids or not re.match(r"^vec_[a-z0-9_]+$", column):
+        return {}
+    rows = db.execute(
+        text(
+            f"SELECT work_id, avg({column})::text FROM work_chunks "  # noqa: S608
+            f"WHERE {column} IS NOT NULL AND work_id = ANY(:ids) GROUP BY work_id"
+        ),
+        {"ids": [str(w) for w in work_ids]},
+    ).all()
+    return {uuid.UUID(str(wid)): _parse_pgvector(v) for wid, v in rows}
+
+
+def _paper_dense_vectors(
+    db: Session, works: list[Work], embedding_model: str | None
+) -> tuple[list[dict[int, float]] | None, str | None]:
+    """Dense per-paper vectors for embedding-based clustering (#21 / B1), as index-keyed dicts.
+
+    Selects the model set (a specific registered model, ``multimode`` across all active models, or
+    the configured default). Each model contributes a mean-pooled stored chunk vector when it has a
+    column on Postgres, else a freshly embedded document vector; per-model vectors are L2-normalized
+    and concatenated. Returns ``(None, None)`` when only the hash-BOW baseline is available — the
+    caller then falls back to TF-IDF clustering and reports it honestly."""
+    from app.services.embedding_registry import active_models, column_for, provider_for
+    from app.services.embeddings import (
+        DEFAULT_EMBEDDING_MODEL,
+        resolve_embedding_provider,
+    )
+    from app.services.hybrid_search import MULTIMODE
+
+    # Resolve the model set → list of (model_name, provider).
+    selected: list[tuple[str, object]] = []
+    if embedding_model == MULTIMODE:
+        selected = [(m.model_name, provider_for(db, m.model_name)) for m in active_models(db)]
+    elif embedding_model:
+        selected = [(embedding_model, provider_for(db, embedding_model))]
+    else:
+        provider = resolve_embedding_provider(db=db).provider
+        if provider.model_name != DEFAULT_EMBEDDING_MODEL:
+            selected = [(provider.model_name, provider)]
+    if not selected:
+        return None, None  # hash-BOW only → let the caller use the TF-IDF baseline
+
+    work_ids = [w.id for w in works]
+    per_work: dict[uuid.UUID, list[float]] = {w.id: [] for w in works}
+    for model_name, provider in selected:
+        col = column_for(db, model_name)
+        pooled = (
+            _mean_pooled_by_column(db, work_ids, col[0])
+            if col is not None and _is_postgres(db)
+            else {}
+        )
+        for work in works:
+            vec = pooled.get(work.id)
+            if not vec:  # no stored chunk vectors for this work/model → embed its text now
+                vec = provider.embed(_doc_text(work))
+            per_work[work.id].extend(_l2([float(x) for x in vec]))
+
+    label = MULTIMODE if embedding_model == MULTIMODE else selected[0][0]
+    vectors = [{i: x for i, x in enumerate(per_work[w.id])} for w in works]
+    return vectors, label
+
+
 def _model_topics_embedding(
     db: Session,
     *,
@@ -297,12 +382,13 @@ def _model_topics_embedding(
     hierarchical: bool,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> dict:
-    """BERTopic-style backend: deterministic clustering + representative works / coherence / etc.
+    """Embedding backend (B1): cluster papers by dense embedding vectors, label with TF-IDF terms.
 
-    Uses the same deterministic TF-IDF + k-means as the baseline for cluster assignment (so it is
-    reproducible and needs no heavy model), then layers the richer result shape on top. The
-    requested ``embedding_model`` is echoed for provenance; a real sentence-transformers/BERTopic
-    backend can replace the internals behind this same return contract.
+    Paper vectors are mean-pooled stored chunk vectors (or freshly embedded text) under the selected
+    model / multimode; k-means runs on those dense vectors while cluster **keywords** still come from
+    TF-IDF centroids (human-readable labels). With only the hash-BOW baseline available it falls back
+    to TF-IDF clustering and reports ``used_embeddings=False`` so the result is honest, not silently
+    lexical. ``bertopic`` reuses this path (real BERTopic is deferred).
     """
     model_id = f"{backend}:{scope_type}:{scope_id or 'all'}"
     works = _ordered_works(
@@ -319,9 +405,16 @@ def _model_topics_embedding(
             model_id, scope_type, scope_id, backend, embedding_model, topics=[], work_count=0
         )
 
-    vectors = _tfidf([tokens for _, tokens in documents])
+    # Labels always come from TF-IDF (human-readable terms); clustering uses dense embedding
+    # vectors when a real model is available, else falls back to the TF-IDF vectors themselves.
+    tfidf_vectors = _tfidf([tokens for _, tokens in documents])
+    dense_vectors, resolved_model = _paper_dense_vectors(
+        db, [w for w, _ in documents], embedding_model
+    )
+    used_embeddings = dense_vectors is not None
+    cluster_vectors = dense_vectors if used_embeddings else tfidf_vectors
     k = max(1, min(max_topics, len(documents)))
-    assignments = _kmeans(vectors, k)
+    assignments = _kmeans(cluster_vectors, k)
 
     topics: list[dict] = []
     outliers: list[str] = []
@@ -331,14 +424,19 @@ def _model_topics_embedding(
         members = [i for i, cluster in enumerate(assignments) if cluster == topic_id]
         if not members:
             continue
-        centroid = _centroid([vectors[i] for i in members])
-        centroids[topic_id] = centroid
-        scored = sorted(members, key=lambda i: _cosine(vectors[i], centroid), reverse=True)
-        coherence = sum(_cosine(vectors[i], centroid) for i in members) / len(members)
+        cluster_centroid = _centroid([cluster_vectors[i] for i in members])
+        label_centroid = _centroid([tfidf_vectors[i] for i in members])
+        centroids[topic_id] = label_centroid  # hierarchy is over the label (term) space
+        scored = sorted(
+            members, key=lambda i: _cosine(cluster_vectors[i], cluster_centroid), reverse=True
+        )
+        coherence = sum(_cosine(cluster_vectors[i], cluster_centroid) for i in members) / len(
+            members
+        )
         topics.append(
             {
                 "topic_id": topic_id,
-                "keywords": _cluster_keywords(centroid),
+                "keywords": _cluster_keywords(label_centroid),
                 "work_count": len(members),
                 "representative_work_ids": [
                     str(documents[i][0].id) for i in scored[:REPRESENTATIVE_PER_TOPIC]
@@ -348,7 +446,7 @@ def _model_topics_embedding(
         )
         for i in members:
             work, _ = documents[i]
-            similarity = _cosine(vectors[i], centroid)
+            similarity = _cosine(cluster_vectors[i], cluster_centroid)
             if allow_outliers and similarity < _OUTLIER_THRESHOLD:
                 outliers.append(str(work.id))
             db.add(
@@ -368,11 +466,12 @@ def _model_topics_embedding(
         scope_type,
         scope_id,
         backend,
-        embedding_model,
+        resolved_model if used_embeddings else embedding_model,
         topics=topics,
         work_count=len(documents),
         outlier_work_ids=outliers,
         hierarchy=_topic_hierarchy(centroids) if hierarchical else None,
+        used_embeddings=used_embeddings,
     )
 
 
@@ -402,6 +501,7 @@ def _embedding_result(
     work_count,
     outlier_work_ids: list[str] | None = None,
     hierarchy: list[dict] | None = None,
+    used_embeddings: bool = False,
 ) -> dict:
     return {
         "model_id": model_id,
@@ -413,6 +513,8 @@ def _embedding_result(
         "topics": topics,
         "outlier_work_ids": outlier_work_ids or [],
         "hierarchy": hierarchy,
+        # True when clustering used real dense embeddings; False = TF-IDF fallback (honest flag).
+        "used_embeddings": used_embeddings,
     }
 
 
