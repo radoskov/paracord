@@ -12,6 +12,7 @@ and current CI), so it never breaks those. Run it with Postgres up via ``make te
 
 import os
 import uuid
+from pathlib import Path
 
 import app.models  # noqa: F401  — registers every model on Base.metadata
 import pytest
@@ -23,7 +24,9 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
-ALEMBIC_INI = "backend/alembic.ini"
+# Resolve relative to this file so the test works regardless of the process cwd
+# (backend/tests/ -> parents[2] is the repo root that contains backend/alembic.ini).
+ALEMBIC_INI = str(Path(__file__).resolve().parents[2] / "backend/alembic.ini")
 
 
 def _postgres_server_url() -> str | None:

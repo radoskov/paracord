@@ -4,6 +4,7 @@ import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -708,8 +709,13 @@ class CitationContextRead(BaseModel):
     source_tei_id: uuid.UUID | None = None
 
 
+# Enumerated annotation kinds (SPECIFICATION.md §8.8.5 / §9.3). Constrained at the API so invalid
+# types are rejected with 422 rather than persisted as free-form strings.
+AnnotationType = Literal["highlight", "note", "page_anchor", "citation_note", "tag_note"]
+
+
 class AnnotationCreate(BaseModel):
-    annotation_type: str
+    annotation_type: AnnotationType
     file_id: uuid.UUID | None = None
     version_id: uuid.UUID | None = None
     page: int | None = None
@@ -726,7 +732,7 @@ class AnnotationRead(BaseModel):
     page: int | None = None
     coordinates: dict | None = None
     selected_text: str | None = None
-    annotation_type: str
+    annotation_type: AnnotationType
     content_markdown: str | None = None
     created_by_user_id: uuid.UUID | None = None
     created_at: datetime

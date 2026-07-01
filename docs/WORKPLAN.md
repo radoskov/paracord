@@ -677,7 +677,7 @@ From a spec/roadmap/audit gap analysis. These are unambiguous completions/fixes 
 decision needed) — implemented directly. (Decision-requiring findings B1–B9 are tracked separately
 for maintainer discussion, NOT here.)
 
-- [ ] **Phase AC1 — spec-completion & hardening (backend).**
+- [x] **Phase AC1 — spec-completion & hardening (backend).**
   - A1: make the Postgres-gated tests cwd-independent — resolve `Config(...alembic.ini)` from
     `__file__`, not the relative literal `"backend/alembic.ini"` (`test_migration_parity.py`,
     `test_pg_integration.py`, `test_access_control.py` backfill test).

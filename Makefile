@@ -99,6 +99,21 @@ restore: ## Restore the database from a dump: make restore RESTORE=backups/db-YY
 	@gunzip -c $(RESTORE) | $(COMPOSE) exec -T postgres sh -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'
 	@echo "✅ restore complete"
 
+.PHONY: restore-dry-run
+restore-dry-run: ## Validate a dump + report what a restore WOULD change, without writing: make restore-dry-run RESTORE=backups/db-...sql.gz
+	@test -n "$(RESTORE)" || { echo 'Usage: make restore-dry-run RESTORE=backups/db-YYYYMMDD-HHMMSS.sql.gz'; exit 1; }
+	@test -f "$(RESTORE)" || { echo "❌ dump not found: $(RESTORE)"; exit 1; }
+	@echo "DRY RUN — no changes will be written."
+	@echo "Dump file:      $(RESTORE)"
+	@echo -n "Gzip integrity: "; gzip -t "$(RESTORE)" && echo "OK" || { echo "FAILED"; exit 1; }
+	@echo -n "Target DB:      "; $(COMPOSE) exec -T postgres sh -c 'echo "$$POSTGRES_DB (user $$POSTGRES_USER)"' 2>/dev/null || echo "(postgres not running — start it to resolve the target DB)"
+	@echo "Looks like a pg dump: "; gunzip -c "$(RESTORE)" | head -n 40 | grep -Eq 'PostgreSQL database dump|CREATE TABLE|COPY |INSERT INTO|SET ' && echo "  yes — SQL statements detected" || { echo "  ❌ no recognizable pg dump statements in the header"; exit 1; }
+	@echo "Statements that WOULD run (counts from the dump):"
+	@gunzip -c "$(RESTORE)" | grep -cE '^CREATE TABLE'  | sed 's/^/  CREATE TABLE: /'
+	@gunzip -c "$(RESTORE)" | grep -cE '^COPY '         | sed 's/^/  COPY (bulk load): /'
+	@gunzip -c "$(RESTORE)" | grep -cE '^INSERT INTO '  | sed 's/^/  INSERT INTO: /'
+	@echo "✅ dry-run complete — dump is a valid, loadable pg dump. Re-run without -dry-run to apply."
+
 .PHONY: up-api
 up-api: init ## Start only runtime services needed by the API.
 	$(COMPOSE) up -d --build postgres redis api
@@ -251,14 +266,25 @@ precommit: ## Run all pre-commit hooks on all files.
 check-secrets: ## Run the repository secret scanner.
 	python scripts/check_secrets.py --all
 
+.PHONY: openapi
+openapi: init ## Regenerate the committed OpenAPI schema (backend/openapi.json) from app.openapi().
+	$(API_RUN_NODEPS) python scripts/dump_openapi.py
+
+.PHONY: openapi-check
+openapi-check: init ## Fail if backend/openapi.json is stale relative to app.openapi().
+	@$(API_RUN_NODEPS) sh -c 'python scripts/dump_openapi.py /tmp/openapi-check.json >/dev/null \
+		&& diff -u backend/openapi.json /tmp/openapi-check.json' \
+		&& echo "✅ OpenAPI schema is current" \
+		|| { echo "❌ backend/openapi.json is out of date — run '\''make openapi'\'' and commit."; exit 1; }
+
 .PHONY: check
-check: lint test test-migrations ## Host-local lint + Docker backend/agent tests + migration parity.
+check: lint test test-migrations openapi-check ## Host-local lint + Docker backend/agent tests + migration parity + OpenAPI freshness.
 
 .PHONY: ready
 ready: fix precommit check frontend-check ## Auto-fix, pre-commit, then full backend + frontend checks.
 
 .PHONY: ci
-ci: lint test test-migrations frontend-check check-secrets ## Mirror the CI checks locally.
+ci: lint test test-migrations openapi-check frontend-check check-secrets ## Mirror the CI checks locally.
 
 # ---------------------------------------------------------------------------
 # Application commands
@@ -333,6 +359,14 @@ bootstrap-admin: init ## Create the initial owner account inside the API contain
 .PHONY: reset-admin-password
 reset-admin-password: init ## Reset an owner/admin password from the server console.
 	$(API_RUN) python scripts/reset_admin_password.py
+
+.PHONY: list-users
+list-users: init ## List all user accounts from the server console (recovery tooling).
+	$(API_RUN) python scripts/list_users.py
+
+.PHONY: revoke-sessions
+revoke-sessions: init ## Revoke a user's active sessions from the server console: make revoke-sessions USER=alice
+	$(API_RUN) python scripts/revoke_sessions.py $(USER)
 
 .PHONY: source-archive
 source-archive: ## Create a source archive.

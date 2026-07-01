@@ -76,3 +76,23 @@ def test_annotation_delete_cross_work_404(client, auth_headers):
     assert wrong.status_code == 404
     still = client.delete(f"/api/v1/works/{w1}/annotations/{ann_id}", headers=h)
     assert still.status_code == 204
+
+
+# A6: annotation_type is constrained to the SPEC §8.8.5/§9.3 enumerated set.
+_VALID_ANNOTATION_TYPES = ("highlight", "note", "page_anchor", "citation_note", "tag_note")
+
+
+def test_annotation_type_valid_values_accepted(client, auth_headers):
+    h = auth_headers("editor")
+    w = _work(client, h, "Typed Paper")
+    for atype in _VALID_ANNOTATION_TYPES:
+        resp = _annotate(client, h, w, annotation_type=atype, content_markdown="body", page=1)
+        assert resp.status_code == 201, (atype, resp.text)
+        assert resp.json()["annotation_type"] == atype
+
+
+def test_annotation_type_invalid_value_rejected(client, auth_headers):
+    h = auth_headers("editor")
+    w = _work(client, h, "Rejecting Paper")
+    resp = _annotate(client, h, w, annotation_type="scribble", content_markdown="body", page=1)
+    assert resp.status_code == 422, resp.text

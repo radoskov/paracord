@@ -29,6 +29,19 @@ make up-infra                                     # or `make up`
 make restore RESTORE=backups/db-20260630-120000.sql.gz
 ```
 
+### Dry run first
+
+Before applying a restore (which drops and replaces existing data), validate the dump and see what
+it *would* do without writing anything:
+
+```bash
+make restore-dry-run RESTORE=backups/db-20260630-120000.sql.gz
+```
+
+This checks gzip integrity, confirms the file is a recognizable `pg_dump`, reports the target
+database name/user, and prints how many `CREATE TABLE` / `COPY` / `INSERT INTO` statements the dump
+contains — all **without** touching the database. Nothing is applied until you re-run `make restore`.
+
 `restore` pipes the dump into `psql`; objects are recreated and existing rows replaced. For the
 managed library, extract the tarball back into the volume:
 

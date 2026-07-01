@@ -428,12 +428,17 @@ def test_backfill_gave_every_existing_user_a_personal_group():
     """
     import os
     import uuid as _uuid
+    from pathlib import Path
 
     from alembic import command
     from alembic.config import Config
     from app.core.config import get_settings
     from sqlalchemy import create_engine, text
     from sqlalchemy.pool import NullPool
+
+    # Resolve relative to this file so it works regardless of cwd
+    # (backend/tests/ -> parents[2] is the repo root holding backend/alembic.ini).
+    alembic_ini = str(Path(__file__).resolve().parents[2] / "backend/alembic.ini")
 
     server_url = get_settings().database_url
     admin = create_engine(server_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
@@ -446,7 +451,7 @@ def test_backfill_gave_every_existing_user_a_personal_group():
     try:
         os.environ["DATABASE_URL"] = test_url
         get_settings.cache_clear()
-        cfg = Config("backend/alembic.ini")
+        cfg = Config(alembic_ini)
         # Migrate up to just before the access-control schema, seed users, then finish the chain.
         command.upgrade(cfg, "0027_web_find_settings")
         eng = create_engine(test_url, poolclass=NullPool)

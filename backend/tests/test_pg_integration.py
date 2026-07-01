@@ -7,6 +7,7 @@ Postgres is reachable, exactly like the migration-parity test; run via a stack w
 
 import os
 import uuid
+from pathlib import Path
 
 import app.models  # noqa: F401 — register models on Base.metadata
 import pytest
@@ -18,7 +19,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-ALEMBIC_INI = "backend/alembic.ini"
+# Resolve relative to this file so the test works regardless of the process cwd
+# (backend/tests/ -> parents[2] is the repo root that contains backend/alembic.ini).
+ALEMBIC_INI = str(Path(__file__).resolve().parents[2] / "backend/alembic.ini")
 
 
 @pytest.fixture(scope="module")
