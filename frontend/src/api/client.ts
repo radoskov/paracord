@@ -810,6 +810,12 @@ export class ApiClient {
     });
   }
 
+  async deleteMetadataAssertion(workId: string, assertionId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/metadata/${assertionId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async confirmMetadataField(workId: string, fieldName: string, confirmed: boolean): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}/metadata/confirm`, {
       method: 'POST',

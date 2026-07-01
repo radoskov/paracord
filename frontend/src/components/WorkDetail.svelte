@@ -457,6 +457,15 @@
     }, 'Canonical value updated');
   }
 
+  async function removeAssertion(assertionId: string): Promise<void> {
+    if (!window.confirm('Remove this metadata entry? This deletes the assertion for this paper.')) return;
+    await run(async () => {
+      const updated = await client.deleteMetadataAssertion(work.id, assertionId);
+      onUpdated(updated);
+      await loadDetail(updated);
+    }, 'Metadata entry removed');
+  }
+
   async function upload(): Promise<void> {
     if (!attachFile) return;
     const file = attachFile;
@@ -708,11 +717,18 @@
                   <button type="button" class="secondary small" on:click={() => selectCanonical(a.id)} disabled={loading || !canModify}
                     title={canModify ? 'Use this value as the canonical one' : INSUFFICIENT_ROLE}>Use this</button>
                 {/if}
+                <button type="button" class="secondary small danger-btn" on:click={() => removeAssertion(a.id)} disabled={loading || !canModify}
+                  title={canModify ? 'Remove this metadata entry (deletes the assertion for this paper)' : INSUFFICIENT_ROLE}>Remove</button>
               </div>
             {/each}
           </div>
         {/each}
       </div>
+      {#if canModify}
+        <p class="hintline">“Use this” makes an entry the canonical value; “Remove” deletes a wrong entry (if you remove the canonical one, the next most recent remaining entry becomes canonical).</p>
+      {:else}
+        <p class="hintline">{INSUFFICIENT_ROLE} — you can only change metadata on papers you created (or any paper as an editor or higher).</p>
+      {/if}
     {/if}
   </details>
 

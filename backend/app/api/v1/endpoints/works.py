@@ -1587,3 +1587,56 @@ def select_metadata_assertion(
     db.commit()
     db.refresh(work)
     return work
+
+
+@router.delete("/{work_id}/metadata/{assertion_id}", response_model=WorkRead)
+def delete_metadata_assertion(
+    work_id: uuid.UUID,
+    assertion_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> Work:
+    """Delete one metadata assertion so a user can resolve a conflict by removing wrong entries.
+
+    404 if the assertion is missing or belongs to a different paper. Gated like the other metadata
+    mutations (contributor floor + own-only ``_guard_modify_work``).
+
+    Canonical re-resolution: if the deleted assertion was the field's canonical one, the most
+    recently retrieved of the *remaining* assertions for that field is promoted to canonical (and
+    applied to the Work for promotable fields), mirroring ``select_metadata_assertion``. If no
+    assertions remain for the field, nothing is left canonical and the Work's column value is kept
+    as-is (we never blank out an existing title/abstract just because its provenance rows are gone).
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    assertion = db.get(MetadataAssertion, assertion_id)
+    if assertion is None or assertion.entity_type != "work" or assertion.entity_id != work_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assertion not found")
+
+    field_name = assertion.field_name
+    was_canonical = assertion.selected_as_canonical
+    db.delete(assertion)
+    db.flush()
+
+    if was_canonical:
+        # Re-pick a canonical from the remaining assertions of this field (newest retrieved), or
+        # leave the field with no canonical if none remain.
+        replacement = db.scalars(
+            select(MetadataAssertion)
+            .where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == work_id,
+                MetadataAssertion.field_name == field_name,
+            )
+            .order_by(MetadataAssertion.retrieved_at.desc())
+        ).first()
+        if replacement is not None:
+            replacement.selected_as_canonical = True
+            if field_name in _PROMOTABLE_FIELDS:
+                _apply_assertion_to_work(work, field_name, replacement.value, replacement.source)
+    work.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(work)
+    return work

@@ -248,6 +248,24 @@ def _resolve_paper_targets(jobs: list[dict]) -> None:
         logger.warning("Could not resolve paper targets for jobs: %s", exc)
 
 
+# Job statuses considered "active" (still in flight): these always sort above terminal jobs.
+_ACTIVE_STATUSES = {"started", "queued", "deferred", "scheduled"}
+
+
+def _order_jobs_newest_first(jobs: list[dict]) -> list[dict]:
+    """Order jobs so the newest activity is on top (item 9), mutating and returning ``jobs``.
+
+    Active jobs (running/queued) sort above terminal ones (finished/failed); within each band the
+    most recent job is first. Recency is ``ended_at`` when present (terminal jobs) else
+    ``enqueued_at`` — ISO-8601 timestamps compare chronologically as strings, and a missing
+    timestamp ("") sorts last on the descending pass. Two stable sorts: recency descending first,
+    then the active/terminal band, which preserves the recency order inside each band.
+    """
+    jobs.sort(key=lambda j: j.get("ended_at") or j.get("enqueued_at") or "", reverse=True)
+    jobs.sort(key=lambda j: 0 if j.get("status") in _ACTIVE_STATUSES else 1)
+    return jobs
+
+
 def queue_status(limit: int = 25) -> dict:
     """Introspect the RQ queue: counts, workers, and recent jobs.
 
@@ -324,14 +342,13 @@ def queue_status(limit: int = 25) -> dict:
                 )
             return rows
 
-        # Newest-relevant first: failures, then running, queued, recent finished.
         jobs = (
             _collect(queue.failed_job_registry.get_job_ids(), "failed")
             + _collect(queue.started_job_registry.get_job_ids(), "started")
             + _collect(queue.job_ids, "queued")
-            + _collect(list(reversed(queue.finished_job_registry.get_job_ids())), "finished")
+            + _collect(queue.finished_job_registry.get_job_ids(), "finished")
         )
-        jobs = jobs[:limit]
+        jobs = _order_jobs_newest_first(jobs)[:limit]
         _resolve_paper_targets(jobs)
         return {
             "available": True,

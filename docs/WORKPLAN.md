@@ -649,7 +649,7 @@ Batch of 10 findings. Resolved decisions:
 - [x] **Phase K — Topic & keyword buttons (item 7).** Per-paper **Topic** (BERTopic) + **Keyword**
   extraction buttons beside Enrich/Extract; show topics below the title, visually separated from
   keywords. WorkDetail + backend triggers (investigate existing infra).
-- [ ] **Phase L — Conflict remove (8) + job order (9).** Add "remove" (delete assertion) buttons to
+- [x] **Phase L — Conflict remove (8) + job order (9).** Add "remove" (delete assertion) buttons to
   metadata-conflict review (keep "use this"); reverse job list to newest-first.
 - [ ] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
   help/explanations (what each model does, when it's used, why something is disabled, BERTopic
