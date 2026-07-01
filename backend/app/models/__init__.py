@@ -8,6 +8,7 @@ from app.models.audit import AuditEvent
 from app.models.chunk import WorkChunk
 from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
+from app.models.embedding_registry import EmbeddingModelRegistry
 from app.models.file import File, FileSegment, FileWorkLink, Location
 from app.models.group import DefaultGrant, Group, GroupGrant, GroupMembership
 from app.models.import_root import ImportRoot
@@ -33,6 +34,7 @@ __all__ = [
     "DefaultGrant",
     "DuplicateCandidate",
     "Embedding",
+    "EmbeddingModelRegistry",
     "File",
     "FileSegment",
     "FileWorkLink",

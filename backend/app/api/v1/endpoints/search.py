@@ -61,6 +61,9 @@ class HybridSearchRequest(BaseModel):
     limit: int = 10
     # 'hybrid' fuses lexical (BM25F+) and semantic (dense) via RRF; the others use one engine.
     mode: Literal["lexical", "semantic", "hybrid"] = "hybrid"
+    # Which embeddings feed the semantic side: None → configured active model; a registered
+    # model_name → that model; "multimode" → RRF across all active models (#21).
+    embedding_model: str | None = None
 
 
 class HybridSearchItem(BaseModel):
@@ -102,15 +105,26 @@ def search(
     degraded = False
     provider = None
     if payload.mode in ("semantic", "hybrid"):
-        resolved = resolve_embedding_provider(db=db)
-        provider = resolved.provider
-        used = resolved.provider.model_name
-        requested = resolved.requested
-        degraded = resolved.degraded
-        reason = resolved.reason
+        if payload.embedding_model == "multimode":
+            used = requested = "multimode"
+        elif payload.embedding_model:
+            used = requested = payload.embedding_model
+        else:
+            resolved = resolve_embedding_provider(db=db)
+            provider = resolved.provider
+            used = resolved.provider.model_name
+            requested = resolved.requested
+            degraded = resolved.degraded
+            reason = resolved.reason
 
     hits = hybrid_search(
-        db, payload.q, visible_ids=visible, limit=limit, mode=payload.mode, provider=provider
+        db,
+        payload.q,
+        visible_ids=visible,
+        limit=limit,
+        mode=payload.mode,
+        provider=provider,
+        embedding_model=payload.embedding_model,
     )
     return HybridSearchResponse(
         query=payload.q,

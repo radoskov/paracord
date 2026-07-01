@@ -11,6 +11,8 @@ Storing per-chunk vectors is idempotent: re-embedding overwrites the work's chun
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -32,8 +34,16 @@ CHUNK_MODEL_COLUMNS: dict[str, tuple[str, int]] = {
 _ALLOWED_COLUMNS = {column for column, _dim in CHUNK_MODEL_COLUMNS.values()}
 
 
-def chunk_column_for(model_name: str) -> tuple[str, int] | None:
-    """Return ``(column, dim)`` for a model, or None if it has no dedicated chunk column."""
+def chunk_column_for(model_name: str, db: Session | None = None) -> tuple[str, int] | None:
+    """Return ``(column, dim)`` for a model, or None if it has no dedicated chunk column.
+
+    When a session is given, the dynamic ``embedding_model_registry`` is authoritative (falling back
+    to the static map when that table is absent, e.g. SQLite unit tests); without a session the
+    static map is used (back-compat for pure-unit callers)."""
+    if db is not None:
+        from app.services.embedding_registry import column_for  # noqa: PLC0415 (avoid import cycle)
+
+        return column_for(db, model_name)
     return CHUNK_MODEL_COLUMNS.get(model_name)
 
 
@@ -45,12 +55,23 @@ def _vec_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{x:.8g}" for x in vector) + "]"
 
 
-def _resolve_column(provider: EmbeddingProvider) -> str | None:
-    col = chunk_column_for(provider.model_name)
+def _resolve_column(
+    db: Session, provider: EmbeddingProvider, *, provision: bool = False
+) -> str | None:
+    """Resolve (and optionally auto-provision) the provider's chunk-vector column.
+
+    ``provision=True`` registers a real model that has no column yet (runtime DDL on Postgres), so
+    activating a freshly-pulled model + reindexing just works — the whole point of #21."""
+    col = chunk_column_for(provider.model_name, db)
+    if col is None and provision and _is_postgres(db):
+        from app.services.embedding_registry import register_provider  # noqa: PLC0415
+
+        col = register_provider(db, provider)
     if col is None:
         return None
     column, _dim = col
-    if column not in _ALLOWED_COLUMNS:  # unreachable given the registry; guards SQL interpolation
+    # Column names come from the registry slugify (^vec_[a-z0-9_]+$); guard SQL interpolation.
+    if not re.match(r"^vec_[a-z0-9_]+$", column):
         return None
     return column
 
@@ -62,7 +83,7 @@ def embed_work_chunks(db: Session, work: Work, *, provider: EmbeddingProvider | 
     the column for the work's chunks, so a re-chunk + re-embed is idempotent.
     """
     provider = provider or get_embedding_provider(db=db)
-    column = _resolve_column(provider)
+    column = _resolve_column(db, provider, provision=True)
     if column is None or not _is_postgres(db):
         return 0
     chunks = list(db.scalars(select(WorkChunk).where(WorkChunk.work_id == work.id)))
@@ -83,7 +104,7 @@ def backfill_chunk_embeddings(db: Session, *, provider: EmbeddingProvider | None
     once, after which switching back to it is instant (the column is retained).
     """
     provider = provider or get_embedding_provider(db=db)
-    column = _resolve_column(provider)
+    column = _resolve_column(db, provider, provision=True)
     if column is None or not _is_postgres(db):
         return 0
     rows = db.execute(
@@ -106,7 +127,7 @@ def chunk_embedding_status(db: Session, *, provider: EmbeddingProvider | None = 
     Postgres — i.e. semantic search is served by the document-level baseline, not chunk ANN.
     """
     provider = provider or get_embedding_provider(db=db)
-    col = chunk_column_for(provider.model_name)
+    col = chunk_column_for(provider.model_name, db)
     total = int(db.scalar(select(func.count()).select_from(WorkChunk)) or 0)
     if col is None or not _is_postgres(db):
         return {"model_name": provider.model_name, "column": None, "indexed": 0, "total": total}

@@ -22,6 +22,7 @@ from app.services.ai_config import (
 from app.services.audit import record_event
 from app.services.bm25_index import cache_info as lexical_cache_info
 from app.services.chunk_embeddings import chunk_embedding_status
+from app.services.embedding_registry import unregister_by_model_name
 from app.services.embeddings import get_embedding_provider
 from app.services.model_management import (
     delete_model,
@@ -95,6 +96,25 @@ def ai_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     return {"models": list_models(ollama_url=get_ai_config(db).ollama_url)}
 
 
+@router.get("/ai/embedding-models")
+def ai_embedding_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
+    """Registered embedding models (each with its own chunk-vector column) for the search selector.
+
+    The UI offers each of these plus a 'multimode' option (RRF across all) for semantic search and
+    clustering (#21)."""
+    from app.services.embedding_registry import MAX_EMBEDDING_MODELS, active_models
+
+    models = active_models(db)
+    return {
+        "models": [
+            {"model_name": m.model_name, "provider": m.provider, "dim": m.dim, "slug": m.slug}
+            for m in models
+        ],
+        "max_models": MAX_EMBEDDING_MODELS,
+        "multimode_available": len(models) > 1,
+    }
+
+
 @router.post("/ai/models/validate")
 def validate_embedding_model(payload: ModelRef, db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Check that an Ollama model is pulled and embedding-capable before selecting it (#2).
@@ -136,6 +156,11 @@ def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User =
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - surface daemon errors as a 502
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    # Also drop the model's chunk-vector column + HNSW index so a cap slot is freed (#21).
+    if payload.provider == "ollama":
+        from app.services.embeddings import normalize_ollama_model
+
+        unregister_by_model_name(db, f"ollama:{normalize_ollama_model(payload.model)}")
     record_event(
         db,
         "ai.model_deleted",

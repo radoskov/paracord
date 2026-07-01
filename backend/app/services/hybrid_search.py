@@ -36,6 +36,56 @@ class HybridHit:
     semantic_rank: int | None = None
 
 
+MULTIMODE = "multimode"
+
+
+def _rrf_paper_hits(rankings: list[list[PaperHit]], *, limit: int) -> list[PaperHit]:
+    """RRF-fuse several paper rankings into one (used for multimode: one ranking per model).
+
+    Rank-based fusion sidesteps the fact that different embedding models produce
+    non-comparable cosine scales; the best passage is carried from whichever ranking ranked the
+    paper highest."""
+    rank_maps = [{h.work.id: i + 1 for i, h in enumerate(r)} for r in rankings]
+    works: dict = {}
+    best_passage: dict = {}  # work_id -> (rank, passage, section) from its best-ranking model
+    for r in rankings:
+        for i, h in enumerate(r):
+            works.setdefault(h.work.id, h.work)
+            prev = best_passage.get(h.work.id)
+            if h.passage is not None and (prev is None or (i + 1) < prev[0]):
+                best_passage[h.work.id] = (i + 1, h.passage, h.section)
+    fused: list[PaperHit] = []
+    for work_id, work in works.items():
+        score = sum(1.0 / (RRF_K + rm[work_id]) for rm in rank_maps if work_id in rm)
+        _, passage, section = best_passage.get(work_id, (0, None, None))
+        fused.append(PaperHit(work=work, score=score, passage=passage, section=section))
+    fused.sort(key=lambda h: h.score, reverse=True)
+    return fused[:limit]
+
+
+def _multimode_semantic(
+    db: Session, query: str, *, visible_ids: set | None, limit: int
+) -> list[PaperHit]:
+    """Semantic ranking fused via RRF across every active registered embedding model (#21)."""
+    from app.services.embedding_registry import active_models, provider_for  # noqa: PLC0415
+
+    depth = max(limit, RRF_DEPTH)
+    rankings: list[list[PaperHit]] = []
+    for model in active_models(db):
+        try:
+            provider = provider_for(db, model.model_name)
+            rankings.append(
+                semantic_search_papers(
+                    db, query, visible_ids=visible_ids, limit=depth, provider=provider
+                )
+            )
+        except Exception:  # noqa: BLE001 - a broken/uninstalled model must not sink the others
+            continue
+    if not rankings:
+        return []
+    return _rrf_paper_hits(rankings, limit=limit)
+
+
 def _fuse(lexical: list[PaperHit], semantic: list[PaperHit], *, limit: int) -> list[HybridHit]:
     """Reciprocal Rank Fusion of two paper rankings (best passage taken from the semantic side)."""
     lexical_rank = {hit.work.id: i + 1 for i, hit in enumerate(lexical)}
@@ -72,6 +122,27 @@ def _fuse(lexical: list[PaperHit], semantic: list[PaperHit], *, limit: int) -> l
     return fused[:limit]
 
 
+def _semantic_ranking(
+    db: Session,
+    query: str,
+    *,
+    visible_ids: set | None,
+    limit: int,
+    provider: EmbeddingProvider | None,
+    embedding_model: str | None,
+) -> list[PaperHit]:
+    """Semantic paper ranking under a single model, a specific registered model, or multimode."""
+    if embedding_model == MULTIMODE:
+        return _multimode_semantic(db, query, visible_ids=visible_ids, limit=limit)
+    if provider is None and embedding_model:
+        from app.services.embedding_registry import provider_for  # noqa: PLC0415
+
+        provider = provider_for(db, embedding_model)
+    return semantic_search_papers(
+        db, query, visible_ids=visible_ids, limit=limit, provider=provider
+    )
+
+
 def hybrid_search(
     db: Session,
     query: str,
@@ -80,8 +151,13 @@ def hybrid_search(
     limit: int = 10,
     mode: str = "hybrid",
     provider: EmbeddingProvider | None = None,
+    embedding_model: str | None = None,
 ) -> list[HybridHit]:
-    """Rank papers for ``query`` in the requested mode, filtered to visible works. Read-only."""
+    """Rank papers for ``query`` in the requested mode, filtered to visible works. Read-only.
+
+    ``embedding_model`` selects which embeddings feed the semantic side: None → the configured
+    active model; a registered ``model_name`` → that model; ``"multimode"`` → RRF across all active
+    models (#21)."""
     if not (query or "").strip():
         return []
 
@@ -102,15 +178,25 @@ def hybrid_search(
                 semantic_rank=i + 1,
             )
             for i, h in enumerate(
-                semantic_search_papers(
-                    db, query, visible_ids=visible_ids, limit=limit, provider=provider
+                _semantic_ranking(
+                    db,
+                    query,
+                    visible_ids=visible_ids,
+                    limit=limit,
+                    provider=provider,
+                    embedding_model=embedding_model,
                 )
             )
         ]
     # hybrid: pull depth from each engine, then RRF-fuse.
     depth = max(limit, RRF_DEPTH)
     lexical = lexical_search_papers(db, query, visible_ids=visible_ids, limit=depth)
-    semantic = semantic_search_papers(
-        db, query, visible_ids=visible_ids, limit=depth, provider=provider
+    semantic = _semantic_ranking(
+        db,
+        query,
+        visible_ids=visible_ids,
+        limit=depth,
+        provider=provider,
+        embedding_model=embedding_model,
     )
     return _fuse(lexical, semantic, limit=limit)

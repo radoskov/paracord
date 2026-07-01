@@ -134,7 +134,7 @@ def semantic_search_papers(
     if not (query or "").strip():
         return []
     provider = provider or get_embedding_provider(db=db)
-    col = chunk_column_for(provider.model_name)
+    col = chunk_column_for(provider.model_name, db)
     if col is None or not _is_postgres(db):
         return _fallback_doc_level(
             db, query, visible_ids=visible_ids, limit=limit, provider=provider
