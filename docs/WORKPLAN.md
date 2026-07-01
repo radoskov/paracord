@@ -698,3 +698,44 @@ for maintainer discussion, NOT here.)
   `reader<contributor<editor<librarian<admin<owner` ladder is implemented (Phase H), not "target".
 
 Order: AC3 (doc-only) runs in parallel with AC1 (backend); AC2 after AC1 (shared backend tests/git).
+
+# Round: to-be-discussed (2026-07-01) — AWAITING MAINTAINER DECISIONS
+
+From the same gap analysis. These need a product/architecture decision before implementation — they
+are NOT scheduled yet. Each lists the decision + main options. (The unambiguous findings A1–A7 were
+implemented as AC1–AC3 above.)
+
+- [ ] **B1 — Topic modeling depth.** Today `bertopic` + `embedding` topic backends are the same
+  deterministic TF-IDF + k-means stand-in (BERTopic not installed; no embedding vectors used).
+  Options: (a) opt-in "AI extra" with real BERTopic + sentence-transformers; (b) embedding-vector
+  clustering reusing existing `Embedding` rows (no full BERTopic); (c) keep the stand-in, wording
+  already honest. Interacts with B3.
+- [ ] **B2 — Provider fallback UX.** Embeddings silently fall back to `hash_bow`, summaries to
+  extractive, when the selected provider (sentence-transformers / Ollama) is unavailable. Options:
+  (a) keep silent (robust/CI-friendly); (b) surface "requested X, using Y" in the UI/results;
+  (c) hard-fail when a provider is explicitly selected. Likely (b).
+- [ ] **B3 — pgvector ANN index + default embedding model.** The `vector` column is unconstrained
+  (exact-scan, pgvector off by default), so no HNSW/IVFFlat index is possible. Decision: commit to a
+  fixed default embedding model/dimension (e.g. MiniLM-384) to enable a typed `vector(d)` + ANN
+  index, and define the model-change/reindex story — or defer. Depends on B1/B2.
+- [ ] **B4 — Real CSL citation styles.** `citeproc-py` is a declared-but-unused dep; the 3 export
+  styles (APA/IEEE/Chicago) are hand-rolled string builders. Options: (a) delegate to citeproc-py +
+  bundle a curated set of `.csl` styles + locale; (b) ship the full csl-styles repo; (c) keep the 3
+  approximations.
+- [ ] **B5 — Real OCR / ML extraction.** Only GROBID runs; OCR is detect-and-flag
+  (`text_layer_quality`) with no OCRmyPDF/Nougat/Marker path (deps detected but unused). Options: (a)
+  build an extractor interface with OCRmyPDF (+ optionally Nougat/Marker — heavy PyTorch/model
+  downloads); (b) OCRmyPDF only (lighter); (c) keep GROBID-only + the needs-OCR signal. (Audit calls
+  this the one genuinely non-functional gap.)
+- [ ] **B6 — Graph scopes + version-collapse.** Citation graph supports `library|shelf|rack`; spec
+  also lists `search_result|selected_papers|import_batch|custom_filter` + a version-collapse control.
+  Decision: which extra scopes + version-collapse are worth building for the single-user target.
+- [ ] **B7 — Saved filters.** Spec §14.3/§13.3 want named saved queries usable as graph/export
+  scopes; none exist. Decision: build (store + UI + scope wiring) or drop from scope.
+- [ ] **B8 — `/search` API shape.** Only `POST /search/semantic` + `/search/reindex` exist; keyword/
+  structured search is `GET /works?q=`. Spec §10.6 names `GET /search`, `POST /search/advanced`,
+  `GET /search/suggestions` (suggestions/autocomplete doesn't exist). Decision: add the spec-named
+  endpoints (+ suggestions) or amend §10.6 to ratify the `/works?q=` design.
+- [ ] **B9 — Sealed emergency-recovery token.** Spec §7.3.6 (phrased "may") — an optional sealed
+  first-run recovery token; not implemented (CLI reset is the working primary path). Decision:
+  implement or formally drop the optional clause.
