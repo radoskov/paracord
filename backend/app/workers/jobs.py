@@ -86,6 +86,7 @@ def embed_work_job(work_id: str) -> None:
 
     from app.db.session import SessionLocal
     from app.models.work import Work
+    from app.services.chunk_embeddings import embed_work_chunks
     from app.services.embeddings import get_embedding_provider
     from app.services.semantic_search import index_one_work
 
@@ -93,7 +94,11 @@ def embed_work_job(work_id: str) -> None:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
-        index_one_work(db, work, provider=get_embedding_provider(db=db))
+        provider = get_embedding_provider(db=db)
+        # Document-level baseline (hash-BOW default; works everywhere, keeps hybrid search working).
+        index_one_work(db, work, provider=provider)
+        # Chunk-level ANN upgrade — no-op unless the active model has a pgvector column (Postgres).
+        embed_work_chunks(db, work, provider=provider)
         db.commit()
 
 
@@ -115,13 +120,20 @@ def scan_duplicates_job() -> None:
 
 
 def reindex_embeddings_job() -> None:
-    """Build embeddings for the active provider over every work missing one (WORKPLAN_NEXT 8F)."""
+    """Build embeddings for the active provider over every work missing one (WORKPLAN_NEXT 8F).
+
+    Also backfills chunk-level embeddings for the active model (no-op unless a real model with a
+    pgvector column is active on Postgres) — this is the backfill-on-activation path.
+    """
     from app.db.session import SessionLocal
+    from app.services.chunk_embeddings import backfill_chunk_embeddings
     from app.services.embeddings import get_embedding_provider
     from app.services.semantic_search import ensure_work_embeddings
 
     with SessionLocal() as db:
-        ensure_work_embeddings(db, provider=get_embedding_provider(db=db))
+        provider = get_embedding_provider(db=db)
+        ensure_work_embeddings(db, provider=provider)
+        backfill_chunk_embeddings(db, provider=provider)
         db.commit()
 
 

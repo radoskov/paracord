@@ -142,3 +142,107 @@ def test_pgvector_ranking_when_enabled(pg_engine, monkeypatch):
         hits = ss.semantic_search(db, "transformer attention", provider=ss.HashBowProvider())
         assert hits
         assert hits[0].work.canonical_title == "Attention transformer model"
+
+
+# --- chunk-level per-model embeddings + ANN (HS2) ---------------------------
+
+
+class _StubMiniLM:
+    """A dependency-free stand-in for the 384-dim MiniLM provider (deterministic)."""
+
+    model_name = "st:sentence-transformers/all-MiniLM-L6-v2"
+
+    def embed(self, text_: str) -> list[float]:
+        import hashlib
+
+        vec = [0.0] * 384
+        for token in (text_ or "").lower().split():
+            bucket = int(hashlib.md5(token.encode()).hexdigest(), 16) % 384  # noqa: S324
+            vec[bucket] += 1.0
+        norm = sum(v * v for v in vec) ** 0.5 or 1.0
+        return [v / norm for v in vec]
+
+
+def test_work_chunk_vector_columns_exist(pg_engine):
+    with Session(pg_engine) as db:
+        cols = (
+            db.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'work_chunks'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert "vec_minilm" in cols
+    assert "vec_nomic" in cols
+
+
+def _seed_chunked_work(db):
+    from app.models.work import Work
+    from app.services.chunking import rechunk_work
+
+    work = Work(
+        canonical_title="Graph neural networks",
+        normalized_title="gnn",
+        abstract="Message passing over graphs. Node features are aggregated across neighbors.",
+    )
+    db.add(work)
+    db.commit()
+    rechunk_work(db, work)
+    db.commit()
+    return work
+
+
+def test_embed_work_chunks_populates_model_column(pg_engine):
+    from app.services import chunk_embeddings as ce
+
+    with Session(pg_engine) as db:
+        work = _seed_chunked_work(db)
+        written = ce.embed_work_chunks(db, work, provider=_StubMiniLM())
+        db.commit()
+        assert written >= 1
+        populated = db.execute(
+            text("SELECT count(*) FROM work_chunks WHERE work_id = :w AND vec_minilm IS NOT NULL"),
+            {"w": str(work.id)},
+        ).scalar()
+        assert populated == written
+        status = ce.chunk_embedding_status(db, provider=_StubMiniLM())
+        assert status["column"] == "vec_minilm"
+        assert status["indexed"] >= written
+
+
+def test_backfill_fills_only_missing(pg_engine):
+    from app.services import chunk_embeddings as ce
+
+    with Session(pg_engine) as db:
+        work = _seed_chunked_work(db)
+        # Nothing embedded yet for this work -> backfill writes them.
+        missing = db.execute(
+            text("SELECT count(*) FROM work_chunks WHERE work_id = :w AND vec_minilm IS NULL"),
+            {"w": str(work.id)},
+        ).scalar()
+        assert missing >= 1
+        written = ce.backfill_chunk_embeddings(db, provider=_StubMiniLM())
+        db.commit()
+        assert written >= missing
+        # Running again writes nothing new for this work (already populated).
+        remaining = db.execute(
+            text("SELECT count(*) FROM work_chunks WHERE work_id = :w AND vec_minilm IS NULL"),
+            {"w": str(work.id)},
+        ).scalar()
+        assert remaining == 0
+
+
+def test_chunk_embeddings_noop_for_model_without_column(pg_engine):
+    from app.services import chunk_embeddings as ce
+    from app.services.embeddings import HashBowProvider
+
+    with Session(pg_engine) as db:
+        work = _seed_chunked_work(db)
+        # hash-BOW has no dedicated chunk column -> chunk-level is a no-op (doc-level baseline serves).
+        assert ce.embed_work_chunks(db, work, provider=HashBowProvider()) == 0
+        assert ce.backfill_chunk_embeddings(db, provider=HashBowProvider()) == 0
+        status = ce.chunk_embedding_status(db, provider=HashBowProvider())
+        assert status["column"] is None

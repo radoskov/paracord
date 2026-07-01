@@ -115,7 +115,13 @@ def test_model_foreign_keys_exist_after_migration(migrated_postgres) -> None:
 
 
 # Columns that live in the DB by design but not on a model (managed via raw SQL).
-_DB_ONLY_COLUMNS = {("embeddings", "vector_pg")}
+# The per-model chunk vector columns (HS2) are Postgres-only pgvector columns read/written via raw
+# SQL, deliberately kept off the ORM model (like embeddings.vector_pg).
+_DB_ONLY_COLUMNS = {
+    ("embeddings", "vector_pg"),
+    ("work_chunks", "vec_minilm"),
+    ("work_chunks", "vec_nomic"),
+}
 
 
 def test_autogenerate_has_no_table_or_column_drift(migrated_postgres) -> None:

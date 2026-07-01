@@ -12,6 +12,7 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
 from app.services import access
+from app.services.chunk_embeddings import backfill_chunk_embeddings
 from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
 from app.services.semantic_search import ensure_work_embeddings, semantic_search
 
@@ -107,7 +108,11 @@ def reindex_embeddings(db: Session = DB_DEP, _: User = EDITOR_DEP) -> dict[str, 
     """Embed any works missing a vector for the active provider (owner/editor). Returns count added.
 
     Embeddings are normally created on import in the background; this rebuilds them on demand (e.g.
-    after a bulk import while the worker was down, or after switching embedding providers)."""
-    added = ensure_work_embeddings(db, provider=get_embedding_provider(db=db))
+    after a bulk import while the worker was down, or after switching embedding providers). Also
+    backfills chunk-level embeddings for the active model (no-op unless a real model with a pgvector
+    column is active on Postgres)."""
+    provider = get_embedding_provider(db=db)
+    added = ensure_work_embeddings(db, provider=provider)
+    chunks_indexed = backfill_chunk_embeddings(db, provider=provider)
     db.commit()
-    return {"indexed": added, "status": "ok"}
+    return {"indexed": added, "chunks_indexed": chunks_indexed, "status": "ok"}
