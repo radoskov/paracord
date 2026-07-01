@@ -36,7 +36,14 @@ export interface SemanticSearchItem {
 
 export interface SemanticSearchResponse {
   query: string;
+  mode?: string;
   items: SemanticSearchItem[];
+  // Provider provenance (Phase B2): the embedding provider actually used vs the one configured,
+  // and whether the search silently degraded to the built-in baseline. Null in lexical mode.
+  embedding_provider_used?: string | null;
+  embedding_provider_requested?: string | null;
+  degraded?: boolean;
+  degraded_reason?: string | null;
 }
 
 export type SummaryType = 'abstract' | 'extractive';
@@ -49,6 +56,12 @@ export interface Summary {
   text: string;
   model_name: string | null;
   prompt_version: string | null;
+  // Provider provenance (Phase B2): what was requested vs actually ran, and whether it degraded
+  // to the extractive fallback (with a short reason). Absent on older/stored summaries.
+  provider_requested?: string | null;
+  provider_used?: string | null;
+  fallback?: boolean;
+  fallback_reason?: string | null;
   created_at: string;
 }
 

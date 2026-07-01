@@ -756,7 +756,7 @@ implemented as AC1–AC3 above.)
 
 Phases for the approved B-items. Sequential impl (shared backend/frontend + git); designs pipelined.
 
-- [ ] **Phase B2 — surface provider fallback.** When the selected embedding/summary provider is
+- [x] **Phase B2 — surface provider fallback.** When the selected embedding/summary provider is
   unavailable and the system degrades (hash-BOW / extractive), surface "requested X, using Y" at the
   point of use (search results / summary display) — not just in the AI tab. Backend exposes the
   active-vs-requested provider per response; frontend shows a small indicator.

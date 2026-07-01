@@ -12,7 +12,7 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
 from app.services import access
-from app.services.embeddings import get_embedding_provider
+from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
 from app.services.semantic_search import ensure_work_embeddings, semantic_search
 
 router = APIRouter()
@@ -39,6 +39,13 @@ class SemanticSearchResponse(BaseModel):
     query: str
     mode: str
     items: list[SemanticSearchItem]
+    # Provider provenance (Phase B2): what embedding provider actually served the ranking vs what
+    # was configured, so the UI can honestly say "requested X, using Y" when it silently degraded.
+    # Null in lexical mode (no embeddings are used).
+    embedding_provider_used: str | None = None
+    embedding_provider_requested: str | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 @router.post("/semantic", response_model=SemanticSearchResponse)
@@ -54,13 +61,35 @@ def search_semantic(
     visible = access.visible_work_ids(db, actor)
     # Over-fetch so trimming hidden hits still leaves up to ``limit`` visible results.
     fetch = limit if visible is None else min(limit * 5, 250)
-    hits = semantic_search(db, payload.q, limit=fetch, mode=payload.mode)
+
+    # In embedding mode, resolve the provider up front so the response can report the one actually
+    # used vs the one configured (a silent hash-BOW fallback surfaces here). Lexical mode uses no
+    # embeddings, so these fields stay null.
+    if payload.mode == "lexical":
+        hits = semantic_search(db, payload.q, limit=fetch, mode="lexical")
+        used = requested = None
+        degraded = False
+        reason = None
+    else:
+        resolved = resolve_embedding_provider(db=db)
+        hits = semantic_search(
+            db, payload.q, limit=fetch, mode="embedding", provider=resolved.provider
+        )
+        used = resolved.provider.model_name
+        requested = resolved.requested
+        degraded = resolved.degraded
+        reason = resolved.reason
+
     if visible is not None:
         hits = [hit for hit in hits if hit.work.id in visible]
     hits = hits[:limit]
     return SemanticSearchResponse(
         query=payload.q,
         mode=payload.mode,
+        embedding_provider_used=used,
+        embedding_provider_requested=requested,
+        degraded=degraded,
+        degraded_reason=reason,
         items=[
             SemanticSearchItem(
                 work_id=hit.work.id,

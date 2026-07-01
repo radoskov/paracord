@@ -38,6 +38,9 @@
 
   let search = '';
   let searchMode: 'metadata' | 'semantic' = 'metadata';
+  // Phase B2: true when the last semantic search silently fell back to the built-in baseline
+  // embedder (a heavier provider was configured but unavailable).
+  let semanticDegraded = false;
   let statusFilter = '';
   let shelfFilter = '';
   let rackFilter = '';
@@ -208,6 +211,7 @@
           client.semanticSearch(search.trim(), 50),
           client.listWorks(structuredQuery()),
         ]);
+        semanticDegraded = ranked.degraded === true;
         const byId = new Map(filtered.map((w) => [w.id, w]));
         const ordered = ranked.items.map((i) => byId.get(i.work_id)).filter((w): w is Work => !!w);
         // Re-sort the ranked set client-side so the chosen column ordering applies in semantic mode.
@@ -218,6 +222,7 @@
             'no papers have indexable text yet.';
         }
       } else {
+        semanticDegraded = false;
         works = await client.listWorks({
           q: search,
           ...structuredQuery(),
@@ -401,6 +406,9 @@
           </select>
           <button type="submit" disabled={loading} title="Apply search and filters">Search</button>
         </div>
+        {#if semanticDegraded}
+          <p class="degraded-hint" role="status">Semantic search is using the built-in baseline (sentence-transformers not configured).</p>
+        {/if}
         <div class="filter-row">
           <select bind:value={statusFilter} on:change={loadWorks} aria-label="Reading status"
             title="Filter the list by reading status">
@@ -617,6 +625,15 @@
     display: grid;
     gap: 0.5rem;
     grid-template-columns: minmax(8rem, 1fr) auto auto;
+  }
+
+  .degraded-hint {
+    margin: 0.25rem 0 0;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.375rem;
+    background: #fef3c7;
+    color: #78350f;
+    font-size: 0.85rem;
   }
 
   .filter-row {

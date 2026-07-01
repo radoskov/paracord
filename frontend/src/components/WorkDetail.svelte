@@ -924,7 +924,12 @@
   {#if summaries.length}
     <details>
       <summary>Summaries ({summaries.length})</summary>
-      {#each summaries as s (s.id)}<p class="muted">{s.summary_type}: {s.text}</p>{/each}
+      {#each summaries as s (s.id)}
+        {#if s.fallback}
+          <p class="degraded-hint" role="status">Summarized with the extractive fallback (LLM unavailable).</p>
+        {/if}
+        <p class="muted">{s.summary_type}: {s.text}</p>
+      {/each}
     </details>
   {/if}
 </div>
@@ -1122,6 +1127,15 @@
   .detail {
     display: grid;
     gap: 0.6rem;
+  }
+
+  .degraded-hint {
+    margin: 0.25rem 0;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.375rem;
+    background: #fef3c7;
+    color: #78350f;
+    font-size: 0.85rem;
   }
 
   .bar {

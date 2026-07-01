@@ -847,6 +847,13 @@ class SummaryRead(BaseModel):
     model_name: str | None = None
     prompt_version: str | None = None
     source_sections: list[str] = []
+    # Provider provenance (Phase B2). On a freshly-generated summary these say what was requested
+    # vs what actually ran and whether it degraded to the extractive fallback; stored summaries
+    # (listed later) carry the persisted ``model_name``, so these default to a non-degraded view.
+    provider_requested: str | None = None
+    provider_used: str | None = None
+    fallback: bool = False
+    fallback_reason: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -1251,9 +1258,11 @@ def create_summary(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Serialize *before* commit: transient provenance attrs (provider_used/fallback/…) attached by
+    # summarize_work would be lost on the post-commit attribute expiry.
+    result = SummaryRead.model_validate(summary)
     db.commit()
-    db.refresh(summary)
-    return summary
+    return result
 
 
 def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:

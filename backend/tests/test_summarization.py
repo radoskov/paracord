@@ -132,6 +132,37 @@ def test_summarize_work_is_idempotent_per_type(db_session) -> None:
     assert len(list_work_summaries(db_session, work.id)) == 1
 
 
+def test_summarize_work_local_llm_falls_back_to_extractive_with_provenance(db_session) -> None:
+    """When local_llm is requested but not enabled, the summary degrades to extractive and records
+    the fallback provenance (Phase B2) so the API/UI can surface 'summarized with the fallback'."""
+    work = Work(
+        canonical_title="t",
+        normalized_title="t",
+        abstract="One. Two. Three. Four. Five. Six. Seven.",
+    )
+    db_session.add(work)
+    db_session.commit()
+
+    summary = summarize_work(db_session, work, summary_type="local_llm")
+    db_session.commit()
+
+    assert summary.provider_requested == "local_llm"
+    assert summary.provider_used == "extractive"
+    assert summary.fallback is True
+    assert summary.fallback_reason  # a short human reason is present
+    assert "extractive-fallback" in summary.source_sections
+
+
+def test_summarize_work_extractive_is_not_marked_degraded(db_session) -> None:
+    work = Work(canonical_title="t", normalized_title="t", abstract="A concise abstract.")
+    db_session.add(work)
+    db_session.commit()
+    summary = summarize_work(db_session, work, summary_type="extractive")
+    db_session.commit()
+    assert summary.fallback is False
+    assert summary.provider_used == summary.provider_requested == "extractive"
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)
@@ -177,6 +208,29 @@ def test_summary_api_returns_provenance(client, auth_headers, db) -> None:
     assert body["model_name"] == "tier0-abstract"
     assert body["prompt_version"] == "v1"
     assert body["text"] == "A real abstract sentence."
+
+
+def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:
+    """A local_llm summary that degraded to extractive reports the fallback in the response so the
+    paper view can show 'Summarized with the extractive fallback (LLM unavailable)' (Phase B2)."""
+    work = Work(
+        canonical_title="t",
+        normalized_title="t",
+        abstract="One. Two. Three. Four. Five. Six. Seven.",
+    )
+    db.add(work)
+    db.commit()
+    created = client.post(
+        f"/api/v1/works/{work.id}/summaries",
+        headers=auth_headers("editor"),
+        json={"summary_type": "local_llm"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider_requested"] == "local_llm"
+    assert body["provider_used"] == "extractive"
+    assert body["fallback"] is True
+    assert body["fallback_reason"]
 
 
 # --- scope-level summaries --------------------------------------------------

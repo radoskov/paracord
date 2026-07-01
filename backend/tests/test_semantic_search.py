@@ -141,3 +141,65 @@ def test_semantic_search_api(client, auth_headers, db) -> None:
 def test_reindex_requires_editor(client, auth_headers) -> None:
     assert client.post("/api/v1/search/reindex", headers=auth_headers("reader")).status_code == 403
     assert client.post("/api/v1/search/reindex", headers=auth_headers("editor")).status_code == 200
+
+
+# --- provider-fallback provenance (Phase B2) --------------------------------
+
+
+def test_semantic_search_reports_used_provider_when_default(client, auth_headers, db) -> None:
+    """The response names the embedding provider actually used and is not marked degraded when the
+    built-in hash-BOW baseline is what was requested."""
+    db.add(Work(canonical_title="A Paper", normalized_title="a", abstract="Some indexable text."))
+    db.commit()
+    client.post("/api/v1/search/reindex", headers=auth_headers("editor"))
+    r = client.post(
+        "/api/v1/search/semantic",
+        headers=auth_headers("reader"),
+        json={"q": "indexable text"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["embedding_provider_used"] == "hash-bow-v1"
+    assert body["embedding_provider_requested"] == "hash_bow"
+    assert body["degraded"] is False
+
+
+def test_semantic_search_reports_degraded_on_provider_fallback(
+    client, auth_headers, db, monkeypatch
+) -> None:
+    """When a non-default provider is configured but unavailable, the search silently uses hash-BOW
+    and the response reports the degradation so the UI can surface 'requested X, using Y'."""
+    from app.services import ai_config
+
+    real = ai_config.get_ai_config
+
+    def _degraded_cfg(db_, *, settings=None):
+        cfg = real(db_, settings=settings)
+        cfg.embedding_provider = "sentence_transformers"
+        cfg.embedding_model = "definitely-not-installed-model"
+        return cfg
+
+    monkeypatch.setattr(ai_config, "get_ai_config", _degraded_cfg)
+
+    r = client.post(
+        "/api/v1/search/semantic",
+        headers=auth_headers("reader"),
+        json={"q": "anything"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["embedding_provider_requested"] == "sentence_transformers"
+    assert body["embedding_provider_used"] == "hash-bow-v1"
+    assert body["degraded"] is True
+
+
+def test_semantic_search_lexical_mode_has_no_provider_provenance(client, auth_headers, db) -> None:
+    r = client.post(
+        "/api/v1/search/semantic",
+        headers=auth_headers("reader"),
+        json={"q": "anything", "mode": "lexical"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["embedding_provider_used"] is None
+    assert body["degraded"] is False

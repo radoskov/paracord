@@ -25,6 +25,7 @@
   let summary: ScopeSummaryResponse | null = null;
   let semanticQuery = '';
   let semanticResults: SemanticSearchItem[] = [];
+  let semanticDegraded = false;
   let loading = false;
   let message = '';
 
@@ -79,6 +80,7 @@
     await run(async () => {
       const response = await client.semanticSearch(semanticQuery, 10);
       semanticResults = response.items;
+      semanticDegraded = response.degraded === true;
     });
   }
 
@@ -175,6 +177,9 @@
       <button type="submit" disabled={!semanticQuery.trim() || loading}
         title={semanticQuery.trim() ? 'Search the library by meaning' : 'Type a query first'}>Search</button>
     </form>
+    {#if semanticDegraded}
+      <p class="degraded-hint" role="status">Semantic search is using the built-in baseline (sentence-transformers not configured).</p>
+    {/if}
     {#if semanticResults.length > 0}
       <ul class="plain">
         {#each semanticResults as hit (hit.work_id)}
@@ -193,6 +198,15 @@
 
   .msg {
     margin: 0;
+  }
+
+  .degraded-hint {
+    margin: 0.5rem 0 0;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.375rem;
+    background: #fef3c7;
+    color: #78350f;
+    font-size: 0.85rem;
   }
 
   .grid {

@@ -206,6 +206,11 @@ def summarize_work(
     ai_cfg = get_ai_config(db, settings=settings)
     source_sections: list[str] = []
     prompt_version = PROMPT_VERSION
+    # Provider provenance (Phase B2): what was requested vs actually used, and — when a requested
+    # LLM silently degraded to the extractive engine — a short reason the UI can show.
+    provider_requested = summary_type
+    provider_used = summary_type
+    fallback_reason: str | None = None
 
     if summary_type == "abstract":
         text = (work.abstract or "").strip()
@@ -225,8 +230,12 @@ def summarize_work(
                 )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
+                fallback_reason = str(exc) or "the local LLM is unavailable"
+        else:
+            fallback_reason = "the local LLM is not enabled"
         if not text:
             text = summarize_extractive(source_text, max_sentences=max_sentences)
+            provider_used = "extractive"
             if text:
                 source_sections.append("extractive-fallback")
     else:
@@ -256,6 +265,11 @@ def summarize_work(
     db.flush()
     # Transient (non-persisted) provenance for the API response.
     summary.source_sections = source_sections
+    summary.provider_requested = provider_requested
+    summary.provider_used = provider_used
+    # A summary is "degraded" only when it actually fell back from a requested LLM to extractive.
+    summary.fallback = provider_used != provider_requested
+    summary.fallback_reason = fallback_reason if summary.fallback else None
     return summary
 
 

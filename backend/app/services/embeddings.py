@@ -17,6 +17,7 @@ import hashlib
 import logging
 import math
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -101,8 +102,27 @@ class OllamaProvider:
             return [float(x) for x in response.json()["embedding"]]
 
 
-def get_embedding_provider(settings: Settings | None = None, *, db=None) -> EmbeddingProvider:
-    """Return the active embedding provider, falling back to hash-BOW on any failure.
+@dataclass
+class ResolvedEmbeddingProvider:
+    """The active embedding provider plus what was *requested*, so callers can surface a
+    silent degradation ("requested X, using Y") at the point of use (Phase B2).
+
+    ``requested`` is the configured provider key (e.g. ``sentence_transformers``); ``provider`` is
+    the object actually in use (hash-BOW when the requested one was unavailable). ``degraded`` is
+    True when a non-default provider was requested but the fallback kicked in, with a short
+    ``reason``.
+    """
+
+    provider: EmbeddingProvider
+    requested: str
+    degraded: bool
+    reason: str | None = None
+
+
+def resolve_embedding_provider(
+    settings: Settings | None = None, *, db=None
+) -> ResolvedEmbeddingProvider:
+    """Resolve the active embedding provider *with provenance* (requested vs used).
 
     When ``db`` is given, the owner-managed runtime config (``ai_config``) decides the provider;
     otherwise the static ``Settings`` defaults are used (back-compat / no-DB call sites).
@@ -122,12 +142,27 @@ def get_embedding_provider(settings: Settings | None = None, *, db=None) -> Embe
         ollama_url = settings.ollama_url
     try:
         if provider == "sentence_transformers":
-            return SentenceTransformerProvider(model or "sentence-transformers/all-MiniLM-L6-v2")
+            active = SentenceTransformerProvider(model or "sentence-transformers/all-MiniLM-L6-v2")
+            return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
         if provider == "ollama":
-            return OllamaProvider(model or "nomic-embed-text", ollama_url)
+            active = OllamaProvider(model or "nomic-embed-text", ollama_url)
+            return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
     except Exception as exc:  # noqa: BLE001 - optional providers degrade, never break a request
         logger.warning("Embedding provider %r unavailable (%s); using hash-BOW.", provider, exc)
-    return HashBowProvider()
+        return ResolvedEmbeddingProvider(
+            HashBowProvider(), requested=provider, degraded=True, reason=str(exc) or None
+        )
+    # Requested provider is the built-in baseline (hash_bow / unknown) — not a degradation.
+    return ResolvedEmbeddingProvider(HashBowProvider(), requested=provider, degraded=False)
+
+
+def get_embedding_provider(settings: Settings | None = None, *, db=None) -> EmbeddingProvider:
+    """Return the active embedding provider, falling back to hash-BOW on any failure.
+
+    When ``db`` is given, the owner-managed runtime config (``ai_config``) decides the provider;
+    otherwise the static ``Settings`` defaults are used (back-compat / no-DB call sites).
+    """
+    return resolve_embedding_provider(settings, db=db).provider
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
