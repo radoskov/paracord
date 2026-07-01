@@ -85,7 +85,8 @@ export type GraphScopeType =
   | 'rack'
   | 'search_result'
   | 'selected_papers'
-  | 'import_batch';
+  | 'import_batch'
+  | 'saved_filter';
 export type GraphNodeMode = 'local_only' | 'include_external';
 
 export interface GraphNode {
@@ -110,7 +111,14 @@ export interface CitationGraphResponse {
   summary: Record<string, number>;
 }
 
-export type ExportScopeType = 'work' | 'shelf' | 'rack' | 'library' | 'selection' | 'search';
+export type ExportScopeType =
+  | 'work'
+  | 'shelf'
+  | 'rack'
+  | 'library'
+  | 'selection'
+  | 'search'
+  | 'saved_filter';
 export type ExportFormat =
   | 'bibtex'
   | 'biblatex'
@@ -497,6 +505,36 @@ export interface WorkQuery {
   order?: 'asc' | 'desc';
 }
 
+// --- Saved filters (Phase B7): a per-user named Library query, usable as a graph/export scope ---
+export interface SavedFilterParams {
+  reading_status?: string | null;
+  shelf_id?: string | null;
+  rack_id?: string | null;
+  tag_id?: string | null;
+  has_pdf?: boolean | null;
+  has_references?: boolean | null;
+  missing?: string[];
+}
+
+export interface SavedFilter {
+  id: string;
+  name: string;
+  search_mode: 'metadata' | 'semantic';
+  query_text: string | null;
+  params: SavedFilterParams;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedFilterCreate {
+  name: string;
+  search_mode?: 'metadata' | 'semantic';
+  query_text?: string | null;
+  params?: SavedFilterParams;
+}
+
+export type SavedFilterUpdate = Partial<SavedFilterCreate>;
+
 // Per-user UI preferences (durable copy of the library column choices; see lib/columns.ts).
 export interface LibraryColumnPrefs {
   order: string[];
@@ -811,6 +849,26 @@ export class ApiClient {
 
   async putPreferences(prefs: UserPreferences): Promise<UserPreferences> {
     return this.request<UserPreferences>('/api/v1/preferences', { method: 'PUT', body: prefs });
+  }
+
+  // --- Saved filters (per-user; usable as a Library filter and as a graph/export scope) ---
+  async listSavedFilters(): Promise<SavedFilter[]> {
+    return this.request<SavedFilter[]>('/api/v1/saved-filters');
+  }
+
+  async createSavedFilter(payload: SavedFilterCreate): Promise<SavedFilter> {
+    return this.request<SavedFilter>('/api/v1/saved-filters', { method: 'POST', body: payload });
+  }
+
+  async updateSavedFilter(id: string, payload: SavedFilterUpdate): Promise<SavedFilter> {
+    return this.request<SavedFilter>(`/api/v1/saved-filters/${id}`, {
+      method: 'PUT',
+      body: payload,
+    });
+  }
+
+  async deleteSavedFilter(id: string): Promise<void> {
+    await this.request<void>(`/api/v1/saved-filters/${id}`, { method: 'DELETE' });
   }
 
   async importReferenceAsWork(referenceId: string): Promise<Work> {

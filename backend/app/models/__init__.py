@@ -12,6 +12,7 @@ from app.models.group import DefaultGrant, Group, GroupGrant, GroupMembership
 from app.models.import_root import ImportRoot
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.saved_filter import SavedFilter
 from app.models.session import UserSession
 from app.models.source import ImportBatch, Source
 from app.models.user import User
@@ -45,6 +46,7 @@ __all__ = [
     "RackShelf",
     "RawTeiDocument",
     "Reference",
+    "SavedFilter",
     "Shelf",
     "ShelfWork",
     "Source",

@@ -8,6 +8,7 @@
     type GraphScopeType,
     type ImportBatch,
     type Rack,
+    type SavedFilter,
     type ScopeSummaryResponse,
     type SemanticSearchItem,
     type Shelf,
@@ -35,16 +36,20 @@
   let graphSearchQuery = '';
   let batches: ImportBatch[] = [];
   let batchId = '';
+  // Phase B7 saved-filter scope.
+  let savedFilters: SavedFilter[] = [];
+  let savedFilterId = '';
   // Live count of the library multi-selection (mirrored from LibraryPage).
   let selectedCount = 0;
   $: selectedCount = $selectedPaperIds.length;
 
   onMount(async () => {
     await run(async () => {
-      [shelves, racks, batches] = await Promise.all([
+      [shelves, racks, batches, savedFilters] = await Promise.all([
         client.listShelves(),
         client.listRacks(),
         client.listImportBatches().catch(() => [] as ImportBatch[]),
+        client.listSavedFilters().catch(() => [] as SavedFilter[]),
       ]);
     });
   });
@@ -97,6 +102,10 @@
     if (scopeType === 'import_batch') {
       return client.citationGraph({ scopeType, scopeId: batchId || null, nodeMode, collapseVersions });
     }
+    if (scopeType === 'saved_filter') {
+      // The backend loads the caller's saved filter, resolves + visibility-clamps it to work ids.
+      return client.citationGraph({ scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions });
+    }
     return client.citationGraph({
       scopeType: scope.scopeType,
       scopeId: scope.scopeId,
@@ -143,7 +152,9 @@
             ? selectedCount > 0
             : scopeType === 'import_batch'
               ? !!batchId
-              : false;
+              : scopeType === 'saved_filter'
+                ? !!savedFilterId
+                : false;
 </script>
 
 <section class="layout">
@@ -160,6 +171,7 @@
         <option value="search_result">Search result</option>
         <option value="selected_papers">Selected papers</option>
         <option value="import_batch">From import batch</option>
+        <option value="saved_filter">Saved filter</option>
       </select>
       {#if scopeType === 'shelf'}
         <select bind:value={scopeId} aria-label="Shelf" title="Choose the shelf to analyse">
@@ -187,6 +199,11 @@
             <option value={batch.id}>{batch.input_type} · {batch.work_count ?? 0} paper{(batch.work_count ?? 0) === 1 ? '' : 's'} · {new Date(batch.created_at).toLocaleDateString()}</option>
           {/each}
         </select>
+      {:else if scopeType === 'saved_filter'}
+        <select bind:value={savedFilterId} aria-label="Saved filter" title="Choose the saved filter to analyse">
+          <option value="">Choose a saved filter…</option>
+          {#each savedFilters as filter (filter.id)}<option value={filter.id}>{filter.name}</option>{/each}
+        </select>
       {/if}
     </div>
     {#if !scopeReady}
@@ -194,6 +211,7 @@
         {#if scopeType === 'search_result'}Type a search to graph its results.
         {:else if scopeType === 'selected_papers'}Select papers in the Library tab to graph them.
         {:else if scopeType === 'import_batch'}Pick an import batch to graph its papers.
+        {:else if scopeType === 'saved_filter'}Pick a saved filter to graph its papers.
         {:else}Pick a {scopeType} to run analyses on it.{/if}
       </p>
     {/if}
@@ -205,6 +223,20 @@
             client.exportCitations({
               scope_type: scopeType,
               scope_id: scopeId || undefined,
+              format,
+              style,
+            })}
+          fetchStyles={() => client.listCitationStyles()}
+        />
+      </div>
+    {:else if scopeReady && scopeType === 'saved_filter'}
+      <div style="margin-top:0.6rem">
+        <ExportDialog
+          label="this saved filter"
+          fetchExport={(format, style) =>
+            client.exportCitations({
+              scope_type: 'saved_filter',
+              scope_id: savedFilterId || undefined,
               format,
               style,
             })}

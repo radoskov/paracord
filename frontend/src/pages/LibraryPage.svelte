@@ -6,6 +6,7 @@
     ApiClient,
     type Rack,
     type ReadingStatus,
+    type SavedFilter,
     type Shelf,
     type Tag,
     type Work,
@@ -34,6 +35,9 @@
   let shelves: Shelf[] = [];
   let racks: Rack[] = [];
   let tags: Tag[] = [];
+  let savedFilters: SavedFilter[] = [];
+  // Bound to the "Apply saved filter…" dropdown; reset to '' after applying so it stays a prompt.
+  let applyFilterId = '';
   let selected: Work | null = null;
 
   let search = '';
@@ -80,10 +84,11 @@
 
   onMount(async () => {
     await run(async () => {
-      [shelves, racks, tags] = await Promise.all([
+      [shelves, racks, tags, savedFilters] = await Promise.all([
         client.listShelves(),
         client.listRacks(),
         client.listTags(),
+        client.listSavedFilters().catch(() => [] as SavedFilter[]),
       ]);
     });
     // Reconcile with the backend (durable source); tolerate failure (keep the localStorage copy).
@@ -170,6 +175,63 @@
       hasReferences: refsFilter ? refsFilter === 'yes' : undefined,
       missing: missing.length ? missing : undefined,
     };
+  }
+
+  // Snake_case params for the saved-filter API (mirrors the backend SavedFilterParams schema).
+  function savedFilterParams() {
+    return {
+      reading_status: statusFilter || null,
+      shelf_id: shelfFilter || null,
+      rack_id: rackFilter || null,
+      tag_id: tagFilter || null,
+      has_pdf: pdfFilter ? pdfFilter === 'yes' : null,
+      has_references: refsFilter ? refsFilter === 'yes' : null,
+      missing: [...missing],
+    };
+  }
+
+  // --- Saved filters: save the current search + filters, apply a stored one, delete one ---
+  async function saveCurrentFilter(): Promise<void> {
+    const name = window.prompt('Name this saved filter:');
+    if (!name || !name.trim()) return;
+    await run(async () => {
+      const created = await client.createSavedFilter({
+        name: name.trim(),
+        search_mode: searchMode,
+        query_text: search,
+        params: savedFilterParams(),
+      });
+      savedFilters = [...savedFilters, created].sort((a, b) => a.name.localeCompare(b.name));
+    }, `Saved filter “${name.trim()}”`);
+  }
+
+  function applySavedFilter(filter: SavedFilter): void {
+    search = filter.query_text ?? '';
+    searchMode = filter.search_mode;
+    const p = filter.params ?? {};
+    statusFilter = p.reading_status ?? '';
+    shelfFilter = p.shelf_id ?? '';
+    rackFilter = p.rack_id ?? '';
+    tagFilter = p.tag_id ?? '';
+    pdfFilter = p.has_pdf === true ? 'yes' : p.has_pdf === false ? 'no' : '';
+    refsFilter = p.has_references === true ? 'yes' : p.has_references === false ? 'no' : '';
+    missing = [...(p.missing ?? [])];
+    void loadWorks();
+  }
+
+  function onApplyFilterChange(event: Event): void {
+    const id = (event.currentTarget as HTMLSelectElement).value;
+    const filter = savedFilters.find((f) => f.id === id);
+    if (filter) applySavedFilter(filter);
+    applyFilterId = ''; // reset so the select stays on the "Apply saved filter…" prompt
+  }
+
+  async function deleteSavedFilter(filter: SavedFilter): Promise<void> {
+    if (!window.confirm(`Delete saved filter “${filter.name}”?`)) return;
+    await run(async () => {
+      await client.deleteSavedFilter(filter.id);
+      savedFilters = savedFilters.filter((f) => f.id !== filter.id);
+    }, `Deleted saved filter “${filter.name}”`);
   }
 
   // Re-sort an already-loaded set by the active column (used for the semantic-ranked set, which
@@ -440,6 +502,37 @@
             {showMoreFilters ? 'Fewer filters' : 'More filters'}
           </button>
         </div>
+        <div class="saved-row">
+          <select
+            bind:value={applyFilterId}
+            on:change={onApplyFilterChange}
+            aria-label="Apply saved filter"
+            title="Apply one of your saved filters to the search and filters above"
+          >
+            <option value="">Apply saved filter…</option>
+            {#each savedFilters as filter (filter.id)}
+              <option value={filter.id}>{filter.name}</option>
+            {/each}
+          </select>
+          <button
+            type="button"
+            class="secondary"
+            on:click={saveCurrentFilter}
+            title="Save the current search and filters as a reusable saved filter"
+          >Save current filter</button>
+          {#if savedFilters.length > 0}
+            <span class="saved-chips" aria-label="Delete saved filters">
+              {#each savedFilters as filter (filter.id)}
+                <button
+                  type="button"
+                  class="chip saved-chip"
+                  on:click={() => deleteSavedFilter(filter)}
+                  title={`Delete saved filter “${filter.name}”`}
+                >{filter.name} ✕</button>
+              {/each}
+            </span>
+          {/if}
+        </div>
         {#if showMoreFilters}
           <div class="more-filters">
             <label class="inline">PDF
@@ -644,6 +737,24 @@
     display: grid;
     gap: 0.5rem;
     grid-template-columns: repeat(4, minmax(6rem, 1fr)) auto;
+  }
+
+  .saved-row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .saved-chips {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .saved-chip {
+    cursor: pointer;
   }
 
   .more-filters {

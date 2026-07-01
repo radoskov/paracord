@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_contributor
@@ -234,33 +234,26 @@ _SORT_COLUMNS = {
 _DEFAULT_SORT_COLUMN = Work.updated_at
 
 
-@router.get("", response_model=list[WorkRead])
-def list_works(
-    q: str | None = Query(default=None),
-    reading_status: str | None = Query(default=None),
-    shelf_id: uuid.UUID | None = Query(default=None),
-    rack_id: uuid.UUID | None = Query(default=None),
-    tag_id: uuid.UUID | None = Query(default=None),
+def build_works_query(
+    db: Session,
+    actor: User,
+    *,
+    q: str | None = None,
+    reading_status: str | None = None,
+    shelf_id: uuid.UUID | None = None,
+    rack_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
     has_pdf: bool | None = None,
     has_references: bool | None = None,
     missing: str | None = None,
-    sort: str | None = Query(default=None),
-    order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    limit: int = Query(default=100, ge=1, le=500),
-    db: Session = DB_DEP,
-    actor: User = AUTH_DEP,
-) -> list[Work]:
-    """List/search works by basic metadata and extraction/metadata completeness.
+) -> Select:
+    """Build the ``select(Work)`` for the Library filter, WITHOUT sort/limit.
 
-    ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
-    ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
-    ``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches
-    title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
-    precedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE
-    filter (only see-able shelves/racks contribute; they never widen visibility).
-
-    Access control: only papers the caller may SEE are returned (most-permissive governing shelf;
-    loose papers are open; admin/owner see all).
+    Starts from ``access.visible_works_query`` — the visibility floor — so every condition composes
+    on top of the caller's see-able set and the query can never widen beyond it. ``list_works``
+    calls this then appends sort/limit; saved-filter/graph/export resolvers reuse it to produce the
+    exact same work set (auto visibility-clamped). ``distinct()`` is applied so the shelf/rack/tag
+    joins don't duplicate rows. See ``list_works`` for the operator/param semantics.
     """
     parsed = parse_search_query(q)
     stmt = access.visible_works_query(db, actor)
@@ -429,12 +422,56 @@ def list_works(
         stmt = stmt.where(
             column.is_(None) if name == "year" else or_(column.is_(None), column == "")
         )
+    return stmt.distinct()
+
+
+@router.get("", response_model=list[WorkRead])
+def list_works(
+    q: str | None = Query(default=None),
+    reading_status: str | None = Query(default=None),
+    shelf_id: uuid.UUID | None = Query(default=None),
+    rack_id: uuid.UUID | None = Query(default=None),
+    tag_id: uuid.UUID | None = Query(default=None),
+    has_pdf: bool | None = None,
+    has_references: bool | None = None,
+    missing: str | None = None,
+    sort: str | None = Query(default=None),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> list[Work]:
+    """List/search works by basic metadata and extraction/metadata completeness.
+
+    ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
+    ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
+    ``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches
+    title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
+    precedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE
+    filter (only see-able shelves/racks contribute; they never widen visibility).
+
+    Access control: only papers the caller may SEE are returned (most-permissive governing shelf;
+    loose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by
+    the saved-filter/graph/export resolvers); ``list_works`` only adds sort + limit.
+    """
+    stmt = build_works_query(
+        db,
+        actor,
+        q=q,
+        reading_status=reading_status,
+        shelf_id=shelf_id,
+        rack_id=rack_id,
+        tag_id=tag_id,
+        has_pdf=has_pdf,
+        has_references=has_references,
+        missing=missing,
+    )
     # SAFE sort: look the key up in the allowlist (never interpolate the raw string); fall back to
     # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
     # order when the sort column has ties.
     sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
     direction = sort_column.asc() if order == "asc" else sort_column.desc()
-    stmt = stmt.distinct().order_by(direction, Work.id).limit(limit)
+    stmt = stmt.order_by(direction, Work.id).limit(limit)
     return list(db.scalars(stmt).all())
 
 

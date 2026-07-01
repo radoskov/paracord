@@ -54,6 +54,7 @@ def export_bibliography(
     output_format: str,
     scope_id: str | None = None,
     work_ids: list[str] | None = None,
+    saved_filter_work_ids: list[uuid.UUID] | None = None,
     style: str | None = None,
     citation_keys: dict[str, str] | None = None,
     actor_user_id: uuid.UUID | None = None,
@@ -65,11 +66,19 @@ def export_bibliography(
     one. When ``actor_user_id`` is given, a ``paper.exported`` audit event is recorded in the
     current transaction (the caller is responsible for committing). ``visible_ids`` (Phase H access
     control) restricts the export to works the caller may see; ``None`` means unrestricted.
+    ``saved_filter_work_ids`` (Phase B7) supplies the resolved id set for the ``saved_filter``
+    scope (the endpoint loads + clamps the filter and passes the ids in); those works are still run
+    through the ``visible_ids`` clamp here as a second belt-and-suspenders check.
     """
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported export format: {output_format}")
     works = _resolve_works(
-        db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids, visible_ids=visible_ids
+        db,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        work_ids=work_ids,
+        saved_filter_work_ids=saved_filter_work_ids,
+        visible_ids=visible_ids,
     )
     authors_by_work = _authors_by_work(db, works)
     meta_by_work = _extra_meta_by_work(db, works)
@@ -109,6 +118,7 @@ def _resolve_works(
     scope_type: str,
     scope_id: str | None,
     work_ids: list[str] | None = None,
+    saved_filter_work_ids: list[uuid.UUID] | None = None,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> list[Work]:
     def _filter(works: list[Work]) -> list[Work]:
@@ -116,6 +126,17 @@ def _resolve_works(
             return works
         return [w for w in works if w.id in visible_ids]
 
+    if scope_type == "saved_filter":
+        # A saved filter resolved to its work ids by the endpoint (already visibility-clamped for
+        # the actor). Fetch + re-clamp here, ordered like the library (year, title).
+        if not saved_filter_work_ids:
+            return []
+        stmt = (
+            select(Work)
+            .where(Work.id.in_(saved_filter_work_ids))
+            .order_by(Work.year, Work.canonical_title)
+        )
+        return _filter(list(db.scalars(stmt).all()))
     if scope_type in ("selection", "search"):
         # An explicit set of works (multi-select in the library, or a search result set).
         if not work_ids:

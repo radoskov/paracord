@@ -21,11 +21,14 @@ from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.utils.normalization import normalize_doi
 
-# Flat tuple of scope kinds; Phase B7 appends ``saved_filter`` here and a matching ``_scope_works``
-# branch with no other restructuring. ``search_result`` and ``selected_papers`` resolve from an
-# explicit ``work_ids`` list (mirroring export's selection/search); ``import_batch`` resolves from
-# ``Work.import_batch_id == scope_id``.
-ScopeType = Literal["library", "shelf", "rack", "search_result", "selected_papers", "import_batch"]
+# Flat tuple of scope kinds. ``search_result`` and ``selected_papers`` resolve from an explicit
+# ``work_ids`` list (mirroring export's selection/search); ``import_batch`` resolves from
+# ``Work.import_batch_id == scope_id``. ``saved_filter`` (Phase B7) also resolves from an explicit
+# ``work_ids`` list — the endpoint loads the filter (owned-by-actor 404) and passes the ids from
+# ``resolve_saved_filter_work_ids`` (already visibility-clamped) in, exactly like the explicit sets.
+ScopeType = Literal[
+    "library", "shelf", "rack", "search_result", "selected_papers", "import_batch", "saved_filter"
+]
 NodeMode = Literal["local_only", "include_external"]
 
 
@@ -256,10 +259,10 @@ def _scope_works(
             .where(RackShelf.rack_id == scope_id)
             .distinct()
         ).all()
-    elif scope_type in ("search_result", "selected_papers"):
-        # An explicit set of works (a search result set, or the library multi-selection). The
-        # frontend runs the search and passes the resulting ids, mirroring export's
-        # selection/search — an empty set is a valid (empty) scope, not an error.
+    elif scope_type in ("search_result", "selected_papers", "saved_filter"):
+        # An explicit set of works: a search result set, the library multi-selection, or a saved
+        # filter's resolved ids (Phase B7 — the endpoint resolves + clamps the filter and passes the
+        # ids in, mirroring export's selection/search). An empty set is a valid (empty) scope.
         if not work_ids:
             return {}
         works = db.scalars(select(Work).where(Work.id.in_(work_ids))).all()

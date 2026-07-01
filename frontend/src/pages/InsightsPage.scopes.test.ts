@@ -20,11 +20,22 @@ const BATCH: ImportBatch = {
   work_count: 3,
 };
 
+const SAVED_FILTER = {
+  id: 'sf-1',
+  name: 'Recent unread',
+  search_mode: 'metadata' as const,
+  query_text: 'transformer',
+  params: { reading_status: 'unread', missing: [] },
+  created_at: '2026-06-01T00:00:00Z',
+  updated_at: '2026-06-01T00:00:00Z',
+};
+
 function makeClient() {
   return {
     listShelves: vi.fn().mockResolvedValue([]),
     listRacks: vi.fn().mockResolvedValue([]),
     listImportBatches: vi.fn().mockResolvedValue([BATCH]),
+    listSavedFilters: vi.fn().mockResolvedValue([SAVED_FILTER]),
     listWorks: vi.fn().mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]),
     citationGraph: vi.fn().mockResolvedValue(EMPTY_GRAPH),
     semanticSearch: vi.fn(),
@@ -94,6 +105,25 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     expect(client.citationGraph).toHaveBeenCalledWith({
       scopeType: 'import_batch',
       scopeId: 'batch-1',
+      nodeMode: 'local_only',
+      collapseVersions: false,
+    });
+  });
+
+  it('saved_filter: shows the saved-filter picker and sends the filter id as scopeId', async () => {
+    const client = makeClient();
+    render(InsightsPage, { client: client as never });
+    await waitFor(() => expect(client.listSavedFilters).toHaveBeenCalled());
+
+    await selectScope('saved_filter');
+    const select = screen.getByLabelText('Saved filter') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toContain('Recent unread');
+    await fireEvent.change(select, { target: { value: 'sf-1' } });
+    await build();
+
+    expect(client.citationGraph).toHaveBeenCalledWith({
+      scopeType: 'saved_filter',
+      scopeId: 'sf-1',
       nodeMode: 'local_only',
       collapseVersions: false,
     });

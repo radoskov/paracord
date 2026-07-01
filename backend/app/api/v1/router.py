@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     jobs,
     preferences,
     racks,
+    saved_filters,
     search,
     shelves,
     sources,
@@ -106,4 +107,11 @@ api_router.include_router(
 # Per-user UI preferences (any authenticated user manages their own blob).
 api_router.include_router(
     preferences.router, prefix="/preferences", tags=["preferences"], dependencies=auth_required
+)
+# Per-user saved library filters (Phase B7; any authenticated user manages their own).
+api_router.include_router(
+    saved_filters.router,
+    prefix="/saved-filters",
+    tags=["saved-filters"],
+    dependencies=auth_required,
 )

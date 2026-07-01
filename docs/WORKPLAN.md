@@ -770,6 +770,6 @@ Phases for the approved B-items. Sequential impl (shared backend/frontend + git)
 - [x] **Phase B6 — graph scopes + version-collapse.** Add `search_result`/`selected_papers`/
   `import_batch` scopes to the citation graph + a version-collapse control (collapse version-linked
   works into one node). Backend `citation_graph.py` + CitationGraph.svelte controls.
-- [ ] **Phase B7 — saved filters.** New `SavedFilter` model (name, query, owner) + CRUD endpoints +
+- [x] **Phase B7 — saved filters.** New `SavedFilter` model (name, query, owner) + CRUD endpoints +
   UI to save the current library search as a named filter and reuse it as a graph/export scope.
   Backend model+migration+endpoints + LibraryPage/graph/export wiring.
