@@ -25,6 +25,17 @@
             ],
             "title": "Embedding Provider"
           },
+          "ocr_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Backend"
+          },
           "ollama_url": {
             "anyOf": [
               {
@@ -1342,6 +1353,11 @@
       },
       "CitationGraphRequest": {
         "properties": {
+          "collapse_versions": {
+            "default": false,
+            "title": "Collapse Versions",
+            "type": "boolean"
+          },
           "node_mode": {
             "default": "local_only",
             "enum": [
@@ -2302,10 +2318,29 @@
             "enum": [
               "library",
               "shelf",
-              "rack"
+              "rack",
+              "search_result",
+              "selected_papers",
+              "import_batch",
+              "saved_filter"
             ],
             "title": "Type",
             "type": "string"
+          },
+          "work_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Ids"
           }
         },
         "required": [
@@ -2447,6 +2482,199 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HybridSearchItem": {
+        "properties": {
+          "lexical_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lexical Rank"
+          },
+          "passage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage"
+          },
+          "relevance": {
+            "default": 0.0,
+            "title": "Relevance",
+            "type": "number"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "semantic_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semantic Rank"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "work_id",
+          "score"
+        ],
+        "title": "HybridSearchItem",
+        "type": "object"
+      },
+      "HybridSearchRequest": {
+        "properties": {
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "limit": {
+            "default": 10,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "hybrid",
+            "enum": [
+              "lexical",
+              "semantic",
+              "hybrid"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "q": {
+            "title": "Q",
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "HybridSearchRequest",
+        "type": "object"
+      },
+      "HybridSearchResponse": {
+        "properties": {
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "embedding_provider_requested": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Provider Requested"
+          },
+          "embedding_provider_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Provider Used"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HybridSearchItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "mode",
+          "items"
+        ],
+        "title": "HybridSearchResponse",
+        "type": "object"
+      },
       "IdentifierImportCreate": {
         "properties": {
           "identifier_type": {
@@ -2515,6 +2743,18 @@
             "title": "Created At",
             "type": "string"
           },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By User Id"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -2575,6 +2815,11 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "work_count": {
+            "default": 0,
+            "title": "Work Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -3345,12 +3590,252 @@
         "title": "Role",
         "type": "string"
       },
+      "SavedFilterCreate": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/SavedFilterParams",
+            "default": {
+              "missing": []
+            }
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Text"
+          },
+          "search_mode": {
+            "default": "metadata",
+            "enum": [
+              "metadata",
+              "semantic"
+            ],
+            "title": "Search Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SavedFilterCreate",
+        "type": "object"
+      },
+      "SavedFilterParams": {
+        "description": "The structured (non-free-text) part of a saved Library query.\n\nMirrors the explicit query params ``list_works``/``build_works_query`` accept. ``missing`` is a\nlist of Work field names to filter on absence of (``title``/``abstract``/``year``/…).",
+        "properties": {
+          "has_pdf": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Pdf"
+          },
+          "has_references": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has References"
+          },
+          "missing": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "rack_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rack Id"
+          },
+          "reading_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading Status"
+          },
+          "shelf_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shelf Id"
+          },
+          "tag_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag Id"
+          }
+        },
+        "title": "SavedFilterParams",
+        "type": "object"
+      },
+      "SavedFilterRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/SavedFilterParams",
+            "default": {
+              "missing": []
+            }
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Text"
+          },
+          "search_mode": {
+            "title": "Search Mode",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "search_mode",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SavedFilterRead",
+        "type": "object"
+      },
+      "SavedFilterUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedFilterParams"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "query_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Text"
+          },
+          "search_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "metadata",
+                  "semantic"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Mode"
+          }
+        },
+        "title": "SavedFilterUpdate",
+        "type": "object"
+      },
       "ScopeSummaryRequest": {
         "properties": {
           "max_sentences": {
             "default": 8,
             "title": "Max Sentences",
             "type": "integer"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
           },
           "scope_id": {
             "anyOf": [
@@ -3374,8 +3859,11 @@
             "type": "string"
           },
           "summary_type": {
-            "const": "extractive",
             "default": "extractive",
+            "enum": [
+              "extractive",
+              "local_llm"
+            ],
             "title": "Summary Type",
             "type": "string"
           }
@@ -3395,6 +3883,22 @@
           "entity_type": {
             "title": "Entity Type",
             "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
           },
           "model_name": {
             "anyOf": [
@@ -3417,6 +3921,28 @@
               }
             ],
             "title": "Prompt Version"
+          },
+          "provider_requested": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Requested"
+          },
+          "provider_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Used"
           },
           "summary_type": {
             "title": "Summary Type",
@@ -3457,9 +3983,31 @@
       },
       "SemanticSearchItem": {
         "properties": {
+          "passage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passage"
+          },
           "score": {
             "title": "Score",
             "type": "number"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
           },
           "title": {
             "anyOf": [
@@ -3525,6 +4073,44 @@
       },
       "SemanticSearchResponse": {
         "properties": {
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "embedding_provider_requested": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Provider Requested"
+          },
+          "embedding_provider_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Provider Used"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SemanticSearchItem"
@@ -3918,6 +4504,22 @@
             "title": "Entity Type",
             "type": "string"
           },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3944,6 +4546,28 @@
               }
             ],
             "title": "Prompt Version"
+          },
+          "provider_requested": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Requested"
+          },
+          "provider_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Used"
           },
           "source_sections": {
             "default": [],
@@ -4139,6 +4763,127 @@
         "title": "TopicActionRequest",
         "type": "object"
       },
+      "TopicGraphEdgeRead": {
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "weight"
+        ],
+        "title": "TopicGraphEdgeRead",
+        "type": "object"
+      },
+      "TopicGraphNodeRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "work_id"
+        ],
+        "title": "TopicGraphNodeRead",
+        "type": "object"
+      },
+      "TopicGraphRequest": {
+        "properties": {
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "k": {
+            "default": 6,
+            "title": "K",
+            "type": "integer"
+          },
+          "min_similarity": {
+            "default": 0.3,
+            "title": "Min Similarity",
+            "type": "number"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/GraphScope"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "TopicGraphRequest",
+        "type": "object"
+      },
+      "TopicGraphResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/TopicGraphEdgeRead"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/TopicGraphNodeRead"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "summary"
+        ],
+        "title": "TopicGraphResponse",
+        "type": "object"
+      },
       "TopicModelResponse": {
         "properties": {
           "backend": {
@@ -4211,6 +4956,11 @@
             },
             "title": "Topics",
             "type": "array"
+          },
+          "used_embeddings": {
+            "default": false,
+            "title": "Used Embeddings",
+            "type": "boolean"
           },
           "work_count": {
             "title": "Work Count",
@@ -5067,6 +5817,18 @@
             "title": "Keywords",
             "type": "array"
           },
+          "main_file_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main File Id"
+          },
           "reading_status": {
             "title": "Reading Status",
             "type": "string"
@@ -5909,6 +6671,59 @@
         ]
       }
     },
+    "/api/v1/admin/ai/embedding-models": {
+      "get": {
+        "description": "Registered embedding models (each with its own chunk-vector column) for the search selector.\n\nThe UI offers each of these plus a 'multimode' option (RRF across all) for semantic search and\nclustering (#21).",
+        "operationId": "ai_embedding_models_api_v1_admin_ai_embedding_models_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ai Embedding Models Api V1 Admin Ai Embedding Models Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ai Embedding Models",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
     "/api/v1/admin/ai/models": {
       "delete": {
         "description": "Remove a locally-pulled model (Ollama).",
@@ -6080,6 +6895,69 @@
           }
         },
         "summary": "Pull Model Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/models/validate": {
+      "post": {
+        "description": "Check that an Ollama model is pulled and embedding-capable before selecting it (#2).\n\nLets the admin UI warn \"not pulled\" / \"not an embedding model\" up front instead of the job\nsilently degrading to hash-BOW. Only Ollama is probed; other providers report present.",
+        "operationId": "validate_embedding_model_api_v1_admin_ai_models_validate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRef"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Validate Embedding Model Api V1 Admin Ai Models Validate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Embedding Model",
         "tags": [
           "admin",
           "ai"
@@ -9469,7 +10347,7 @@
     },
     "/api/v1/exports": {
       "post": {
-        "description": "Export citations for a work, shelf, rack, search result, or selection.\n\nAccess control: the export is filtered to papers the caller may SEE; a shelf/rack scope\nrequires SEE on that container.",
+        "description": "Export citations for a work, shelf, rack, search result, selection, or saved filter.\n\nAccess control: the export is filtered to papers the caller may SEE; a shelf/rack scope\nrequires SEE on that container. A ``saved_filter`` scope (Phase B7) loads the caller's own\nfilter (404 on a missing/foreign one), resolves it to work ids clamped to the caller's visible\nset, and exports those.",
         "operationId": "export_scope_api_v1_exports_post",
         "parameters": [
           {
@@ -9522,6 +10400,63 @@
           }
         },
         "summary": "Export Scope",
+        "tags": [
+          "exports"
+        ]
+      }
+    },
+    "/api/v1/exports/styles": {
+      "get": {
+        "description": "List the citation styles available for the ``styled`` export format.\n\nReturned as ``[{\"value\", \"label\"}, ...]`` so the frontend can populate the style selector\ndynamically instead of hard-coding the list.",
+        "operationId": "list_citation_styles_api_v1_exports_styles_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response List Citation Styles Api V1 Exports Styles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Citation Styles",
         "tags": [
           "exports"
         ]
@@ -9655,7 +10590,7 @@
     },
     "/api/v1/files/{file_id}/extract": {
       "post": {
-        "description": "Queue GROBID extraction for a file (runs in the background worker).",
+        "description": "Queue GROBID extraction for a file (runs in the background worker).\n\n``force_ocr=true`` re-runs OCRmyPDF even when the text layer looks fine / OCR is disabled —\nthe manual \"Force OCR\" action for a scanned PDF that came out textless (#22).",
         "operationId": "extract_file_api_v1_files__file_id__extract_post",
         "parameters": [
           {
@@ -9666,6 +10601,16 @@
               "format": "uuid",
               "title": "File Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force_ocr",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force Ocr",
+              "type": "boolean"
             }
           },
           {
@@ -9842,6 +10787,66 @@
         ]
       }
     },
+    "/api/v1/graphs/topic": {
+      "post": {
+        "description": "Build a scoped embedding-similarity graph (nodes = papers, edges = semantic similarity, #6).\n\nAccess control mirrors the citation graph: hidden papers never appear, and a shelf/rack scope\nrequires SEE on that container. Edge weight is cosine similarity (inverted semantic distance);\nedges are kNN-sparsified.",
+        "operationId": "topic_graph_api_v1_graphs_topic_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopicGraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicGraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Topic Graph",
+        "tags": [
+          "graph"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "description": "Return basic service health.",
@@ -9979,6 +10984,70 @@
           }
         },
         "summary": "Batch Preview",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/batches": {
+      "get": {
+        "description": "List import batches (newest first) for the graph's import-batch scope picker.\n\nAccess-filtered (Phase B6/H): owner/admin see all batches; everyone else sees only batches they\ncreated. Each row carries the current work count for a human-readable picker label.",
+        "operationId": "list_import_batches_api_v1_imports_batches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportBatchRead"
+                  },
+                  "title": "Response List Import Batches Api V1 Imports Batches Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Batches",
         "tags": [
           "imports"
         ]
@@ -11073,9 +12142,302 @@
         ]
       }
     },
+    "/api/v1/saved-filters": {
+      "get": {
+        "description": "List the caller's saved filters (ordered by name).",
+        "operationId": "list_filters_api_v1_saved_filters_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SavedFilterRead"
+                  },
+                  "title": "Response List Filters Api V1 Saved Filters Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Filters",
+        "tags": [
+          "saved-filters"
+        ]
+      },
+      "post": {
+        "description": "Create a saved filter owned by the caller (409 on a duplicate name).",
+        "operationId": "create_filter_api_v1_saved_filters_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedFilterCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFilterRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Filter",
+        "tags": [
+          "saved-filters"
+        ]
+      }
+    },
+    "/api/v1/saved-filters/{filter_id}": {
+      "delete": {
+        "description": "Delete the caller's saved filter (404 if it isn't theirs).",
+        "operationId": "delete_filter_api_v1_saved_filters__filter_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filter_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Filter Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Filter",
+        "tags": [
+          "saved-filters"
+        ]
+      },
+      "put": {
+        "description": "Update the caller's saved filter (404 if it isn't theirs; 409 on a duplicate name).",
+        "operationId": "update_filter_api_v1_saved_filters__filter_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filter_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Filter Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedFilterUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedFilterRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Filter",
+        "tags": [
+          "saved-filters"
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "post": {
+        "description": "Unified search: lexical (BM25F+), semantic (dense), or hybrid (RRF fusion, default).\n\nRead-only. Access control is applied inside each engine (results are filtered to papers the\ncaller may SEE). Semantic/hybrid modes report which embedding provider actually served the\nranking vs the one configured, so a silent hash-BOW fallback is visible.",
+        "operationId": "search_api_v1_search_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HybridSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HybridSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
     "/api/v1/search/reindex": {
       "post": {
-        "description": "Embed any works missing a vector for the active provider (owner/editor). Returns count added.\n\nEmbeddings are normally created on import in the background; this rebuilds them on demand (e.g.\nafter a bulk import while the worker was down, or after switching embedding providers).",
+        "description": "Embed any works missing a vector for the active provider (owner/editor). Returns count added.\n\nEmbeddings are normally created on import in the background; this rebuilds them on demand (e.g.\nafter a bulk import while the worker was down, or after switching embedding providers). Also\nbackfills chunk-level embeddings for the active model (no-op unless a real model with a pgvector\ncolumn is active on Postgres).\n\nSurfaces provider provenance so the UI can warn when the requested provider (e.g. an Ollama\nmodel) was unavailable and the reindex silently ran under the hash-BOW fallback instead.",
         "operationId": "reindex_embeddings_api_v1_search_reindex_post",
         "parameters": [
           {
@@ -11107,6 +12469,12 @@
                       },
                       {
                         "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
                       }
                     ]
                   },
@@ -11136,7 +12504,7 @@
     },
     "/api/v1/search/semantic": {
       "post": {
-        "description": "Rank works by similarity to a free-text query. Read-only: embeddings are built off this\npath (on import / via /search/reindex), so a search never writes to the database.\n\nAccess control: results are filtered to papers the caller may SEE. We over-fetch then trim so\nthe visible result count is preserved when hidden papers rank highly.",
+        "description": "Rank works by similarity to a free-text query. Read-only: embeddings are built off this\npath (on import / via /search/reindex), so a search never writes to the database.\n\nAccess control: results are filtered to papers the caller may SEE, applied *inside* the ranking\n(selectivity-adaptive: exact over a small visible set, else ANN with an allow-list) so the\nvisible top-N is exact — no over-fetch heuristic.",
         "operationId": "search_semantic_api_v1_search_semantic_post",
         "parameters": [
           {
@@ -11189,6 +12557,67 @@
           }
         },
         "summary": "Search Semantic",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/search/warm": {
+      "post": {
+        "description": "Warm the BM25F+ lexical index into memory (call when the library view opens) so the first\nlexical/hybrid search is hot. Idempotent — the index is rebuilt only when the corpus changed.",
+        "operationId": "warm_search_api_v1_search_warm_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "title": "Response Warm Search Api V1 Search Warm Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Warm Search",
         "tags": [
           "search"
         ]
@@ -11925,7 +13354,7 @@
     },
     "/api/v1/works": {
       "get": {
-        "description": "List/search works by basic metadata and extraction/metadata completeness.\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``has:pdf`` ``has:references`` ``title:``); the leftover free text matches title/abstract/DOI/\narXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take precedence.\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all).",
+        "description": "List/search works by basic metadata and extraction/metadata completeness.\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``\n``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches\ntitle/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take\nprecedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE\nfilter (only see-able shelves/racks contribute; they never widen visibility).\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by\nthe saved-filter/graph/export resolvers); ``list_works`` only adds sort + limit.",
         "operationId": "list_works_api_v1_works_get",
         "parameters": [
           {
@@ -13259,6 +14688,69 @@
         ]
       }
     },
+    "/api/v1/works/{work_id}/files/{file_id}": {
+      "delete": {
+        "description": "Detach a file from a paper (#17). The File itself is retained (it may back other papers);\nonly the link is removed. If it was the paper's main file, the pointer is cleared.",
+        "operationId": "remove_work_file_api_v1_works__work_id__files__file_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Work File",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}/find-on-web": {
       "post": {
         "description": "Search legitimate scholarly sources for candidate matches for a paper (#5).\n\nRead-only egress: never stores anything and never fails the whole search when a source is\ndown — a degraded source is reported in ``degraded_sources``. Returns a (possibly empty)\nranked candidate list.",
@@ -13547,6 +15039,76 @@
           }
         },
         "summary": "Keywords Work Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/main-file/{file_id}": {
+      "put": {
+        "description": "Choose a paper's primary file for one-click 'Read' (#16). The file must be attached.",
+        "operationId": "set_main_file_api_v1_works__work_id__main_file__file_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Main File",
         "tags": [
           "works"
         ]

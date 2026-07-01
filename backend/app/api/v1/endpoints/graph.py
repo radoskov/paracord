@@ -16,6 +16,7 @@ from app.services.saved_filters import (
     get_owned_saved_filter,
     resolve_saved_filter_work_ids,
 )
+from app.services.topic_graph import build_topic_graph
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -111,5 +112,74 @@ def citation_graph(
     return CitationGraphResponse(
         nodes=[GraphNodeRead(**vars(node)) for node in graph.nodes],
         edges=[GraphEdgeRead(**vars(edge)) for edge in graph.edges],
+        summary=graph.summary,
+    )
+
+
+class TopicGraphRequest(BaseModel):
+    scope: GraphScope
+    embedding_model: str | None = None
+    k: int = 6
+    min_similarity: float = 0.30
+
+
+class TopicGraphNodeRead(BaseModel):
+    id: str
+    label: str
+    work_id: uuid.UUID
+    year: int | None = None
+
+
+class TopicGraphEdgeRead(BaseModel):
+    source: str
+    target: str
+    weight: float
+
+
+class TopicGraphResponse(BaseModel):
+    nodes: list[TopicGraphNodeRead]
+    edges: list[TopicGraphEdgeRead]
+    summary: dict
+
+
+@router.post("/topic", response_model=TopicGraphResponse)
+def topic_graph(
+    payload: TopicGraphRequest, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> TopicGraphResponse:
+    """Build a scoped embedding-similarity graph (nodes = papers, edges = semantic similarity, #6).
+
+    Access control mirrors the citation graph: hidden papers never appear, and a shelf/rack scope
+    requires SEE on that container. Edge weight is cosine similarity (inverted semantic distance);
+    edges are kNN-sparsified."""
+    if not access.can_see_scope_container(
+        db, actor, scope_type=payload.scope.type, scope_id=payload.scope.id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    work_ids = payload.scope.work_ids
+    if payload.scope.type == "saved_filter":
+        if payload.scope.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
+            )
+        saved = get_owned_saved_filter(db, actor, payload.scope.id)
+        if saved is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+        work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    try:
+        graph = build_topic_graph(
+            db,
+            scope_type=payload.scope.type,
+            scope_id=payload.scope.id,
+            work_ids=work_ids,
+            embedding_model=payload.embedding_model,
+            visible_ids=access.visible_work_ids(db, actor),
+            k=max(1, min(payload.k, 20)),
+            min_similarity=max(0.0, min(payload.min_similarity, 1.0)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return TopicGraphResponse(
+        nodes=[TopicGraphNodeRead(**vars(node)) for node in graph.nodes],
+        edges=[TopicGraphEdgeRead(**vars(edge)) for edge in graph.edges],
         summary=graph.summary,
     )
