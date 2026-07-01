@@ -670,3 +670,31 @@ Batch of 10 findings. Resolved decisions:
   H. Phases run sequentially (shared backend tests + git); read-only design passes pipeline.
 - **Phase N after H + J** — it reuses J's shelf-picker and ACL-checked add/remove helpers and the H
   access layer; schedule it once those exist.
+
+# Round: gap-analysis "all-clear" follow-ups (2026-07-01)
+
+From a spec/roadmap/audit gap analysis. These are unambiguous completions/fixes (no product
+decision needed) — implemented directly. (Decision-requiring findings B1–B9 are tracked separately
+for maintainer discussion, NOT here.)
+
+- [ ] **Phase AC1 — spec-completion & hardening (backend).**
+  - A1: make the Postgres-gated tests cwd-independent — resolve `Config(...alembic.ini)` from
+    `__file__`, not the relative literal `"backend/alembic.ini"` (`test_migration_parity.py`,
+    `test_pg_integration.py`, `test_access_control.py` backfill test).
+  - A2: add a `make openapi` target that dumps `app.openapi()` to a tracked `backend/openapi.json`
+    (spec §10 mandates a committed OpenAPI schema) + an optional `openapi-check` that it's current.
+  - A3: add a `--dry-run` to the restore script/`make restore` that validates the dump + reports what
+    would change without writing (spec §8.16.2). (The `admin/restore/dry-run` API form is B — skip.)
+  - A5: add thin `list-users` + `revoke-sessions` console scripts (+ Make targets) reusing existing
+    `user_service` functions (spec §7.3).
+  - A6: constrain `annotation_type` to the spec's enumerated set (Pydantic `Literal` on the
+    create/read schema at least; optionally a DB CHECK) — currently unconstrained `String(64)`.
+- [ ] **Phase AC2 — structured-search filters (backend).** A4: extend `search_query.py` + `list_works`
+  with the spec §14.2 operators that are missing and mechanically clear: `doi:`, `arxiv:`, `status:`,
+  `shelf:`, `rack:`, `has:notes|annotations|summary|abstract`, and `cites:`/`cited_by_local:` (join
+  citation edges). Keep the safe-allowlist parsing pattern.
+- [ ] **Phase AC3 — spec doc truthfulness (docs).** A7: update `SPECIFICATION.md` where it lags the
+  shipped code — §13.1/§13.11 "AI & Models" is now its own tab (Phase M), and §7.1.1/§7.1.2 the full
+  `reader<contributor<editor<librarian<admin<owner` ladder is implemented (Phase H), not "target".
+
+Order: AC3 (doc-only) runs in parallel with AC1 (backend); AC2 after AC1 (shared backend tests/git).
