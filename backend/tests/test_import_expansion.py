@@ -312,3 +312,64 @@ def test_work_references_endpoint_lists_bibliography(client, auth_headers, db) -
 
     missing = client.get(f"/api/v1/works/{uuid.uuid4()}/references", headers=headers)
     assert missing.status_code == 404
+
+
+# --- #16 main file + #17 remove file ---
+
+
+def _upload_pdf(client, headers, work_id, name="p.pdf"):
+    from app.core.config import get_settings
+
+    with (
+        patch("app.services.storage.get_settings", return_value=get_settings()),
+        patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            f"/api/v1/works/{work_id}/files",
+            headers=headers,
+            files={"file": (name, io.BytesIO(_TINY_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
+def test_set_main_file_and_read_pointer(client, auth_headers):
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "Main"}).json()
+    file_id = _upload_pdf(client, headers, work["id"])
+
+    r = client.put(f"/api/v1/works/{work['id']}/main-file/{file_id}", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["main_file_id"] == file_id
+    # reflected on the work read
+    assert (
+        client.get(f"/api/v1/works/{work['id']}", headers=headers).json()["main_file_id"] == file_id
+    )
+
+
+def test_set_main_file_rejects_unattached(client, auth_headers):
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "M2"}).json()
+    r = client.put(f"/api/v1/works/{work['id']}/main-file/{uuid.uuid4()}", headers=headers)
+    assert r.status_code == 404
+
+
+def test_remove_file_detaches_and_clears_main(client, auth_headers, db):
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "Rm"}).json()
+    file_id = _upload_pdf(client, headers, work["id"])
+    client.put(f"/api/v1/works/{work['id']}/main-file/{file_id}", headers=headers)
+
+    r = client.delete(f"/api/v1/works/{work['id']}/files/{file_id}", headers=headers)
+    assert r.status_code == 204
+    assert client.get(f"/api/v1/works/{work['id']}/files", headers=headers).json() == []
+    # main_file pointer cleared; the File row itself is retained (may back other papers)
+    assert client.get(f"/api/v1/works/{work['id']}", headers=headers).json()["main_file_id"] is None
+    assert db.get(File, uuid.UUID(file_id)) is not None
+
+
+def test_remove_file_requires_attachment(client, auth_headers):
+    headers = auth_headers("editor")
+    work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "Rm2"}).json()
+    r = client.delete(f"/api/v1/works/{work['id']}/files/{uuid.uuid4()}", headers=headers)
+    assert r.status_code == 404

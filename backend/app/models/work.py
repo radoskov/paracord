@@ -29,6 +29,10 @@ class Work(Base):
     work_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
     canonical_metadata_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reading_status: Mapped[str] = mapped_column(String(64), default="unread", index=True)
+    # User-chosen primary file for one-click "Read" (#16); NULL → the first attached file is used.
+    main_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
     # Manual ordering within the reading queue (SPEC §8.17.1); NULL sorts last.
     queue_position: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)

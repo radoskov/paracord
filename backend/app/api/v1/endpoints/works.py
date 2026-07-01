@@ -138,6 +138,8 @@ class WorkRead(BaseModel):
     year: int | None = None
     reading_status: str
     canonical_metadata_source: str | None = None
+    # User-chosen primary file for one-click "Read" (#16); NULL → the UI uses the first file.
+    main_file_id: uuid.UUID | None = None
     confirmed_fields: list[str] = []
     keywords: list[str] = []
     # Per-paper representative topic terms (Phase K); rendered separately from keywords.
@@ -1111,6 +1113,50 @@ async def upload_work_file(
     db.refresh(file_obj)
     enqueue_extraction(file_obj.id)
     return _file_read(db, file_obj)
+
+
+def _require_attached_file(db: Session, work_id: uuid.UUID, file_id: uuid.UUID) -> FileWorkLink:
+    link = db.scalar(
+        select(FileWorkLink).where(FileWorkLink.work_id == work_id, FileWorkLink.file_id == file_id)
+    )
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File is not attached to this paper"
+        )
+    return link
+
+
+@router.put("/{work_id}/main-file/{file_id}", response_model=WorkRead)
+def set_main_file(
+    work_id: uuid.UUID, file_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
+) -> Work:
+    """Choose a paper's primary file for one-click 'Read' (#16). The file must be attached."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    _require_attached_file(db, work_id, file_id)
+    work.main_file_id = file_id
+    db.commit()
+    db.refresh(work)
+    return work
+
+
+@router.delete("/{work_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_work_file(
+    work_id: uuid.UUID, file_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
+) -> None:
+    """Detach a file from a paper (#17). The File itself is retained (it may back other papers);
+    only the link is removed. If it was the paper's main file, the pointer is cleared."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    link = _require_attached_file(db, work_id, file_id)
+    db.delete(link)
+    if work.main_file_id == file_id:
+        work.main_file_id = None
+    db.commit()
 
 
 @router.get("/annotations/search", response_model=list[AnnotationRead])
