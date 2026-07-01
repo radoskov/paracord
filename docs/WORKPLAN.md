@@ -693,7 +693,7 @@ for maintainer discussion, NOT here.)
   with the spec §14.2 operators that are missing and mechanically clear: `doi:`, `arxiv:`, `status:`,
   `shelf:`, `rack:`, `has:notes|annotations|summary|abstract`, and `cites:`/`cited_by_local:` (join
   citation edges). Keep the safe-allowlist parsing pattern.
-- [ ] **Phase AC3 — spec doc truthfulness (docs).** A7: update `SPECIFICATION.md` where it lags the
+- [x] **Phase AC3 — spec doc truthfulness (docs).** A7: update `SPECIFICATION.md` where it lags the
   shipped code — §13.1/§13.11 "AI & Models" is now its own tab (Phase M), and §7.1.1/§7.1.2 the full
   `reader<contributor<editor<librarian<admin<owner` ladder is implemented (Phase H), not "target".
 
