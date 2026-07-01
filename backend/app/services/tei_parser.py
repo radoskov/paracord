@@ -67,6 +67,30 @@ def extract_body_text(tei_xml: str) -> str | None:
     return joined or None
 
 
+def extract_sections(tei_xml: str) -> list[tuple[str | None, str]]:
+    """Return ``(section_label, text)`` for each top-level body section of a GROBID TEI document.
+
+    Each ``<div>`` directly under ``<body>`` becomes one section: its label is the ``<head>`` text
+    (or the div ``type`` attribute), and its text is the concatenation of all descendant paragraphs.
+    Used by the chunker (HYBRID-SEARCH-DESIGN §3.1) to keep section labels on chunks. Returns ``[]``
+    on malformed/empty TEI. The reference list lives under ``<back>``, not ``<body>``, so it is
+    naturally excluded here; the chunker additionally drops acknowledgment-like sections by label.
+    """
+    if not tei_xml or not tei_xml.strip():
+        return []
+    try:
+        root = etree.fromstring(tei_xml.encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return []
+    sections: list[tuple[str | None, str]] = []
+    for div in root.findall(".//t:text/t:body/t:div", TEI_NS):
+        label = _text(div.find("t:head", TEI_NS)) or div.get("type")
+        text = " ".join(t for p in div.findall(".//t:p", TEI_NS) if (t := _text(p)))
+        if text:
+            sections.append((label, text))
+    return sections
+
+
 def _first(*elements):
     """Return the first element that is not None (avoids lxml truthiness pitfalls)."""
     for element in elements:

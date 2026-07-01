@@ -5,6 +5,7 @@ from app.models.agent import Agent, AgentEnrollmentToken, AgentFile
 from app.models.ai import AIConfig, Embedding, Summary, TopicAssignment
 from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
+from app.models.chunk import WorkChunk
 from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink, Location
@@ -59,5 +60,6 @@ __all__ = [
     "WebFindAllowedHost",
     "WebFindSettings",
     "Work",
+    "WorkChunk",
     "WorkVersion",
 ]

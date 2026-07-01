@@ -15,6 +15,7 @@ QUEUE_NAME = "paracord"
 EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
 EMBED_JOB = "app.workers.jobs.embed_work_job"
+CHUNK_JOB = "app.workers.jobs.chunk_work_job"
 DEDUP_JOB = "app.workers.jobs.scan_duplicates_job"
 REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
@@ -60,6 +61,16 @@ def enqueue_embedding(work_id) -> str | None:
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue embedding for work %s: %s", work_id, exc)
+        return None
+
+
+def enqueue_chunking(work_id) -> str | None:
+    """Best-effort enqueue of a passage-chunking job (populates work_chunks for semantic search)."""
+    try:
+        job = get_queue().enqueue(CHUNK_JOB, str(work_id))
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue chunking for work %s: %s", work_id, exc)
         return None
 
 
@@ -115,6 +126,7 @@ _FUNC_LABELS = {
     EXTRACT_JOB: "extract",
     ENRICH_JOB: "enrich",
     EMBED_JOB: "embed",
+    CHUNK_JOB: "chunk",
     TOPIC_JOB: "topic",
     KEYWORDS_JOB: "keywords",
     DEDUP_JOB: "dedup-scan",
@@ -312,7 +324,7 @@ def queue_status(limit: int = 25) -> dict:
                 return None, None
             if job.func_name == EXTRACT_JOB:
                 return "file", str(args[0])
-            if job.func_name in (ENRICH_JOB, EMBED_JOB, TOPIC_JOB, KEYWORDS_JOB):
+            if job.func_name in (ENRICH_JOB, EMBED_JOB, CHUNK_JOB, TOPIC_JOB, KEYWORDS_JOB):
                 return "work", str(args[0])
             return None, None
 

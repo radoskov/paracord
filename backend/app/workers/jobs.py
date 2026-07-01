@@ -54,7 +54,7 @@ def enrich_work_job(work_id: str) -> None:
     from app.db.session import SessionLocal
     from app.models.work import Work
     from app.services.metadata_enrichment import enrich_work
-    from app.workers.queue import enqueue_embedding
+    from app.workers.queue import enqueue_chunking, enqueue_embedding
 
     with SessionLocal() as db:
         work = db.get(Work, uuid.UUID(str(work_id)))
@@ -62,8 +62,22 @@ def enrich_work_job(work_id: str) -> None:
             return
         enrich_work(db, work, settings=get_settings())
         db.commit()
-    # Embeddings are built off the search read path; (re)index now that title/abstract are settled.
+    # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding unit), then
+    # (re)index embeddings — both off the search read path.
+    enqueue_chunking(work_id)
     enqueue_embedding(work_id)
+
+
+def chunk_work_job(work_id: str) -> None:
+    """(Re)build a work's passage chunks (HS1). Idempotent; no-op if the work is missing."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.services.chunking import chunk_work_by_id
+
+    with SessionLocal() as db:
+        chunk_work_by_id(db, uuid.UUID(str(work_id)))
+        db.commit()
 
 
 def embed_work_job(work_id: str) -> None:
