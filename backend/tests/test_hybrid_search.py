@@ -136,3 +136,29 @@ def test_search_api_lexical_has_no_provenance(client, auth_headers, db) -> None:
     assert body["items"][0]["title"] == "Quantum entanglement"
     assert body["embedding_provider_used"] is None
     assert body["degraded"] is False
+
+
+def test_search_relevance_is_normalized_across_modes(client, auth_headers, db) -> None:
+    """#20: raw scores differ wildly by mode; the display relevance is always in [0,1], top=1."""
+    for i in range(3):
+        db.add(
+            Work(
+                canonical_title=f"Graph neural networks {i}",
+                normalized_title=f"gnn {i}",
+                abstract="message passing over graphs and nodes and edges",
+            )
+        )
+    db.commit()
+    client.post("/api/v1/search/reindex", headers=auth_headers("editor"))
+    for mode in ("lexical", "semantic", "hybrid"):
+        r = client.post(
+            "/api/v1/search",
+            headers=auth_headers("reader"),
+            json={"q": "graph message passing", "mode": mode},
+        )
+        assert r.status_code == 200, mode
+        items = r.json()["items"]
+        assert items, mode
+        rels = [it["relevance"] for it in items]
+        assert all(0.0 <= x <= 1.0 for x in rels), (mode, rels)
+        assert max(rels) <= 1.0 and rels[0] == max(rels), (mode, rels)

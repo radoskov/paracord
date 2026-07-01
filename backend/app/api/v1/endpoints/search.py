@@ -25,6 +25,23 @@ AUTH_DEP = Depends(require_authenticated_user)
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 
 
+def _relevances(mode: str, scores: list[float]) -> list[float]:
+    """Map raw per-mode scores to a comparable [0,1] display relevance (#20).
+
+    Semantic scores are cosine similarities already in [0,1] (just clamped). Lexical (unbounded
+    BM25) and hybrid (tiny RRF) scores are scaled by the top score in the result set, so the best
+    hit reads as 100% and the rest as a sensible fraction — instead of >1000% / 1-3%.
+    """
+    if not scores:
+        return []
+    if mode == "semantic":
+        return [round(max(0.0, min(1.0, s)), 4) for s in scores]
+    top = max(scores)
+    if top <= 0:
+        return [0.0 for _ in scores]
+    return [round(max(0.0, s / top), 4) for s in scores]
+
+
 class SemanticSearchRequest(BaseModel):
     q: str
     limit: int = 10
@@ -71,6 +88,9 @@ class HybridSearchItem(BaseModel):
     title: str | None = None
     year: int | None = None
     score: float
+    # Display relevance in [0,1]: comparable across modes (raw scores are not — BM25 is unbounded,
+    # cosine is 0-1, RRF is ~0.016-0.03). The UI shows this as a %, not the raw score (#20).
+    relevance: float = 0.0
     passage: str | None = None
     section: str | None = None
     # Per-engine 1-based ranks (which engine surfaced the paper); null if that engine didn't.
@@ -126,6 +146,7 @@ def search(
         provider=provider,
         embedding_model=payload.embedding_model,
     )
+    relevances = _relevances(payload.mode, [h.score for h in hits])
     return HybridSearchResponse(
         query=payload.q,
         mode=payload.mode,
@@ -139,12 +160,13 @@ def search(
                 title=hit.work.canonical_title,
                 year=hit.work.year,
                 score=round(hit.score, 6),
+                relevance=rel,
                 passage=hit.passage,
                 section=hit.section,
                 lexical_rank=hit.lexical_rank,
                 semantic_rank=hit.semantic_rank,
             )
-            for hit in hits
+            for hit, rel in zip(hits, relevances, strict=False)
         ],
     )
 
