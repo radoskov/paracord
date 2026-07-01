@@ -82,12 +82,28 @@ class SentenceTransformerProvider:
         return [float(x) for x in self._model.encode(text or "", normalize_embeddings=True)]
 
 
+def normalize_ollama_model(model_name: str) -> str:
+    """Canonicalize an Ollama model name to the tagged form the HTTP API expects.
+
+    Ollama's ``/api/embeddings`` matches the daemon registry by exact name; a bare
+    ``nomic-embed-text`` misses the entry the daemon stores as ``nomic-embed-text:latest`` and
+    fails, whereas the tagged form works. A bare name and its ``:latest`` tag are the same model,
+    so we canonicalize to the tagged form everywhere (wire call *and* the stored ``model_name``
+    key) to avoid the silent-degrade-to-hash-BOW bug and to keep one vector namespace per model.
+    """
+    name = (model_name or "").strip()
+    if name and ":" not in name:
+        return f"{name}:latest"
+    return name
+
+
 class OllamaProvider:
     """Opt-in Ollama embeddings endpoint (local daemon)."""
 
     def __init__(self, model_name: str, base_url: str) -> None:
-        self.model_name = f"ollama:{model_name}"
-        self._model = model_name
+        canonical = normalize_ollama_model(model_name)
+        self.model_name = f"ollama:{canonical}"
+        self._model = canonical
         self._base_url = base_url.rstrip("/")
 
     def embed(self, text: str) -> list[float]:

@@ -22,7 +22,9 @@ from app.services.embeddings import EmbeddingProvider, get_embedding_provider
 # Keyed by the *resolved* provider model_name (e.g. "st:..."/"ollama:...").
 CHUNK_MODEL_COLUMNS: dict[str, tuple[str, int]] = {
     "st:sentence-transformers/all-MiniLM-L6-v2": ("vec_minilm", 384),
-    "ollama:nomic-embed-text": ("vec_nomic", 768),
+    # Canonicalized to the tagged form (see embeddings.normalize_ollama_model): the provider now
+    # reports "ollama:nomic-embed-text:latest" so its vectors keep landing in vec_nomic.
+    "ollama:nomic-embed-text:latest": ("vec_nomic", 768),
 }
 
 # Whitelist of column names we will ever interpolate into SQL (defense-in-depth: the only source is

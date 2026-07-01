@@ -15,7 +15,7 @@ from app.services import access
 from app.services.bm25_index import get_index, lexical_search_papers
 from app.services.chunk_embeddings import backfill_chunk_embeddings
 from app.services.chunk_search import semantic_search_papers
-from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
+from app.services.embeddings import resolve_embedding_provider
 from app.services.hybrid_search import hybrid_search
 from app.services.semantic_search import ensure_work_embeddings
 
@@ -195,18 +195,32 @@ def search_semantic(
 
 
 @router.post("/reindex")
-def reindex_embeddings(db: Session = DB_DEP, _: User = EDITOR_DEP) -> dict[str, int | str]:
+def reindex_embeddings(
+    db: Session = DB_DEP, _: User = EDITOR_DEP
+) -> dict[str, int | str | bool | None]:
     """Embed any works missing a vector for the active provider (owner/editor). Returns count added.
 
     Embeddings are normally created on import in the background; this rebuilds them on demand (e.g.
     after a bulk import while the worker was down, or after switching embedding providers). Also
     backfills chunk-level embeddings for the active model (no-op unless a real model with a pgvector
-    column is active on Postgres)."""
-    provider = get_embedding_provider(db=db)
+    column is active on Postgres).
+
+    Surfaces provider provenance so the UI can warn when the requested provider (e.g. an Ollama
+    model) was unavailable and the reindex silently ran under the hash-BOW fallback instead."""
+    resolved = resolve_embedding_provider(db=db)
+    provider = resolved.provider
     added = ensure_work_embeddings(db, provider=provider)
     chunks_indexed = backfill_chunk_embeddings(db, provider=provider)
     db.commit()
-    return {"indexed": added, "chunks_indexed": chunks_indexed, "status": "ok"}
+    return {
+        "indexed": added,
+        "chunks_indexed": chunks_indexed,
+        "status": "ok",
+        "embedding_provider_used": provider.model_name,
+        "embedding_provider_requested": resolved.requested,
+        "degraded": resolved.degraded,
+        "degraded_reason": resolved.reason,
+    }
 
 
 @router.post("/warm")

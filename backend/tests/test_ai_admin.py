@@ -195,3 +195,49 @@ def test_ai_config_rejects_unknown_ocr_backend(client, auth_headers):
         json={"ocr_backend": "made-up"},
     )
     assert r.status_code == 400
+
+
+# --- #2: embedding-model capability validation ---
+
+
+def test_validate_model_reports_unreachable(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    monkeypatch.setattr(model_management, "_ollama_tags", lambda ollama_url: None)
+    r = client.post(
+        "/api/v1/admin/ai/models/validate",
+        headers=auth_headers("owner"),
+        json={"provider": "ollama", "model": "nomic-embed-text"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["present"] is None
+    assert body["canonical"] == "nomic-embed-text:latest"
+    assert "unreachable" in body["error"].lower()
+
+
+def test_validate_model_reports_not_pulled(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    monkeypatch.setattr(
+        model_management, "_ollama_tags", lambda ollama_url: [{"name": "qwen3:latest"}]
+    )
+    r = client.post(
+        "/api/v1/admin/ai/models/validate",
+        headers=auth_headers("owner"),
+        json={"provider": "ollama", "model": "nomic-embed-text"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["present"] is False
+    assert "not pulled" in body["error"].lower()
+
+
+def test_validate_non_ollama_provider_is_ok(client, auth_headers):
+    r = client.post(
+        "/api/v1/admin/ai/models/validate",
+        headers=auth_headers("owner"),
+        json={"provider": "sentence_transformers", "model": "all-MiniLM-L6-v2"},
+    )
+    assert r.status_code == 200
+    assert r.json()["embeddings"] is True

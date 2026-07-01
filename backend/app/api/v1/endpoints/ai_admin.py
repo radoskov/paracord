@@ -23,7 +23,12 @@ from app.services.audit import record_event
 from app.services.bm25_index import cache_info as lexical_cache_info
 from app.services.chunk_embeddings import chunk_embedding_status
 from app.services.embeddings import get_embedding_provider
-from app.services.model_management import delete_model, detect_providers, list_models
+from app.services.model_management import (
+    delete_model,
+    detect_providers,
+    list_models,
+    probe_embedding_model,
+)
 from app.services.semantic_search import reindex_status
 from app.workers.queue import enqueue_model_pull, enqueue_reindex
 
@@ -88,6 +93,17 @@ def ai_providers(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
 def ai_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """List locally-available downloadable models."""
     return {"models": list_models(ollama_url=get_ai_config(db).ollama_url)}
+
+
+@router.post("/ai/models/validate")
+def validate_embedding_model(payload: ModelRef, db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
+    """Check that an Ollama model is pulled and embedding-capable before selecting it (#2).
+
+    Lets the admin UI warn "not pulled" / "not an embedding model" up front instead of the job
+    silently degrading to hash-BOW. Only Ollama is probed; other providers report present."""
+    if payload.provider != "ollama":
+        return {"present": True, "embeddings": True, "canonical": payload.model, "error": None}
+    return probe_embedding_model(payload.model, ollama_url=get_ai_config(db).ollama_url)
 
 
 @router.post("/ai/models/pull", status_code=status.HTTP_202_ACCEPTED)

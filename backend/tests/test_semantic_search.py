@@ -237,3 +237,35 @@ def test_semantic_search_lexical_mode_has_no_provider_provenance(client, auth_he
     body = r.json()
     assert body["embedding_provider_used"] is None
     assert body["degraded"] is False
+
+
+# --- #2: Ollama model-name canonicalization ---------------------------------
+
+
+def test_normalize_ollama_model_appends_latest_tag() -> None:
+    from app.services.embeddings import normalize_ollama_model
+
+    assert normalize_ollama_model("nomic-embed-text") == "nomic-embed-text:latest"
+    # An explicit tag is preserved; a fully-qualified name is untouched.
+    assert normalize_ollama_model("nomic-embed-text:v1.5") == "nomic-embed-text:v1.5"
+    assert normalize_ollama_model("  mxbai-embed-large  ") == "mxbai-embed-large:latest"
+    assert normalize_ollama_model("") == ""
+
+
+def test_ollama_provider_canonicalizes_wire_and_key() -> None:
+    """The bare name and its :latest tag are the same model, so both the daemon call and the stored
+    model_name key use the tagged form — this is the actual #2 silent-failure fix."""
+    from app.services.embeddings import OllamaProvider
+
+    bare = OllamaProvider("nomic-embed-text", "http://ollama:11434")
+    tagged = OllamaProvider("nomic-embed-text:latest", "http://ollama:11434")
+    assert bare.model_name == "ollama:nomic-embed-text:latest"
+    assert bare._model == "nomic-embed-text:latest"
+    assert bare.model_name == tagged.model_name  # unified vector namespace
+
+
+def test_nomic_keeps_its_chunk_column_after_canonicalization() -> None:
+    """The chunk-column registry key was updated to the canonical name so nomic keeps vec_nomic."""
+    from app.services.chunk_embeddings import chunk_column_for
+
+    assert chunk_column_for("ollama:nomic-embed-text:latest") == ("vec_nomic", 768)

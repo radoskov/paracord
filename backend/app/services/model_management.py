@@ -122,6 +122,57 @@ def detect_providers(*, ollama_url: str) -> dict:
     }
 
 
+def probe_embedding_model(model: str, *, ollama_url: str) -> dict:
+    """Check whether an Ollama model is pulled *and* embedding-capable.
+
+    Answers the "which models are for embedding?" problem (#2): a generation-only model like
+    ``qwen`` is present but 500s on ``/api/embeddings``. Returns a dict the UI can act on:
+    ``{present, embeddings, canonical, error}`` where ``present``/``embeddings`` are None when the
+    daemon is unreachable (can't verify) so the caller can distinguish "bad model" from "can't
+    check right now".
+    """
+    from app.services.embeddings import normalize_ollama_model  # noqa: PLC0415 (avoid import cycle)
+
+    canonical = normalize_ollama_model(model)
+    tags = _ollama_tags(ollama_url)
+    if tags is None:
+        return {
+            "present": None,
+            "embeddings": None,
+            "canonical": canonical,
+            "error": "Ollama daemon unreachable — cannot verify the model.",
+        }
+    names = {t.get("name") for t in tags}
+    if canonical not in names and model not in names:
+        return {
+            "present": False,
+            "embeddings": None,
+            "canonical": canonical,
+            "error": f"Model '{canonical}' is not pulled. Pull it first.",
+        }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                f"{ollama_url.rstrip('/')}/api/embeddings",
+                json={"model": canonical, "prompt": "probe"},
+            )
+            resp.raise_for_status()
+            ok = bool(resp.json().get("embedding"))
+        return {
+            "present": True,
+            "embeddings": ok,
+            "canonical": canonical,
+            "error": None if ok else "Model returned no embedding vector.",
+        }
+    except Exception as exc:  # noqa: BLE001 - generation-only models 500 here; that's the signal
+        return {
+            "present": True,
+            "embeddings": False,
+            "canonical": canonical,
+            "error": f"'{canonical}' is not an embedding model ({exc}).",
+        }
+
+
 def list_models(*, ollama_url: str) -> list[dict]:
     """List locally-available downloadable models (currently Ollama; ST weights live in HF cache)."""
     models: list[dict] = []
