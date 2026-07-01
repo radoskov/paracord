@@ -689,7 +689,7 @@ for maintainer discussion, NOT here.)
     `user_service` functions (spec §7.3).
   - A6: constrain `annotation_type` to the spec's enumerated set (Pydantic `Literal` on the
     create/read schema at least; optionally a DB CHECK) — currently unconstrained `String(64)`.
-- [ ] **Phase AC2 — structured-search filters (backend).** A4: extend `search_query.py` + `list_works`
+- [x] **Phase AC2 — structured-search filters (backend).** A4: extend `search_query.py` + `list_works`
   with the spec §14.2 operators that are missing and mechanically clear: `doi:`, `arxiv:`, `status:`,
   `shelf:`, `rack:`, `has:notes|annotations|summary|abstract`, and `cites:`/`cited_by_local:` (join
   citation edges). Keep the safe-allowlist parsing pattern.

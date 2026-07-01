@@ -1,5 +1,6 @@
 """Work endpoints."""
 
+import contextlib
 import json
 import uuid
 from collections.abc import Iterator
@@ -197,6 +198,19 @@ def _looks_like_hash(text: str) -> bool:
     return 8 <= len(candidate) <= 64 and all(c in "0123456789abcdefABCDEF" for c in candidate)
 
 
+def _name_or_id_condition(name_col, id_col, value: str):
+    """Build a SAFE ``name ILIKE %value% [OR id == value]`` predicate for a name-or-id operator.
+
+    ``value`` is always bound through the ORM (never interpolated). When it parses as a UUID we also
+    match the id column exactly, so ``shelf:<uuid>`` / ``rack:<uuid>`` / ``cites:<uuid>`` work; a
+    non-UUID string matches by name only.
+    """
+    conditions = [name_col.ilike(f"%{value}%")]
+    with contextlib.suppress(ValueError):
+        conditions.append(id_col == uuid.UUID(value))
+    return or_(*conditions)
+
+
 # Work columns that the `missing` filter can test for absence (NULL or empty string).
 _MISSING_FIELDS = {
     "title": Work.canonical_title,
@@ -239,8 +253,11 @@ def list_works(
     """List/search works by basic metadata and extraction/metadata completeness.
 
     ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
-    ``has:pdf`` ``has:references`` ``title:``); the leftover free text matches title/abstract/DOI/
-    arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take precedence.
+    ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
+    ``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches
+    title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
+    precedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE
+    filter (only see-able shelves/racks contribute; they never widen visibility).
 
     Access control: only papers the caller may SEE are returned (most-permissive governing shelf;
     loose papers are open; admin/owner see all).
@@ -303,6 +320,70 @@ def list_works(
             )
             .exists()
         )
+    if parsed.doi:
+        # Match the stored (already normalized) DOI as a normalized prefix so ``doi:10.1/x`` finds a
+        # paper whose DOI was stored with a scheme/prefix; a full DOI is an exact prefix match.
+        stmt = stmt.where(Work.doi.ilike(f"{normalize_doi(parsed.doi)}%"))
+    if parsed.arxiv:
+        # arXiv ids may be stored versioned (arxiv_id) or base (arxiv_base_id); match either.
+        arxiv_like = f"%{parsed.arxiv}%"
+        stmt = stmt.where(
+            or_(Work.arxiv_id.ilike(arxiv_like), Work.arxiv_base_id.ilike(arxiv_like))
+        )
+    if parsed.reading_status:
+        stmt = stmt.where(Work.reading_status == parsed.reading_status)
+    if parsed.shelf:
+        # Works in a shelf matched by name or id, restricted to shelves the caller may SEE (never
+        # widens visibility: a private shelf without a grant contributes no works).
+        shelf_ids = access.visible_shelves_query(db, actor).subquery()
+        shelf_cond = _name_or_id_condition(shelf_ids.c.name, shelf_ids.c.id, parsed.shelf)
+        member = (
+            select(ShelfWork.work_id)
+            .join(shelf_ids, shelf_ids.c.id == ShelfWork.shelf_id)
+            .where(ShelfWork.work_id == Work.id, shelf_cond)
+            .exists()
+        )
+        stmt = stmt.where(member)
+    if parsed.rack:
+        # Works whose shelf sits in a rack matched by name or id, restricted to racks the caller may
+        # SEE (rack->shelf->work; only see-able racks contribute).
+        rack_ids = access.visible_racks_query(db, actor).subquery()
+        rack_cond = _name_or_id_condition(rack_ids.c.name, rack_ids.c.id, parsed.rack)
+        member = (
+            select(ShelfWork.work_id)
+            .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+            .join(rack_ids, rack_ids.c.id == RackShelf.rack_id)
+            .where(ShelfWork.work_id == Work.id, rack_cond)
+            .exists()
+        )
+        stmt = stmt.where(member)
+    if parsed.cites:
+        # cites:X — works that cite the work(s) matching X. A local citation edge is a Reference
+        # resolved to a target work (Reference.citing_work_id cites Reference.resolved_work_id), so
+        # this keeps works that have a resolved reference whose target matches X (title/id).
+        target = Work.__table__.alias("cited_target")
+        cites_cond = _name_or_id_condition(target.c.canonical_title, target.c.id, parsed.cites)
+        edge = (
+            select(Reference.id)
+            .join(target, target.c.id == Reference.resolved_work_id)
+            .where(Reference.citing_work_id == Work.id, cites_cond)
+            .exists()
+        )
+        stmt = stmt.where(edge)
+    if parsed.cited_by_local:
+        # cited_by_local:X — works cited BY the work(s) matching X (the reverse edge): keep works
+        # that are the resolved target of a reference whose citing work matches X.
+        source = Work.__table__.alias("citing_source")
+        src_cond = _name_or_id_condition(
+            source.c.canonical_title, source.c.id, parsed.cited_by_local
+        )
+        edge = (
+            select(Reference.id)
+            .join(source, source.c.id == Reference.citing_work_id)
+            .where(Reference.resolved_work_id == Work.id, src_cond)
+            .exists()
+        )
+        stmt = stmt.where(edge)
     # Operator-derived has:* unless the caller passed explicit query params (those win).
     if has_pdf is None:
         has_pdf = parsed.has_pdf
@@ -329,6 +410,16 @@ def list_works(
     if has_references is not None:
         has_refs = select(Reference.id).where(Reference.citing_work_id == Work.id).exists()
         stmt = stmt.where(has_refs if has_references else ~has_refs)
+    if parsed.has_annotations:  # has:notes / has:annotations — ≥1 annotation on the work
+        stmt = stmt.where(select(Annotation.id).where(Annotation.work_id == Work.id).exists())
+    if parsed.has_summary:  # has:summary — ≥1 stored summary for the work
+        stmt = stmt.where(
+            select(Summary.id)
+            .where(Summary.entity_type == "work", Summary.entity_id == Work.id)
+            .exists()
+        )
+    if parsed.has_abstract:  # has:abstract — a non-empty abstract column
+        stmt = stmt.where(Work.abstract.is_not(None), Work.abstract != "")
     for field in (missing or "").split(","):
         name = field.strip()
         column = _MISSING_FIELDS.get(name)
