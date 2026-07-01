@@ -739,3 +739,37 @@ implemented as AC1–AC3 above.)
 - [ ] **B9 — Sealed emergency-recovery token.** Spec §7.3.6 (phrased "may") — an optional sealed
   first-run recovery token; not implemented (CLI reset is the working primary path). Decision:
   implement or formally drop the optional clause.
+
+## Maintainer decisions (2026-07-01)
+- **B1 + B3 — DEFERRED for detailed discussion.** Maintainer wants an explainer first: where/how the
+  current stand-ins are used per feature + how each option affects functionality AND system
+  requirements (VRAM/image size/model downloads). Do NOT implement until discussed.
+- **B2 — surface the fallback** (build).
+- **B4 — real CSL styles via citeproc-py + bundled styles** (build).
+- **B5 — OCRmyPDF as the default OCR path, + an admin/config toggle to ACTIVATE full-ML OCR
+  (Nougat/Marker) when its optional dependency is present, with documented install** (build).
+- **B6 — extra graph scopes + version-collapse** (build).
+- **B7 — saved filters** (build).
+- **B8, B9 — out of scope** (not selected).
+
+# Round: approved to-be-discussed items (2026-07-01)
+
+Phases for the approved B-items. Sequential impl (shared backend/frontend + git); designs pipelined.
+
+- [ ] **Phase B2 — surface provider fallback.** When the selected embedding/summary provider is
+  unavailable and the system degrades (hash-BOW / extractive), surface "requested X, using Y" at the
+  point of use (search results / summary display) — not just in the AI tab. Backend exposes the
+  active-vs-requested provider per response; frontend shows a small indicator.
+- [ ] **Phase B4 — real CSL citation styles.** Delegate `export_service.render_styled` to
+  `citeproc-py` with bundled `.csl` styles + locale (add `citeproc-py-styles` or vendor a curated
+  set), replacing the 3 hand-rolled approximations; keep APA/IEEE/Chicago + add a few common ones.
+- [ ] **Phase B5 — OCR extraction.** Add an OCRmyPDF path for scanned/needs-OCR PDFs (real, default),
+  wired into the extraction pipeline + Docker extraction image (tesseract/ghostscript). Add an
+  `extraction`/`ocr_backend` config + admin AI/config toggle to activate full-ML OCR
+  (Nougat/Marker) when installed, with availability + install guidance (NO runtime web-UI pip).
+- [ ] **Phase B6 — graph scopes + version-collapse.** Add `search_result`/`selected_papers`/
+  `import_batch` scopes to the citation graph + a version-collapse control (collapse version-linked
+  works into one node). Backend `citation_graph.py` + CitationGraph.svelte controls.
+- [ ] **Phase B7 — saved filters.** New `SavedFilter` model (name, query, owner) + CRUD endpoints +
+  UI to save the current library search as a named filter and reuse it as a graph/export scope.
+  Backend model+migration+endpoints + LibraryPage/graph/export wiring.
