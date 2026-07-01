@@ -6,11 +6,12 @@
     type CitationGraphResponse,
     type GraphNodeMode,
     type GraphScopeType,
+    type HybridSearchItem,
     type ImportBatch,
     type Rack,
     type SavedFilter,
     type ScopeSummaryResponse,
-    type SemanticSearchItem,
+    type SearchMode,
     type Shelf,
     type Topic,
   } from '../api/client';
@@ -28,8 +29,10 @@
   let topics: Topic[] = [];
   let summary: ScopeSummaryResponse | null = null;
   let semanticQuery = '';
-  let semanticResults: SemanticSearchItem[] = [];
+  let semanticResults: HybridSearchItem[] = [];
   let semanticDegraded = false;
+  // Search mode (HS5): hybrid (RRF of lexical + semantic, default), semantic-only, or lexical-only.
+  let searchMode: SearchMode = 'hybrid';
   let loading = false;
   let message = '';
   // Phase B6 graph scopes.
@@ -52,6 +55,8 @@
         client.listSavedFilters().catch(() => [] as SavedFilter[]),
       ]);
     });
+    // Warm the lexical index so the first lexical/hybrid search is hot (best-effort).
+    client.warmSearch?.().catch(() => undefined);
   });
 
   $: scope = {
@@ -135,7 +140,7 @@
   async function semanticSearch(): Promise<void> {
     if (!semanticQuery.trim()) return;
     await run(async () => {
-      const response = await client.semanticSearch(semanticQuery, 10);
+      const response = await client.search(semanticQuery, searchMode, 10);
       semanticResults = response.items;
       semanticDegraded = response.degraded === true;
     });
@@ -288,20 +293,48 @@
   </div>
 
   <div class="card">
-    <h2>Semantic search</h2>
-    <p class="muted">Find papers by meaning across the whole library (lexical baseline embedder).</p>
+    <h2>Search</h2>
+    <p class="muted">
+      Find papers across the library. <strong>Hybrid</strong> fuses keyword (BM25F+) and meaning-based
+      search; <strong>Semantic</strong> is meaning-only; <strong>Lexical</strong> is keyword-only.
+    </p>
+    <div class="modes" role="radiogroup" aria-label="Search mode">
+      {#each [['hybrid', 'Hybrid'], ['semantic', 'Semantic'], ['lexical', 'Lexical']] as [value, label] (value)}
+        <label class="mode" class:active={searchMode === value}>
+          <input type="radio" name="search-mode" value={value} bind:group={searchMode} />
+          {label}
+        </label>
+      {/each}
+    </div>
     <form on:submit|preventDefault={semanticSearch} class="row">
-      <input bind:value={semanticQuery} placeholder="e.g. attention mechanisms for translation" aria-label="Semantic query" />
+      <input bind:value={semanticQuery} placeholder="e.g. attention mechanisms for translation" aria-label="Search query" />
       <button type="submit" disabled={!semanticQuery.trim() || loading}
-        title={semanticQuery.trim() ? 'Search the library by meaning' : 'Type a query first'}>Search</button>
+        title={semanticQuery.trim() ? 'Search the library' : 'Type a query first'}>Search</button>
     </form>
     {#if semanticDegraded}
-      <p class="degraded-hint" role="status">Semantic search is using the built-in baseline (sentence-transformers not configured).</p>
+      <p class="degraded-hint" role="status">Semantic ranking is using the built-in baseline embedder (sentence-transformers / Ollama not configured).</p>
     {/if}
     {#if semanticResults.length > 0}
-      <ul class="plain">
+      <ul class="plain results">
         {#each semanticResults as hit (hit.work_id)}
-          <li><strong>{hit.title ?? 'Untitled'}</strong><small class="muted"> · {(hit.score * 100).toFixed(0)}%{hit.year ? ` · ${hit.year}` : ''}</small></li>
+          <li>
+            <div class="result-head">
+              <strong>{hit.title ?? 'Untitled'}</strong>
+              <small class="muted"> · {(hit.score * 100).toFixed(0)}%{hit.year ? ` · ${hit.year}` : ''}</small>
+              {#if searchMode === 'hybrid'}
+                {#if hit.lexical_rank && hit.semantic_rank}
+                  <span class="badge both" title="Matched by both keyword and semantic search">both</span>
+                {:else if hit.lexical_rank}
+                  <span class="badge lex" title="Matched by keyword search">keyword</span>
+                {:else if hit.semantic_rank}
+                  <span class="badge sem" title="Matched by semantic search">semantic</span>
+                {/if}
+              {/if}
+            </div>
+            {#if hit.passage}
+              <p class="passage">{hit.section ? `${hit.section}: ` : ''}{hit.passage.length > 240 ? hit.passage.slice(0, 240) + '…' : hit.passage}</p>
+            {/if}
+          </li>
         {/each}
       </ul>
     {/if}
@@ -325,6 +358,75 @@
     background: #fef3c7;
     color: #78350f;
     font-size: 0.85rem;
+  }
+
+  .modes {
+    display: inline-flex;
+    gap: 0.25rem;
+    margin: 0 0 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    padding: 0.15rem;
+  }
+
+  .mode {
+    cursor: pointer;
+    padding: 0.2rem 0.6rem;
+    border-radius: 0.375rem;
+    font-size: 0.85rem;
+    user-select: none;
+  }
+
+  .mode.active {
+    background: #2563eb;
+    color: #fff;
+  }
+
+  .mode input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .results li {
+    margin-bottom: 0.6rem;
+  }
+
+  .result-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .badge.both {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  .badge.lex {
+    background: #e0e7ff;
+    color: #3730a3;
+  }
+
+  .badge.sem {
+    background: #fae8ff;
+    color: #86198f;
+  }
+
+  .passage {
+    margin: 0.2rem 0 0;
+    font-size: 0.85rem;
+    color: #4b5563;
   }
 
   .grid {

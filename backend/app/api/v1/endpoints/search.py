@@ -16,6 +16,7 @@ from app.services.bm25_index import get_index, lexical_search_papers
 from app.services.chunk_embeddings import backfill_chunk_embeddings
 from app.services.chunk_search import semantic_search_papers
 from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
+from app.services.hybrid_search import hybrid_search
 from app.services.semantic_search import ensure_work_embeddings
 
 router = APIRouter()
@@ -53,6 +54,85 @@ class SemanticSearchResponse(BaseModel):
     embedding_provider_requested: str | None = None
     degraded: bool = False
     degraded_reason: str | None = None
+
+
+class HybridSearchRequest(BaseModel):
+    q: str
+    limit: int = 10
+    # 'hybrid' fuses lexical (BM25F+) and semantic (dense) via RRF; the others use one engine.
+    mode: Literal["lexical", "semantic", "hybrid"] = "hybrid"
+
+
+class HybridSearchItem(BaseModel):
+    work_id: uuid.UUID
+    title: str | None = None
+    year: int | None = None
+    score: float
+    passage: str | None = None
+    section: str | None = None
+    # Per-engine 1-based ranks (which engine surfaced the paper); null if that engine didn't.
+    lexical_rank: int | None = None
+    semantic_rank: int | None = None
+
+
+class HybridSearchResponse(BaseModel):
+    query: str
+    mode: str
+    items: list[HybridSearchItem]
+    # Embedding provenance (Phase B2) — populated for semantic/hybrid modes, null for lexical.
+    embedding_provider_used: str | None = None
+    embedding_provider_requested: str | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
+
+
+@router.post("", response_model=HybridSearchResponse)
+def search(
+    payload: HybridSearchRequest, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> HybridSearchResponse:
+    """Unified search: lexical (BM25F+), semantic (dense), or hybrid (RRF fusion, default).
+
+    Read-only. Access control is applied inside each engine (results are filtered to papers the
+    caller may SEE). Semantic/hybrid modes report which embedding provider actually served the
+    ranking vs the one configured, so a silent hash-BOW fallback is visible."""
+    limit = max(1, min(payload.limit, 50))
+    visible = access.visible_work_ids(db, actor)
+
+    used = requested = reason = None
+    degraded = False
+    provider = None
+    if payload.mode in ("semantic", "hybrid"):
+        resolved = resolve_embedding_provider(db=db)
+        provider = resolved.provider
+        used = resolved.provider.model_name
+        requested = resolved.requested
+        degraded = resolved.degraded
+        reason = resolved.reason
+
+    hits = hybrid_search(
+        db, payload.q, visible_ids=visible, limit=limit, mode=payload.mode, provider=provider
+    )
+    return HybridSearchResponse(
+        query=payload.q,
+        mode=payload.mode,
+        embedding_provider_used=used,
+        embedding_provider_requested=requested,
+        degraded=degraded,
+        degraded_reason=reason,
+        items=[
+            HybridSearchItem(
+                work_id=hit.work.id,
+                title=hit.work.canonical_title,
+                year=hit.work.year,
+                score=round(hit.score, 6),
+                passage=hit.passage,
+                section=hit.section,
+                lexical_rank=hit.lexical_rank,
+                semantic_rank=hit.semantic_rank,
+            )
+            for hit in hits
+        ],
+    )
 
 
 @router.post("/semantic", response_model=SemanticSearchResponse)

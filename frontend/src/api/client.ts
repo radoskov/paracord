@@ -46,6 +46,32 @@ export interface SemanticSearchResponse {
   degraded_reason?: string | null;
 }
 
+// Unified hybrid search (HS5): lexical (BM25F+), semantic (dense), or hybrid (RRF fusion).
+export type SearchMode = 'lexical' | 'semantic' | 'hybrid';
+
+export interface HybridSearchItem {
+  work_id: string;
+  title: string | null;
+  year: number | null;
+  score: number;
+  // Best-matching passage + its section (semantic/hybrid); null in lexical mode / doc fallback.
+  passage?: string | null;
+  section?: string | null;
+  // Which engine surfaced the paper (1-based rank), null if that engine didn't.
+  lexical_rank?: number | null;
+  semantic_rank?: number | null;
+}
+
+export interface HybridSearchResponse {
+  query: string;
+  mode: string;
+  items: HybridSearchItem[];
+  embedding_provider_used?: string | null;
+  embedding_provider_requested?: string | null;
+  degraded?: boolean;
+  degraded_reason?: string | null;
+}
+
 export type SummaryType = 'abstract' | 'extractive';
 
 export interface Summary {
@@ -1662,6 +1688,18 @@ export class ApiClient {
       method: 'POST',
       body: { q, limit },
     });
+  }
+
+  async search(q: string, mode: SearchMode = 'hybrid', limit = 10): Promise<HybridSearchResponse> {
+    return this.request<HybridSearchResponse>('/api/v1/search', {
+      method: 'POST',
+      body: { q, mode, limit },
+    });
+  }
+
+  // Warm the BM25F+ lexical index (call on library/insights open) so the first search is hot.
+  async warmSearch(): Promise<{ lexical_indexed_docs: number; status: string }> {
+    return this.request('/api/v1/search/warm', { method: 'POST' });
   }
 
   async listSummaries(workId: string): Promise<Summary[]> {
