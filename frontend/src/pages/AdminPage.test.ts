@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { currentUser } from '../lib/session';
@@ -37,6 +37,9 @@ describe('AdminPage groups section', () => {
 
     // The admin-gated group reads are issued on mount.
     await waitFor(() => expect(client.listGroups).toHaveBeenCalled());
+
+    // The admin page is organised into sub-tabs (#24); open the Groups tab.
+    await fireEvent.click(screen.getByRole('button', { name: 'Groups' }));
 
     expect(screen.getByText(/Groups & access/i)).toBeTruthy();
     // Both a shared group and a personal group render (personal is marked + non-deletable).

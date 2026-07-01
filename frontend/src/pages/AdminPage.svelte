@@ -60,6 +60,24 @@
   // enforces this).
   $: meId = $currentUser?.id ?? null;
 
+  // Admin sub-tabs (#24): group the existing sections under a local tab strip so the page isn't one
+  // long scroll. Folders + the download policy are owner-only; those tabs are hidden for plain
+  // admins. Find-on-web bundles the allowed-hosts list and the download policy.
+  type AdminTab = { id: string; label: string; ownerOnly?: boolean };
+  const ADMIN_TABS: AdminTab[] = [
+    { id: 'users', label: 'Users' },
+    { id: 'groups', label: 'Groups' },
+    { id: 'findweb', label: 'Find-on-web' },
+    { id: 'folders', label: 'Folders', ownerOnly: true },
+    { id: 'agents', label: 'Agents' },
+  ];
+  $: visibleAdminTabs = ADMIN_TABS.filter((t) => !t.ownerOnly || $isOwner);
+  let activeAdminTab = 'users';
+  // If the active tab isn't available for this role, fall back to the first visible one.
+  $: if (!visibleAdminTabs.some((t) => t.id === activeAdminTab)) {
+    activeAdminTab = visibleAdminTabs[0]?.id ?? 'users';
+  }
+
   /** The owner row is fully locked: no role-change, disable, delete or password reset. */
   function isOwnerRow(user: AdminUser): boolean {
     return user.role === 'owner' || user.is_bootstrap;
@@ -519,6 +537,15 @@
     <p class="message">{message}</p>
   {/if}
 
+  <!-- Admin sub-tabs (#24) -->
+  <nav class="admin-tabs" aria-label="Admin sections">
+    {#each visibleAdminTabs as tab (tab.id)}
+      <button type="button" class="admin-tab" class:active={activeAdminTab === tab.id}
+        on:click={() => (activeAdminTab = tab.id)}>{tab.label}</button>
+    {/each}
+  </nav>
+
+  {#if activeAdminTab === 'users'}
   <div class="admin-columns">
     <!-- Users -->
     <section class="surface admin-section">
@@ -635,8 +662,12 @@
         {/each}
       </div>
     </section>
+  </div>
+  {/if}
 
-    <!-- Agents -->
+  <!-- Agents -->
+  {#if activeAdminTab === 'agents'}
+  <div class="admin-columns">
     <section class="surface admin-section">
       <h2>Agents</h2>
       <p class="muted small-help">
@@ -763,9 +794,10 @@
       {/if}
     </section>
   </div>
+  {/if}
 
   <!-- Server import folders (owner-only; batch 2 #19) -->
-  {#if $isOwner}
+  {#if activeAdminTab === 'folders' && $isOwner}
     <section class="surface admin-section import-roots">
       <h2>Server import folders</h2>
       <p class="muted">
@@ -825,7 +857,7 @@
   {/if}
 
   <!-- Find-on-web allowed download hosts (owner+admin; batch 2 #5) -->
-  {#if $canManageUsers}
+  {#if activeAdminTab === 'findweb' && $canManageUsers}
     <section class="surface admin-section allowed-hosts">
       <h2>Find-on-web allowed hosts</h2>
       <p class="muted">
@@ -880,7 +912,7 @@
   {/if}
 
   <!-- Find-on-web download policy (owner-only; find-on-web v2). -->
-  {#if $isOwner}
+  {#if activeAdminTab === 'findweb' && $isOwner}
     <section class="surface admin-section download-policy">
       <h2>Find-on-web download policy</h2>
       <p class="muted">
@@ -915,7 +947,7 @@
   {/if}
 
   <!-- Access-control groups (admin-or-owner; Phase H) -->
-  {#if $canManageUsers}
+  {#if activeAdminTab === 'groups' && $canManageUsers}
     <section class="surface admin-section groups">
       <h2>Groups &amp; access</h2>
       <p class="muted">
@@ -1103,6 +1135,27 @@
   .admin-layout {
     max-width: 92rem;
     margin: 0 auto;
+  }
+
+  .admin-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+  }
+
+  .admin-tab {
+    background: #fff;
+    border: 1px solid var(--pg-border, #cbd5e1);
+    border-radius: 6px;
+    color: var(--pg-secondary-text, #21303d);
+    font-weight: 600;
+  }
+
+  .admin-tab.active {
+    background: #203142;
+    border-color: #203142;
+    color: #fff;
   }
 
   .admin-columns {

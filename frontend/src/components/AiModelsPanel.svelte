@@ -6,6 +6,7 @@
     type AiConfig,
     type AiModel,
     type AiStatus,
+    type EmbeddingModelInfo,
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
 
@@ -15,10 +16,26 @@
   let status: AiStatus | null = null;
   let models: AiModel[] = [];
 
+  // Registered embedding models + cap (#21).
+  let embeddingModels: EmbeddingModelInfo[] = [];
+  let maxModels = 0;
+
   let pullProvider = 'ollama';
   let pullModel = '';
   let message = '';
   let busy = false;
+
+  // Ollama embedding-model validation (#2): result of validating config.embedding_model.
+  let validation: { present: boolean | null; embeddings: boolean | null; canonical: string; error: string | null } | null = null;
+  let validating = false;
+
+  // Pull-progress tracking (#5): the job id returned by a pull + its polled status.
+  let pullJobId: string | null = null;
+  let pullJobStatus = '';
+  let pullPolling = false;
+
+  // Copy-to-clipboard confirmation for a clicked model name (#19).
+  let copiedModel = '';
 
   onMount(refresh);
 
@@ -41,7 +58,70 @@
       status = st;
       config = st.config;
       models = mdl.models;
+      // Registered embedding models + cap (#21); tolerate absence on older backends.
+      try {
+        const emb = await client.listEmbeddingModels();
+        embeddingModels = emb.models;
+        maxModels = emb.max_models;
+      } catch {
+        embeddingModels = [];
+        maxModels = 0;
+      }
     });
+    // Validate the current Ollama embedding model so the warning is present on load.
+    await validateEmbedding();
+  }
+
+  // #2: validate the configured Ollama embedding model against the daemon. Only meaningful for the
+  // ollama provider; other providers clear the validation state.
+  async function validateEmbedding(): Promise<void> {
+    if (!config || config.embedding_provider !== 'ollama' || !config.embedding_model?.trim()) {
+      validation = null;
+      return;
+    }
+    validating = true;
+    try {
+      validation = await client.validateAiModel('ollama', config.embedding_model.trim());
+    } catch {
+      validation = null;
+    } finally {
+      validating = false;
+    }
+  }
+
+  // #19: click a model name to copy it, with a brief "copied" confirmation.
+  async function copyModelName(name: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(name);
+      copiedModel = name;
+      window.setTimeout(() => {
+        if (copiedModel === name) copiedModel = '';
+      }, 1500);
+    } catch {
+      message = name;
+    }
+  }
+
+  // #5: poll the Jobs status for the pull job until it finishes/fails, updating a status label.
+  async function pollPull(jobId: string): Promise<void> {
+    pullPolling = true;
+    pullJobStatus = 'queued';
+    try {
+      for (let i = 0; i < 600; i += 1) {
+        const q = await client.getJobs(50).catch(() => null);
+        const job = q?.jobs.find((j) => j.id === jobId);
+        if (job) {
+          pullJobStatus = job.status;
+          if (job.status === 'finished' || job.status === 'failed') {
+            if (job.status === 'finished') models = await client.listAiModels().then((r) => r.models);
+            return;
+          }
+        }
+        await new Promise((r) => window.setTimeout(r, 2000));
+      }
+    } finally {
+      pullPolling = false;
+    }
   }
 
   // Availability + how-to-enable note for a specific provider/backend option, read from the
@@ -143,10 +223,14 @@
 
   async function pull(): Promise<void> {
     if (!pullModel.trim()) return;
+    const name = pullModel.trim();
     await run(async () => {
-      const r = await client.pullAiModel(pullProvider, pullModel.trim());
-      message = `Pull queued for ${pullProvider}/${pullModel} (job ${r.job_id.slice(0, 8)}) — watch the Jobs tab.`;
+      const r = await client.pullAiModel(pullProvider, name);
+      message = `Pull queued for ${pullProvider}/${name} (job ${r.job_id.slice(0, 8)}).`;
       pullModel = '';
+      pullJobId = r.job_id;
+      // #5: track progress by polling the Jobs status (background pull, no streaming endpoint).
+      void pollPull(r.job_id);
     });
   }
 
@@ -209,9 +293,33 @@
           {/if}
         </label>
         <label>Embedding model
-          <input bind:value={config.embedding_model} placeholder="(provider default)" disabled={busy}
+          <input bind:value={config.embedding_model} on:blur={validateEmbedding}
+            placeholder="(provider default)" disabled={busy}
             title="Specific embedding model name, or blank for the provider default" />
         </label>
+        <!-- #2: validate the Ollama embedding model + show the resolved effective model. -->
+        {#if config.embedding_provider === 'ollama' && config.embedding_model?.trim()}
+          {#if validating}
+            <p class="reason">Validating model…</p>
+          {:else if validation}
+            {#if validation.present === false}
+              <p class="banner" title="The model isn't pulled on the Ollama server">
+                Not pulled on Ollama — run “Pull model” below (or <code>ollama pull {config.embedding_model.trim()}</code>).
+              </p>
+            {:else if validation.embeddings === false}
+              <p class="banner" title="This model doesn't produce embeddings">
+                Not an embedding model — pick a model that supports embeddings (e.g. nomic-embed-text).
+              </p>
+            {:else if validation.present === null || validation.embeddings === null}
+              <p class="banner" title="Couldn't reach the Ollama daemon to validate">
+                Couldn't validate — the Ollama daemon is unreachable{validation.error ? ` (${validation.error})` : ''}.
+              </p>
+            {/if}
+            {#if validation.canonical}
+              <p class="reason">Effective model: <code>{validation.canonical}</code></p>
+            {/if}
+          {/if}
+        {/if}
       </article>
 
       <!-- Topic modeling (topic backend) -->
@@ -353,14 +461,52 @@
         Pull model
       </button>
     </div>
+    <!-- #5: live pull progress via Jobs polling. -->
+    {#if pullJobId}
+      <p class="pull-status" role="status">
+        {#if pullPolling}<span class="spinner" aria-hidden="true"></span>{/if}
+        Pull {pullJobStatus || 'queued'}
+        {#if pullJobStatus === 'finished'}✓{:else if pullJobStatus === 'failed'}✗{/if}
+        <small class="muted">(job {pullJobId.slice(0, 8)})</small>
+      </p>
+    {/if}
     {#if models.length === 0}
       <p class="empty">No local models. Pull one above (needs the Ollama profile running).</p>
     {:else}
       <ul class="models">
         {#each models as m (m.provider + m.name)}
           <li>
-            <span>{m.name} <small class="muted">{m.provider} {fmtSize(m.size_bytes)}</small></span>
+            <span>
+              <!-- #19: click the model name to copy it. -->
+              <button type="button" class="copy-name" on:click={() => copyModelName(m.name)}
+                title="Click to copy this model name">{m.name}</button>
+              {#if copiedModel === m.name}<span class="copied">copied ✓</span>{/if}
+              <small class="muted">{m.provider} {fmtSize(m.size_bytes)}</small>
+            </span>
             <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy} title="Delete this downloaded model">Delete</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <!-- #21: registered embedding models + the model cap. -->
+    <h3 class="section">Registered embedding models</h3>
+    <p class="muted small">
+      Models registered for semantic search{maxModels ? ` (cap: ${maxModels})` : ''}. The Search tab
+      can rank with any of these, or fuse all of them (“Multimode”).
+    </p>
+    {#if embeddingModels.length === 0}
+      <p class="empty">No embedding models registered.</p>
+    {:else}
+      <ul class="models">
+        {#each embeddingModels as m (m.model_name)}
+          <li>
+            <span>
+              <button type="button" class="copy-name" on:click={() => copyModelName(m.model_name)}
+                title="Click to copy this model name">{m.model_name}</button>
+              {#if copiedModel === m.model_name}<span class="copied">copied ✓</span>{/if}
+              <small class="muted">{m.provider} · dim {m.dim}</small>
+            </span>
           </li>
         {/each}
       </ul>
@@ -463,5 +609,36 @@
   .models { display: flex; flex-direction: column; gap: 0.3rem; list-style: none; margin: 0.4rem 0; padding: 0; }
   .models li { align-items: center; display: flex; gap: 0.5rem; justify-content: space-between; }
   .models .small { min-height: 1.9rem; margin: 0; padding: 0.2rem 0.5rem; }
+  .copy-name {
+    background: none;
+    border: none;
+    color: #1f2a36;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    min-height: 0;
+    padding: 0;
+    text-decoration: underline dotted;
+  }
+  .copied { color: #14532d; font-size: 0.75rem; font-weight: 700; margin-left: 0.35rem; }
+  .pull-status {
+    align-items: center;
+    background: #eef4ef;
+    border-radius: 6px;
+    display: flex;
+    gap: 0.4rem;
+    margin: 0.4rem 0;
+    padding: 0.35rem 0.6rem;
+  }
+  .spinner {
+    animation: spin 0.8s linear infinite;
+    border: 2px solid #cbd5e1;
+    border-radius: 50%;
+    border-top-color: #2d3e50;
+    display: inline-block;
+    height: 0.9rem;
+    width: 0.9rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
 </style>

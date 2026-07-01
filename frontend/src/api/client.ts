@@ -1510,6 +1510,25 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Validate a provider/model against the daemon (#2). `present`/`embeddings` are null when the
+   * daemon (e.g. Ollama) is unreachable; `canonical` is the resolved effective model name.
+   */
+  async validateAiModel(
+    provider: string,
+    model: string,
+  ): Promise<{
+    present: boolean | null;
+    embeddings: boolean | null;
+    canonical: string;
+    error: string | null;
+  }> {
+    return this.request('/api/v1/admin/ai/models/validate', {
+      method: 'POST',
+      body: { provider, model },
+    });
+  }
+
   async deleteAiModel(provider: string, model: string): Promise<unknown> {
     return this.request('/api/v1/admin/ai/models', { method: 'DELETE', body: { provider, model } });
   }
