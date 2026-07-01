@@ -141,6 +141,8 @@ export interface GraphNode {
   work_id: string | null;
   year: number | null;
   doi: string | null;
+  // Optional venue for hover tooltips (#8); not always populated by the backend.
+  venue?: string | null;
 }
 
 export interface GraphEdge {
@@ -154,6 +156,34 @@ export interface CitationGraphResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
   summary: Record<string, number>;
+}
+
+// Topic (embedding-similarity) graph (#6): nodes are papers, edges weighted by similarity.
+export interface TopicGraphNode {
+  id: string;
+  label: string;
+  work_id: string | null;
+  year: number | null;
+  venue?: string | null;
+  doi?: string | null;
+}
+
+export interface TopicGraphEdge {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+export interface TopicGraphResponse {
+  nodes: TopicGraphNode[];
+  edges: TopicGraphEdge[];
+  summary: {
+    node_count: number;
+    edge_count: number;
+    used_embeddings: boolean;
+    embedding_model?: string | null;
+    note?: string | null;
+  };
 }
 
 export type ExportScopeType =
@@ -1816,6 +1846,30 @@ export class ApiClient {
         },
         node_mode: payload.nodeMode,
         collapse_versions: payload.collapseVersions ?? false,
+      },
+    });
+  }
+
+  /** Topic (embedding-similarity) graph over the same scope family as the citation graph (#6). */
+  async topicGraph(payload: {
+    scopeType: GraphScopeType;
+    scopeId?: string | null;
+    workIds?: string[];
+    embeddingModel?: string;
+    k?: number;
+    minSimilarity?: number;
+  }): Promise<TopicGraphResponse> {
+    return this.request<TopicGraphResponse>('/api/v1/graphs/topic', {
+      method: 'POST',
+      body: {
+        scope: {
+          type: payload.scopeType,
+          id: payload.scopeId ?? null,
+          work_ids: payload.workIds ?? null,
+        },
+        ...(payload.embeddingModel ? { embedding_model: payload.embeddingModel } : {}),
+        ...(payload.k != null ? { k: payload.k } : {}),
+        ...(payload.minSimilarity != null ? { min_similarity: payload.minSimilarity } : {}),
       },
     });
   }

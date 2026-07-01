@@ -17,7 +17,7 @@
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
-  import { selectedPaperIds } from '../lib/selection';
+  import { pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -120,6 +120,31 @@
       nodeMode,
       collapseVersions,
     });
+  }
+
+  // Topic (embedding-similarity) graph over the current scope (#6). Mirrors loadGraph's scope
+  // resolution so both graph types share the same scope picker.
+  async function loadTopicGraph(): Promise<import('../api/client').TopicGraphResponse> {
+    if (scopeType === 'search_result') {
+      const works = await client.listWorks({ q: graphSearchQuery });
+      return client.topicGraph({ scopeType, workIds: works.map((w) => w.id) });
+    }
+    if (scopeType === 'selected_papers') {
+      return client.topicGraph({ scopeType, workIds: $selectedPaperIds });
+    }
+    if (scopeType === 'import_batch') {
+      return client.topicGraph({ scopeType, scopeId: batchId || null });
+    }
+    if (scopeType === 'saved_filter') {
+      return client.topicGraph({ scopeType, scopeId: savedFilterId || null });
+    }
+    return client.topicGraph({ scopeType: scope.scopeType, scopeId: scope.scopeId });
+  }
+
+  // External graph node → jump to the Library search for its DOI so the user can import it (#8).
+  function importExternal(doi: string): void {
+    pendingLibrarySearch.set({ query: doi, mode: 'metadata' });
+    if (typeof window !== 'undefined') window.location.hash = '#library';
   }
 
   async function modelTopics(): Promise<void> {
@@ -259,6 +284,8 @@
       label={scopeType === 'library' ? '· whole library' : `· ${scopeType.replace('_', ' ')}`}
       disabled={loading || !scopeReady}
       load={loadGraph}
+      loadTopic={loadTopicGraph}
+      onImportExternal={importExternal}
       {visible}
     />
   </div>

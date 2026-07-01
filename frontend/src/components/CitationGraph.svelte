@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
 
-  import type { CitationGraphResponse, GraphNodeMode } from '../api/client';
+  import type { CitationGraphResponse, GraphNodeMode, TopicGraphResponse } from '../api/client';
 
   export let label = '';
   export let disabled = false;
@@ -13,8 +13,13 @@
     edges: [],
     summary: {},
   });
+  // Topic (embedding-similarity) graph loader (#6). When provided, a Citation/Topic mode toggle is
+  // shown; the topic graph shares the same Cytoscape rendering.
+  export let loadTopic: (() => Promise<TopicGraphResponse>) | null = null;
   // Called with a node's work_id when a local node is clicked (opens the work).
   export let onOpenWork: ((workId: string) => void) | null = null;
+  // Called with a doi/arxiv identifier when an external node's "import" action fires (#8).
+  export let onImportExternal: ((doi: string) => void) | null = null;
   // Whether the enclosing tab is visible (#9). Cytoscape mis-sizes when built while its container
   // is `display:none`, so when the tab becomes visible again we resize + re-run the layout.
   export let visible = true;
@@ -28,34 +33,101 @@
     wasVisible = visible;
   }
 
+  // Graph type: citation (default) or topic (embedding similarity, #6).
+  let graphType: 'citation' | 'topic' = 'citation';
   let nodeMode: GraphNodeMode = 'local_only';
   let collapseVersions = false;
   let renderMode: 'graph' | 'list' = 'graph';
-  let layout = 'cose';
+  // fcose (#8) is the preferred force layout; if the extension didn't load we fall back to cose.
+  let layout = 'fcose';
   let graph: CitationGraphResponse | null = null;
+  let topicGraph: TopicGraphResponse | null = null;
   let busy = false;
+  // Hide nodes with no edges (#7); default ON.
+  let hideSingletons = true;
+  // Collapse a paper's external citation leaves beyond this many into a single "+K external" node (#8).
+  const EXTERNAL_LEAF_CAP = 8;
+  let hideExternalLeaves = false;
 
   let cyContainer: HTMLDivElement | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let cy: any = null;
   let cyError = false;
+  let fcoseRegistered = false;
+  // Hover tooltip (#8).
+  let tooltip = { show: false, x: 0, y: 0, html: '' };
 
   async function build(): Promise<void> {
     busy = true;
     try {
-      graph = await load(nodeMode, collapseVersions);
+      if (graphType === 'topic' && loadTopic) {
+        topicGraph = await loadTopic();
+        graph = null;
+      } else {
+        graph = await load(nodeMode, collapseVersions);
+        topicGraph = null;
+      }
     } finally {
       busy = false;
     }
   }
 
-  function nodeLabel(id: string): string {
-    return graph?.nodes.find((node) => node.id === id)?.label ?? id;
+  // Unified node/edge shape for rendering, derived from whichever graph is active.
+  type RNode = { id: string; label: string; kind: 'local' | 'external'; workId: string | null; year: number | null; venue: string | null; doi: string | null };
+  type REdge = { source: string; target: string; weight: number; resolution?: string };
+
+  $: rNodes = (() => {
+    if (graphType === 'topic' && topicGraph) {
+      return topicGraph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: 'local', workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi ?? null }));
+    }
+    if (graph) {
+      return graph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: n.type, workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi }));
+    }
+    return [] as RNode[];
+  })();
+  $: rEdges = (() => {
+    if (graphType === 'topic' && topicGraph) return topicGraph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight }));
+    if (graph) return graph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight, resolution: e.resolution }));
+    return [] as REdge[];
+  })();
+
+  // Apply the client-side filters (#7 hide singletons, #8 collapse external leaves) to produce the
+  // node/edge set actually rendered.
+  function filteredElements(): { nodes: RNode[]; edges: REdge[] } {
+    let nodes = rNodes;
+    let edges = rEdges;
+
+    if (hideExternalLeaves) {
+      // Drop external nodes and any edge touching them.
+      const localIds = new Set(nodes.filter((n) => n.kind === 'local').map((n) => n.id));
+      nodes = nodes.filter((n) => n.kind === 'local');
+      edges = edges.filter((e) => localIds.has(e.source) && localIds.has(e.target));
+    }
+
+    if (hideSingletons) {
+      const touched = new Set<string>();
+      for (const e of edges) {
+        touched.add(e.source);
+        touched.add(e.target);
+      }
+      nodes = nodes.filter((n) => touched.has(n.id));
+    }
+    return { nodes, edges };
   }
 
-  function degrees(g: CitationGraphResponse): Record<string, number> {
+  $: hasGraph = graphType === 'topic' ? topicGraph != null : graph != null;
+  $: activeSummary =
+    graphType === 'topic'
+      ? topicGraph?.summary ?? null
+      : (graph?.summary as Record<string, number> | null) ?? null;
+
+  function nodeLabel(id: string): string {
+    return rNodes.find((node) => node.id === id)?.label ?? id;
+  }
+
+  function degrees(edges: REdge[]): Record<string, number> {
     const deg: Record<string, number> = {};
-    for (const edge of g.edges) {
+    for (const edge of edges) {
       deg[edge.source] = (deg[edge.source] ?? 0) + edge.weight;
       deg[edge.target] = (deg[edge.target] ?? 0) + edge.weight;
     }
@@ -63,28 +135,43 @@
   }
 
   async function renderGraph(): Promise<void> {
-    if (!graph || !cyContainer) return;
+    if (!hasGraph || !cyContainer) return;
     try {
       // Dynamically imported and called untyped: the lazy chunk keeps cytoscape out of the
       // initial bundle, and per-layout options (e.g. `animate`) aren't in the base type.
       const cytoscape = (await import('cytoscape')).default as (options: unknown) => typeof cy;
+      // fcose (#8) is a nicer force layout than the built-in cose. Register once; if it can't load
+      // (e.g. offline), fall back to cose so the graph still renders.
+      if (!fcoseRegistered) {
+        try {
+          const fcose = (await import('cytoscape-fcose')).default as unknown;
+          (cytoscape as unknown as { use: (ext: unknown) => void }).use(fcose);
+          fcoseRegistered = true;
+        } catch {
+          if (layout === 'fcose') layout = 'cose';
+        }
+      }
       if (cy) {
         cy.destroy();
         cy = null;
       }
-      const deg = degrees(graph);
+      const { nodes, edges } = filteredElements();
+      const deg = degrees(edges);
       const maxDeg = Math.max(1, ...Object.values(deg));
       const elements = [
-        ...graph.nodes.map((node) => ({
+        ...nodes.map((node) => ({
           data: {
             id: node.id,
             label: node.label,
-            kind: node.type,
-            workId: node.work_id,
+            kind: node.kind,
+            workId: node.workId,
+            doi: node.doi,
+            year: node.year,
+            venue: node.venue,
             deg: deg[node.id] ?? 0,
           },
         })),
-        ...graph.edges.map((edge) => ({
+        ...edges.map((edge) => ({
           data: {
             source: edge.source,
             target: edge.target,
@@ -93,6 +180,7 @@
           },
         })),
       ];
+      const useLayout = layout === 'fcose' && !fcoseRegistered ? 'cose' : layout;
       cy = cytoscape({
         container: cyContainer,
         elements,
@@ -125,11 +213,32 @@
             },
           },
         ],
-        layout: { name: layout, animate: false },
+        layout: { name: useLayout, animate: false },
       });
-      cy.on('tap', 'node', (event: { target: { data: (k: string) => string } }) => {
-        const workId = event.target.data('workId');
-        if (workId && onOpenWork) onOpenWork(workId);
+      cy.on('tap', 'node', (event: { target: { data: (k: string) => unknown } }) => {
+        const t = event.target;
+        const workId = t.data('workId') as string | null;
+        if (workId && onOpenWork) {
+          onOpenWork(workId);
+          return;
+        }
+        // External node (no local work): offer an import by DOI when possible (#8).
+        const doi = t.data('doi') as string | null;
+        if (!workId && doi && onImportExternal) onImportExternal(doi);
+      });
+      // Hover tooltips (#8): title / year / venue / DOI.
+      cy.on('mouseover', 'node', (event: { target: { data: (k: string) => unknown; renderedPosition: () => { x: number; y: number } } }) => {
+        const t = event.target;
+        const parts = [
+          `<strong>${escapeHtml(String(t.data('label') ?? ''))}</strong>`,
+          [t.data('year'), t.data('venue')].filter(Boolean).map((v) => escapeHtml(String(v))).join(' · '),
+          t.data('doi') ? `doi:${escapeHtml(String(t.data('doi')))}` : '',
+        ].filter(Boolean);
+        const pos = t.renderedPosition();
+        tooltip = { show: true, x: pos.x, y: pos.y, html: parts.join('<br>') };
+      });
+      cy.on('mouseout', 'node', () => {
+        tooltip = { ...tooltip, show: false };
       });
       cyError = false;
     } catch {
@@ -138,11 +247,16 @@
     }
   }
 
-  function relayout(): void {
-    if (cy) cy.layout({ name: layout, animate: false }).run();
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c);
   }
 
-  $: if (renderMode === 'graph' && graph && cyContainer) void renderGraph();
+  function relayout(): void {
+    if (cy) cy.layout({ name: layout === 'fcose' && !fcoseRegistered ? 'cose' : layout, animate: false }).run();
+  }
+
+  // Re-render when the active graph, render mode, or client-side filters change.
+  $: if (renderMode === 'graph' && hasGraph && cyContainer && (rNodes || hideSingletons || hideExternalLeaves)) void renderGraph();
 
   onDestroy(() => {
     if (cy) cy.destroy();
@@ -151,8 +265,18 @@
 
 <section>
   <div class="head">
-    <h3>Citation graph {label}</h3>
+    <h3>{graphType === 'topic' ? 'Topic graph' : 'Citation graph'} {label}</h3>
     <div class="controls">
+      {#if loadTopic}
+        <div class="seg" role="group" aria-label="Graph type">
+          <button type="button" class:active={graphType === 'citation'}
+            on:click={() => (graphType = 'citation')}
+            title="Show citation links between papers">Citation</button>
+          <button type="button" class:active={graphType === 'topic'}
+            on:click={() => (graphType = 'topic')}
+            title="Show embedding-similarity (topic) links between papers">Topic</button>
+        </div>
+      {/if}
       <div class="seg" role="group" aria-label="Render mode">
         <button
           type="button"
@@ -166,7 +290,7 @@
           type="button"
           class:active={renderMode === 'list'}
           on:click={() => (renderMode = 'list')}
-          title="Show the citation edges as a plain list"
+          title="Show the graph edges as a plain list"
         >
           List
         </button>
@@ -174,55 +298,85 @@
       {#if renderMode === 'graph'}
         <select bind:value={layout} on:change={relayout} disabled={disabled || busy}
           title="Graph layout algorithm">
-          <option value="cose">Force</option>
+          <option value="fcose">Force (fCoSE)</option>
+          <option value="cose">Force (cose)</option>
           <option value="circle">Circle</option>
           <option value="grid">Grid</option>
           <option value="breadthfirst">Hierarchy</option>
         </select>
       {/if}
-      <select bind:value={nodeMode} disabled={disabled || busy}
-        title="Whether to include papers outside the library as external nodes">
-        <option value="local_only">Local only</option>
-        <option value="include_external">Include external</option>
-      </select>
-      <label class="toggle" title="Merge papers linked as versions of one another into one node">
-        <input
-          type="checkbox"
-          bind:checked={collapseVersions}
-          disabled={disabled || busy}
-          aria-label="Collapse works linked as versions into one node"
-        />
-        Collapse versions
+      {#if graphType === 'citation'}
+        <select bind:value={nodeMode} disabled={disabled || busy}
+          title="Whether to include papers outside the library as external nodes">
+          <option value="local_only">Local only</option>
+          <option value="include_external">Include external</option>
+        </select>
+        <label class="toggle" title="Merge papers linked as versions of one another into one node">
+          <input
+            type="checkbox"
+            bind:checked={collapseVersions}
+            disabled={disabled || busy}
+            aria-label="Collapse works linked as versions into one node"
+          />
+          Collapse versions
+        </label>
+      {/if}
+      <label class="toggle" title="Hide nodes that have no edges">
+        <input type="checkbox" bind:checked={hideSingletons}
+          aria-label="Hide nodes with no edges" />
+        Hide singletons
       </label>
+      {#if graphType === 'citation' && nodeMode === 'include_external'}
+        <label class="toggle" title="Hide external (outside-library) nodes and their edges">
+          <input type="checkbox" bind:checked={hideExternalLeaves}
+            aria-label="Hide external nodes" />
+          Hide external
+        </label>
+      {/if}
       <button type="button" on:click={build} disabled={disabled || busy}
-        title="Build the citation graph for the chosen scope">Build graph</button>
+        title={graphType === 'topic' ? 'Build the topic graph for the chosen scope' : 'Build the citation graph for the chosen scope'}>Build graph</button>
     </div>
   </div>
 
-  {#if graph}
-    <p class="summary">
-      {graph.summary.node_count ?? graph.nodes.length} nodes · {graph.summary.edge_count ??
-        graph.edges.length} edges · {graph.summary.external_node_count ?? 0} external ·
-      {graph.summary.unresolved_reference_count ?? 0} unresolved
-    </p>
+  {#if hasGraph}
+    {#if graphType === 'topic' && topicGraph}
+      <p class="summary">
+        {topicGraph.summary.node_count} nodes · {topicGraph.summary.edge_count} edges
+        {#if topicGraph.summary.embedding_model} · {topicGraph.summary.embedding_model}{/if}
+      </p>
+      {#if !topicGraph.summary.used_embeddings}
+        <p class="note">{topicGraph.summary.note ?? 'Topic graph is using a non-embedding fallback (no embeddings available).'}</p>
+      {/if}
+    {:else if graph}
+      <p class="summary">
+        {graph.summary.node_count ?? graph.nodes.length} nodes · {graph.summary.edge_count ??
+          graph.edges.length} edges · {graph.summary.external_node_count ?? 0} external ·
+        {graph.summary.unresolved_reference_count ?? 0} unresolved
+      </p>
+    {/if}
 
-    {#if graph.edges.length === 0 && graph.nodes.length === 0}
-      <p class="empty">No citation edges in this scope yet.</p>
+    {#if rNodes.length === 0 && rEdges.length === 0}
+      <p class="empty">{graphType === 'topic' ? 'No similarity edges in this scope yet.' : 'No citation edges in this scope yet.'}</p>
     {:else if renderMode === 'graph'}
-      <div class="cy" bind:this={cyContainer}></div>
+      <div class="cy-wrap">
+        <div class="cy" bind:this={cyContainer}></div>
+        {#if tooltip.show}
+          <div class="cy-tooltip" style={`left:${tooltip.x + 12}px; top:${tooltip.y + 12}px`}>{@html tooltip.html}</div>
+        {/if}
+      </div>
       {#if cyError}
         <p class="empty">Interactive view unavailable here — switch to List.</p>
       {:else}
-        <p class="hint">Node size ≈ citation degree · click a node to open the work.</p>
+        <p class="hint">Node size ≈ degree · hover for details · click a local node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.</p>
       {/if}
     {:else}
       <ul class="edges">
-        {#each graph.edges as edge (edge.source + '->' + edge.target)}
+        {#each rEdges as edge (edge.source + '->' + edge.target)}
           <li>
             <span>{nodeLabel(edge.source)}</span>
-            <span class="arrow">→</span>
+            <span class="arrow">{graphType === 'topic' ? '↔' : '→'}</span>
             <span>{nodeLabel(edge.target)}</span>
-            <small>{edge.resolution}{edge.weight > 1 ? ` ·×${edge.weight}` : ''}</small>
+            <small>{edge.resolution ?? `sim ${edge.weight.toFixed(2)}`}{edge.resolution && edge.weight > 1 ? ` ·×${edge.weight}` : ''}</small>
           </li>
         {/each}
       </ul>
@@ -295,12 +449,38 @@
     padding: 0.3rem 0.5rem;
   }
 
+  .cy-wrap {
+    position: relative;
+  }
+
   .cy {
     background: #fbfcfd;
     border: 1px solid #d8dee6;
     border-radius: 6px;
     height: min(60vh, 34rem);
     width: 100%;
+  }
+
+  .cy-tooltip {
+    background: #1f2a36;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    max-width: 20rem;
+    padding: 0.35rem 0.55rem;
+    pointer-events: none;
+    position: absolute;
+    z-index: 5;
+  }
+
+  .note {
+    background: #fef3c7;
+    border-radius: 6px;
+    color: #78350f;
+    font-size: 0.82rem;
+    margin: 0.2rem 0;
+    padding: 0.35rem 0.55rem;
   }
 
   .summary,
