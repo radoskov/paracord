@@ -38,13 +38,17 @@ def test_ai_config_is_owner_only(client, auth_headers):
     assert client.get("/api/v1/admin/ai-config", headers=auth_headers("reader")).status_code == 403
 
 
-def test_providers_detection_and_reindex_status(client, auth_headers):
+def test_providers_detection_and_reindex_status(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    # Force Ollama "unreachable" so the assertion holds regardless of a daemon on the host.
+    monkeypatch.setattr(model_management, "_ollama_tags", lambda ollama_url: None)
     owner = auth_headers("owner")
     providers = client.get("/api/v1/admin/ai/providers", headers=owner)
     assert providers.status_code == 200
     body = providers.json()
     assert body["embedding"]["hash_bow"]["available"] is True
-    # Ollama is unreachable in CI → reported unavailable with a how-to-enable note.
+    # Ollama forced unreachable → reported unavailable with a how-to-enable note.
     assert body["embedding"]["ollama"]["available"] is False
     assert body["embedding"]["ollama"]["note"]
 
@@ -62,7 +66,11 @@ def test_providers_detection_and_reindex_status(client, auth_headers):
     assert "indexed" in status.json()
 
 
-def test_ai_status_endpoint(client, auth_headers):
+def test_ai_status_endpoint(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    # Deterministic: force Ollama unreachable regardless of a daemon on the host.
+    monkeypatch.setattr(model_management, "_ollama_tags", lambda ollama_url: None)
     # Owner + admin get the folded status; editor/reader are refused.
     for role in ("owner", "admin"):
         r = client.get("/api/v1/admin/ai/status", headers=auth_headers(role))
@@ -91,11 +99,33 @@ def test_ai_status_endpoint(client, auth_headers):
         ), role
 
 
-def test_models_list_when_ollama_down(client, auth_headers):
-    # No Ollama in CI → an empty model list, not an error.
+def test_models_list_when_ollama_down(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    # Force Ollama unreachable → an empty model list, not an error.
+    monkeypatch.setattr(model_management, "_ollama_tags", lambda ollama_url: None)
     r = client.get("/api/v1/admin/ai/models", headers=auth_headers("owner"))
     assert r.status_code == 200
     assert r.json() == {"models": []}
+
+
+def test_models_list_when_ollama_up(client, auth_headers, monkeypatch):
+    from app.services import model_management
+
+    # Reachable daemon with two local models → surfaced as provider/name/size rows.
+    monkeypatch.setattr(
+        model_management,
+        "_ollama_tags",
+        lambda ollama_url: [
+            {"name": "nomic-embed-text:latest", "size": 274301056},
+            {"name": "qwen3:latest", "size": 5200000000},
+        ],
+    )
+    r = client.get("/api/v1/admin/ai/models", headers=auth_headers("owner"))
+    assert r.status_code == 200
+    models = r.json()["models"]
+    assert {m["name"] for m in models} == {"nomic-embed-text:latest", "qwen3:latest"}
+    assert all(m["provider"] == "ollama" for m in models)
 
 
 # --- Phase B5: OCR / advanced-extraction backend ---
