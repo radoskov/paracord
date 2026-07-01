@@ -54,6 +54,8 @@ export interface HybridSearchItem {
   title: string | null;
   year: number | null;
   score: number;
+  // Normalised 0..1 relevance for display as a % (distinct from the raw fusion `score`).
+  relevance?: number | null;
   // Best-matching passage + its section (semantic/hybrid); null in lexical mode / doc fallback.
   passage?: string | null;
   section?: string | null;
@@ -70,6 +72,21 @@ export interface HybridSearchResponse {
   embedding_provider_requested?: string | null;
   degraded?: boolean;
   degraded_reason?: string | null;
+}
+
+// Registered embedding models (admin) — powers the Search embedding-model selector and the
+// AI panel's model list.
+export interface EmbeddingModelInfo {
+  model_name: string;
+  provider: string;
+  dim: number;
+  slug: string;
+}
+
+export interface EmbeddingModelsResponse {
+  models: EmbeddingModelInfo[];
+  max_models: number;
+  multimode_available: boolean;
 }
 
 export type SummaryType = 'abstract' | 'extractive';
@@ -1693,11 +1710,27 @@ export class ApiClient {
     });
   }
 
-  async search(q: string, mode: SearchMode = 'hybrid', limit = 10): Promise<HybridSearchResponse> {
+  async search(
+    q: string,
+    mode: SearchMode = 'hybrid',
+    limit = 10,
+    embeddingModel?: string,
+  ): Promise<HybridSearchResponse> {
     return this.request<HybridSearchResponse>('/api/v1/search', {
       method: 'POST',
-      body: { q, mode, limit },
+      body: {
+        q,
+        mode,
+        limit,
+        // Omit for the default model; pass a registered model_name or "multimode" to fuse all.
+        ...(embeddingModel ? { embedding_model: embeddingModel } : {}),
+      },
     });
+  }
+
+  /** Registered embedding models + the model cap (admin-scoped; 403 for reader-only sessions). */
+  async listEmbeddingModels(): Promise<EmbeddingModelsResponse> {
+    return this.request<EmbeddingModelsResponse>('/api/v1/admin/ai/embedding-models');
   }
 
   // Warm the BM25F+ lexical index (call on library/insights open) so the first search is hot.

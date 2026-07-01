@@ -26,7 +26,12 @@
     saveColumnPrefs,
     visibleColumnDefs,
   } from '../lib/columns';
-  import { pendingLibrarySearch, selectedPaperIds, selectedWorkId } from '../lib/selection';
+  import {
+    pendingLibraryOpen,
+    pendingLibrarySearch,
+    selectedPaperIds,
+    selectedWorkId,
+  } from '../lib/selection';
   import { canEdit, canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -151,6 +156,14 @@
     void loadWorks();
   });
   onDestroy(unsubscribePendingSearch);
+  // Open a paper requested from another tab (e.g. a search result). Fetches it if it isn't in the
+  // current filtered list. Resets the request so re-clicking the same paper works again.
+  const unsubscribePendingOpen = pendingLibraryOpen.subscribe((workId) => {
+    if (!workId) return;
+    pendingLibraryOpen.set(null);
+    void onSelectWork(workId);
+  });
+  onDestroy(unsubscribePendingOpen);
   onDestroy(() => {
     if (savePrefsTimer) clearTimeout(savePrefsTimer);
   });

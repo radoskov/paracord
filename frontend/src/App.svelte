@@ -12,6 +12,7 @@
   import LibraryPage from './pages/LibraryPage.svelte';
   import ProfilePage from './pages/ProfilePage.svelte';
   import RacksPage from './pages/RacksPage.svelte';
+  import SearchPage from './pages/SearchPage.svelte';
   import ShelvesPage from './pages/ShelvesPage.svelte';
   import TagsPage from './pages/TagsPage.svelte';
   import { currentUser } from './lib/session';
@@ -23,6 +24,7 @@
 
   const TABS: Tab[] = [
     { id: 'library', label: 'Library', hint: 'Search, read, edit and organise your papers.' },
+    { id: 'search', label: 'Search', hint: 'Search the whole library by keyword or meaning, and act on the results.' },
     { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
@@ -218,6 +220,9 @@
          `visible` prop so they can pause work / resize while hidden. -->
     {#if visited.has('library')}
       <div hidden={active !== 'library'}><LibraryPage {client} /></div>
+    {/if}
+    {#if visited.has('search')}
+      <div hidden={active !== 'search'}><SearchPage {client} /></div>
     {/if}
     {#if visited.has('import')}
       <div hidden={active !== 'import'}><ImportPage {client} /></div>

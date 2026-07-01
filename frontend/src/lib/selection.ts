@@ -18,3 +18,7 @@ export interface PendingSearch {
 }
 
 export const pendingLibrarySearch = writable<PendingSearch | null>(null);
+
+// A paper to open in the Library tab, set from elsewhere (e.g. clicking a search result). LibraryPage
+// subscribes, opens the paper (fetching it if not in the current list), and resets this to null.
+export const pendingLibraryOpen = writable<string | null>(null);
