@@ -168,6 +168,12 @@ class Settings(BaseSettings):
     allowed_roles: list[str] = ["owner", "editor", "reader"]
     session_ttl_minutes: int = Field(default=720, alias="PARACORD_SESSION_TTL_MINUTES")
     managed_library_root: str = "./storage/library"
+    # Directory for the persisted BM25F+ lexical index (HS4). On Postgres the eager-scored sparse
+    # matrix is saved here and memory-mapped read-only by every worker (one shared physical copy);
+    # SQLite/test runs build it in-memory and never touch disk. Lives on the persisted library volume.
+    search_index_dir: str = Field(
+        default="./storage/search_index", alias="PARACORD_SEARCH_INDEX_DIR"
+    )
     # Per-user UI preferences file (YAML). Defaults to the XDG-ish ~/.config path for bare-metal;
     # docker-compose overrides this to /app/storage/preferences.yaml (the persisted library volume),
     # since the container's ~/.config is neither mounted nor persistent.

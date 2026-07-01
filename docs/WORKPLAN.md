@@ -792,10 +792,11 @@ per phase.
   passages then rolls the best per paper up; access filtering moves inside the query (pre-filter +
   exact for a small visible set, else HNSW ANN + pgvector iterative scan). Removes the `limit*5`
   over-fetch hack. (`d030ee6`)
-- [x] **HS4 — BM25F+ lexical engine.** Pure-Python eager inverted index with true BM25F field
-  weighting (TEI-sourced fields) + BM25+ δ; signature-cached, warmed via `POST /search/warm`.
-  Replaces the naive token-overlap lexical path. (numpy/scipy eager-sparse + mmap is a documented
-  future optimization.) (`55a930c`)
+- [x] **HS4 — BM25F+ lexical engine.** Eager **scipy CSR** index of precomputed term→doc
+  contributions (query = sparse row-select + column-sum) with true BM25F field weighting
+  (TEI-sourced fields) + BM25+ δ; signature-cached, warmed via `POST /search/warm`, and on Postgres
+  persisted as mmap-friendly `.npy` arrays memory-mapped read-only across workers. Replaces the
+  naive token-overlap lexical path. (`55a930c`; scipy rework follow-up.)
 - [x] **HS5 — RRF fusion + unified `/search` + UI.** `hybrid_search` fuses lexical + semantic via
   Reciprocal Rank Fusion (k=60); modes lexical/semantic/hybrid (default hybrid). New `POST /search`;
   Insights search card gains a mode selector, matching-passage display, per-engine badges, warm-on-

@@ -12,11 +12,13 @@
 > | HS5 RRF fusion + unified /search + mode-selector UI | `fb5fe66` | ✅ |
 > | HS6 admin status + docs | *(this commit)* | ✅ |
 >
-> **Deviation from the design's "bm25s":** numpy/scipy are not installed and the project keeps heavy
-> deps out by policy, so HS4 was built as a **pure-Python BM25F+** inverted index (identical scoring:
-> per-field weighted tf + per-field length norm + BM25+ δ; milliseconds at library scale). The
-> numpy/scipy eager-sparse matrix with mmap sharing across workers remains a documented future
-> optimization; today the index is held per worker and rebuilt on demand when the corpus changes.
+> **HS4 engine:** the eager-sparse design as originally planned. `numpy`/`scipy` are core deps
+> (added to `backend/requirements.txt`); the BM25F+ index is a **scipy CSR matrix** of precomputed
+> term→doc contributions (query = sparse row-select + column-sum). On Postgres it is persisted as
+> mmap-friendly `.npy` arrays and **memory-mapped read-only** by every worker (one shared physical
+> copy via `search_index_dir`); SQLite/test runs build in-memory. Rebuilt when the corpus signature
+> changes; primed by `POST /search/warm`. (An earlier revision shipped a pure-Python inverted index;
+> replaced by this scipy version on maintainer request.)
 >
 > **Embedding-model columns (HS2 open decision, resolved to the default):** `vec_minilm` (384) +
 > `vec_nomic` (768). Adding another model is a migration + a `CHUNK_MODEL_COLUMNS` entry.

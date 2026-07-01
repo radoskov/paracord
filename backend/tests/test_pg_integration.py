@@ -320,3 +320,36 @@ def test_chunk_semantic_search_empty_visible_returns_nothing(pg_engine):
             semantic_search_papers(db, "graph", visible_ids=set(), limit=5, provider=_StubMiniLM())
             == []
         )
+
+
+# --- BM25F+ eager-sparse index: mmap persistence on Postgres (HS4) -----------
+
+
+def test_bm25f_index_persists_and_mmaps(pg_engine, tmp_path, monkeypatch):
+    from app.core.config import get_settings
+    from app.models.work import Work
+    from app.services import bm25_index as bm
+
+    monkeypatch.setattr(get_settings(), "search_index_dir", str(tmp_path), raising=False)
+    bm.invalidate_cache()
+    with Session(pg_engine) as db:
+        gnn = Work(
+            canonical_title="graph neural message passing",
+            normalized_title="gnnp",
+            abstract="passing messages over graph nodes",
+        )
+        db.add(gnn)
+        db.commit()
+        # First call builds the CSR matrix and persists it (Postgres path).
+        bm.get_index(db)
+        signature = bm.corpus_signature(db)
+        key = bm._disk_key(db, signature)
+        # The mmap-friendly arrays were written to disk.
+        assert (tmp_path / f"bm25-{key}.data.npy").exists()
+        # Load straight from disk (memory-mapped) and query it.
+        loaded = bm.load_index(str(tmp_path), key, signature)
+        assert loaded is not None
+        # Scope to the new work (the shared module DB holds other "graph" papers from prior tests).
+        hits = loaded.search("graph message passing", limit=5, visible_ids={gnn.id})
+        assert hits
+        assert hits[0][0] == str(gnn.id)

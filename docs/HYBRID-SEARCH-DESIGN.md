@@ -87,7 +87,8 @@ BM25F+ scorer ourselves. Because a term-document score depends only on document 
 query), we still **precompute it into a scipy sparse matrix** (eager scoring) — keeping `bm25s`-class
 query speed (sub-millisecond to low-ms at our scale) while getting exact BM25F+.
 
-`bm25s` is still used for its tokenizer/stemming and sparse plumbing; the scorer is ours.
+Implemented directly on `numpy`/`scipy` (a regex tokenizer + a `scipy.sparse` CSR matrix); `bm25s`
+itself is not a dependency, since it offers no BM25F and we precompute the CSR ourselves.
 
 ### 2.4 Persistence, memory, and sharing
 
@@ -183,7 +184,7 @@ RRF(paper) = Σ_engine  1 / (k + rank_engine(paper)),   k = 60
 ## 5. Testing split
 
 - **SQLite** (fast, in-process) for the bulk of the suite: access control, models, API behavior, and
-  the **pure-Python BM25F+** path (DB-agnostic).
+  the **BM25F+** engine (DB-agnostic — builds the CSR in-memory; disk mmap persistence is Postgres-only).
 - **Postgres** (dedicated CI job + prod) for the **vector/ANN** path (constrained columns + ANN
   indexes are Postgres-only) and migrations.
 
