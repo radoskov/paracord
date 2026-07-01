@@ -77,16 +77,20 @@ def get_file(file_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -
 @router.post("/{file_id}/extract", status_code=status.HTTP_202_ACCEPTED)
 def extract_file(
     file_id: uuid.UUID,
+    force_ocr: bool = Query(default=False),
     db: Session = DB_DEP,
     actor: User = CONTRIBUTOR_DEP,
 ) -> dict[str, str | None]:
-    """Queue GROBID extraction for a file (runs in the background worker)."""
+    """Queue GROBID extraction for a file (runs in the background worker).
+
+    ``force_ocr=true`` re-runs OCRmyPDF even when the text layer looks fine / OCR is disabled —
+    the manual "Force OCR" action for a scanned PDF that came out textless (#22)."""
     file = db.get(File, file_id)
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    job_id = enqueue_extraction(file_id)
+    job_id = enqueue_extraction(file_id, force_ocr=force_ocr)
     if job_id is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

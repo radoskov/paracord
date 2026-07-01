@@ -31,13 +31,14 @@ def get_queue():
     return Queue(QUEUE_NAME, connection=Redis.from_url(get_settings().redis_url))
 
 
-def enqueue_extraction(file_id) -> str | None:
+def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     """Best-effort enqueue of a GROBID extraction job. Returns the job id, or None.
 
-    Never raises: a missing/unreachable Redis must not break the import flow.
+    ``force_ocr`` re-runs OCRmyPDF regardless of the configured backend / current text-layer
+    quality (#22). Never raises: a missing/unreachable Redis must not break the import flow.
     """
     try:
-        job = get_queue().enqueue(EXTRACT_JOB, str(file_id))
+        job = get_queue().enqueue(EXTRACT_JOB, str(file_id), force_ocr)
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue extraction for file %s: %s", file_id, exc)

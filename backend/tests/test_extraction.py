@@ -487,3 +487,31 @@ def test_extraction_stores_citation_contexts_with_pdf_coordinates(
     assert first["page"] == 3
     assert first["pdf_x"] == 123.4
     assert first["pdf_coordinates"] == [{"page": 3, "x": 123.4, "y": 456.7, "w": 12.0, "h": 10.5}]
+
+
+def test_extract_force_ocr_runs_even_on_good_text_layer(db_session, tmp_path, monkeypatch) -> None:
+    """#22: force_ocr re-runs OCRmyPDF regardless of quality; summary surfaces provenance."""
+    from app.services import ocr as ocr_service
+
+    work, file, pdf, settings = _make_extractable_file(db_session, tmp_path, quality="good")
+    monkeypatch.setattr(ocr_service, "ocrmypdf_available", lambda: True)
+    ocr_pdf = tmp_path / "paper.ocr.pdf"
+    ocr_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    seen = {}
+
+    def fake_maybe_ocr(path, **kw):
+        seen["skip_if_good"] = kw.get("skip_if_good")
+        return ocr_service.OcrResult(
+            ocr_pdf, ran=True, engine="ocrmypdf", text_layer_quality="ocr_added", error=None
+        )
+
+    monkeypatch.setattr(ocr_service, "maybe_ocr", fake_maybe_ocr)
+    summary = extract_and_store(
+        db_session, file=file, fetch_tei=lambda _p: FIXTURE, settings=settings, force_ocr=True
+    )
+    db_session.commit()
+    assert summary["ocr_ran"] is True
+    assert summary["ocr_forced"] is True
+    assert summary["ocr_available"] is True
+    assert seen["skip_if_good"] is False  # forcing disables the good-layer skip

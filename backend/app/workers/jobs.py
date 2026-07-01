@@ -5,8 +5,10 @@ canonical records without review.
 """
 
 
-def extract_pdf_job(file_id: str) -> None:
-    """Run GROBID extraction for a PDF file, persist metadata/references, then enrich."""
+def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
+    """Run GROBID extraction for a PDF file, persist metadata/references, then enrich.
+
+    ``force_ocr`` re-runs OCRmyPDF regardless of backend/quality (#22 manual Force OCR)."""
     import uuid
 
     from sqlalchemy import select
@@ -27,7 +29,12 @@ def extract_pdf_job(file_id: str) -> None:
         if file is None:
             return
         try:
-            extract_and_store(db, file=file, fetch_tei=client.process_fulltext_document_sync)
+            extract_and_store(
+                db,
+                file=file,
+                fetch_tei=client.process_fulltext_document_sync,
+                force_ocr=force_ocr,
+            )
         except Exception:
             # Persist a durable failure marker (so the UI can show extraction never succeeded)
             # before letting RQ record the job as failed.

@@ -180,6 +180,7 @@ def extract_and_store(
     fetch_tei: TeiFetcher,
     actor_user_id=None,
     settings: Settings | None = None,
+    force_ocr: bool = False,
 ) -> dict[str, Any]:
     """Run extraction for a file: locate its work + path, fetch/parse TEI, persist.
 
@@ -206,7 +207,13 @@ def extract_and_store(
     # extraction (maybe_ocr swallows errors and returns the original path on failure/skip).
     ocr_result: ocr_service.OcrResult | None = None
     tei_source_path = pdf_path
-    if ocr_backend == "ocrmypdf" and ocr_service.needs_ocr(file.text_layer_quality):
+    # Run OCRmyPDF when it is installed AND either the admin selected it and the text layer is
+    # poor, OR the caller explicitly forced it (#22 manual "Force OCR", regardless of the backend
+    # setting or current quality — skip_if_good is disabled so a re-OCR always runs).
+    run_ocrmypdf = ocr_service.ocrmypdf_available() and (
+        force_ocr or (ocr_backend == "ocrmypdf" and ocr_service.needs_ocr(file.text_layer_quality))
+    )
+    if run_ocrmypdf:
         with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
             ocr_result = ocr_service.maybe_ocr(
                 pdf_path,
@@ -214,7 +221,7 @@ def extract_and_store(
                 out_dir=Path(scratch),
                 timeout=settings.ocr_timeout_seconds,
                 language=settings.ocr_language,
-                skip_if_good=settings.ocr_skip_if_text_layer_good,
+                skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
             )
             tei_source_path = ocr_result.output_pdf_path
             tei_xml = fetch_tei(tei_source_path)
@@ -242,6 +249,11 @@ def extract_and_store(
     summary["ocr_ran"] = ocr_ran
     summary["ocr_engine"] = ocr_result.engine if ocr_result else None
     summary["ocr_error"] = ocr_result.error if ocr_result else None
+    # Surface availability + text-layer quality so the UI can explain a textless scan (#22):
+    # "OCR not installed" vs "OCR ran" vs "text layer already good".
+    summary["ocr_available"] = ocr_service.ocrmypdf_available()
+    summary["ocr_forced"] = force_ocr
+    summary["text_layer_quality"] = file.text_layer_quality
 
     record_event(
         db,
