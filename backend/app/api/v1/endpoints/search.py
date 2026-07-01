@@ -12,10 +12,11 @@ from app.core.security import Role
 from app.db.session import get_db
 from app.models.user import User
 from app.services import access
+from app.services.bm25_index import get_index, lexical_search_papers
 from app.services.chunk_embeddings import backfill_chunk_embeddings
 from app.services.chunk_search import semantic_search_papers
 from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
-from app.services.semantic_search import ensure_work_embeddings, semantic_search
+from app.services.semantic_search import ensure_work_embeddings
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -78,9 +79,7 @@ def search_semantic(
                 year=hit.work.year,
                 score=round(hit.score, 4),
             )
-            for hit in semantic_search(
-                db, payload.q, limit=limit, mode="lexical", visible_ids=visible
-            )
+            for hit in lexical_search_papers(db, payload.q, visible_ids=visible, limit=limit)
         ]
         used = requested = reason = None
         degraded = False
@@ -128,3 +127,11 @@ def reindex_embeddings(db: Session = DB_DEP, _: User = EDITOR_DEP) -> dict[str, 
     chunks_indexed = backfill_chunk_embeddings(db, provider=provider)
     db.commit()
     return {"indexed": added, "chunks_indexed": chunks_indexed, "status": "ok"}
+
+
+@router.post("/warm")
+def warm_search(db: Session = DB_DEP, _: User = AUTH_DEP) -> dict[str, int | str]:
+    """Warm the BM25F+ lexical index into memory (call when the library view opens) so the first
+    lexical/hybrid search is hot. Idempotent — the index is rebuilt only when the corpus changed."""
+    index = get_index(db)
+    return {"lexical_indexed_docs": len(index.work_ids), "status": "ok"}
