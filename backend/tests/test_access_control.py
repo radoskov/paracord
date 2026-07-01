@@ -674,3 +674,37 @@ def test_list_shelves_carries_can_modify(client, db, make_user):
     # open -> librarian modifiable by role; visible -> needs a grant (not modifiable yet)
     assert by_name["n-ls-open"]["can_modify"] is True
     assert by_name["n-ls-vis"]["can_modify"] is False
+
+
+# --- #1 default-shelf access propagation + #6 topic-graph visibility clamp ---
+
+
+def test_default_shelf_access_level_propagates_to_new_papers(db, make_user):
+    """A private default shelf makes auto-placed papers private (no more 'loose = open')."""
+    from app.services.access_settings import set_default_access_level
+    from app.services.default_shelf import get_default_shelf_id, place_on_default_if_loose
+
+    set_default_access_level(db, access_level="private")
+    work = _work(db, title="inbox-private")
+    place_on_default_if_loose(db, work.id)
+    db.commit()
+
+    reader = make_user("dsp-reader", role="reader")
+    admin = make_user("dsp-admin", role="admin")
+    assert not access.can_see_work(db, reader, work)  # private default shelf hides it
+    assert access.can_see_work(db, admin, work)
+    # a grant on the default shelf unlocks it
+    _grant(db, reader, "shelf", get_default_shelf_id(db))
+    assert access.can_see_work(db, reader, work)
+
+
+def test_topic_graph_clamps_to_visible_papers(db):
+    """The topic graph must never surface papers outside the caller's visible set (#6)."""
+    from app.services.topic_graph import build_topic_graph
+
+    works = [_work(db, title=f"tg-{i}") for i in range(3)]
+    db.commit()
+    visible = {works[0].id, works[1].id}
+    graph = build_topic_graph(db, scope_type="library", visible_ids=visible)
+    node_ids = {uuid.UUID(n.id) for n in graph.nodes}
+    assert node_ids == visible  # the third paper is excluded
