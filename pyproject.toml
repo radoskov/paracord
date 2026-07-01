@@ -22,3 +22,8 @@ pythonpath = ["backend", "agent", "."]
 # importlib mode lets the two test_security.py modules (backend + agent) coexist
 # without an import-file-mismatch; "." on pythonpath makes `scripts` importable.
 addopts = "--import-mode=importlib"
+# Bare `pytest` (CI, IDEs) always runs everything, marked or not — only the Makefile's
+# fast targets (`make test`/`make ready`) add `-m "not slow"` to skip these locally.
+markers = [
+    "slow: heavier/supplementary tests (real-Postgres integration, large multi-step acceptance flows like agent teleport, and additional edge-case contract coverage) — skipped by `make test`/`make ready`; run everything with `make test-full`/`make ready-full` or `pytest -m slow`.",
+]

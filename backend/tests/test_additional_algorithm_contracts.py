@@ -6,11 +6,16 @@ They instead check stability, idempotence, score ordering, and scope isolation.
 
 from __future__ import annotations
 
+import pytest
 from app.models.ai import TopicAssignment
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.models.work import Work
 from app.services.topic_modeling import model_topics
 from sqlalchemy import func, select
+
+# Supplementary contract coverage (see module docstring) — excluded from `make test`/`make ready`;
+# run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
 
 
 def _work(title: str, abstract: str) -> Work:

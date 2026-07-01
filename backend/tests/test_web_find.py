@@ -46,6 +46,10 @@ from app.services.web_find_settings import set_download_policy
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+# Heavier suite: slow per-test schema setup (full Base.metadata create_all on file-backed SQLite)
+# — moved to the full tier. Run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

@@ -8,6 +8,12 @@ accidentally contaminate work-tag filters.
 
 from __future__ import annotations
 
+import pytest
+
+# Supplementary contract coverage (see module docstring) — excluded from `make test`/`make ready`;
+# run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
+
 
 def _create_work(client, headers, title: str) -> dict:
     response = client.post(

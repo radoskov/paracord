@@ -14,9 +14,14 @@ from __future__ import annotations
 import io
 from datetime import UTC, datetime
 
+import pytest
 from app.core.config import Settings
 from app.models.file import File, Location
 from app.services.auth import create_user_session, get_active_session, hash_token
+
+# Supplementary contract coverage (see module docstring) — excluded from `make test`/`make ready`;
+# run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
 
 _TINY_PDF = b"%PDF-1.4\n%%EOF\n"
 

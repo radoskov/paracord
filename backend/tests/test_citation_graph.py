@@ -12,6 +12,10 @@ from app.services.citation_graph import build_citation_graph
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+# Heavier suite: slow per-test schema setup (full Base.metadata create_all on file-backed SQLite)
+# — moved to the full tier. Run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture()
 def db_session(tmp_path: Path):

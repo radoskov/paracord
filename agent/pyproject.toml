@@ -40,3 +40,8 @@ include = ["paperracks_agent*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
+# Mirrors the root pyproject.toml `slow` marker so backend and agent tests tier the same way
+# (see there for the full rationale); none of the agent's tests currently need it.
+markers = [
+    "slow: heavier/supplementary tests — skipped by `make test`/`make ready`; run everything with `make test-full`/`make ready-full` or `pytest -m slow`.",
+]

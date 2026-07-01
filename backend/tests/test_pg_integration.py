@@ -19,6 +19,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
+# Needs a real Postgres (see module docstring) — excluded from `make test`/`make ready`;
+# run via `make test-full`/`make ready-full` or `pytest -m slow`.
+pytestmark = pytest.mark.slow
+
 # Resolve relative to this file so the test works regardless of the process cwd
 # (backend/tests/ -> parents[2] is the repo root that contains backend/alembic.ini).
 ALEMBIC_INI = str(Path(__file__).resolve().parents[2] / "backend/alembic.ini")

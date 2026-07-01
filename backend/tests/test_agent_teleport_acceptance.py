@@ -1,9 +1,13 @@
-"""Acceptance test for the agent manifest + teleport vertical (WORKPLAN Stage 5 / M5).
+"""End-to-end acceptance for the agent manifest + teleport vertical (M5).
 
-Exercises the real, secure flow end to end through the HTTP API: owner enrolls + approves an
-agent, the agent reports a manifest, a user requests a teleport, the agent pushes the bytes, and
-the server verifies the hash and stores a managed file. The server never sees a path on the
-agent's machine; the agent never accepts a path from the server.
+Exercises the real, secure flow through the HTTP API: owner enrolls + approves an agent, the agent
+reports a manifest, a user requests a teleport, the agent pushes the bytes, and the server verifies
+the hash and stores a managed file. The server never sees a path on the agent's machine; the agent
+never accepts a path from the server.
+
+Marked ``slow`` because it is a large multi-step round trip (enroll → approve → manifest → request →
+push → verify) rather than because of the feature's maturity — it runs in `make test-full`/`make
+ready-full`, CI, and `pytest -m slow`, but not in the fast `make test`/`make ready` tier.
 """
 
 from __future__ import annotations
@@ -11,6 +15,10 @@ from __future__ import annotations
 import hashlib
 import io
 from unittest.mock import patch
+
+import pytest
+
+pytestmark = pytest.mark.slow
 
 _PDF = b"%PDF-1.4\n%%EOF\n"
 _SHA = hashlib.sha256(_PDF).hexdigest()

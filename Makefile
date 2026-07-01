@@ -230,17 +230,32 @@ db-shell: init ## Open psql inside the Postgres container.
 # ---------------------------------------------------------------------------
 
 .PHONY: test
-test: test-api test-agent ## Run backend and agent tests, each in its own container.
+test: test-api test-agent ## Run the FAST tier of backend + agent tests (skips @slow; see test-full).
+
+.PHONY: test-full
+test-full: test-api-full test-agent-full ## Run the FULL backend + agent suite, including @slow tests.
 
 # Keep pytest's cache out of the bind-mounted source tree (it would be root-owned on the host).
 PYTEST := python -m pytest -o cache_dir=/tmp/paracord-pytest-cache
+# `slow` tests need a real Postgres, run a full multi-step acceptance flow, or are
+# supplementary/forward-looking contract coverage (see the marker docstring in pyproject.toml).
+# They still run in CI (bare `pytest`) and in every *-full target — only these fast targets skip them.
+PYTEST_FAST := $(PYTEST) -m "not slow"
 
 .PHONY: test-api
-test-api: init ## Run backend tests inside the API container.
+test-api: init ## Run backend tests inside the API container (fast tier: skips @slow).
+	$(API_RUN_NODEPS) $(PYTEST_FAST) backend/tests
+
+.PHONY: test-api-full
+test-api-full: init ## Run ALL backend tests inside the API container, including @slow.
 	$(API_RUN_NODEPS) $(PYTEST) backend/tests
 
 .PHONY: test-agent
-test-agent: init ## Run agent tests inside the agent container.
+test-agent: init ## Run agent tests inside the agent container (fast tier: skips @slow).
+	$(AGENT_RUN) $(PYTEST_FAST) agent/tests
+
+.PHONY: test-agent-full
+test-agent-full: init ## Run ALL agent tests inside the agent container, including @slow.
 	$(AGENT_RUN) $(PYTEST) agent/tests
 
 .PHONY: test-migrations
@@ -248,7 +263,11 @@ test-migrations: init ## Run the migration<->model parity test against the compo
 	$(API_RUN) $(PYTEST) backend/tests/test_migration_parity.py -v
 
 .PHONY: test-local
-test-local: ## Run tests on the host interpreter.
+test-local: ## Run the FAST tier of tests on the host interpreter (skips @slow).
+	python -m pytest -m "not slow" $(PYTEST_PATHS)
+
+.PHONY: test-local-full
+test-local-full: ## Run ALL tests on the host interpreter, including @slow.
 	python -m pytest $(PYTEST_PATHS)
 
 # Ruff is pure static analysis (no runtime/services needed), so lint/format are
@@ -283,13 +302,19 @@ openapi-check: init ## Fail if backend/openapi.json is stale relative to app.ope
 		|| { echo "❌ backend/openapi.json is out of date — run '\''make openapi'\'' and commit."; exit 1; }
 
 .PHONY: check
-check: lint test test-migrations openapi-check ## Host-local lint + Docker backend/agent tests + migration parity + OpenAPI freshness.
+check: lint test openapi-check ## Host-local lint + FAST backend/agent tests + OpenAPI freshness.
+
+.PHONY: check-full
+check-full: lint test-full test-migrations openapi-check ## Host-local lint + FULL backend/agent tests + migration parity + OpenAPI freshness.
 
 .PHONY: ready
-ready: fix precommit check frontend-check ## Auto-fix, pre-commit, then full backend + frontend checks.
+ready: fix precommit check frontend-test ## Auto-fix, pre-commit, then the FAST tier of backend + frontend checks. Run before every commit.
+
+.PHONY: ready-full
+ready-full: fix precommit check-full frontend-check ## Auto-fix, pre-commit, then the FULL backend + frontend checks (mirrors CI). Run before pushing/opening a PR.
 
 .PHONY: ci
-ci: lint test test-migrations openapi-check frontend-check check-secrets ## Mirror the CI checks locally.
+ci: lint test-full test-migrations openapi-check frontend-check check-secrets ## Mirror the CI checks locally (always the full suite).
 
 # ---------------------------------------------------------------------------
 # Application commands
