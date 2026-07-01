@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services import access
 from app.services.chunk_embeddings import backfill_chunk_embeddings
+from app.services.chunk_search import semantic_search_papers
 from app.services.embeddings import get_embedding_provider, resolve_embedding_provider
 from app.services.semantic_search import ensure_work_embeddings, semantic_search
 
@@ -34,6 +35,10 @@ class SemanticSearchItem(BaseModel):
     title: str | None = None
     year: int | None = None
     score: float
+    # The best-matching passage + its section (chunk-level embedding mode); null in lexical mode
+    # and in the document-level fallback.
+    passage: str | None = None
+    section: str | None = None
 
 
 class SemanticSearchResponse(BaseModel):
@@ -56,34 +61,49 @@ def search_semantic(
     """Rank works by similarity to a free-text query. Read-only: embeddings are built off this
     path (on import / via /search/reindex), so a search never writes to the database.
 
-    Access control: results are filtered to papers the caller may SEE. We over-fetch then trim so
-    the visible result count is preserved when hidden papers rank highly."""
+    Access control: results are filtered to papers the caller may SEE, applied *inside* the ranking
+    (selectivity-adaptive: exact over a small visible set, else ANN with an allow-list) so the
+    visible top-N is exact — no over-fetch heuristic."""
     limit = max(1, min(payload.limit, 50))
     visible = access.visible_work_ids(db, actor)
-    # Over-fetch so trimming hidden hits still leaves up to ``limit`` visible results.
-    fetch = limit if visible is None else min(limit * 5, 250)
 
     # In embedding mode, resolve the provider up front so the response can report the one actually
     # used vs the one configured (a silent hash-BOW fallback surfaces here). Lexical mode uses no
     # embeddings, so these fields stay null.
     if payload.mode == "lexical":
-        hits = semantic_search(db, payload.q, limit=fetch, mode="lexical")
-        used = requested = None
+        items = [
+            SemanticSearchItem(
+                work_id=hit.work.id,
+                title=hit.work.canonical_title,
+                year=hit.work.year,
+                score=round(hit.score, 4),
+            )
+            for hit in semantic_search(
+                db, payload.q, limit=limit, mode="lexical", visible_ids=visible
+            )
+        ]
+        used = requested = reason = None
         degraded = False
-        reason = None
     else:
         resolved = resolve_embedding_provider(db=db)
-        hits = semantic_search(
-            db, payload.q, limit=fetch, mode="embedding", provider=resolved.provider
-        )
+        items = [
+            SemanticSearchItem(
+                work_id=hit.work.id,
+                title=hit.work.canonical_title,
+                year=hit.work.year,
+                score=round(hit.score, 4),
+                passage=hit.passage,
+                section=hit.section,
+            )
+            for hit in semantic_search_papers(
+                db, payload.q, visible_ids=visible, limit=limit, provider=resolved.provider
+            )
+        ]
         used = resolved.provider.model_name
         requested = resolved.requested
         degraded = resolved.degraded
         reason = resolved.reason
 
-    if visible is not None:
-        hits = [hit for hit in hits if hit.work.id in visible]
-    hits = hits[:limit]
     return SemanticSearchResponse(
         query=payload.q,
         mode=payload.mode,
@@ -91,15 +111,7 @@ def search_semantic(
         embedding_provider_requested=requested,
         degraded=degraded,
         degraded_reason=reason,
-        items=[
-            SemanticSearchItem(
-                work_id=hit.work.id,
-                title=hit.work.canonical_title,
-                year=hit.work.year,
-                score=round(hit.score, 4),
-            )
-            for hit in hits
-        ],
+        items=items,
     )
 
 

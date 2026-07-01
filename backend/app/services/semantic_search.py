@@ -249,13 +249,20 @@ def related_works(
     return [SearchHit(work=works[wid], score=score) for wid, score in top if wid in works]
 
 
-def _lexical_search(db: Session, query: str, *, limit: int) -> list[SearchHit]:
-    """Rank works by query-term overlap with title + abstract (no embeddings required)."""
+def _lexical_search(
+    db: Session, query: str, *, limit: int, visible_ids: set[uuid.UUID] | None = None
+) -> list[SearchHit]:
+    """Rank works by query-term overlap with title + abstract (no embeddings required).
+
+    ``visible_ids`` (when not None) restricts ranking to works the caller may see — applied before
+    truncation so the visible top-``limit`` is exact (no post-filter under-fill)."""
     terms = {t for t in _WORD.findall(query.lower()) if len(t) > 1}
     if not terms:
         return []
     hits: list[SearchHit] = []
     for work in db.scalars(select(Work)).all():
+        if visible_ids is not None and work.id not in visible_ids:
+            continue
         tokens = _WORD.findall(_work_text(work).lower())
         if not tokens:
             continue
@@ -277,17 +284,20 @@ def semantic_search(
     mode: str = "embedding",
     provider: EmbeddingProvider | None = None,
     auto_index: bool = False,
+    visible_ids: set[uuid.UUID] | None = None,
 ) -> list[SearchHit]:
     """Return works ranked by the query (most relevant first).
 
     ``mode='embedding'`` (default) ranks by cosine similarity over stored vectors and is
     **read-only** unless ``auto_index`` is set (tests / explicit reindex). ``mode='lexical'``
-    ranks by term overlap and never touches embeddings.
+    ranks by term overlap and never touches embeddings. ``visible_ids`` (when not None) restricts
+    results to works the caller may see, applied before truncation so the visible top-``limit`` is
+    exact.
     """
     if not (query or "").strip():
         return []
     if mode == "lexical":
-        return _lexical_search(db, query, limit=limit)
+        return _lexical_search(db, query, limit=limit, visible_ids=visible_ids)
 
     provider = provider or get_embedding_provider(db=db)
     if auto_index:
@@ -296,9 +306,15 @@ def semantic_search(
     query_vector = provider.embed(query)
 
     # Fast path: rank in Postgres via pgvector when enabled (falls through to Python on any miss).
+    # Over-fetch when filtering so the post-filter still yields up to ``limit`` visible works.
     top: list[tuple] | None = None
     if _pgvector_on(db):
-        top = _pgvector_rank(db, query_vector, model_name=provider.model_name, limit=limit)
+        fetch = limit if visible_ids is None else min(limit * 5, 250)
+        ranked = _pgvector_rank(db, query_vector, model_name=provider.model_name, limit=fetch)
+        if ranked is not None:
+            if visible_ids is not None:
+                ranked = [(wid, s) for wid, s in ranked if wid in visible_ids]
+            top = ranked[:limit]
 
     if top is None:
         rows = db.scalars(
@@ -308,6 +324,8 @@ def semantic_search(
         ).all()
         scored: list[tuple[uuid.UUID, float]] = []
         for embedding in rows:
+            if visible_ids is not None and embedding.entity_id not in visible_ids:
+                continue
             score = cosine_similarity(query_vector, embedding.vector)
             if score > 0.0:
                 scored.append((embedding.entity_id, score))

@@ -102,6 +102,40 @@ def test_search_lazily_indexes_then_caches(db_session) -> None:
     assert ensure_work_embeddings(db_session) == 0
 
 
+def test_semantic_search_filters_to_visible_exactly(db_session) -> None:
+    """visible_ids restricts results before truncation — no hidden work leaks (HS3)."""
+    _seed(db_session)
+    ensure_work_embeddings(db_session)
+    db_session.commit()
+    works = db_session.scalars(select(Work)).all()
+    visible = {works[0].id}
+    hits = semantic_search(db_session, "transformer attention", visible_ids=visible, limit=10)
+    assert hits
+    assert all(h.work.id in visible for h in hits)
+
+
+def test_lexical_search_filters_to_visible_exactly(db_session) -> None:
+    _seed(db_session)
+    works = db_session.scalars(select(Work)).all()
+    visible = {works[0].id}
+    hits = semantic_search(db_session, "transformer attention", mode="lexical", visible_ids=visible)
+    assert hits
+    assert all(h.work.id in visible for h in hits)
+
+
+def test_semantic_search_papers_falls_back_to_doc_level_on_sqlite(db_session) -> None:
+    """With no chunk column (SQLite / hash-BOW), the paper-level engine uses the doc baseline."""
+    from app.services.chunk_search import semantic_search_papers
+
+    _seed(db_session)
+    ensure_work_embeddings(db_session)
+    db_session.commit()
+    hits = semantic_search_papers(db_session, "transformer attention", visible_ids=None, limit=3)
+    assert hits
+    assert hits[0].work.canonical_title == "Attention Is All You Need"
+    assert hits[0].passage is None  # no chunk passage in the doc-level fallback
+
+
 def test_semantic_search_empty_query_returns_empty(db_session) -> None:
     _seed(db_session)
     assert semantic_search(db_session, "   ") == []

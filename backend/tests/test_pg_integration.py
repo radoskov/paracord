@@ -246,3 +246,77 @@ def test_chunk_embeddings_noop_for_model_without_column(pg_engine):
         assert ce.backfill_chunk_embeddings(db, provider=HashBowProvider()) == 0
         status = ce.chunk_embedding_status(db, provider=HashBowProvider())
         assert status["column"] is None
+
+
+# --- chunk-level semantic search + adaptive filtering (HS3) ------------------
+
+
+def _seed_two_embedded_works(db):
+    from app.models.work import Work
+    from app.services import chunk_embeddings as ce
+    from app.services.chunking import rechunk_work
+
+    gnn = Work(
+        canonical_title="Graph message passing networks",
+        normalized_title="gnn2",
+        abstract="Message passing over graph structured data aggregates neighbor node features.",
+    )
+    bread = Work(
+        canonical_title="Sourdough fermentation",
+        normalized_title="bread2",
+        abstract="Fermenting flour and water to bake artisan bread at home.",
+    )
+    db.add_all([gnn, bread])
+    db.commit()
+    for work in (gnn, bread):
+        rechunk_work(db, work)
+    db.commit()
+    ce.embed_work_chunks(db, gnn, provider=_StubMiniLM())
+    ce.embed_work_chunks(db, bread, provider=_StubMiniLM())
+    db.commit()
+    return gnn, bread
+
+
+def test_chunk_semantic_search_ranks_and_returns_passage(pg_engine):
+    from app.services.chunk_search import semantic_search_papers
+
+    with Session(pg_engine) as db:
+        gnn, _bread = _seed_two_embedded_works(db)
+        # visible_ids=None -> ANN branch (iterative scan).
+        hits = semantic_search_papers(
+            db, "graph message passing neighbor", visible_ids=None, limit=5, provider=_StubMiniLM()
+        )
+        assert hits
+        assert hits[0].work.id == gnn.id
+        assert hits[0].passage is not None  # chunk-level returns the matching passage
+        assert hits[0].section is not None
+
+
+def test_chunk_semantic_search_exact_path_filters_to_visible(pg_engine, monkeypatch):
+    from app.services import chunk_search
+    from app.services.chunk_search import semantic_search_papers
+
+    # Force the pre-filter + exact branch for any restricted query.
+    monkeypatch.setattr(chunk_search, "SELECTIVITY_THRESHOLD", 2.0)
+    with Session(pg_engine) as db:
+        gnn, _bread = _seed_two_embedded_works(db)
+        hits = semantic_search_papers(
+            db,
+            "graph message passing neighbor",
+            visible_ids={gnn.id},
+            limit=5,
+            provider=_StubMiniLM(),
+        )
+        assert hits
+        assert all(h.work.id == gnn.id for h in hits)
+
+
+def test_chunk_semantic_search_empty_visible_returns_nothing(pg_engine):
+    from app.services.chunk_search import semantic_search_papers
+
+    with Session(pg_engine) as db:
+        _seed_two_embedded_works(db)
+        assert (
+            semantic_search_papers(db, "graph", visible_ids=set(), limit=5, provider=_StubMiniLM())
+            == []
+        )
