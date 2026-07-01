@@ -9,6 +9,8 @@ export interface Work {
   venue: string | null;
   year: number | null;
   reading_status: ReadingStatus;
+  // The file to open by default (the "main" file); null falls back to the first attached file.
+  main_file_id?: string | null;
   confirmed_fields?: string[];
   keywords?: string[];
   // Per-paper representative topic terms (Phase K); shown separately from keywords.
@@ -1677,8 +1679,22 @@ export class ApiClient {
     return this.request(`/api/v1/jobs/clear?which=${which}`, { method: 'POST' });
   }
 
-  async extractFile(fileId: string): Promise<{ job_id: string | null; status: string }> {
-    return this.request(`/api/v1/files/${fileId}/extract`, { method: 'POST' });
+  async extractFile(
+    fileId: string,
+    forceOcr = false,
+  ): Promise<{ job_id: string | null; status: string }> {
+    const q = forceOcr ? '?force_ocr=true' : '';
+    return this.request(`/api/v1/files/${fileId}/extract${q}`, { method: 'POST' });
+  }
+
+  /** Set which attached file is the paper's main (default-to-open) file. Returns the updated work. */
+  async setMainFile(workId: string, fileId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/main-file/${fileId}`, { method: 'PUT' });
+  }
+
+  /** Detach a file from a paper (204). If it was the main file, the backend clears the pointer. */
+  async deleteWorkFile(workId: string, fileId: string): Promise<void> {
+    return this.request(`/api/v1/works/${workId}/files/${fileId}`, { method: 'DELETE' });
   }
 
   async extractWork(

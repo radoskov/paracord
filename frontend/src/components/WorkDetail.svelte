@@ -19,6 +19,12 @@
     type WorkFile,
     type WorkShelfMembership,
   } from '../api/client';
+  import {
+    clearFindWebCache,
+    getFindWebCache,
+    setFindWebCache,
+    type SourceProgress,
+  } from '../lib/findWebCache';
   import { pendingLibrarySearch } from '../lib/selection';
   import { canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
@@ -63,7 +69,7 @@
   let downloadStatus: Record<string, WebFindDownloadResult> = {};
   let downloading = false;
   // Live per-source progress for the streaming search ('querying' | 'done' | 'failed', + count).
-  type SourceProgress = { source: string; status: 'querying' | 'done' | 'failed'; count?: number };
+  // The `SourceProgress` type is shared with the per-work find-on-web cache (#4).
   let sourceProgress: SourceProgress[] = [];
   // Total download progress (N done / M selected) shown in the sticky bar.
   let downloadDone = 0;
@@ -108,6 +114,11 @@
 
   // GROBID extraction needs at least one file whose PDF bytes are on the server.
   $: hasReadableFile = files.some((f) => f.content_available);
+
+  // The paper's main (default-to-open) file: work.main_file_id if set, else the first attached file
+  // (#16). The quick-read button under the title opens this.
+  $: mainFile =
+    files.find((f) => f.id === work.main_file_id) ?? files[0] ?? null;
 
   // Reference ids that have at least one in-text mention with page coordinates — these can
   // be located in the reader via "Find in text".
@@ -272,8 +283,42 @@
     });
   }
 
+  // Open the find-on-web modal. Reuse cached results for THIS paper (#4) so reopening doesn't
+  // re-run the slow web search; only run afresh when there's no cache for this paper.
   async function findOnWeb(): Promise<void> {
     showFindModal = true;
+    message = '';
+    const cached = getFindWebCache(work.id);
+    if (cached) {
+      findResults = cached.findResults;
+      degradedSources = cached.degradedSources;
+      sourceProgress = cached.sourceProgress;
+      selectedIds = new Set(cached.selectedIds);
+      downloadStatus = cached.downloadStatus;
+      searching = false;
+      return;
+    }
+    await runFindOnWeb();
+  }
+
+  // Persist the current find-on-web state for this paper so reopening restores it.
+  function saveFindWebCache(): void {
+    setFindWebCache(work.id, {
+      findResults,
+      degradedSources,
+      sourceProgress,
+      selectedIds: [...selectedIds],
+      downloadStatus,
+    });
+  }
+
+  // Force a fresh search on this paper, discarding any cached results (Reset button, #4).
+  async function resetFindOnWeb(): Promise<void> {
+    clearFindWebCache(work.id);
+    await runFindOnWeb();
+  }
+
+  async function runFindOnWeb(): Promise<void> {
     findResults = [];
     degradedSources = [];
     selectedIds = new Set();
@@ -301,6 +346,7 @@
       }
     } finally {
       searching = false;
+      saveFindWebCache();
     }
   }
 
@@ -320,6 +366,7 @@
     if (next.has(id)) next.delete(id);
     else next.add(id);
     selectedIds = next;
+    saveFindWebCache();
   }
 
   // The URL we attempt for a candidate: a direct PDF if it has one, else its resolved (final
@@ -339,10 +386,12 @@
 
   function selectAll(): void {
     selectedIds = new Set(downloadableCandidates.map((c) => c.candidate_id));
+    saveFindWebCache();
   }
 
   function selectNone(): void {
     selectedIds = new Set();
+    saveFindWebCache();
   }
 
   // Ask the user before fetching from an off-allowlist host (unrestricted mode). Resolves to the
@@ -362,6 +411,7 @@
 
   function recordResult(r: WebFindDownloadResult): void {
     downloadStatus = { ...downloadStatus, [r.candidate_id]: r };
+    saveFindWebCache();
   }
 
   async function downloadSelected(): Promise<void> {
@@ -484,6 +534,53 @@
         `Extraction ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
         'It runs in the background worker — watch the Jobs tab.';
     });
+  }
+
+  // #22: force an OCR pass over a (likely scanned) file, then watch the Jobs tab.
+  async function forceOcr(file: WorkFile): Promise<void> {
+    await run(async () => {
+      const result = await client.extractFile(file.id, true);
+      files = await client.listWorkFiles(work.id);
+      message =
+        `OCR extraction queued (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
+        'It runs in the background worker — watch the Jobs tab.';
+    });
+  }
+
+  // #16: make a file the paper's main (default-to-open) file.
+  async function setMainFile(file: WorkFile): Promise<void> {
+    await run(async () => {
+      const updated = await client.setMainFile(work.id, file.id);
+      onUpdated(updated);
+    }, 'Set as main file');
+  }
+
+  // #17: detach a file from the paper (confirm first); refresh the list afterwards.
+  async function removeFile(file: WorkFile): Promise<void> {
+    if (!window.confirm(`Remove “${file.original_filename ?? 'this file'}” from this paper? The file itself stays in the library.`))
+      return;
+    await run(async () => {
+      await client.deleteWorkFile(work.id, file.id);
+      files = await client.listWorkFiles(work.id);
+      // If it was the main file the backend clears the pointer; reflect that locally.
+      if (work.main_file_id === file.id) onUpdated({ ...work, main_file_id: null });
+    }, 'File removed');
+  }
+
+  // #22: human-readable OCR / text-layer status per file, with a hint whether OCR would help.
+  function ocrStatus(file: WorkFile): { label: string; needsOcr: boolean } | null {
+    switch (file.text_layer_quality) {
+      case 'ocr_added':
+        return { label: 'OCR added', needsOcr: false };
+      case 'good':
+        return { label: 'text layer: good', needsOcr: false };
+      case 'poor':
+        return { label: 'scanned — needs OCR', needsOcr: true };
+      case 'none':
+        return { label: 'no text layer — needs OCR', needsOcr: true };
+      default:
+        return null; // 'unknown' / unset — nothing useful to show
+    }
   }
 
   function fileStatusLabel(status: string): string {
@@ -615,6 +712,18 @@
     </div>
   </div>
   {#if message}<p class="muted">{message}</p>{/if}
+  {#if mainFile}
+    <!-- #16: quick-read the paper's main file right below the title (+ open in a new tab). -->
+    <div class="quick-read">
+      <button type="button" class="secondary small" on:click={() => mainFile && openInReader(mainFile)}
+        disabled={loading || !mainFile.content_available}
+        title={mainFile.content_available ? 'Read the main file in the in-app reader' : 'The main file’s PDF is not on the server.'}>Read</button>
+      <button type="button" class="secondary small" on:click={() => mainFile && openInNewTab(mainFile)}
+        disabled={loading || !mainFile.content_available}
+        title={mainFile.content_available ? 'Open the main file in a new browser tab' : 'The main file’s PDF is not on the server.'}>New tab ↗</button>
+      <span class="hintline">Main file: {mainFile.original_filename ?? mainFile.id.slice(0, 8)}</span>
+    </div>
+  {/if}
   {#if work.keywords && work.keywords.length}
     <div class="keywords">
       {#each work.keywords as kw}<button type="button" class="kw" on:click={() => searchKeyword(kw)}
@@ -753,6 +862,13 @@
                 <span class="fname">{file.original_filename ?? file.id.slice(0, 8)}</span>
                 <small class="muted">{formatBytes(file.size_bytes)}</small>
                 <span class="fstatus fstatus-{file.status}">{fileStatusLabel(file.status)}</span>
+                {#if file.id === work.main_file_id}
+                  <span class="fstatus fmain" title="This is the paper's main (default-to-open) file.">main</span>
+                {/if}
+                {#if ocrStatus(file)}
+                  {@const ocr = ocrStatus(file)}
+                  <span class="fstatus focr" class:funavail={ocr?.needsOcr} title="Text-layer / OCR status for this file.">{ocr?.label}</span>
+                {/if}
                 {#if !file.content_available}
                   <span class="fstatus funavail" title="The PDF bytes are not stored on the server (extracted-only or the source location was removed).">file unavailable</span>
                 {/if}
@@ -768,8 +884,16 @@
                   title={file.content_available
                     ? 'Open the raw PDF in a new browser tab'
                     : 'PDF not available on the server.'}>New tab ↗</button>
+                {#if file.id !== work.main_file_id}
+                  <button type="button" class="secondary small" on:click={() => setMainFile(file)} disabled={loading || !canModify}
+                    title={canModify ? 'Make this the paper’s main (default-to-open) file' : INSUFFICIENT_ROLE}>Set as main</button>
+                {/if}
                 <button type="button" class="secondary small" on:click={() => reextract(file)} disabled={loading || !canModify}
                   title={canModify ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
+                <button type="button" class="secondary small" on:click={() => forceOcr(file)} disabled={loading || !canModify || !file.content_available}
+                  title={canModify ? 'Force an OCR pass (for scanned PDFs with no/poor text layer)' : INSUFFICIENT_ROLE}>Force OCR</button>
+                <button type="button" class="secondary small danger-btn" on:click={() => removeFile(file)} disabled={loading || !canModify}
+                  title={canModify ? 'Remove this file from the paper (the file stays in the library)' : INSUFFICIENT_ROLE}>Remove</button>
               </span>
             </div>
             <span class="note-count" title="Notes (annotations) on this file">
@@ -953,6 +1077,14 @@
         Semantic Scholar). Select the papers to download and attach; failed downloads fall back to
         manual upload.
       </p>
+
+      <!-- Results are cached per paper (#4): reopening this modal shows them without re-searching.
+           Reset discards the cache and runs a fresh search. -->
+      <div class="findweb-toolbar">
+        <span class="hintline">Results are kept for this paper until you reset.</span>
+        <button type="button" class="secondary small" on:click={resetFindOnWeb} disabled={searching}
+          title="Discard the cached results and search the web again">Reset</button>
+      </div>
 
       <!-- Live per-source search progress. -->
       {#if sourceProgress.length}
@@ -1318,6 +1450,40 @@
   .funavail {
     background: #fed7aa;
     color: #7c2d12;
+  }
+
+  .fmain {
+    background: #dbeafe;
+    color: #1e3a8a;
+  }
+
+  .focr {
+    background: #e2e8f0;
+    color: #475569;
+  }
+
+  .quick-read {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.2rem 0 0.6rem;
+  }
+
+  .quick-read .hintline {
+    margin: 0;
+  }
+
+  .findweb-toolbar {
+    align-items: center;
+    display: flex;
+    gap: 0.6rem;
+    justify-content: space-between;
+    margin: 0.2rem 0 0.4rem;
+  }
+
+  .findweb-toolbar .hintline {
+    margin: 0;
   }
 
   .note-count {

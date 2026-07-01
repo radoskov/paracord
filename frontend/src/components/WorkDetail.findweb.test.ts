@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WebFindStreamEvent, Work } from '../api/client';
+import { clearFindWebCache } from '../lib/findWebCache';
 import { currentUser } from '../lib/session';
 import WorkDetail from './WorkDetail.svelte';
 
@@ -95,6 +96,9 @@ function makeClient(overrides: Record<string, unknown> = {}) {
 describe('WorkDetail find-on-web picker (v2)', () => {
   beforeEach(() => {
     currentUser.set({ id: 'u1', username: 'ed', role: 'editor' } as never);
+    // Find-on-web results are cached per work id across the session (#4); clear between tests so
+    // each starts with a fresh search rather than a prior test's cached candidates.
+    clearFindWebCache(WORK.id);
   });
 
   it('shows the paper-info header, streaming progress, candidates, and gates Download by selection', async () => {
