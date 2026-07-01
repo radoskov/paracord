@@ -48,6 +48,13 @@
   // Explanation shown on the login screen after an involuntary sign-out (session expired / disabled).
   let sessionEndedMessage = '';
 
+  // Tab caching (#9): tabs are lazy-mounted on first visit, then kept mounted for the session and
+  // toggled with CSS (`hidden`) so their state (scroll, in-progress searches, modelled topics, open
+  // modals) survives switching away and back. `visited` tracks which tabs have been mounted at least
+  // once. Reset on logout/reload is intentional.
+  let visited = new Set<string>();
+  $: if (token && active) visited = new Set(visited).add(active);
+
   // A 401 on an authenticated call means the session ended server-side (expired, signed out, or the
   // account was disabled). Force a clean logout and explain why, on the next interaction.
   function onUnauthorized(detail: string): void {
@@ -80,8 +87,32 @@
     syncHash();
     const onHash = (): void => syncHash();
     window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    window.addEventListener('keydown', onKeydown);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('keydown', onKeydown);
+    };
   });
+
+  // Arrow-key tab navigation (#23): Left/Right move between the visible, role-filtered tabs — but
+  // only when the user isn't typing (focus not in an input/textarea/contenteditable/select).
+  function onKeydown(event: KeyboardEvent): void {
+    if (!token) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const el = document.activeElement as HTMLElement | null;
+    if (el) {
+      const tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) return;
+    }
+    const tabs = visibleTabs;
+    const current = tabs.findIndex((tab) => tab.id === active);
+    if (current === -1) return;
+    const next = event.key === 'ArrowLeft' ? current - 1 : current + 1;
+    if (next < 0 || next >= tabs.length) return;
+    event.preventDefault();
+    window.location.hash = `#${tabs[next].id}`;
+  }
 
   function syncHash(): void {
     const id = (window.location.hash || '#library').slice(1);
@@ -113,6 +144,8 @@
   function clearSession(): void {
     token = '';
     loadedFor = '';
+    // Drop cached tabs so a fresh sign-in starts clean (state reset on logout is intended, #9).
+    visited = new Set<string>();
     currentUser.set(null);
     window.localStorage.removeItem('paracord_token');
   }
@@ -180,30 +213,44 @@
     </section>
   {:else}
     <p class="tab-hint">{activeTab.hint}</p>
-    {#if active === 'library'}
-      <LibraryPage {client} />
-    {:else if active === 'import'}
-      <ImportPage {client} />
-    {:else if active === 'shelves'}
-      <ShelvesPage {client} />
-    {:else if active === 'racks'}
-      <RacksPage {client} />
-    {:else if active === 'tags'}
-      <TagsPage {client} />
-    {:else if active === 'duplicates'}
-      <DuplicatesPage {client} />
-    {:else if active === 'jobs'}
-      <JobsPage {client} />
-    {:else if active === 'insights'}
-      <InsightsPage {client} />
-    {:else if active === 'admin'}
-      <AdminPage {client} />
-    {:else if active === 'ai'}
-      <AiModelsPage {client} />
-    {:else if active === 'events'}
-      <EventsPage {client} />
-    {:else if active === 'profile'}
-      <ProfilePage {client} />
+    <!-- Tab caching (#9): each panel is mounted on first visit, then kept mounted and hidden with
+         CSS so its state survives tab switches. Pages that poll or render a graph receive a
+         `visible` prop so they can pause work / resize while hidden. -->
+    {#if visited.has('library')}
+      <div hidden={active !== 'library'}><LibraryPage {client} /></div>
+    {/if}
+    {#if visited.has('import')}
+      <div hidden={active !== 'import'}><ImportPage {client} /></div>
+    {/if}
+    {#if visited.has('shelves')}
+      <div hidden={active !== 'shelves'}><ShelvesPage {client} /></div>
+    {/if}
+    {#if visited.has('racks')}
+      <div hidden={active !== 'racks'}><RacksPage {client} /></div>
+    {/if}
+    {#if visited.has('tags')}
+      <div hidden={active !== 'tags'}><TagsPage {client} /></div>
+    {/if}
+    {#if visited.has('duplicates')}
+      <div hidden={active !== 'duplicates'}><DuplicatesPage {client} /></div>
+    {/if}
+    {#if visited.has('jobs')}
+      <div hidden={active !== 'jobs'}><JobsPage {client} visible={active === 'jobs'} /></div>
+    {/if}
+    {#if visited.has('insights')}
+      <div hidden={active !== 'insights'}><InsightsPage {client} visible={active === 'insights'} /></div>
+    {/if}
+    {#if visited.has('admin')}
+      <div hidden={active !== 'admin'}><AdminPage {client} /></div>
+    {/if}
+    {#if visited.has('ai')}
+      <div hidden={active !== 'ai'}><AiModelsPage {client} /></div>
+    {/if}
+    {#if visited.has('events')}
+      <div hidden={active !== 'events'}><EventsPage {client} /></div>
+    {/if}
+    {#if visited.has('profile')}
+      <div hidden={active !== 'profile'}><ProfilePage {client} /></div>
     {/if}
   {/if}
   </div>

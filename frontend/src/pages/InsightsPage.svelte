@@ -21,6 +21,9 @@
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+  // Whether the Insights tab is visible (#9). Forwarded to CitationGraph so it can resize +
+  // relayout Cytoscape after the tab is shown again (it mis-sizes while hidden).
+  export let visible = true;
 
   let shelves: Shelf[] = [];
   let racks: Rack[] = [];
@@ -256,6 +259,7 @@
       label={scopeType === 'library' ? '· whole library' : `· ${scopeType.replace('_', ' ')}`}
       disabled={loading || !scopeReady}
       load={loadGraph}
+      {visible}
     />
   </div>
 

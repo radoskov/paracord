@@ -5,12 +5,27 @@
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+  // Whether this tab is the active one. Tabs stay mounted across switches (#9); pause polling
+  // while hidden so background tabs don't keep hitting the API.
+  export let visible = true;
 
   let status: QueueStatus | null = null;
   let message = '';
   let auto = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   let filter = 'all';
+
+  // Pause the auto-refresh timer when the tab is hidden; resume (and refresh once) when shown.
+  let wasVisible = true;
+  $: {
+    if (visible && !wasVisible) {
+      void refresh();
+      startAuto();
+    } else if (!visible && wasVisible) {
+      stopAuto();
+    }
+    wasVisible = visible;
+  }
 
   const COUNT_ORDER = ['queued', 'started', 'finished', 'failed', 'scheduled', 'deferred'];
 

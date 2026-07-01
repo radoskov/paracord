@@ -15,6 +15,18 @@
   });
   // Called with a node's work_id when a local node is clicked (opens the work).
   export let onOpenWork: ((workId: string) => void) | null = null;
+  // Whether the enclosing tab is visible (#9). Cytoscape mis-sizes when built while its container
+  // is `display:none`, so when the tab becomes visible again we resize + re-run the layout.
+  export let visible = true;
+
+  let wasVisible = true;
+  $: {
+    if (visible && !wasVisible && cy) {
+      cy.resize();
+      relayout();
+    }
+    wasVisible = visible;
+  }
 
   let nodeMode: GraphNodeMode = 'local_only';
   let collapseVersions = false;
