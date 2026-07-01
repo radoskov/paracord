@@ -34,12 +34,13 @@
   let message = '';
   let lastBatch: ImportBatch | null = null;
 
-  function inputLines(): string[] {
-    return text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-  }
+  // Non-empty, trimmed input lines. Declared reactively (not as a plain function) so the
+  // `disabled` binding below re-evaluates when `text` changes — a template expression only
+  // tracks variables it references directly, never ones read inside a called function.
+  $: lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 
   function rowFromDraft(draft: ParsedDraft): Row {
     return {
@@ -67,7 +68,6 @@
   }
 
   async function preview(): Promise<void> {
-    const lines = inputLines();
     if (!lines.length) return;
     loading = true;
     message = '';
@@ -151,7 +151,7 @@
       <label><input type="radio" bind:group={engine} value="lookup" /> Lookup</label>
       <label><input type="radio" bind:group={engine} value="grobid" /> GROBID</label>
     </fieldset>
-    <button type="button" on:click={preview} disabled={loading || !inputLines().length}>
+    <button type="button" on:click={preview} disabled={loading || !lines.length}>
       Preview
     </button>
   </div>
