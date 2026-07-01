@@ -572,6 +572,12 @@ def create_work(
     db.add(work)
     db.commit()
     db.refresh(work)
+    # No free-floating papers (#1): a manually-created paper lands on the default shelf (committed
+    # separately so the work's own create/refresh flow is unaffected).
+    from app.services.default_shelf import place_on_default_if_loose
+
+    place_on_default_if_loose(db, work.id, actor_id=actor.id)
+    db.commit()
     enqueue_embedding(work.id)  # index off the search read path (best-effort)
     return work
 

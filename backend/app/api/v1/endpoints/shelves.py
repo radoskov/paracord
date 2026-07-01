@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.access_settings import get_default_access_level
+from app.services.default_shelf import get_default_shelf_id, place_on_default_if_loose
 from app.services.shelf_membership import add_work_to_shelf_checked
 
 router = APIRouter()
@@ -216,4 +217,8 @@ def remove_work_from_shelf(
     if link is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")
     db.delete(link)
+    db.flush()
+    # No free-floating papers (#1): if that was the paper's last real shelf, fall back to default.
+    if shelf_id != get_default_shelf_id(db):
+        place_on_default_if_loose(db, work_id, actor_id=actor.id)
     db.commit()

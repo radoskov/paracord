@@ -187,6 +187,11 @@ def import_records(
     def _add_to_shelf(work_id) -> None:
         nonlocal added_to_shelf
         if target_shelf_id is None:
+            from app.services.default_shelf import place_on_default_if_loose
+
+            place_on_default_if_loose(
+                db, work_id, actor_id=actor.id
+            )  # no free-floating papers (#1)
             return
         from app.services.shelf_membership import add_work_to_shelf_checked
 

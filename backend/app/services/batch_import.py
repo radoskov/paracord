@@ -38,6 +38,7 @@ from app.models.work import Work
 from app.services import web_find
 from app.services.audit import record_event
 from app.services.bibliography_import import _find_existing
+from app.services.default_shelf import place_on_default_if_loose
 from app.services.grobid_client import GrobidClient, GrobidUnavailableError
 from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.tei_parser import parse_citation_list
@@ -337,6 +338,8 @@ def commit_drafts(
     def _add_to_shelf(work_id: uuid.UUID) -> None:
         nonlocal added_to_shelf
         if target_shelf_id is None:
+            # No explicit shelf → keep it off the floor by placing loose papers on the default (#1).
+            place_on_default_if_loose(db, work_id, actor_id=actor.id)
             return
         add_work_to_shelf_checked(
             db,

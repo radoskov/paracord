@@ -26,10 +26,13 @@ _TABLE_PRESENT: dict[int, bool] = {}
 
 
 def _table_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
+    key = id(db.get_bind())
     if key not in _TABLE_PRESENT:
-        _TABLE_PRESENT[key] = inspect(bind).has_table(AccessSettings.__tablename__)
+        # Inspect the session's own connection, not the engine: inspecting the engine checks out a
+        # fresh connection and (on SQLite/StaticPool) issues a ROLLBACK that would discard the
+        # caller's uncommitted rows — corrupting, e.g., an in-progress import batch. (Mirrors the
+        # fix in ai_config._ai_config_table_present.)
+        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(AccessSettings.__tablename__)
     return _TABLE_PRESENT[key]
 
 

@@ -35,6 +35,9 @@ class AccessSettings(Base):
         Uuid(as_uuid=True), primary_key=True, default=ACCESS_SETTINGS_SINGLETON_ID
     )
     default_access_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The ephemeral "default shelf" newly-added papers land on so nothing is free-floating (#1).
+    # Soft reference (no FK, mirrors updated_by_user_id) to the shelf; NULL until bootstrapped.
+    default_shelf_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

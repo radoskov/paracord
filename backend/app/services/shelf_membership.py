@@ -64,4 +64,13 @@ def add_work_to_shelf_checked(
             link.position = position
         if note is not None:
             link.note = note
+    # Ephemeral default-shelf membership (#1): filing a paper onto any real shelf removes it from
+    # the default shelf, so the default shelf only ever holds papers with no other home.
+    from app.services.default_shelf import (  # noqa: PLC0415
+        get_default_shelf_id,
+        remove_from_default,
+    )
+
+    if shelf_id != get_default_shelf_id(db):
+        remove_from_default(db, work_id)
     return link
