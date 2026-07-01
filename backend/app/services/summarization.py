@@ -329,22 +329,54 @@ def summarize_scope(
     scope_id: uuid.UUID | None = None,
     summary_type: str = "extractive",
     max_sentences: int = 8,
+    model_name: str | None = None,
     visible_ids: set[uuid.UUID] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[Summary, int]:
-    """Generate (replacing prior) an extractive summary over all works in a scope.
+    """Generate (replacing prior) a scope summary over all works' abstracts.
 
-    Returns ``(summary, work_count)`` so the caller can include the count without an
-    extra query. ``visible_ids`` (Phase H) restricts the scope to works the caller may see.
+    Mirrors ``summarize_work``: ``local_llm`` calls the configured Ollama model (when enabled) over
+    the combined abstracts and degrades to the extractive engine on any failure, recording the
+    requested model + a fallback reason. Returns ``(summary, work_count)``; ``visible_ids`` (Phase H)
+    restricts the scope to works the caller may see.
     """
+    if summary_type not in SUPPORTED_SUMMARY_TYPES:
+        raise ValueError(f"Unsupported summary type: {summary_type}")
+    settings = settings or get_settings()
+    from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+    ai_cfg = get_ai_config(db, settings=settings)
     works = _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
 
     abstracts = [w.abstract for w in works if w.abstract]
     if not abstracts:
         raise ValueError(f"No abstracts available in {scope_type!r} scope to summarize")
-
     combined = " ".join(abstracts)
-    text = summarize_extractive(combined, max_sentences=max_sentences)
+
+    provider_requested = summary_type
+    provider_used = summary_type
+    fallback_reason: str | None = None
+    prompt_version = PROMPT_VERSION
+    text = ""
+    if summary_type == "local_llm":
+        stored_model = model_name or ai_cfg.summary_model
+        prompt_version = LLM_PROMPT_VERSION
+        if ai_cfg.summary_provider == "local_llm":
+            try:
+                text = _ollama_summarize(combined, model=stored_model, base_url=ai_cfg.ollama_url)
+            except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
+                logger.warning("local_llm scope summary unavailable (%s); extractive fallback", exc)
+                fallback_reason = str(exc) or "the local LLM is unavailable"
+        else:
+            fallback_reason = "the local LLM is not enabled"
+        if not text:
+            text = summarize_extractive(combined, max_sentences=max_sentences)
+            provider_used = "extractive"
+            stored_model = "tier1-extractive-frequency-scope"
+    else:
+        text = summarize_extractive(combined, max_sentences=max_sentences)
+        stored_model = "tier1-extractive-frequency-scope"
 
     db.execute(
         delete(Summary).where(
@@ -358,9 +390,14 @@ def summarize_scope(
         entity_id=entity_id,
         summary_type=summary_type,
         text=text,
-        model_name="tier1-extractive-frequency-scope",
-        prompt_version=PROMPT_VERSION,
+        model_name=stored_model,
+        prompt_version=prompt_version,
     )
     db.add(summary)
     db.flush()
+    # Transient provenance (mirrors summarize_work) for the API response.
+    summary.provider_requested = provider_requested
+    summary.provider_used = provider_used
+    summary.fallback = provider_used != provider_requested
+    summary.fallback_reason = fallback_reason if summary.fallback else None
     return summary, len(abstracts)

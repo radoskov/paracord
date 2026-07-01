@@ -360,3 +360,56 @@ def test_scope_summary_api_empty_scope_returns_400(client, auth_headers, db) -> 
         json={"scope_type": "shelf", "scope_id": str(shelf.id)},
     )
     assert r.status_code == 400
+
+
+# --- #10: scope-level local_llm path ---
+
+
+def test_scope_summary_local_llm_falls_back_to_extractive(db_session) -> None:
+    """Scope local_llm degrades to extractive when the LLM isn't enabled, recording provenance."""
+    shelf = Shelf(name="LLM scope")
+    db_session.add(shelf)
+    db_session.flush()
+    for i in range(2):
+        work = Work(
+            canonical_title=f"Paper {i}",
+            normalized_title=f"paper {i}",
+            abstract=f"Sentence {i}. Neural networks learn representations from data.",
+        )
+        db_session.add(work)
+        db_session.flush()
+        db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.commit()
+
+    summary, count = summarize_scope(
+        db_session, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm"
+    )
+    assert count == 2
+    assert summary.summary_type == "local_llm"
+    assert summary.provider_used == "extractive"  # LLM not enabled → honest fallback
+    assert summary.fallback is True
+    assert summary.fallback_reason
+
+
+def test_scope_summary_api_accepts_local_llm(client, auth_headers, db) -> None:
+    """The endpoint no longer rejects local_llm (the #10 root cause: enum was extractive-only)."""
+    from app.models.organization import Shelf, ShelfWork
+
+    shelf = Shelf(name="scope llm api")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="P", normalized_title="p", abstract="One. Two. Three. Four.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    r = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id), "summary_type": "local_llm"},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["summary_type"] == "local_llm"
+    assert body["provider_requested"] == "local_llm"

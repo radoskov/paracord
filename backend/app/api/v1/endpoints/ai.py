@@ -31,8 +31,11 @@ LIBRARIAN_DEP = Depends(require_min_role(Role.LIBRARIAN))
 class ScopeSummaryRequest(BaseModel):
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
-    summary_type: Literal["extractive"] = "extractive"
+    # 'local_llm' uses the configured Ollama model over the scope's abstracts, degrading to the
+    # extractive engine when the LLM is disabled/unreachable (#10).
+    summary_type: Literal["extractive", "local_llm"] = "extractive"
     max_sentences: int = 8
+    model_name: str | None = None
 
 
 class ScopeSummaryResponse(BaseModel):
@@ -43,6 +46,11 @@ class ScopeSummaryResponse(BaseModel):
     model_name: str | None = None
     prompt_version: str | None = None
     work_count: int
+    # Provider provenance (#10): what was requested vs used, and why it fell back if it did.
+    provider_requested: str | None = None
+    provider_used: str | None = None
+    fallback: bool = False
+    fallback_reason: str | None = None
 
 
 @router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
@@ -66,6 +74,7 @@ def create_scope_summary(
             scope_id=payload.scope_id,
             summary_type=payload.summary_type,
             max_sentences=max(3, min(payload.max_sentences, 20)),
+            model_name=payload.model_name,
             visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:
@@ -79,6 +88,10 @@ def create_scope_summary(
         model_name=summary.model_name,
         prompt_version=summary.prompt_version,
         work_count=work_count,
+        provider_requested=getattr(summary, "provider_requested", None),
+        provider_used=getattr(summary, "provider_used", None),
+        fallback=getattr(summary, "fallback", False),
+        fallback_reason=getattr(summary, "fallback_reason", None),
     )
 
 
