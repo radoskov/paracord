@@ -144,6 +144,11 @@ down-ai: ## Stop Ollama AI profile.
 	$(COMPOSE) --profile ai stop ollama
 	$(COMPOSE) --profile ai rm -f ollama
 
+.PHONY: build-ml-extraction
+build-ml-extraction: ## Build the opt-in ML-extraction image (Nougat/Marker; torch, multi-GB). Enables ocr_backend=full_ml.
+	docker build -f backend/Dockerfile --target ml-extraction -t paracord-api:ml-extraction .
+	@echo "✅ Built paracord-api:ml-extraction. Run the api/worker from this image and set ocr_backend=full_ml to activate."
+
 .PHONY: ps
 ps: ## Show Docker Compose service status.
 	$(COMPOSE) ps

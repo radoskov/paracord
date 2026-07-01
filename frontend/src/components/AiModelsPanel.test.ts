@@ -14,12 +14,14 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       summary_model: 'llama3',
       topic_backend: 'tfidf',
       topic_embedding_model: null,
+      ocr_backend: 'ocrmypdf',
       ollama_url: 'http://localhost:11434',
     },
     allowed: {
       embedding_provider: ['hash_bow', 'sentence_transformers', 'ollama'],
       summary_provider: ['extractive', 'local_llm'],
       topic_backend: ['tfidf', 'embedding', 'bertopic'],
+      ocr_backend: ['none', 'ocrmypdf', 'full_ml'],
     },
     providers: {
       embedding: {
@@ -32,6 +34,11 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
         embedding: { available: true, note: 'Built-in deterministic TF-IDF clustering (does not use embedding vectors yet).' },
         bertopic: { available: true, note: 'BERTopic is not installed — using the built-in deterministic TF-IDF topic model (same results as \'tfidf\', with richer metadata).' },
       },
+      extraction: {
+        none: { available: true, note: 'OCR pre-step disabled — GROBID runs on the PDF as-is.' },
+        ocrmypdf: { available: true, note: null },
+        full_ml: { available: false, note: 'No ML extractor installed — build the opt-in ML-extraction image (`make build-ml-extraction`).' },
+      },
       ollama_reachable: false,
     },
     reindex: { model_name: 'hash-bow-v1', indexed: 3, total: 5 },
@@ -42,6 +49,7 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       embedding: { selected: 'hash_bow', available: true, note: 'Default, dependency-free.' },
       summary: { selected: 'extractive', available: true, note: 'Default, dependency-free.' },
       topic: { selected: 'tfidf', available: true, note: 'Default, dependency-free.' },
+      extraction: { selected: 'ocrmypdf', available: true, note: null },
     },
     ...overrides,
   };
@@ -95,5 +103,35 @@ describe('AiModelsPanel', () => {
     // The red "falls back" badge + its reason are shown.
     expect(await screen.findByText('Falls back to hash-BOW')).toBeTruthy();
     expect(screen.getAllByText(/Start the Ollama profile/i).length).toBeGreaterThan(0);
+  });
+
+  it('renders the PDF text extraction / OCR card', async () => {
+    const client = makeClient(makeStatus());
+    render(AiModelsPanel, { client: client as never });
+    await waitFor(() => expect(client.getAiStatus).toHaveBeenCalled());
+
+    expect(await screen.findByText('PDF text extraction / OCR')).toBeTruthy();
+    expect(screen.getByText(/Adds a searchable text layer to scanned/i)).toBeTruthy();
+  });
+
+  it('shows full_ml install guidance (no install button) when the ML extractor is unavailable', async () => {
+    const status = makeStatus();
+    status.config.ocr_backend = 'full_ml';
+    status.active.extraction = {
+      selected: 'full_ml',
+      available: false,
+      note: 'No ML extractor installed — build the opt-in ML-extraction image (`make build-ml-extraction`).',
+    };
+    const client = makeClient(status);
+    render(AiModelsPanel, { client: client as never });
+    await waitFor(() => expect(client.getAiStatus).toHaveBeenCalled());
+
+    // The banner names the opt-in build path and there is NO pip/install button.
+    expect(
+      await screen.findByText(/No ML extractor is installed/i, { exact: false }),
+    ).toBeTruthy();
+    expect(screen.getAllByText(/make build-ml-extraction/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /install/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /pip/i })).toBeNull();
   });
 });

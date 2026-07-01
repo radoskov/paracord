@@ -21,8 +21,18 @@ WORKDIR /app
 
 # curl is used by the container healthcheck. psycopg[binary]/lxml/bcrypt ship wheels,
 # so no compiler toolchain is required.
+#
+# OCR (Phase B5): tesseract-ocr + the English data + ghostscript + the ocrmypdf CLI let the
+# worker add a searchable text layer to scanned/poor-text PDFs before GROBID. This is a bounded
+# local subprocess with no network egress. These packages add roughly 300-500 MB to the base
+# image; add extra `tesseract-ocr-<lang>` packages here for other OCR languages.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        ghostscript \
+        ocrmypdf \
     && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000
@@ -64,3 +74,13 @@ CMD ["sh", "-c", \
        --bind 0.0.0.0:8000 \
        --access-logfile - \
        --error-logfile -"]
+
+# ── ml-extraction (opt-in): heavy ML PDF extractors (Nougat/Marker) ───────────
+# Built ONLY on request via `make build-ml-extraction` — these pull torch + model weights (multi-GB)
+# and are never installed at runtime. Selecting ocr_backend=full_ml activates them when present and
+# otherwise degrades to GROBID. Layers on top of `development` so the app + OCR deps are already in.
+FROM development AS ml-extraction
+
+RUN pip install \
+        "nougat-ocr>=0.1.17" \
+        "marker-pdf>=0.2"

@@ -91,3 +91,72 @@ def test_models_list_when_ollama_down(client, auth_headers):
     r = client.get("/api/v1/admin/ai/models", headers=auth_headers("owner"))
     assert r.status_code == 200
     assert r.json() == {"models": []}
+
+
+# --- Phase B5: OCR / advanced-extraction backend ---
+
+
+def test_detect_providers_reports_extraction_ocr_availability(monkeypatch):
+    """detect_providers keys the OCR enum + reports ocrmypdf via shutil.which and ML via find_spec."""
+    from app.services import model_management
+
+    monkeypatch.setattr(model_management.shutil, "which", lambda name: None)
+    monkeypatch.setattr(model_management, "_module_available", lambda name: False)
+    providers = model_management.detect_providers(ollama_url="http://localhost:11434")
+
+    extraction = providers["extraction"]
+    assert extraction["none"]["available"] is True
+    assert extraction["ocrmypdf"]["available"] is False
+    assert "rebuild the base image" in extraction["ocrmypdf"]["note"]
+    assert extraction["full_ml"]["available"] is False
+    assert "build-ml-extraction" in extraction["full_ml"]["note"]
+    assert "build-ml-extraction" in extraction["nougat"]["note"]
+    assert providers["ocrmypdf_installed"] is False
+    assert providers["nougat_installed"] is False
+    assert providers["marker_installed"] is False
+
+
+def test_detect_providers_ocrmypdf_present(monkeypatch):
+    from app.services import model_management
+
+    monkeypatch.setattr(
+        model_management.shutil,
+        "which",
+        lambda name: "/usr/bin/ocrmypdf" if name == "ocrmypdf" else None,
+    )
+    monkeypatch.setattr(model_management, "_module_available", lambda name: False)
+    providers = model_management.detect_providers(ollama_url="http://localhost:11434")
+    assert providers["extraction"]["ocrmypdf"]["available"] is True
+    assert providers["extraction"]["ocrmypdf"]["note"] is None
+    assert providers["ocrmypdf_installed"] is True
+
+
+def test_ai_config_includes_ocr_backend_in_allowed_and_active(client, auth_headers):
+    owner = auth_headers("owner")
+
+    cfg = client.get("/api/v1/admin/ai-config", headers=owner).json()
+    assert cfg["config"]["ocr_backend"] == "ocrmypdf"  # Settings default
+    assert set(cfg["allowed"]["ocr_backend"]) == {"none", "ocrmypdf", "full_ml"}
+
+    status = client.get("/api/v1/admin/ai/status", headers=owner).json()
+    assert "extraction" in status["active"]
+    assert status["active"]["extraction"]["selected"] == "ocrmypdf"
+    assert "ocr_backend" in status["allowed"]
+
+
+def test_ai_config_persists_ocr_backend(client, auth_headers):
+    owner = auth_headers("owner")
+    r = client.put("/api/v1/admin/ai-config", headers=owner, json={"ocr_backend": "none"})
+    assert r.status_code == 200
+    assert r.json()["config"]["ocr_backend"] == "none"
+    again = client.get("/api/v1/admin/ai-config", headers=owner).json()
+    assert again["config"]["ocr_backend"] == "none"
+
+
+def test_ai_config_rejects_unknown_ocr_backend(client, auth_headers):
+    r = client.put(
+        "/api/v1/admin/ai-config",
+        headers=auth_headers("owner"),
+        json={"ocr_backend": "made-up"},
+    )
+    assert r.status_code == 400

@@ -46,10 +46,10 @@
 
   // Availability + how-to-enable note for a specific provider/backend option, read from the
   // detected providers map. Unknown keys default to "available" (the dependency-free baseline).
-  function avail(group: 'embedding' | 'summary' | 'topic', key: string): boolean {
+  function avail(group: 'embedding' | 'summary' | 'topic' | 'extraction', key: string): boolean {
     return status?.providers?.[group]?.[key]?.available ?? true;
   }
-  function note(group: 'embedding' | 'summary' | 'topic', key: string): string | null {
+  function note(group: 'embedding' | 'summary' | 'topic' | 'extraction', key: string): string | null {
     return status?.providers?.[group]?.[key]?.note ?? null;
   }
 
@@ -87,6 +87,24 @@
     };
   }
 
+  function ocrBadge(): Badge {
+    if (!config) return { kind: 'baseline', label: 'Loading…', reason: null };
+    if (config.ocr_backend === 'none') {
+      return { kind: 'baseline', label: 'OCR off', reason: 'GROBID runs on the PDF as-is — scanned pages stay un-searchable.' };
+    }
+    if (config.ocr_backend === 'ocrmypdf') {
+      const ok = avail('extraction', 'ocrmypdf');
+      return ok
+        ? { kind: 'ok', label: 'Available', reason: 'OCRmyPDF adds a text layer to scanned/poor-text PDFs before GROBID.' }
+        : { kind: 'off', label: 'OCR unavailable', reason: note('extraction', 'ocrmypdf') };
+    }
+    // full_ml
+    const ok = avail('extraction', 'full_ml');
+    return ok
+      ? { kind: 'ok', label: 'Available', reason: null }
+      : { kind: 'off', label: 'Degrades to GROBID', reason: note('extraction', 'full_ml') };
+  }
+
   // True when a topic backend that *sounds* like it uses embeddings/BERTopic is selected, so we
   // can show the honesty banner explaining it is actually the TF-IDF stand-in.
   $: topicPretendsAdvanced =
@@ -98,11 +116,18 @@
   let embBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
   let sumBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
   let topBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
+  let ocrBdg: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
   $: if (status || config) {
     embBadge = embeddingBadge();
     sumBadge = summaryBadge();
     topBadge = topicBadge();
+    ocrBdg = ocrBadge();
   }
+
+  // True when full_ml OCR is selected but no ML extractor is installed — show install guidance
+  // (never a runtime install button; the opt-in image is built with `make build-ml-extraction`).
+  $: ocrMlUnavailable =
+    config != null && config.ocr_backend === 'full_ml' && !avail('extraction', 'full_ml');
 
   async function save(): Promise<void> {
     if (!config) return;
@@ -257,6 +282,37 @@
         <p class="what">Pulls representative keyword phrases from a paper's title and abstract.</p>
         <p class="used">Used for: the keyword chips on a paper and keyword search.</p>
         <p class="reason">Always on — a dependency-free RAKE extractor with no settings to configure.</p>
+      </article>
+
+      <!-- PDF text extraction / OCR (ocr_backend) -->
+      <article class="cap">
+        <header>
+          <h3>PDF text extraction / OCR</h3>
+          <span class="badge badge-{ocrBdg.kind}" title={ocrBdg.reason ?? ''}>{ocrBdg.label}</span>
+        </header>
+        <p class="what">Adds a searchable text layer to scanned or poor-text PDFs before extraction, so GROBID can read them.</p>
+        <p class="used">Used for: extracting metadata, abstract, keywords and references from a paper's PDF. OCR runs locally on the stored file (no network).</p>
+        {#if ocrBdg.reason}<p class="reason">{ocrBdg.reason}</p>{/if}
+        {#if ocrMlUnavailable}
+          <p class="banner" title="The full-ML extractors (Nougat/Marker) are an opt-in image build, not a runtime install">
+            No ML extractor is installed. Build the opt-in ML-extraction image
+            (<code>make build-ml-extraction</code>) to enable it; until then this degrades to GROBID.
+          </p>
+        {/if}
+        <label>Extraction backend
+          <select bind:value={config.ocr_backend} disabled={busy}
+            title="How PDF text is extracted before GROBID (OCRmyPDF adds a text layer; full_ml is an opt-in ML extractor)">
+            {#each status.allowed.ocr_backend ?? [] as p}
+              <option value={p} disabled={!avail('extraction', p)}
+                title={avail('extraction', p) ? (note('extraction', p) ?? '') : (note('extraction', p) ?? 'Not available in this deployment')}>
+                {p}{avail('extraction', p) ? '' : ' (unavailable)'}
+              </option>
+            {/each}
+          </select>
+          {#if note('extraction', config.ocr_backend)}
+            <small class="hint">{note('extraction', config.ocr_backend)}</small>
+          {/if}
+        </label>
       </article>
     </div>
 

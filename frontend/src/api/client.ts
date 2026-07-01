@@ -568,6 +568,8 @@ export interface AiConfig {
   summary_model: string;
   topic_backend: string;
   topic_embedding_model: string | null;
+  // OCR / advanced-extraction backend (Phase B5): 'none' | 'ocrmypdf' | 'full_ml'.
+  ocr_backend: string;
   ollama_url: string;
 }
 
@@ -607,6 +609,8 @@ export interface AiStatus {
     embedding: AiActiveCapability;
     summary: AiActiveCapability;
     topic: AiActiveCapability;
+    // PDF text extraction / OCR (Phase B5); optional for older backends without the field.
+    extraction?: AiActiveCapability;
   };
 }
 

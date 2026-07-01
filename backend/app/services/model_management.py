@@ -9,6 +9,7 @@ fully drivable from the UI: detect, list, pull, delete.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 
 import httpx2 as httpx
 
@@ -33,6 +34,9 @@ def detect_providers(*, ollama_url: str) -> dict:
     ollama_models = _ollama_tags(ollama_url)
     st_available = _module_available("sentence_transformers")
     bertopic_available = _module_available("bertopic")
+    ocrmypdf_available = shutil.which("ocrmypdf") is not None
+    nougat_available = _module_available("nougat")
+    marker_available = _module_available("marker")
     return {
         "embedding": {
             "hash_bow": {"available": True, "note": "Default, dependency-free."},
@@ -71,24 +75,50 @@ def detect_providers(*, ollama_url: str) -> dict:
                 "topic model (same results as 'tfidf', with richer metadata).",
             },
         },
+        # Extraction / OCR backends. Keyed by the ``ocr_backend`` enum (none|ocrmypdf|full_ml) so
+        # the active-capability status can look up the selected value directly; grobid/nougat/marker
+        # entries are also reported for detection visibility.
         "extraction": {
+            "none": {
+                "available": True,
+                "note": "OCR pre-step disabled — GROBID runs on the PDF as-is.",
+            },
+            "ocrmypdf": {
+                "available": ocrmypdf_available,
+                "note": None
+                if ocrmypdf_available
+                else "ocrmypdf/tesseract not found in this image — rebuild the base image "
+                "(bundles tesseract-ocr + ghostscript + ocrmypdf).",
+            },
+            "full_ml": {
+                "available": nougat_available or marker_available,
+                "note": None
+                if (nougat_available or marker_available)
+                else "No ML extractor installed — build the opt-in ML-extraction image "
+                "(`make build-ml-extraction`); it degrades to GROBID until then.",
+            },
             "grobid": {"available": True, "note": "Default TEI extractor (GROBID service)."},
             "nougat": {
-                "available": _module_available("nougat"),
+                "available": nougat_available,
                 "note": None
-                if _module_available("nougat")
-                else "Opt-in ML extractor for hard/scanned PDFs — install in the AI image extra.",
+                if nougat_available
+                else "Opt-in ML extractor for hard/scanned PDFs — install via the ML-extraction "
+                "image extra (`make build-ml-extraction`).",
             },
             "marker": {
-                "available": _module_available("marker"),
+                "available": marker_available,
                 "note": None
-                if _module_available("marker")
-                else "Opt-in ML extractor — install in the AI image extra.",
+                if marker_available
+                else "Opt-in ML extractor — install via the ML-extraction image extra "
+                "(`make build-ml-extraction`).",
             },
         },
         "ollama_reachable": ollama_models is not None,
         "bertopic_installed": bertopic_available,
         "sentence_transformers_installed": st_available,
+        "ocrmypdf_installed": ocrmypdf_available,
+        "nougat_installed": nougat_available,
+        "marker_installed": marker_available,
     }
 
 

@@ -95,10 +95,22 @@ processing:
   keywords:
     extractor: yake          # or keybert when embeddings are enabled
   ocr:
-    enable_fallback: false   # detect needs_ocr always; run OCR only when enabled
-    engine: ocrmypdf
+    # OCR pre-step (Phase B5). backend: none | ocrmypdf | full_ml.
+    #   none     — GROBID runs on the PDF as-is (no OCR).
+    #   ocrmypdf — (default) add a searchable text layer to scanned/poor-text PDFs before GROBID.
+    #              Bounded local subprocess (ocrmypdf --skip-text); no network egress.
+    #   full_ml  — route to an opt-in ML extractor (Nougat/Marker); activate-when-present, else
+    #              degrades to GROBID. Requires the opt-in image (`make build-ml-extraction`).
+    # The legacy `enable_fallback` boolean still works (true→ocrmypdf, false→none) when `backend`
+    # is unset, but `backend` is preferred.
+    backend: ocrmypdf
+    timeout_seconds: 300            # per-file OCR wall-clock cap
+    language: eng                   # tesseract language(s); add tesseract-ocr-<lang> to the image
+    skip_if_text_layer_good: true   # skip OCR when the PDF already has a good text layer
   reference_parser_fallback: null   # null | anystyle | refextract
-  advanced_extraction:       # optional ML PDF->markdown for hard documents
+  advanced_extraction:       # optional ML PDF->text for hard documents (ocr_backend=full_ml)
+    # Enabling either sets ocr_backend=full_ml + extraction_backend. The dep is NEVER installed at
+    # runtime — build the opt-in image with `make build-ml-extraction` first.
     nougat_enabled: false
     marker_enabled: false
   # Paper body summaries are tiered. Tier 0 (abstract) is always available; Tier 1

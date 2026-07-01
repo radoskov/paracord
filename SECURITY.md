@@ -59,6 +59,7 @@ Do not add a web endpoint for unauthenticated password reset unless a future sec
 PaRacORD is local-first and built only from open-source, auditable components (GROBID, PostgreSQL, Redis, PDF.js, Ollama, BERTopic, and the supporting tools listed in `SPECIFICATION.md` §5.3). None is a closed binary that could silently scan the host or exfiltrate data.
 
 - No component reads outside its configured roots (server roots, managed store, agent roots). There is no host-wide scanning.
+- **OCR is a local subprocess with no egress.** The default `ocr_backend=ocrmypdf` runs the bundled `ocrmypdf`/Tesseract/Ghostscript tools as a bounded local subprocess on a stored PDF, writing a searchable copy to a transient scratch path that is fed to GROBID and then discarded. It makes no network calls and never transmits PDF contents. The opt-in full-ML extractors (Nougat/Marker) run locally too and are built only via `make build-ml-extraction` — never installed at runtime.
 - The only outbound traffic is **opt-in metadata enrichment and GROBID consolidation**, and it carries only **bibliographic identifiers** — titles, authors, DOIs, arXiv IDs, and raw reference strings.
 - The system never transmits PDF contents, full text, annotations, notes, your shelf/rack/collection structure, filesystem paths, or any bulk export of your library to a third party.
 - Every external request is recorded as a `metadata.enrichment_called` audit event, so egress is fully visible to the owner.

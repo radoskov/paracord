@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services.ai_config import (
     EMBEDDING_PROVIDERS,
+    OCR_BACKENDS,
     SUMMARY_PROVIDERS,
     TOPIC_BACKENDS,
     get_ai_config,
@@ -36,6 +37,7 @@ class AIConfigUpdate(BaseModel):
     summary_model: str | None = None
     topic_backend: str | None = None
     topic_embedding_model: str | None = None
+    ocr_backend: str | None = None
     ollama_url: str | None = None
 
 
@@ -53,6 +55,7 @@ def read_ai_config(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
             "embedding_provider": list(EMBEDDING_PROVIDERS),
             "summary_provider": list(SUMMARY_PROVIDERS),
             "topic_backend": list(TOPIC_BACKENDS),
+            "ocr_backend": list(OCR_BACKENDS),
         },
     }
 
@@ -165,6 +168,7 @@ def _active_capability_status(config: dict, providers: dict) -> dict:
         "embedding": _entry("embedding", config["embedding_provider"]),
         "summary": _entry("summary", config["summary_provider"]),
         "topic": _entry("topic", config["topic_backend"]),
+        "extraction": _entry("extraction", config["ocr_backend"]),
     }
 
 
@@ -181,6 +185,7 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
             "embedding_provider": list(EMBEDDING_PROVIDERS),
             "summary_provider": list(SUMMARY_PROVIDERS),
             "topic_backend": list(TOPIC_BACKENDS),
+            "ocr_backend": list(OCR_BACKENDS),
         },
         "providers": providers,
         "reindex": reindex_status(db, provider=get_embedding_provider(db=db)),

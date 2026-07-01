@@ -373,6 +373,8 @@ citation features rest directly on it.
 ### PDF extraction & ML
 
 * **[GROBID](https://github.com/kermitt2/grobid)** (Apache-2.0) — PDF-to-TEI extraction service (see above).
+* **[OCRmyPDF](https://ocrmypdf.readthedocs.io/)** (MPL-2.0) + **[Tesseract](https://github.com/tesseract-ocr/tesseract)** (Apache-2.0) + **[Ghostscript](https://www.ghostscript.com/)** (AGPL-3.0) — the default OCR pre-step (`ocr_backend=ocrmypdf`). Bundled in the backend image (adds ~300-500 MB); before GROBID runs, scanned/poor-text PDFs get a searchable text layer added to a transient copy (a bounded **local subprocess**, no network). Detected + toggled from the Admin AI & Models panel.
+* Optional, when enabled: **[Nougat](https://github.com/facebookresearch/nougat)** / **[Marker](https://github.com/VikParuchuri/marker)** — heavy ML PDF extractors (`ocr_backend=full_ml`). Pull PyTorch + model weights (multi-GB) and are **built only via the opt-in image** (`make build-ml-extraction`) — never installed at runtime from the web UI. Activate-when-present; otherwise the system degrades to GROBID.
 * **[PyMuPDF](https://pymupdf.readthedocs.io/)** (AGPL-3.0) — PDF rendering and coordinate handling.
 * **[lxml](https://lxml.de/)** (BSD-3-Clause) — parsing GROBID TEI output.
 * **[NetworkX](https://networkx.org/)** (BSD-3-Clause) — citation-graph construction and analysis.

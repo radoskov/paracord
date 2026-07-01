@@ -5,6 +5,8 @@ every value is recorded as a MetadataAssertion, and canonical fields are only pr
 the work has not been user-confirmed and the field is empty or filename-derived.
 """
 
+import contextlib
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +20,8 @@ from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
+from app.services import ocr as ocr_service
+from app.services.ai_config import get_ai_config
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path
 from app.services.keyword_extraction import extract_keywords
@@ -193,9 +197,51 @@ def extract_and_store(
 
     pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
 
-    tei_xml = fetch_tei(pdf_path)
+    # Effective OCR/advanced-extraction backend: DB row (runtime toggle) overlaid on Settings,
+    # honouring the admin's choice like the topic job does.
+    ocr_backend = get_ai_config(db, settings=settings).ocr_backend
+
+    # OCR pre-step: when OCRmyPDF is selected and the text layer is poor/none/unknown, add a
+    # searchable text layer to a *transient* copy and feed that to GROBID. OCR never fails the
+    # extraction (maybe_ocr swallows errors and returns the original path on failure/skip).
+    ocr_result: ocr_service.OcrResult | None = None
+    tei_source_path = pdf_path
+    if ocr_backend == "ocrmypdf" and ocr_service.needs_ocr(file.text_layer_quality):
+        with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
+            ocr_result = ocr_service.maybe_ocr(
+                pdf_path,
+                text_layer_quality=file.text_layer_quality,
+                out_dir=Path(scratch),
+                timeout=settings.ocr_timeout_seconds,
+                language=settings.ocr_language,
+                skip_if_good=settings.ocr_skip_if_text_layer_good,
+            )
+            tei_source_path = ocr_result.output_pdf_path
+            tei_xml = fetch_tei(tei_source_path)
+    elif ocr_backend == "full_ml" and ocr_service.ml_extraction_available(
+        settings.extraction_backend
+    ):
+        # Activate-when-present: an installed ML extractor would return searchable text here. It is
+        # not wired yet (run_ml_extraction raises), so we degrade to GROBID — ML failure or absence
+        # never fails extraction, and we never install the dep at runtime.
+        with contextlib.suppress(Exception):  # degrade to GROBID; ML failure never fails extraction
+            _ = ocr_service.run_ml_extraction(pdf_path, backend=settings.extraction_backend)
+        tei_xml = fetch_tei(pdf_path)
+    else:
+        tei_xml = fetch_tei(pdf_path)
+
     parsed = parse_tei(tei_xml)
     summary = store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml)
+
+    # OCR provenance in the summary + audit. When OCR actually ran, "ocr_added" wins over the
+    # post-GROBID text-layer recompute (the file now carries a text layer we added).
+    ocr_ran = bool(ocr_result and ocr_result.ran)
+    if ocr_ran and ocr_result is not None:
+        file.text_layer_quality = ocr_result.text_layer_quality or "ocr_added"
+    summary["ocr_backend"] = ocr_backend
+    summary["ocr_ran"] = ocr_ran
+    summary["ocr_engine"] = ocr_result.engine if ocr_result else None
+    summary["ocr_error"] = ocr_result.error if ocr_result else None
 
     record_event(
         db,

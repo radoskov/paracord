@@ -25,7 +25,11 @@ def _ai_config_table_present(db: Session) -> bool:
     bind = db.get_bind()
     key = id(bind)
     if key not in _TABLE_PRESENT:
-        _TABLE_PRESENT[key] = inspect(bind).has_table(AIConfig.__tablename__)
+        # Inspect the session's own connection rather than the engine: inspecting the engine checks
+        # out a fresh connection and (on SQLite/StaticPool) issues a ROLLBACK that would discard the
+        # caller's uncommitted rows. Using the session connection keeps the caller's transaction
+        # (and any pending flush) intact.
+        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(AIConfig.__tablename__)
     return _TABLE_PRESENT[key]
 
 
@@ -37,11 +41,15 @@ EDITABLE_FIELDS = (
     "summary_model",
     "topic_backend",
     "topic_embedding_model",
+    "ocr_backend",
     "ollama_url",
 )
 EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
 SUMMARY_PROVIDERS = ("extractive", "local_llm")
 TOPIC_BACKENDS = ("tfidf", "embedding", "bertopic")
+# OCR / advanced-extraction backends (Phase B5): none disables OCR; ocrmypdf adds a searchable
+# text layer before GROBID; full_ml routes to an opt-in ML extractor (activate-when-present).
+OCR_BACKENDS = ("none", "ocrmypdf", "full_ml")
 
 
 @dataclass
@@ -52,6 +60,7 @@ class EffectiveAIConfig:
     summary_model: str
     topic_backend: str
     topic_embedding_model: str | None
+    ocr_backend: str
     ollama_url: str
 
     def as_dict(self) -> dict:
@@ -66,6 +75,7 @@ def _defaults(settings: Settings) -> EffectiveAIConfig:
         summary_model=settings.summary_llm_model,
         topic_backend=settings.topic_backend,
         topic_embedding_model=None,
+        ocr_backend=settings.ocr_backend,
         ollama_url=settings.ollama_url,
     )
 
@@ -125,3 +135,5 @@ def _validate(changes: dict) -> None:
         raise ValueError(f"Unknown summary_provider (allowed: {SUMMARY_PROVIDERS})")
     if changes.get("topic_backend") and changes["topic_backend"] not in TOPIC_BACKENDS:
         raise ValueError(f"Unknown topic_backend (allowed: {TOPIC_BACKENDS})")
+    if changes.get("ocr_backend") and changes["ocr_backend"] not in OCR_BACKENDS:
+        raise ValueError(f"Unknown ocr_backend (allowed: {OCR_BACKENDS})")

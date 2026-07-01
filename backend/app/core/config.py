@@ -109,6 +109,29 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["web_find_resolve_enabled"] = web_find["resolve_enabled"]
     if "resolve_timeout" in web_find:
         values["web_find_resolve_timeout"] = web_find["resolve_timeout"]
+
+    # OCR / advanced extraction (Phase B5). `processing.ocr` toggles the OCRmyPDF pre-step; the
+    # `processing.advanced_extraction` block selects an opt-in ML extractor (activate-when-present).
+    processing = data.get("processing") or {}
+    ocr = processing.get("ocr") or {}
+    if "backend" in ocr:
+        values["ocr_backend"] = ocr["backend"]
+    elif "enable_fallback" in ocr:
+        # Backward-compat: the old boolean toggle maps onto the single ocr_backend enum.
+        values["ocr_backend"] = "ocrmypdf" if ocr["enable_fallback"] else "none"
+    if "timeout_seconds" in ocr:
+        values["ocr_timeout_seconds"] = ocr["timeout_seconds"]
+    if "language" in ocr:
+        values["ocr_language"] = ocr["language"]
+    if "skip_if_text_layer_good" in ocr:
+        values["ocr_skip_if_text_layer_good"] = ocr["skip_if_text_layer_good"]
+    advanced = processing.get("advanced_extraction") or {}
+    if advanced.get("nougat_enabled"):
+        values["ocr_backend"] = "full_ml"
+        values["extraction_backend"] = "nougat"
+    elif advanced.get("marker_enabled"):
+        values["ocr_backend"] = "full_ml"
+        values["extraction_backend"] = "marker"
     return values
 
 
@@ -191,7 +214,16 @@ class Settings(BaseSettings):
     pgvector_enabled: bool = False
     # PDF extraction backend: grobid (default) | nougat | marker (opt-in ML extractors for hard/
     # scanned PDFs; detected + selectable like the other providers, full impl is a follow-up).
+    # Kept for backward compat; the effective OCR/extraction mode is chosen via `ocr_backend`.
     extraction_backend: str = "grobid"
+    # OCR / advanced extraction (Phase B5). `ocrmypdf` (default) adds a searchable text layer to
+    # scanned/poor-text PDFs before GROBID (bounded local subprocess; no egress). `none` disables
+    # the pre-step; `full_ml` routes to an opt-in ML extractor (activate-when-present) and
+    # otherwise degrades to GROBID.
+    ocr_backend: str = "ocrmypdf"  # none | ocrmypdf | full_ml
+    ocr_timeout_seconds: int = 300
+    ocr_language: str = "eng"
+    ocr_skip_if_text_layer_good: bool = True
     # At-rest field encryption key (Fernet). When unset, sensitive fields are stored in clear and
     # SECURITY.md's at-rest claim is downgraded accordingly (Stage 7).
     secret_key: str | None = Field(default=None, alias="PARACORD_SECRET_KEY")

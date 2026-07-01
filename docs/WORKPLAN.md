@@ -763,7 +763,7 @@ Phases for the approved B-items. Sequential impl (shared backend/frontend + git)
 - [x] **Phase B4 — real CSL citation styles.** Delegate `export_service.render_styled` to
   `citeproc-py` with bundled `.csl` styles + locale (add `citeproc-py-styles` or vendor a curated
   set), replacing the 3 hand-rolled approximations; keep APA/IEEE/Chicago + add a few common ones.
-- [ ] **Phase B5 — OCR extraction.** Add an OCRmyPDF path for scanned/needs-OCR PDFs (real, default),
+- [x] **Phase B5 — OCR extraction.** Add an OCRmyPDF path for scanned/needs-OCR PDFs (real, default),
   wired into the extraction pipeline + Docker extraction image (tesseract/ghostscript). Add an
   `extraction`/`ocr_backend` config + admin AI/config toggle to activate full-ML OCR
   (Nougat/Marker) when installed, with availability + install guidance (NO runtime web-UI pip).

@@ -19,6 +19,9 @@ pybtex>=0.24
 citeproc-py>=0.8  # hard dep: renders the "styled" citation export from bundled CSL styles (Phase B4)
 PyYAML>=6.0
 PyMuPDF>=1.24
+# OCR pre-step (Phase B5, ocr_backend=ocrmypdf): drives the `ocrmypdf` CLI (installed in the base
+# image alongside tesseract-ocr + ghostscript) to add a searchable text layer before GROBID.
+ocrmypdf>=15.0
 
 # Optional AI/perf providers — the app degrades gracefully (guarded imports) when these are absent,
 # so they are intentionally NOT installed by default. Uncomment to enable:
@@ -26,3 +29,7 @@ PyMuPDF>=1.24
 #   sentence-transformers>=3.0     # embedding_provider=sentence_transformers (local embeddings)
 # Ollama (embedding_provider=ollama, summary_llm_enabled) needs no Python dep — just a reachable
 # Ollama daemon at OLLAMA_URL.
+# Full-ML PDF extractors (ocr_backend=full_ml) are heavy (torch + model weights, multi-GB) and are
+# built ONLY via the opt-in ml-extraction image (`make build-ml-extraction`), never installed here:
+#   nougat-ocr>=0.1.17             # extraction_backend=nougat
+#   marker-pdf>=0.2                # extraction_backend=marker

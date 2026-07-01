@@ -288,6 +288,126 @@ def test_extract_and_store_reads_managed_path(db_session, tmp_path: Path) -> Non
     assert summary["raw_tei_stored"] is True
 
 
+def _make_extractable_file(db_session, tmp_path: Path, *, quality: str):
+    """A work + file + server-path location whose PDF exists on disk, ready for extract_and_store."""
+    from app.core.config import get_settings
+
+    work = Work(canonical_title="o", normalized_title="o", canonical_metadata_source="filename")
+    file = File(
+        sha256="c" * 64, size_bytes=10, mime_type="application/pdf", text_layer_quality=quality
+    )
+    source = Source(
+        type="server_folder", name="S", path_alias="s", config={"root_path": str(tmp_path)}
+    )
+    db_session.add_all([work, file, source])
+    db_session.flush()
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    db_session.add_all(
+        [
+            FileWorkLink(file_id=file.id, work_id=work.id),
+            Location(
+                file_id=file.id,
+                source_id=source.id,
+                location_type="server_path",
+                internal_uri=str(pdf),
+            ),
+        ]
+    )
+    db_session.commit()
+    # ocr_backend defaults to "ocrmypdf" (no ai_config table in this narrow schema → Settings).
+    settings = get_settings()
+    return work, file, pdf, settings
+
+
+def test_extract_runs_ocr_on_poor_text_layer(db_session, tmp_path: Path, monkeypatch) -> None:
+    from app.services import ocr as ocr_service
+
+    work, file, pdf, settings = _make_extractable_file(db_session, tmp_path, quality="poor")
+    ocr_pdf = tmp_path / "paper.ocr.pdf"
+    ocr_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    def fake_maybe_ocr(path, **_kw):
+        assert path == pdf.resolve()
+        return ocr_service.OcrResult(
+            ocr_pdf, ran=True, engine="ocrmypdf", text_layer_quality="ocr_added", error=None
+        )
+
+    monkeypatch.setattr(ocr_service, "maybe_ocr", fake_maybe_ocr)
+
+    fed: dict[str, Path] = {}
+
+    def fake_fetch(path: Path) -> str:
+        fed["path"] = path
+        return FIXTURE
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    assert fed["path"] == ocr_pdf  # GROBID fed the OCR'd copy, not the original
+    assert summary["ocr_ran"] is True
+    assert summary["ocr_engine"] == "ocrmypdf"
+    assert file.text_layer_quality == "ocr_added"  # wins over the post-GROBID recompute
+
+
+def test_extract_skips_ocr_on_good_text_layer(db_session, tmp_path: Path, monkeypatch) -> None:
+    from app.services import ocr as ocr_service
+
+    work, file, pdf, settings = _make_extractable_file(db_session, tmp_path, quality="good")
+
+    def fake_maybe_ocr(*_a, **_k):  # pragma: no cover - must not be called for a good layer
+        raise AssertionError("OCR should not run when text layer is good")
+
+    monkeypatch.setattr(ocr_service, "maybe_ocr", fake_maybe_ocr)
+
+    fed: dict[str, Path] = {}
+
+    def fake_fetch(path: Path) -> str:
+        fed["path"] = path
+        return FIXTURE
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    assert fed["path"] == pdf.resolve()  # original PDF fed to GROBID
+    assert summary["ocr_ran"] is False
+
+
+def test_extract_ocr_failure_does_not_fail_extraction(
+    db_session, tmp_path: Path, monkeypatch
+) -> None:
+    from app.services import ocr as ocr_service
+
+    work, file, pdf, settings = _make_extractable_file(db_session, tmp_path, quality="none")
+
+    # maybe_ocr swallows the failure and returns the ORIGINAL path with an error string.
+    def fake_maybe_ocr(path, **_kw):
+        return ocr_service.OcrResult(
+            path, ran=False, engine="ocrmypdf", text_layer_quality=None, error="ocr blew up"
+        )
+
+    monkeypatch.setattr(ocr_service, "maybe_ocr", fake_maybe_ocr)
+
+    fed: dict[str, Path] = {}
+
+    def fake_fetch(path: Path) -> str:
+        fed["path"] = path
+        return FIXTURE
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    # Extraction still succeeded on the original PDF, provenance records the swallowed error, and
+    # the completion audit is still emitted.
+    assert fed["path"] == pdf.resolve()
+    assert summary["ocr_ran"] is False
+    assert summary["ocr_error"] == "ocr blew up"
+    assert summary["reference_count"] == 2
+    assert db_session.scalars(
+        select(AuditEvent).where(AuditEvent.event_type == "extraction.completed")
+    ).all()
+
+
 def test_file_ids_pending_extraction(db_session) -> None:
     from app.models.metadata import MetadataAssertion
 
