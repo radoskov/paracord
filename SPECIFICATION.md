@@ -247,22 +247,22 @@ GROBID and Ollama must not be directly exposed to the LAN by default. They shoul
 
 #### 7.1.1 Roles (implemented)
 
-The currently implemented role model is a four-tier privilege hierarchy:
+The implemented role model is a linear, six-tier privilege ladder (defined in `backend/app/core/security.py`; see §7.1.2 for the ladder and §7.9 for the group/collection access control that accompanies it):
 
-- `owner`: the single immutable bootstrap account (created by `make bootstrap-admin`). Full system control: user management, agents, AI/model settings, audit log, backups, deletion. The owner **cannot be disabled, deleted, role-changed, or self-disabled**, and is the only role that may manage `admin` users.
-- `admin`: manages users (readers/editors), agents, AI/model settings, find-on-web policy/allowed-hosts, server import roots, and the audit log. An admin **cannot create, disable, remove, or role-change another admin or the owner**, and **cannot disable itself**.
-- `editor`: library editing — imports, metadata edits, enrichment/extraction, annotations, exports, and shelf/rack management.
-- `reader`: authenticated reading, searching, and export. Readers see Library, Shelves, Racks, Tags, Insights, and Profile, but Import, Jobs, and Duplicates are hidden (editor+) and Admin/Events are owner/admin-only.
+- `owner`: the single immutable bootstrap account (created by `make bootstrap-admin`). Full system control: user management, agents, AI/model settings, audit log, backups, deletion. The owner **cannot be disabled, deleted, role-changed, or self-disabled**, and is the only role that may manage `admin` users. Bypasses all content ACLs.
+- `admin`: manages users, groups, grants, default-grant sets, agents, AI/model settings, find-on-web policy/allowed-hosts, server import roots, and the audit log; bypasses all content ACLs. An admin **cannot create, disable, remove, or role-change another admin or the owner**, and **cannot disable itself**.
+- `librarian`: editor + create/edit/delete racks and shelves and organize papers within them (subject to the rack/shelf grant matrix in §7.9 — "not even a librarian without a grant" for `visible`/`private` targets).
+- `editor`: contributor + create/edit/delete **any accessible** paper; no rack/shelf structural changes.
+- `contributor`: reader + create/edit/delete **own** papers (where `Work.created_by_user_id` is self); no rack/shelf structural changes.
+- `reader`: authenticated reading, searching, and export of accessible content. Readers see Library, Shelves, Racks, Tags, Insights, and Profile, but Import, Jobs, and Duplicates are hidden (editor+) and Admin/AI/Events are owner/admin-only.
 
-Disabling a user forces an immediate logout (active sessions are revoked). The migration that introduced `admin` keeps the bootstrap account as `owner` and moves any other pre-existing owners to `admin`.
+Disabling a user forces an immediate logout (active sessions are revoked). The migration that introduced `admin` keeps the bootstrap account as `owner` and moved any other pre-existing owners to `admin`; the migration that introduced the full ladder preserves the existing `editor` role.
 
 Each user has a **Profile** tab showing an editable appearance/display name and a read-only display of *their own* role (with a self-contained description; the full privilege ladder is not advertised). Admins/owner can reset a user's password.
 
-#### 7.1.2 Role ladder and access control (target — in progress)
+#### 7.1.2 Role ladder and access control (implemented)
 
-The agreed end-state replaces the four-tier model with a linear ladder and adds group-based, per-collection access control. This is the defined target (see §7.9 and §20); it is not yet implemented.
-
-Role ladder (lowest to highest):
+The role ladder and the group-based, per-collection access control (§7.9) are implemented. The ladder is linear (lowest to highest):
 
 ```text
 reader < contributor < editor < librarian < admin < owner
@@ -275,7 +275,7 @@ reader < contributor < editor < librarian < admin < owner
 - `admin`: + manage users, groups, grants, default-grant sets, agents, AI, and audit. Sees and does everything except managing other admins or the owner.
 - `owner`: + manage admins; immutable singleton, as in 7.1.1.
 
-The existing `editor` role is preserved across the migration.
+The existing `editor` role is preserved across the migration. Rank comparisons use `role_rank`/`role_at_least` in `backend/app/core/security.py`.
 
 ### 7.2 Authentication
 
@@ -409,9 +409,9 @@ The system is local-first and built only from open-source, auditable components 
 5. Enrichment is configurable per service and can be fully disabled; consolidation may be pointed at a self-hosted biblio-glutton instance for zero third-party calls.
 6. Secrets and credentials are never committed to version control; see `docs/runbooks/secrets_management.md`.
 
-### 7.9 User groups and collection access control (target — in progress)
+### 7.9 User groups and collection access control (implemented)
 
-This subsection specifies the agreed group/ACL model that accompanies the role ladder (§7.1.2). It is the defined target and is not yet implemented.
+This subsection specifies the group/ACL model that accompanies the role ladder (§7.1.2). It is implemented: `Group`/`GroupMembership`/`GroupGrant`/`DefaultGrant` (`backend/app/models/group.py`), rack/shelf `access_level` (`backend/app/models/organization.py`), the access layer (`backend/app/services/access.py`) with visibility filtering on list endpoints and modify guards on mutations, and the admin UI for groups/membership/grants/defaults.
 
 **Groups (Linux-like).**
 
@@ -433,7 +433,7 @@ This subsection specifies the agreed group/ACL model that accompanies the role l
 2. A paper in no shelf falls back to the global default (`open`); admins/owner see all.
 3. **MODIFY** (contributor = own papers only; editor and above = any visible paper) requires SEE plus modify access via a governing shelf (`open` → role; `visible`/`private` → role + grant). A loose paper (in no shelf) is treated as `open`.
 
-Visibility filtering applies to list endpoints, and modify guards apply to mutations; the design pass formalizes the full multi-shelf matrix.
+Visibility filtering applies to list endpoints, and modify guards apply to mutations; the full multi-shelf matrix is implemented in `backend/app/services/access.py`.
 
 ---
 
@@ -460,17 +460,15 @@ The system shall ingest:
 
 Each ingestion creates an `ImportBatch` with source type, timestamp, user, agent/server source, errors, warnings, processing status, and generated work/file IDs.
 
-An import (any input type) may optionally target a specific **rack and/or shelf**, dropping the resulting works straight into that collection at import time (subject to §7.9 access control once that lands).
+An import (any input type) may optionally target a specific **rack and/or shelf**, dropping the resulting works straight into that collection at import time (subject to §7.9 access control).
 
-#### 8.1.1 Raw-citation batch import (target — in progress)
+#### 8.1.1 Raw-citation batch import (implemented)
 
-A batch-import flow accepts a block of raw citations/titles, one per line, and resolves each line to a work:
+A batch-import flow accepts a block of raw citations/titles, one per line, and resolves each line to a work (`backend/app/services/batch_import.py`):
 
 1. By default, each line is looked up via Crossref/OpenAlex; **GROBID's citation parser is a selectable option** for parsing reference strings.
 2. A **staging UI** shows the parsed fields per line so the user can confirm/edit before committing.
 3. A line with no match becomes a **title-only draft** work.
-
-This is the defined target and is not yet implemented.
 
 ### 8.2 PDF extraction
 
@@ -906,7 +904,9 @@ Requirements:
 6. Allow creating shelves from topics.
 7. Allow freezing a topic model to prevent accidental drift.
 8. Allow rerunning topic models after substantial imports.
-9. Expose per-paper **Topic** (BERTopic) and **Keyword** extraction actions on the paper view, alongside Enrich/Extract (§8.12). On the paper detail view, topics are shown **below the title**, visually separated from keywords. *(Scope-level topic modeling and automatic keyword extraction during GROBID extraction exist today; the per-paper Topic/Keyword action buttons are the defined target and are in progress.)*
+9. Expose per-paper **Topic** and **Keyword** extraction actions on the paper view, alongside Enrich/Extract (§8.12). On the paper detail view, topics are shown **below the title**, visually separated from keywords. These actions are implemented (`POST /works/{id}/topics`, `POST /works/{id}/keywords`), and scope-level topic modeling plus automatic keyword extraction during GROBID extraction also exist.
+
+**Topic-backend honesty.** BERTopic is **not installed**; every topic backend (including the ones named `bertopic`/`embedding`) runs the built-in **deterministic TF-IDF stand-in** — always available, no downloads or network. The AI & Models tab surfaces this with an explicit honesty banner (§13.11). A real BERTopic backend is a future add.
 
 Suggested embedding models:
 
@@ -1722,7 +1722,7 @@ Topics
 Search
 Exports
 Admin          (admin/owner)
-AI & Models    (admin/owner; dedicated tab — target, in progress)
+AI & Models    (admin/owner; dedicated top-level tab)
 Events / Audit (admin/owner)
 Settings / Profile
 ```
@@ -1849,7 +1849,7 @@ History/audit
 
 The Overview/Related papers area surfaces embedding-based nearest neighbours (8.17) with their existing shelves/tags; related papers are clickable (switch to that paper) and show a "why related" reason. Keyword chips are clickable and run a semantic search.
 
-Per-paper actions are exposed as separate buttons: **Enrich** (metadata/refs), **Extract** (GROBID), **Topic** and **Keyword** (§8.15, in progress), and **Find on web** (§8.18) for works without an attached PDF. The file widget shows a note count and the full file hash with copy-on-click. Topics, when present, render below the title, separated from keywords. Action availability is role-gated with hover hints. Editing/contributing follows §7.1.2/§7.9 once access control lands.
+Per-paper actions are exposed as separate buttons: **Enrich** (metadata/refs), **Extract** (GROBID), **Topic** and **Keyword** (§8.15), and **Find on web** (§8.18) for works without an attached PDF. The file widget shows a note count and the full file hash with copy-on-click. Topics, when present, render below the title, separated from keywords. Action availability is role-gated with hover hints, and editing/contributing follows the §7.1.2/§7.9 access control.
 
 ### 13.8 PDF reader view
 
@@ -1939,7 +1939,7 @@ credential recovery instructions
 security warnings
 ```
 
-**AI & Models** is its own dedicated tab (target — in progress) with help explaining what each model does, when it is used, why a control is disabled, and the BERTopic out-of-the-box status. *(Today the AI/Models panel is embedded in the Admin page; promoting it to a standalone tab is the defined target.)*
+**AI & Models** is its own dedicated top-level tab (`frontend/src/pages/AiModelsPage.svelte` rendering `AiModelsPanel.svelte`, wired into `App.svelte` as the role-gated `ai` tab for admin/owner; backed by `GET /admin/ai/status`). It provides honest per-capability help: each capability (embeddings/semantic search, summaries, topics) shows a **status badge** (green when the chosen engine runs as selected; amber when it silently falls back to a baseline; off), **"used for"** text explaining what the engine does and when it is used, why a control is disabled, and a **BERTopic-not-installed honesty banner** stating that a topic backend that sounds like it uses embeddings/BERTopic actually runs the built-in deterministic TF-IDF stand-in. Local models can be listed and pulled from here.
 
 **Server import roots** (owner-only): a GUI to add/remove import roots with aliases, stored in a DB-backed `import_roots` table and **merged read-only** with `server.yaml`'s `storage.server_allowed_roots` (the YAML set is never written; YAML wins on an alias clash). One merged set feeds both server-folder import validation (same absolute/existing-directory checks and path-containment guard) and the listing API.
 
@@ -2267,7 +2267,7 @@ Acceptance:
 
 The ordering is value-first and dependency-sound: it front-loads the complete single-machine loop — import → organize → extract → read → export (Milestones 1–4) — so the tool is genuinely useful early, then adds the remote-machine agent (5) and the heavier analytical layers, citation graph (6) and local AI/topics (7), before final hardening (8). `ROADMAP.md` is a condensed mirror of this list and `WORK_SPLIT.md` maps the work packages onto it.
 
-**Status (2026-07-01).** Milestones 0–7 are substantially built, and the system has been through several in-vivo testing rounds. Beyond the original milestones, the following are **implemented**: the `admin` role and immutable-owner model (§7.1.1); the PDF.js text-layer reader with whole-document search, working annotations, and bidirectional citation↔reference navigation (§13.8); library configurable/sortable columns, hash search, and reference↔citation cross-linking (§13.3); separate Enrich/Extract actions; the agent web-GUI overhaul (§32.7); owner-only server import roots; UI-wide hover hints; and **find-on-web** with live streaming search, resolved platform/redirect-following, the safe-OA allowlist + denylist + SSRF guard, and the three owner-set download-policy modes (§8.18). The following are **agreed and in progress** (the 2026-07-01 round, see "Milestone 9" below): the linear role ladder and group/collection access control (§7.1.2, §7.9), raw-citation batch import and import-into-rack/shelf (§8.1.1), the per-paper Topic/Keyword action buttons (§8.15), the metadata-conflict **remove/resolve** action (§8.12), and the dedicated **AI & Models** tab (§13.11). No dates or completion metrics are asserted here beyond done/in-progress.
+**Status (2026-07-01).** Milestones 0–7 are substantially built, and the system has been through several in-vivo testing rounds. Beyond the original milestones, the following are **implemented**: the `admin` role and immutable-owner model (§7.1.1); the PDF.js text-layer reader with whole-document search, working annotations, and bidirectional citation↔reference navigation (§13.8); library configurable/sortable columns, hash search, and reference↔citation cross-linking (§13.3); separate Enrich/Extract actions; the agent web-GUI overhaul (§32.7); owner-only server import roots; UI-wide hover hints; and **find-on-web** with live streaming search, resolved platform/redirect-following, the safe-OA allowlist + denylist + SSRF guard, and the three owner-set download-policy modes (§8.18). The 2026-07-01 round (see "Milestone 9" below) also shipped: the linear role ladder and group/collection access control (§7.1.2, §7.9), raw-citation batch import and import-into-rack/shelf (§8.1.1), the per-paper Topic/Keyword action buttons (§8.15), the metadata-conflict **remove/resolve** action (§8.12), and the dedicated **AI & Models** tab (§13.11). No dates or completion metrics are asserted here beyond done/in-progress.
 
 ### Milestone 0: foundation
 
@@ -2487,9 +2487,9 @@ Exit criteria:
 3. all critical tests pass;
 4. system is usable as a personal production tool.
 
-### Milestone 9: access control, batch import, and modeling actions (in progress)
+### Milestone 9: access control, batch import, and modeling actions (implemented)
 
-The agreed next round (2026-07-01). It deepens the security model and rounds out import/extraction ergonomics.
+The 2026-07-01 round. It deepened the security model and rounded out import/extraction ergonomics; all deliverables below shipped.
 
 Deliverables:
 
@@ -2499,7 +2499,7 @@ user groups + personal groups + group→rack/shelf grants + default grant sets (
 rack/shelf access levels (open | visible | private) + paper visibility inheritance (§7.9)
 raw-citation batch import (Crossref/OpenAlex; GROBID parser option) with a staging/confirm UI (§8.1.1)
 import directly into a rack/shelf (§8.1)
-per-paper Topic (BERTopic) and Keyword extraction actions (§8.15)
+per-paper Topic and Keyword extraction actions — deterministic TF-IDF stand-in; BERTopic not installed (§8.15)
 metadata-conflict remove/resolve action (§8.12)
 jobs list newest-first (done); AI & Models as its own tab (§13.11)
 find-on-web full redirect chain → true final host; download attempts resolved/landing URL (done, §8.18)
