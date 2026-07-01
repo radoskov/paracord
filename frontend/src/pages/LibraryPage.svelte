@@ -511,6 +511,7 @@
                 format,
                 style,
               })}
+            fetchStyles={() => client.listCitationStyles()}
           />
           <button type="button" class="link" on:click={() => (selectedIds = [])}
             title="Clear the current selection">Clear</button>

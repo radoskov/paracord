@@ -7,11 +7,23 @@ from app.api.deps import require_authenticated_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.export import ExportRequest, ExportResponse
-from app.services import access
+from app.services import access, csl
 from app.services.export_service import export_bibliography, media_for
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
+
+
+@router.get("/styles")
+def list_citation_styles() -> list[dict[str, str]]:
+    """List the citation styles available for the ``styled`` export format.
+
+    Returned as ``[{"value", "label"}, ...]`` so the frontend can populate the style selector
+    dynamically instead of hard-coding the list.
+    """
+    return csl.available_styles()
+
+
 # Export is a read operation: any authenticated user (reader+) may export, but only the works they
 # may SEE are included (and a shelf/rack scope requires SEE on that container).
 EXPORT_DEP = Depends(require_authenticated_user)

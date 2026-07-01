@@ -126,7 +126,22 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'styled', label: 'Styled (APA/IEEE/…)' },
 ];
 
-export const CITATION_STYLES = ['apa', 'ieee', 'chicago'] as const;
+export interface CitationStyle {
+  value: string;
+  label: string;
+}
+
+// Fallback list used before the dynamic list loads (or if the styles endpoint is unavailable).
+// The backend (GET /api/v1/exports/styles) is the source of truth; keep these in rough sync.
+export const CITATION_STYLES: CitationStyle[] = [
+  { value: 'apa', label: 'APA (7th edition)' },
+  { value: 'ieee', label: 'IEEE' },
+  { value: 'chicago', label: 'Chicago (author-date)' },
+  { value: 'mla', label: 'MLA (9th edition)' },
+  { value: 'harvard', label: 'Harvard (Cite Them Right)' },
+  { value: 'vancouver', label: 'Vancouver' },
+  { value: 'nature', label: 'Nature' },
+];
 
 export interface ExportResponse {
   filename: string;
@@ -1627,6 +1642,11 @@ export class ApiClient {
     style?: string;
   }): Promise<ExportResponse> {
     return this.request<ExportResponse>('/api/v1/exports', { method: 'POST', body: payload });
+  }
+
+  /** Citation styles offered for the `styled` export format (backend is the source of truth). */
+  async listCitationStyles(): Promise<CitationStyle[]> {
+    return this.request<CitationStyle[]>('/api/v1/exports/styles');
   }
 
   private async request<T>(

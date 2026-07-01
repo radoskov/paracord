@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     CITATION_STYLES,
     EXPORT_FORMATS,
+    type CitationStyle,
     type ExportFormat,
     type ExportResponse,
   } from '../api/client';
@@ -13,12 +15,29 @@
   // Rich mode: when provided, this dialog fetches and offers Preview / Copy / Download.
   export let fetchExport: ((format: ExportFormat, style?: string) => Promise<ExportResponse>) | null =
     null;
+  // When provided, the style list is loaded dynamically from the backend (source of truth);
+  // otherwise the static CITATION_STYLES fallback is used.
+  export let fetchStyles: (() => Promise<CitationStyle[]>) | null = null;
 
   let format: ExportFormat = 'bibtex';
-  let style = 'apa';
+  let styles: CitationStyle[] = CITATION_STYLES;
+  let style = styles[0]?.value ?? 'apa';
   let preview = '';
   let status = '';
   let busy = false;
+
+  onMount(async () => {
+    if (!fetchStyles) return;
+    try {
+      const loaded = await fetchStyles();
+      if (loaded.length) {
+        styles = loaded;
+        if (!styles.some((s) => s.value === style)) style = styles[0].value;
+      }
+    } catch {
+      // Keep the static fallback list if the styles endpoint is unavailable.
+    }
+  });
 
   async function fetchContent(): Promise<ExportResponse | null> {
     if (!fetchExport) return null;
@@ -85,7 +104,7 @@
     {#if format === 'styled'}
       <label>Style
         <select bind:value={style} disabled={disabled || busy} title="Citation style for the formatted output">
-          {#each CITATION_STYLES as s}<option value={s}>{s.toUpperCase()}</option>{/each}
+          {#each styles as s (s.value)}<option value={s.value}>{s.label}</option>{/each}
         </select>
       </label>
     {/if}

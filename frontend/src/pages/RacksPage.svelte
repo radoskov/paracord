@@ -227,6 +227,7 @@
         disabled={loading}
         fetchExport={(format, style) =>
           client.exportCitations({ scope_type: 'rack', scope_id: selected!.id, format, style })}
+        fetchStyles={() => client.listCitationStyles()}
       />
     {/if}
   </div>

@@ -1,0 +1,30 @@
+CSL Citation Styles — Attribution
+==================================
+
+The .csl style files bundled in ./styles/ are Citation Style Language (CSL) styles from the
+Citation Style Language project:
+
+    https://citationstyles.org/
+    https://github.com/citation-style-language/styles
+
+These styles are licensed under the Creative Commons Attribution-ShareAlike 3.0 License
+(CC-BY-SA 3.0): https://creativecommons.org/licenses/by-sa/3.0/
+
+Bundled styles (unmodified unless noted):
+
+    apa.csl                          APA (7th edition)
+    ieee.csl                         IEEE
+    chicago-author-date.csl          Chicago (author-date)  — MODIFIED: removed the
+                                     page-range-format="chicago-16" attribute, which is not
+                                     supported by citeproc-py 0.9.3 and raised on paginated
+                                     items. Removal only changes page-range collapsing.
+    modern-language-association.csl  MLA (9th edition)
+    harvard-cite-them-right.csl      Harvard (Cite Them Right)
+    vancouver.csl                    Vancouver
+    nature.csl                       Nature
+
+Rendering is performed by citeproc-py (https://github.com/citeproc-py/citeproc-py), which also
+provides the bundled en-US locale used at render time.
+
+Because these files are CC-BY-SA 3.0, any redistributed modifications must be shared under the
+same license. See the <info>/<rights> block inside each .csl file for its per-style notice.

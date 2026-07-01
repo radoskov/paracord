@@ -51,8 +51,9 @@ repos:
     hooks:
       - id: codespell
         args:
-          - "--ignore-words-list=te,fo,aci,nd"
-        exclude: ^(frontend/package-lock\.json|docs/.*\.tex)$
+          - "--ignore-words-list=te,fo,aci,nd,thes"
+        # Vendored third-party CSL style files (CC-BY-SA) carry unmodifiable non-English tokens.
+        exclude: ^(frontend/package-lock\.json|docs/.*\.tex|backend/app/services/csl/styles/.*\.csl)$
 
   - repo: local
     hooks:

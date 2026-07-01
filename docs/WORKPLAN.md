@@ -760,7 +760,7 @@ Phases for the approved B-items. Sequential impl (shared backend/frontend + git)
   unavailable and the system degrades (hash-BOW / extractive), surface "requested X, using Y" at the
   point of use (search results / summary display) — not just in the AI tab. Backend exposes the
   active-vs-requested provider per response; frontend shows a small indicator.
-- [ ] **Phase B4 — real CSL citation styles.** Delegate `export_service.render_styled` to
+- [x] **Phase B4 — real CSL citation styles.** Delegate `export_service.render_styled` to
   `citeproc-py` with bundled `.csl` styles + locale (add `citeproc-py-styles` or vendor a curated
   set), replacing the 3 hand-rolled approximations; keep APA/IEEE/Chicago + add a few common ones.
 - [ ] **Phase B5 — OCR extraction.** Add an OCRmyPDF path for scanned/needs-OCR PDFs (real, default),

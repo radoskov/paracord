@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
+from app.services import csl
 from app.services.audit import record_event
 
 # format -> (file extension, content type)
@@ -29,11 +30,14 @@ SUPPORTED_FORMATS = set(FORMAT_MEDIA)
 
 @dataclass
 class _Entry:
-    """A work plus its resolved citation key and author list, ready to render."""
+    """A work plus its resolved citation key, author list, and extra citation metadata."""
 
     work: Work
     authors: list[str] = field(default_factory=list)
     key: str = ""
+    # Extra bibliographic fields resolved from MetadataAssertions (volume/issue/pages/publisher),
+    # used to enrich the CSL-JSON item for styled/csl-json rendering when available.
+    meta: dict[str, str] = field(default_factory=dict)
 
 
 def media_for(output_format: str) -> tuple[str, str]:
@@ -68,7 +72,15 @@ def export_bibliography(
         db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids, visible_ids=visible_ids
     )
     authors_by_work = _authors_by_work(db, works)
-    entries = [_Entry(work=work, authors=authors_by_work.get(work.id, [])) for work in works]
+    meta_by_work = _extra_meta_by_work(db, works)
+    entries = [
+        _Entry(
+            work=work,
+            authors=authors_by_work.get(work.id, []),
+            meta=meta_by_work.get(work.id, {}),
+        )
+        for work in works
+    ]
     _assign_keys(entries)
     if citation_keys:
         for entry in entries:
@@ -180,6 +192,50 @@ def _authors_by_work(db: Session, works: list[Work]) -> dict[uuid.UUID, list[str
     return {wid: _split_authors(value) for wid, value in best.items()}
 
 
+# Extra CSL-relevant fields that may be recorded as MetadataAssertions (not columns on ``Work``).
+# ``number`` is an alias some importers use for the journal issue.
+_EXTRA_META_FIELDS = ("volume", "issue", "number", "pages", "page", "publisher")
+
+
+def _extra_meta_by_work(db: Session, works: list[Work]) -> dict[uuid.UUID, dict[str, str]]:
+    """Resolve extra bibliographic fields (volume/issue/pages/publisher) in one query.
+
+    Only some importers record these as assertions, so they are best-effort: absent fields simply
+    don't appear on the CSL-JSON item. Best assertion per (work, field) wins (canonical, then
+    confidence), mirroring :func:`_authors_by_work`.
+    """
+    ids = [w.id for w in works]
+    if not ids:
+        return {}
+    rows = db.execute(
+        select(
+            MetadataAssertion.entity_id,
+            MetadataAssertion.field_name,
+            MetadataAssertion.value,
+        )
+        .where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.entity_id.in_(ids),
+            MetadataAssertion.field_name.in_(_EXTRA_META_FIELDS),
+        )
+        .order_by(
+            MetadataAssertion.entity_id,
+            MetadataAssertion.field_name,
+            MetadataAssertion.selected_as_canonical.desc(),
+            func.coalesce(MetadataAssertion.confidence, 0).desc(),
+        )
+    ).all()
+    out: dict[uuid.UUID, dict[str, str]] = {}
+    for entity_id, field_name, value in rows:
+        if not value:
+            continue
+        bucket = out.setdefault(entity_id, {})
+        # First row per (work, field) wins; normalize ``number`` -> ``issue``, ``page`` -> ``pages``.
+        key = {"number": "issue", "page": "pages"}.get(field_name, field_name)
+        bucket.setdefault(key, value.strip())
+    return out
+
+
 def _assign_keys(entries: list[_Entry]) -> None:
     """Assign each entry a unique ``authorYEAR`` (or ``titlewordYEAR``) citation key."""
     counts: dict[str, int] = {}
@@ -264,23 +320,91 @@ def _entry_to_ris(entry: _Entry) -> str:
     return "\n".join(lines) + "\n"
 
 
+# Map heterogeneous ``Work.work_type`` values (bibtex entry types, RIS codes, CSL types) to a CSL
+# item type. Anything unrecognized falls back to ``article-journal``.
+_CSL_TYPE_MAP = {
+    # already-CSL types (pass through)
+    "article-journal": "article-journal",
+    "paper-conference": "paper-conference",
+    "book": "book",
+    "chapter": "chapter",
+    "thesis": "thesis",
+    "report": "report",
+    "dataset": "dataset",
+    # bibtex entry types
+    "article": "article-journal",
+    "inproceedings": "paper-conference",
+    "conference": "paper-conference",
+    "proceedings": "paper-conference",
+    "incollection": "chapter",
+    "inbook": "chapter",
+    "book_chapter": "chapter",
+    "phdthesis": "thesis",
+    "mastersthesis": "thesis",
+    "techreport": "report",
+    "misc": "article",
+    # RIS type codes
+    "jour": "article-journal",
+    "conf": "paper-conference",
+    "cpaper": "paper-conference",
+    "chap": "chapter",
+    "thes": "thesis",
+    "rprt": "report",
+    "data": "dataset",
+    # PaRacORD internal / source hints
+    "preprint": "article-journal",
+    "journal_article": "article-journal",
+    "conference_paper": "paper-conference",
+}
+
+
+def _csl_type(work: Work) -> str:
+    raw = (work.work_type or "").strip().lower()
+    if not raw:
+        # arXiv-only records with no venue are effectively preprints/journal articles.
+        return "article-journal"
+    return _CSL_TYPE_MAP.get(raw, "article-journal")
+
+
+def _entry_to_csl_item(entry: _Entry) -> dict:
+    """Map a resolved :class:`_Entry` to a single CSL-JSON item.
+
+    Missing fields are simply omitted so citeproc renders gracefully. Author names are split into
+    family/given parts; ``issued`` uses year date-parts; ``container-title`` carries the venue; and
+    volume/issue/pages/publisher/DOI are included when resolved from assertions or columns.
+    """
+    work = entry.work
+    item: dict = {"id": entry.key, "type": _csl_type(work)}
+    if work.canonical_title:
+        item["title"] = work.canonical_title
+    if entry.authors:
+        item["author"] = [_split_name(name) for name in entry.authors]
+    if work.year:
+        item["issued"] = {"date-parts": [[work.year]]}
+    if work.venue:
+        item["container-title"] = work.venue
+    if work.doi:
+        item["DOI"] = work.doi
+    # Extra bibliographic fields resolved from MetadataAssertions, when present.
+    for src_key, csl_key in (
+        ("volume", "volume"),
+        ("issue", "issue"),
+        ("pages", "page"),
+        ("publisher", "publisher"),
+    ):
+        value = entry.meta.get(src_key)
+        if value:
+            item[csl_key] = value
+    return item
+
+
 def _render_csl_json(entries: list[_Entry]) -> str:
     items = []
     for entry in entries:
-        work = entry.work
-        item: dict = {"id": entry.key, "type": "article-journal"}
-        if work.canonical_title:
-            item["title"] = work.canonical_title
-        if entry.authors:
-            item["author"] = [_split_name(name) for name in entry.authors]
-        if work.year:
-            item["issued"] = {"date-parts": [[work.year]]}
-        if work.venue:
-            item["container-title"] = work.venue
-        if work.doi:
-            item["DOI"] = work.doi
-        if work.abstract:
-            item["abstract"] = work.abstract
+        item = _entry_to_csl_item(entry)
+        # csl-json export also carries the abstract (not used by rendered styles).
+        if entry.work.abstract:
+            item["abstract"] = entry.work.abstract
         items.append(item)
     return json.dumps(items, indent=2, ensure_ascii=False)
 
@@ -306,47 +430,21 @@ def _render_text(entries: list[_Entry]) -> str:
     return "\n".join(_work_to_text(entry.work) for entry in entries)
 
 
-# Built-in citation styles (a lightweight approximation; full CSL/citeproc style files are a
-# documented follow-up). Keyed by the ``style`` request field.
-STYLES = ("apa", "ieee", "chicago")
+# Citation styles are rendered with real CSL via citeproc-py (Phase B4). ``STYLES`` is the ordered
+# tuple of supported style keys (``apa``/``ieee``/``chicago`` kept from before, plus mla/harvard/
+# vancouver/nature); the .csl files + license attribution live under ``app/services/csl/``.
+STYLES = csl.CITATION_STYLES
 
 
 def render_styled(entries: list[_Entry], style: str) -> str:
-    """Render a numbered, human-readable reference list in a named style."""
-    style = (style or "apa").lower()
-    if style not in STYLES:
-        raise ValueError(f"Unsupported citation style: {style} (allowed: {STYLES})")
-    return "\n".join(_styled_entry(i, e, style) for i, e in enumerate(entries, start=1))
+    """Render a human-readable reference list in a named CSL style.
 
-
-def _styled_entry(index: int, entry: _Entry, style: str) -> str:
-    work = entry.work
-    authors = entry.authors
-    title = (work.canonical_title or "Untitled").strip()
-    venue = (work.venue or "").strip()
-    year = work.year
-    doi = f" https://doi.org/{work.doi}" if work.doi else ""
-    if style == "ieee":
-        who = ", ".join(authors) if authors else ""
-        bits = [f"[{index}]"]
-        if who:
-            bits.append(who + ",")
-        bits.append(f'"{title},"')
-        if venue:
-            bits.append(f"{venue},")
-        if year:
-            bits.append(f"{year}.")
-        return " ".join(bits).strip() + doi
-    if style == "chicago":
-        who = ", ".join(authors) if authors else ""
-        head = f"{who}. " if who else ""
-        return f'{head}"{title}." {venue}{f" ({year})" if year else ""}.'.strip() + doi
-    # apa (default)
-    who = ", ".join(authors) if authors else ""
-    head = f"{who} " if who else ""
-    yr = f"({year}). " if year else ""
-    ven = f" {venue}." if venue else ""
-    return f"{head}{yr}{title}.{ven}".strip() + doi
+    Delegates to citeproc-py via :mod:`app.services.csl`. Each entry is mapped to a CSL-JSON item;
+    rendering is per-item defensive (a malformed record degrades to a minimal safe string instead
+    of failing the whole export). Raises ``ValueError`` for an unknown style key.
+    """
+    items = [_entry_to_csl_item(entry) for entry in entries]
+    return csl.render_bibliography(items, style or "apa")
 
 
 def _entry_inline(entry: _Entry, *, markdown: bool) -> str:

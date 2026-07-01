@@ -123,6 +123,7 @@
               format,
               style,
             })}
+          fetchStyles={() => client.listCitationStyles()}
         />
       </div>
     {/if}

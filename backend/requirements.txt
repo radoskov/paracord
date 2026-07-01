@@ -16,7 +16,7 @@ lxml>=5.2
 networkx>=3.3
 bibtexparser>=1.4
 pybtex>=0.24
-citeproc-py>=0.8
+citeproc-py>=0.8  # hard dep: renders the "styled" citation export from bundled CSL styles (Phase B4)
 PyYAML>=6.0
 PyMuPDF>=1.24
 
