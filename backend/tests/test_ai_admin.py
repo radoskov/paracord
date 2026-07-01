@@ -79,6 +79,11 @@ def test_ai_status_endpoint(client, auth_headers):
         assert body["active"]["embedding"]["selected"] == "hash_bow"
         assert body["active"]["embedding"]["available"] is True
         assert body["active"]["topic"]["selected"] == "tfidf"
+        # Hybrid-search status (HS6): chunk-level ANN coverage (inactive under hash-BOW/SQLite)
+        # and lexical-index warmth are surfaced.
+        assert body["chunk_embeddings"]["column"] is None
+        assert body["chunk_embeddings"]["model_name"] == "hash-bow-v1"
+        assert "loaded" in body["lexical_index"]
 
     for role in ("editor", "reader"):
         assert (

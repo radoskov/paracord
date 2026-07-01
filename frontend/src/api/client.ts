@@ -674,6 +674,9 @@ export interface AiStatus {
   allowed: Record<string, string[]>;
   providers: AiProviders;
   reindex: { model_name: string; indexed: number; total: number };
+  // Hybrid search (HS6): chunk-level ANN coverage for the active model + lexical index warmth.
+  chunk_embeddings?: { model_name: string; column: string | null; indexed: number; total: number };
+  lexical_index?: { loaded: boolean; docs: number | null };
   ollama_reachable: boolean;
   bertopic_installed: boolean;
   sentence_transformers_installed: boolean;

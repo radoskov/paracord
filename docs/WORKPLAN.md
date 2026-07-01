@@ -773,3 +773,33 @@ Phases for the approved B-items. Sequential impl (shared backend/frontend + git)
 - [x] **Phase B7 — saved filters.** New `SavedFilter` model (name, query, owner) + CRUD endpoints +
   UI to save the current library search as a named filter and reuse it as a graph/export scope.
   Backend model+migration+endpoints + LibraryPage/graph/export wiring.
+
+## Round 2026-07-01 — Hybrid search (BM25F+ ⊕ chunk-level ANN ⊕ RRF)
+
+Full design + phase detail: [HYBRID-SEARCH-DESIGN.md](./HYBRID-SEARCH-DESIGN.md) and
+[WORKPLAN_HYBRID_SEARCH.md](./WORKPLAN_HYBRID_SEARCH.md). Grounded in the TigerData RRF recipe and
+arXiv:2602.11443 (filtered-ANN taxonomy). Sequential impl on `main`, tests + migration parity green
+per phase.
+
+- [x] **HS1 — chunking + `work_chunks`.** Section-aware passage chunker (title/abstract/TEI sections,
+  ~256–512 tokens, ~15% overlap, skips references/acknowledgments) + `work_chunks` table (migration
+  0034); idempotent rechunk job in the enrichment chain. (`b77dafa`)
+- [x] **HS2 — per-model chunk embeddings + ANN.** Postgres-only migration 0035 adds
+  dimension-constrained pgvector columns (`vec_minilm`/384, `vec_nomic`/768) + HNSW cosine indexes;
+  `chunk_embeddings` service embeds a work's chunks into the active model's column; backfill-on-
+  activation via reindex. Document-level hash-BOW stays the dialect-agnostic baseline. (`5134791`)
+- [x] **HS3 — selectivity-adaptive filtered semantic search.** `semantic_search_papers` ranks
+  passages then rolls the best per paper up; access filtering moves inside the query (pre-filter +
+  exact for a small visible set, else HNSW ANN + pgvector iterative scan). Removes the `limit*5`
+  over-fetch hack. (`d030ee6`)
+- [x] **HS4 — BM25F+ lexical engine.** Pure-Python eager inverted index with true BM25F field
+  weighting (TEI-sourced fields) + BM25+ δ; signature-cached, warmed via `POST /search/warm`.
+  Replaces the naive token-overlap lexical path. (numpy/scipy eager-sparse + mmap is a documented
+  future optimization.) (`55a930c`)
+- [x] **HS5 — RRF fusion + unified `/search` + UI.** `hybrid_search` fuses lexical + semantic via
+  Reciprocal Rank Fusion (k=60); modes lexical/semantic/hybrid (default hybrid). New `POST /search`;
+  Insights search card gains a mode selector, matching-passage display, per-engine badges, warm-on-
+  open. (`fb5fe66`)
+- [x] **HS6 — admin status + docs.** AI & Models tab surfaces chunk-level ANN coverage + lexical
+  index warmth (`/admin/ai/status`); workplan/spec updated. Activation stays activate-when-present
+  (no runtime web-UI pip installer).

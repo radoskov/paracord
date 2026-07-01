@@ -1,8 +1,30 @@
 # Workplan — Hybrid Search (BM25F+ ⊕ chunk-level ANN ⊕ RRF)
 
-> **Status:** proposed, awaiting go-ahead. Design: [HYBRID-SEARCH-DESIGN.md](./HYBRID-SEARCH-DESIGN.md).
-> Not yet merged into the live [WORKPLAN.md](./WORKPLAN.md). One product decision is still open
-> (which embedding models get columns — default MiniLM-384 + nomic-768).
+> **Status: IMPLEMENTED (2026-07-01).** All six phases shipped to `main`. Design:
+> [HYBRID-SEARCH-DESIGN.md](./HYBRID-SEARCH-DESIGN.md).
+>
+> | Phase | Commit | |
+> |---|---|---|
+> | HS1 chunking + work_chunks | `b77dafa` | ✅ |
+> | HS2 per-model pgvector columns + ANN | `5134791` | ✅ |
+> | HS3 selectivity-adaptive filtered semantic search | `d030ee6` | ✅ |
+> | HS4 BM25F+ lexical engine | `55a930c` | ✅ |
+> | HS5 RRF fusion + unified /search + mode-selector UI | `fb5fe66` | ✅ |
+> | HS6 admin status + docs | *(this commit)* | ✅ |
+>
+> **Deviation from the design's "bm25s":** numpy/scipy are not installed and the project keeps heavy
+> deps out by policy, so HS4 was built as a **pure-Python BM25F+** inverted index (identical scoring:
+> per-field weighted tf + per-field length norm + BM25+ δ; milliseconds at library scale). The
+> numpy/scipy eager-sparse matrix with mmap sharing across workers remains a documented future
+> optimization; today the index is held per worker and rebuilt on demand when the corpus changes.
+>
+> **Embedding-model columns (HS2 open decision, resolved to the default):** `vec_minilm` (384) +
+> `vec_nomic` (768). Adding another model is a migration + a `CHUNK_MODEL_COLUMNS` entry.
+>
+> **Activation (no runtime pip installer):** sentence-transformers → uncomment in
+> `backend/requirements.txt` and rebuild the image (auto-detected via `model_management`); Ollama →
+> `make up-ai` + pull a model, then select it in the AI & Models tab. Chunk-level ANN + backfill
+> then activate automatically for the selected model on Postgres.
 >
 > Standing constraints apply: commit to `main`, no runtime web-UI pip installer (activate-when-present
 > + documented `make` target + admin toggle), keep the SQLite-testable path for portable logic,

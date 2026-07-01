@@ -20,6 +20,8 @@ from app.services.ai_config import (
     update_ai_config,
 )
 from app.services.audit import record_event
+from app.services.bm25_index import cache_info as lexical_cache_info
+from app.services.chunk_embeddings import chunk_embedding_status
 from app.services.embeddings import get_embedding_provider
 from app.services.model_management import delete_model, detect_providers, list_models
 from app.services.semantic_search import reindex_status
@@ -189,6 +191,9 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
         },
         "providers": providers,
         "reindex": reindex_status(db, provider=get_embedding_provider(db=db)),
+        # Hybrid search (HS6): chunk-level ANN coverage for the active model + lexical index warmth.
+        "chunk_embeddings": chunk_embedding_status(db, provider=get_embedding_provider(db=db)),
+        "lexical_index": lexical_cache_info(),
         "ollama_reachable": providers["ollama_reachable"],
         "bertopic_installed": providers["bertopic_installed"],
         "sentence_transformers_installed": providers["sentence_transformers_installed"],

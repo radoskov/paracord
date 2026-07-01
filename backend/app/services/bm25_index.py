@@ -308,6 +308,16 @@ def invalidate_cache() -> None:
         _CACHE["index"] = None
 
 
+def cache_info() -> dict:
+    """Report whether the lexical index is warm in this process and its size (no build triggered)."""
+    with _LOCK:
+        index = _CACHE["index"]
+        return {
+            "loaded": index is not None,
+            "docs": len(index.work_ids) if index is not None else None,
+        }
+
+
 def lexical_search_papers(
     db: Session,
     query: str,

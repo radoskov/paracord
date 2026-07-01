@@ -377,6 +377,27 @@
         <code>{status.reindex.model_name}</code>.
       </p>
     {/if}
+    {#if status.chunk_embeddings}
+      <p class="muted small">
+        {#if status.chunk_embeddings.column}
+          Chunk-level ANN: <strong>{status.chunk_embeddings.indexed}</strong> /
+          {status.chunk_embeddings.total} passages embedded in
+          <code>{status.chunk_embeddings.column}</code> (used for passage-level semantic + hybrid
+          search). Reindexing backfills these too.
+        {:else}
+          Chunk-level ANN is inactive for the current model — semantic search uses the
+          document-level baseline. Select a model with a dedicated vector column (e.g. MiniLM /
+          nomic) on Postgres to enable passage retrieval.
+        {/if}
+      </p>
+    {/if}
+    {#if status.lexical_index}
+      <p class="muted small">
+        Lexical (BM25F+) index: {status.lexical_index.loaded
+          ? `warm — ${status.lexical_index.docs} papers`
+          : 'not yet warmed (builds on first search / library open)'}.
+      </p>
+    {/if}
     <button type="button" class="secondary" on:click={doReindex} disabled={busy}
       title="Rebuild embeddings for every paper with the current embedding model">Reindex embeddings</button>
   {:else}

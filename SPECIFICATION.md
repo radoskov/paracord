@@ -607,6 +607,14 @@ reading status
 processing status
 ```
 
+**Search modes (hybrid search).** The relevance search offers three modes, selectable in the UI and via `POST /api/v1/search` (`mode`):
+
+1. **Lexical** — a **BM25F+** engine (document-level): an eager inverted index with true BM25F field weighting so title/abstract/methods/conclusion outrank introduction/related-work (fields derived from the GROBID/TEI section structure), plus the BM25+ δ lower bound for length fairness. Pure-Python, dependency-free, warmed on library open and rebuilt when the corpus changes.
+2. **Semantic** — chunk-level dense retrieval: papers are split into section-aware passages (`work_chunks`), each embedded under the active model into a **dimension-constrained pgvector column** with an HNSW index; the best-matching passage per paper is surfaced. Falls back to the document-level baseline embedder when no real model/column is active (or off Postgres).
+3. **Hybrid** (default) — fuses the lexical and semantic rankings with **Reciprocal Rank Fusion** (k = 60), so a paper found by both engines ranks highest; the matching passage comes from the semantic side.
+
+Access control is applied **inside** each engine (results are filtered to papers the caller may SEE): the semantic path is **selectivity-adaptive** — pre-filter + exact over a small visible set, else HNSW ANN with the allow-list pushed down and pgvector's iterative index scan — so the visible top-N is exact rather than best-effort. Keeping multiple constrained per-model columns is cheap; switching the active model needs no re-embedding (a one-time backfill populates a newly enabled model's column).
+
 ### 8.8 PDF reading and annotations
 
 Requirements:
