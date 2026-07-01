@@ -5,17 +5,15 @@
     ApiClient,
     type AiConfig,
     type AiModel,
-    type AiProviders,
+    type AiStatus,
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
 
   let config: AiConfig | null = null;
-  let allowed: Record<string, string[]> = {};
-  let providers: AiProviders | null = null;
+  let status: AiStatus | null = null;
   let models: AiModel[] = [];
-  let reindex: { model_name: string; indexed: number; total: number } | null = null;
 
   let pullProvider = 'ollama';
   let pullModel = '';
@@ -39,25 +37,71 @@
 
   async function refresh(): Promise<void> {
     await run(async () => {
-      const [cfg, prov, mdl, status] = await Promise.all([
-        client.getAiConfig(),
-        client.getAiProviders(),
-        client.listAiModels(),
-        client.getReindexStatus(),
-      ]);
-      config = cfg.config;
-      allowed = cfg.allowed;
-      providers = prov;
+      const [st, mdl] = await Promise.all([client.getAiStatus(), client.listAiModels()]);
+      status = st;
+      config = st.config;
       models = mdl.models;
-      reindex = status;
     });
   }
 
+  // Availability + how-to-enable note for a specific provider/backend option, read from the
+  // detected providers map. Unknown keys default to "available" (the dependency-free baseline).
   function avail(group: 'embedding' | 'summary' | 'topic', key: string): boolean {
-    return providers?.[group]?.[key]?.available ?? true;
+    return status?.providers?.[group]?.[key]?.available ?? true;
   }
   function note(group: 'embedding' | 'summary' | 'topic', key: string): string | null {
-    return providers?.[group]?.[key]?.note ?? null;
+    return status?.providers?.[group]?.[key]?.note ?? null;
+  }
+
+  // A card's status badge: green when the active selection runs as chosen; amber when it silently
+  // falls back to the built-in baseline; the reason is the provider note.
+  type Badge = { kind: 'ok' | 'baseline' | 'off'; label: string; reason: string | null };
+
+  function embeddingBadge(): Badge {
+    if (!status || !config) return { kind: 'baseline', label: 'Loading…', reason: null };
+    const a = status.active.embedding;
+    if (config.embedding_provider === 'hash_bow') {
+      return { kind: 'baseline', label: 'Built-in baseline', reason: 'Dependency-free hashed bag-of-words — always works.' };
+    }
+    if (a.available) return { kind: 'ok', label: 'Available', reason: null };
+    return { kind: 'off', label: 'Falls back to hash-BOW', reason: a.note };
+  }
+
+  function summaryBadge(): Badge {
+    if (!status || !config) return { kind: 'baseline', label: 'Loading…', reason: null };
+    const a = status.active.summary;
+    if (config.summary_provider === 'extractive') {
+      return { kind: 'baseline', label: 'Built-in baseline', reason: 'Dependency-free extractive summariser — always works.' };
+    }
+    if (a.available) return { kind: 'ok', label: 'Available', reason: null };
+    return { kind: 'off', label: 'Falls back to extractive', reason: a.note };
+  }
+
+  function topicBadge(): Badge {
+    if (!config) return { kind: 'baseline', label: 'Loading…', reason: null };
+    // Every topic backend is the built-in deterministic TF-IDF model today; be honest about it.
+    return {
+      kind: 'baseline',
+      label: 'Built-in baseline',
+      reason: 'Deterministic TF-IDF topic model — always works, no downloads or network.',
+    };
+  }
+
+  // True when a topic backend that *sounds* like it uses embeddings/BERTopic is selected, so we
+  // can show the honesty banner explaining it is actually the TF-IDF stand-in.
+  $: topicPretendsAdvanced =
+    config != null && (config.topic_backend === 'bertopic' || config.topic_backend === 'embedding');
+
+  // Recompute the per-card badges whenever config/status change (referenced in the markup, where
+  // {@const} isn't allowed directly under a plain <article>). Each badge fn reads status/config, so
+  // naming them here makes Svelte re-run the block on any change.
+  let embBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
+  let sumBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
+  let topBadge: Badge = { kind: 'baseline', label: 'Loading…', reason: null };
+  $: if (status || config) {
+    embBadge = embeddingBadge();
+    sumBadge = summaryBadge();
+    topBadge = topicBadge();
   }
 
   async function save(): Promise<void> {
@@ -106,70 +150,145 @@
 <section class="card">
   <h2>AI &amp; Models</h2>
   <p class="muted">
-    Choose the engines used for semantic search, summaries, and topics, and download local models.
-    The dependency-free baselines (hash-BOW / extractive / TF-IDF) always work; heavier providers
-    show a hint when they aren't available yet.
+    Each capability below picks the engine used for one AI feature. The dependency-free baselines
+    (hashed bag-of-words / extractive summaries / TF-IDF topics) always work; heavier engines need
+    an extra dependency or a reachable Ollama server, and each control tells you what's missing when
+    it can't run. Nothing here is ever fully off — an unavailable engine simply degrades to the
+    built-in baseline.
   </p>
   {#if message}<p class="message">{message}</p>{/if}
 
-  {#if config}
-    <div class="grid">
-      <label>Embedding provider
-        <select bind:value={config.embedding_provider} disabled={busy} title="Engine used to embed papers for semantic search">
-          {#each allowed.embedding_provider ?? [] as p}
-            <option value={p} disabled={!avail('embedding', p)}>
-              {p}{avail('embedding', p) ? '' : ' (unavailable)'}
-            </option>
-          {/each}
-        </select>
-        {#if note('embedding', config.embedding_provider)}
-          <small class="hint">{note('embedding', config.embedding_provider)}</small>
-        {/if}
-      </label>
-      <label>Embedding model
-        <input bind:value={config.embedding_model} placeholder="(provider default)" disabled={busy}
-          title="Specific embedding model name, or blank for the provider default" />
-      </label>
+  {#if config && status}
+    <div class="cards">
+      <!-- Semantic search & related papers (embeddings) -->
+      <article class="cap">
+        <header>
+          <h3>Semantic search &amp; related papers</h3>
+          <span class="badge badge-{embBadge.kind}" title={embBadge.reason ?? ''}>{embBadge.label}</span>
+        </header>
+        <p class="what">Turns each paper into a vector so search and "related papers" can match by meaning, not just keywords.</p>
+        <p class="used">Used for: the semantic search box and the related-papers list on a paper. Changing the model re-embeds every paper (queues a reindex).</p>
+        {#if embBadge.reason}<p class="reason">{embBadge.reason}</p>{/if}
+        <label>Embedding provider
+          <select bind:value={config.embedding_provider} disabled={busy}
+            title="Engine used to embed papers for semantic search & related papers">
+            {#each status.allowed.embedding_provider ?? [] as p}
+              <option value={p} disabled={!avail('embedding', p)}
+                title={avail('embedding', p) ? '' : (note('embedding', p) ?? 'Not available in this deployment')}>
+                {p}{avail('embedding', p) ? '' : ' (unavailable)'}
+              </option>
+            {/each}
+          </select>
+          {#if note('embedding', config.embedding_provider)}
+            <small class="hint">{note('embedding', config.embedding_provider)}</small>
+          {/if}
+        </label>
+        <label>Embedding model
+          <input bind:value={config.embedding_model} placeholder="(provider default)" disabled={busy}
+            title="Specific embedding model name, or blank for the provider default" />
+        </label>
+      </article>
 
-      <label>Summary provider
-        <select bind:value={config.summary_provider} disabled={busy} title="Engine used to generate summaries">
-          {#each allowed.summary_provider ?? [] as p}
-            <option value={p} disabled={!avail('summary', p)}>
-              {p}{avail('summary', p) ? '' : ' (unavailable)'}
-            </option>
-          {/each}
-        </select>
-        {#if note('summary', config.summary_provider)}
-          <small class="hint">{note('summary', config.summary_provider)}</small>
+      <!-- Topic modeling (topic backend) -->
+      <article class="cap">
+        <header>
+          <h3>Topic modeling</h3>
+          <span class="badge badge-{topBadge.kind}" title={topBadge.reason ?? ''}>{topBadge.label}</span>
+        </header>
+        <p class="what">Clusters a scope's papers into topics and labels each with its top terms.</p>
+        <p class="used">Used for: the Topics view in Insights, and turning a topic into a tag or a shelf.</p>
+        {#if topBadge.reason}<p class="reason">{topBadge.reason}</p>{/if}
+        {#if topicPretendsAdvanced}
+          <p class="banner" title="BERTopic is a heavy optional dependency and is not installed here">
+            BERTopic isn't installed; this uses the built-in TF-IDF topic model. Results are the
+            same as “tfidf”.
+          </p>
         {/if}
-      </label>
-      <label>Summary model (Ollama)
-        <input bind:value={config.summary_model} disabled={busy} title="Ollama model used for summaries" />
-      </label>
+        <label>Topic backend
+          <select bind:value={config.topic_backend} disabled={busy}
+            title="How papers are clustered into topics (all options are the built-in TF-IDF model today)">
+            {#each status.allowed.topic_backend ?? [] as p}
+              <option value={p} disabled={!avail('topic', p)}
+                title={note('topic', p) ?? ''}>
+                {p}{avail('topic', p) ? '' : ' (unavailable)'}
+              </option>
+            {/each}
+          </select>
+          {#if note('topic', config.topic_backend)}
+            <small class="hint">{note('topic', config.topic_backend)}</small>
+          {/if}
+        </label>
+      </article>
 
-      <label>Topic backend
-        <select bind:value={config.topic_backend} disabled={busy} title="Engine used to cluster papers into topics">
-          {#each allowed.topic_backend ?? [] as p}<option value={p}>{p}</option>{/each}
-        </select>
-      </label>
-      <label>Ollama URL
+      <!-- Scope summaries (summary provider) -->
+      <article class="cap">
+        <header>
+          <h3>Scope summaries</h3>
+          <span class="badge badge-{sumBadge.kind}" title={sumBadge.reason ?? ''}>{sumBadge.label}</span>
+        </header>
+        <p class="what">Generates a short prose summary of a paper, shelf or rack.</p>
+        <p class="used">Used for: the "Summarise" action on a paper and the scope summaries in Insights.</p>
+        {#if sumBadge.reason}<p class="reason">{sumBadge.reason}</p>{/if}
+        <label>Summary provider
+          <select bind:value={config.summary_provider} disabled={busy} title="Engine used to generate summaries">
+            {#each status.allowed.summary_provider ?? [] as p}
+              <option value={p} disabled={!avail('summary', p)}
+                title={avail('summary', p) ? '' : (note('summary', p) ?? 'Not available in this deployment')}>
+                {p}{avail('summary', p) ? '' : ' (unavailable)'}
+              </option>
+            {/each}
+          </select>
+          {#if note('summary', config.summary_provider)}
+            <small class="hint">{note('summary', config.summary_provider)}</small>
+          {/if}
+        </label>
+        <label>Summary model (Ollama)
+          <input bind:value={config.summary_model} disabled={busy}
+            title="Ollama model used for summaries when the provider is local_llm" />
+        </label>
+      </article>
+
+      <!-- Keyword extraction (read-only, always available) -->
+      <article class="cap">
+        <header>
+          <h3>Keyword extraction</h3>
+          <span class="badge badge-baseline" title="Built-in RAKE extractor — no dependencies, always available">Built-in baseline</span>
+        </header>
+        <p class="what">Pulls representative keyword phrases from a paper's title and abstract.</p>
+        <p class="used">Used for: the keyword chips on a paper and keyword search.</p>
+        <p class="reason">Always on — a dependency-free RAKE extractor with no settings to configure.</p>
+      </article>
+    </div>
+
+    <div class="row shared">
+      <button type="button" on:click={save} disabled={busy}
+        title="Save the AI provider/model settings (changing the embedding model queues a reindex)">Save config</button>
+      <button type="button" class="secondary" on:click={refresh} disabled={busy}
+        title="Reload the current settings and provider availability">Refresh</button>
+      <label class="ollama-url">Ollama URL
         <input bind:value={config.ollama_url} placeholder="http://localhost:11434" disabled={busy}
-          title="Base URL of the Ollama server to reach" />
+          title="Base URL of the Ollama server used by the ollama / local_llm engines" />
       </label>
-    </div>
-    <div class="row">
-      <button type="button" on:click={save} disabled={busy} title="Save the AI provider/model settings (changing the embedding model queues a reindex)">Save config</button>
-      <button type="button" class="secondary" on:click={refresh} disabled={busy} title="Reload the current settings and provider availability">Refresh</button>
-      {#if providers}
-        <span class="muted">Ollama: {providers.ollama_reachable ? 'reachable ✓' : 'not reachable'}</span>
-      {/if}
+      <span class="muted">Ollama: {status.ollama_reachable ? 'reachable ✓' : 'not reachable'}</span>
     </div>
 
-    <h3>Models</h3>
+    <h3 class="section">Models</h3>
+    <p class="muted small">
+      Download the weights the heavier engines need. Pulling <code>ollama</code> models needs the
+      Ollama profile running (<code>make up-ai</code>); pulling <code>sentence_transformers</code>
+      downloads the weights into the Hugging Face cache and needs that package installed in the
+      image.
+    </p>
     <div class="row">
       <select bind:value={pullProvider} disabled={busy} title="Provider to download the model from">
         <option value="ollama">ollama</option>
-        <option value="sentence_transformers">sentence_transformers</option>
+        <option value="sentence_transformers"
+          disabled={status.sentence_transformers_installed === false}
+          title={status.sentence_transformers_installed === false
+            ? 'sentence-transformers is not installed in this image — rebuild with the AI extra'
+            : 'Download sentence-transformers weights into the HF cache'}>
+          sentence_transformers{status.sentence_transformers_installed === false ? ' (not installed)' : ''}
+        </option>
       </select>
       <input bind:value={pullModel} placeholder="model name (e.g. nomic-embed-text)" disabled={busy}
         title="Name of the model to download" />
@@ -191,14 +310,19 @@
       </ul>
     {/if}
 
-    <h3>Embedding index</h3>
-    {#if reindex}
+    <h3 class="section">Embedding index</h3>
+    <p class="muted small">
+      How many papers currently have an embedding for the active model. Reindexing rebuilds them all
+      — do this after changing the embedding provider/model so semantic search stays consistent.
+    </p>
+    {#if status.reindex}
       <p class="muted">
-        <strong>{reindex.indexed}</strong> / {reindex.total} works indexed for
-        <code>{reindex.model_name}</code>.
+        <strong>{status.reindex.indexed}</strong> / {status.reindex.total} papers indexed for
+        <code>{status.reindex.model_name}</code>.
       </p>
     {/if}
-    <button type="button" class="secondary" on:click={doReindex} disabled={busy} title="Rebuild embeddings for every paper with the current embedding model">Reindex embeddings</button>
+    <button type="button" class="secondary" on:click={doReindex} disabled={busy}
+      title="Rebuild embeddings for every paper with the current embedding model">Reindex embeddings</button>
   {:else}
     <p class="empty">Loading…</p>
   {/if}
@@ -206,18 +330,61 @@
 
 <style>
   h2 { font-size: 1.05rem; margin: 0 0 0.4rem; }
-  h3 { font-size: 0.9rem; margin: 1rem 0 0.4rem; }
-  .grid {
+  h3 { font-size: 0.9rem; margin: 0; }
+  h3.section { margin: 1.1rem 0 0.3rem; }
+  .cards {
     display: grid;
-    gap: 0.6rem;
+    gap: 0.75rem;
     grid-template-columns: 1fr 1fr;
-    margin: 0.6rem 0;
+    margin: 0.8rem 0;
   }
-  .row { align-items: center; display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+  .cap {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.75rem 0.85rem;
+  }
+  .cap header {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+  .cap .what { color: #203142; font-size: 0.84rem; margin: 0; }
+  .cap .used { color: #64717f; font-size: 0.78rem; margin: 0; }
+  .cap .reason { color: #526070; font-size: 0.76rem; font-style: italic; margin: 0; }
+  .cap label { margin-top: 0.2rem; }
+  .badge {
+    border-radius: 999px;
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.12rem 0.5rem;
+    white-space: nowrap;
+  }
+  .badge-ok { background: #bbf7d0; color: #14532d; }
+  .badge-baseline { background: #fef3c7; color: #78350f; }
+  .badge-off { background: #fecaca; color: #7f1d1d; }
+  .banner {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 6px;
+    color: #9a3412;
+    font-size: 0.78rem;
+    margin: 0.1rem 0;
+    padding: 0.4rem 0.55rem;
+  }
+  .row { align-items: flex-end; display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+  .row.shared { border-top: 1px solid #e2e8f0; padding-top: 0.75rem; }
+  .ollama-url { flex: 1 1 16rem; }
   .hint { color: #8a6d3b; }
+  .small { margin: 0.2rem 0 0.4rem; }
   .message { background: #eef4ef; border-radius: 6px; padding: 0.4rem 0.6rem; }
   .models { display: flex; flex-direction: column; gap: 0.3rem; list-style: none; margin: 0.4rem 0; padding: 0; }
   .models li { align-items: center; display: flex; gap: 0.5rem; justify-content: space-between; }
-  .small { min-height: 1.9rem; padding: 0.2rem 0.5rem; }
-  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .models .small { min-height: 1.9rem; margin: 0; padding: 0.2rem 0.5rem; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
 </style>

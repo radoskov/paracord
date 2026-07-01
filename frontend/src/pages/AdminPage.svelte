@@ -20,7 +20,6 @@
   } from '../api/client';
   import { get } from 'svelte/store';
 
-  import AiModelsPanel from '../components/AiModelsPanel.svelte';
   import Modal from '../components/Modal.svelte';
   import { canManageUsers, currentUser, isOwner } from '../lib/session';
 
@@ -763,11 +762,6 @@
         </div>
       {/if}
     </section>
-
-    <!-- AI & Models -->
-    <div class="surface admin-section">
-      <AiModelsPanel {client} />
-    </div>
   </div>
 
   <!-- Server import folders (owner-only; batch 2 #19) -->
@@ -1113,7 +1107,7 @@
 
   .admin-columns {
     display: grid;
-    grid-template-columns: 1fr 1fr 1.5fr;
+    grid-template-columns: 1fr 1fr;
     gap: 1rem;
     align-items: start;
   }

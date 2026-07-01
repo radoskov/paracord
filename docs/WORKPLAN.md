@@ -651,7 +651,7 @@ Batch of 10 findings. Resolved decisions:
   keywords. WorkDetail + backend triggers (investigate existing infra).
 - [x] **Phase L — Conflict remove (8) + job order (9).** Add "remove" (delete assertion) buttons to
   metadata-conflict review (keep "use this"); reverse job list to newest-first.
-- [ ] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
+- [x] **Phase M — AI & Models tab (item 10).** Move AiModelsPanel to its own tab with better
   help/explanations (what each model does, when it's used, why something is disabled, BERTopic
   out-of-the-box status).
 - [x] **Phase N — Paper shelf-membership UI (added 2026-07-01).** In the paper view (Library tab):

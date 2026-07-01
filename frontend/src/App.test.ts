@@ -35,8 +35,9 @@ describe('App', () => {
     expect(screen.queryByRole('link', { name: 'Import' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Jobs' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Duplicates' })).toBeNull();
-    // ...and the owner-only Admin tab:
+    // ...and the owner/admin-only Admin + AI & Models tabs:
     expect(screen.queryByRole('link', { name: 'Admin' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'AI & Models' })).toBeNull();
     // ...and the active tab's explanatory hint is shown.
     expect(screen.getByText(/Search, read, edit and organise/i)).toBeTruthy();
   });

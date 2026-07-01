@@ -48,10 +48,42 @@ def test_providers_detection_and_reindex_status(client, auth_headers):
     assert body["embedding"]["ollama"]["available"] is False
     assert body["embedding"]["ollama"]["note"]
 
+    # The topic backends are honest: BERTopic is not installed, and both non-default backends are
+    # the built-in TF-IDF stand-in (neither uses embedding vectors).
+    assert body["bertopic_installed"] is False
+    bertopic_note = body["topic"]["bertopic"]["note"]
+    assert "not installed" in bertopic_note
+    assert "built-in" in bertopic_note.lower()
+    assert "does not use embedding vectors" in body["topic"]["embedding"]["note"]
+
     status = client.get("/api/v1/admin/ai/reindex/status", headers=owner)
     assert status.status_code == 200
     assert status.json()["model_name"] == "hash-bow-v1"
     assert "indexed" in status.json()
+
+
+def test_ai_status_endpoint(client, auth_headers):
+    # Owner + admin get the folded status; editor/reader are refused.
+    for role in ("owner", "admin"):
+        r = client.get("/api/v1/admin/ai/status", headers=auth_headers(role))
+        assert r.status_code == 200, role
+        body = r.json()
+        assert body["config"]["embedding_provider"] == "hash_bow"
+        assert body["providers"]["embedding"]["hash_bow"]["available"] is True
+        assert body["reindex"]["model_name"] == "hash-bow-v1"
+        # Honest capability flags: BERTopic isn't installed and its note says so.
+        assert body["bertopic_installed"] is False
+        assert body["ollama_reachable"] is False
+        assert "not installed" in body["providers"]["topic"]["bertopic"]["note"]
+        # The active selection per capability is surfaced (hash_bow / extractive / tfidf here).
+        assert body["active"]["embedding"]["selected"] == "hash_bow"
+        assert body["active"]["embedding"]["available"] is True
+        assert body["active"]["topic"]["selected"] == "tfidf"
+
+    for role in ("editor", "reader"):
+        assert (
+            client.get("/api/v1/admin/ai/status", headers=auth_headers(role)).status_code == 403
+        ), role
 
 
 def test_models_list_when_ollama_down(client, auth_headers):

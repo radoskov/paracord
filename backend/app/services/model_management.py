@@ -32,6 +32,7 @@ def detect_providers(*, ollama_url: str) -> dict:
     """Report which providers can run here and how to enable the ones that can't."""
     ollama_models = _ollama_tags(ollama_url)
     st_available = _module_available("sentence_transformers")
+    bertopic_available = _module_available("bertopic")
     return {
         "embedding": {
             "hash_bow": {"available": True, "note": "Default, dependency-free."},
@@ -59,8 +60,16 @@ def detect_providers(*, ollama_url: str) -> dict:
         },
         "topic": {
             "tfidf": {"available": True, "note": "Default, dependency-free."},
-            "embedding": {"available": True, "note": "Uses the active embedding provider."},
-            "bertopic": {"available": True, "note": "Deterministic embedding-clustered backend."},
+            "embedding": {
+                "available": True,
+                "note": "Built-in deterministic TF-IDF clustering "
+                "(does not use embedding vectors yet).",
+            },
+            "bertopic": {
+                "available": True,
+                "note": "BERTopic is not installed — using the built-in deterministic TF-IDF "
+                "topic model (same results as 'tfidf', with richer metadata).",
+            },
         },
         "extraction": {
             "grobid": {"available": True, "note": "Default TEI extractor (GROBID service)."},
@@ -78,6 +87,8 @@ def detect_providers(*, ollama_url: str) -> dict:
             },
         },
         "ollama_reachable": ollama_models is not None,
+        "bertopic_installed": bertopic_available,
+        "sentence_transformers_installed": st_available,
     }
 
 

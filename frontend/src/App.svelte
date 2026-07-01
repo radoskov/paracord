@@ -3,6 +3,7 @@
 
   import { ApiClient } from './api/client';
   import AdminPage from './pages/AdminPage.svelte';
+  import AiModelsPage from './pages/AiModelsPage.svelte';
   import DuplicatesPage from './pages/DuplicatesPage.svelte';
   import EventsPage from './pages/EventsPage.svelte';
   import ImportPage from './pages/ImportPage.svelte';
@@ -30,6 +31,7 @@
     { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner', 'admin'] },
+    { id: 'ai', label: 'AI & Models', hint: 'Choose the engines for semantic search, summaries and topics, and manage local models.', roles: ['owner', 'admin'] },
     { id: 'events', label: 'Events', hint: 'Browse the audit log of activity across the library.', roles: ['owner', 'admin'] },
     { id: 'profile', label: 'Profile', hint: 'Your account, appearance name and password.' },
   ];
@@ -196,6 +198,8 @@
       <InsightsPage {client} />
     {:else if active === 'admin'}
       <AdminPage {client} />
+    {:else if active === 'ai'}
+      <AiModelsPage {client} />
     {:else if active === 'events'}
       <EventsPage {client} />
     {:else if active === 'profile'}

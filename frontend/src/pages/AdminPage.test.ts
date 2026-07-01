@@ -21,11 +21,6 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listShelves: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
-    // AiModelsPanel loads these on mount; stub them so its refresh resolves cleanly.
-    getAiConfig: vi.fn().mockResolvedValue({ config: {}, allowed: {} }),
-    getAiProviders: vi.fn().mockResolvedValue({ embedding: {}, summary: {}, topic: {}, ollama_reachable: false }),
-    listAiModels: vi.fn().mockResolvedValue({ models: [] }),
-    getReindexStatus: vi.fn().mockResolvedValue({ model_name: '', indexed: 0, total: 0 }),
     ...overrides,
   };
 }

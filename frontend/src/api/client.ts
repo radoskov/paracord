@@ -552,7 +552,34 @@ export interface AiProviders {
   embedding: Record<string, AiProviderInfo>;
   summary: Record<string, AiProviderInfo>;
   topic: Record<string, AiProviderInfo>;
+  extraction?: Record<string, AiProviderInfo>;
   ollama_reachable: boolean;
+  bertopic_installed?: boolean;
+  sentence_transformers_installed?: boolean;
+}
+
+// One capability's active selection + whether that selection can run right now (else it degrades
+// to the dependency-free baseline).
+export interface AiActiveCapability {
+  selected: string;
+  available: boolean;
+  note: string | null;
+}
+
+// Everything the AI & Models tab needs in one call (GET /admin/ai/status).
+export interface AiStatus {
+  config: AiConfig;
+  allowed: Record<string, string[]>;
+  providers: AiProviders;
+  reindex: { model_name: string; indexed: number; total: number };
+  ollama_reachable: boolean;
+  bertopic_installed: boolean;
+  sentence_transformers_installed: boolean;
+  active: {
+    embedding: AiActiveCapability;
+    summary: AiActiveCapability;
+    topic: AiActiveCapability;
+  };
 }
 
 export interface AiModel {
@@ -1318,6 +1345,12 @@ export class ApiClient {
 
   async getAiProviders(): Promise<AiProviders> {
     return this.request('/api/v1/admin/ai/providers');
+  }
+
+  // One-shot status for the AI & Models tab: config + provider availability + reindex coverage +
+  // capability flags + the active selection per capability.
+  async getAiStatus(): Promise<AiStatus> {
+    return this.request('/api/v1/admin/ai/status');
   }
 
   async listAiModels(): Promise<{ models: AiModel[] }> {

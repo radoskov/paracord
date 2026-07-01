@@ -143,3 +143,49 @@ def reindex_endpoint(db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
 def reindex_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Embedding-index coverage for the active model (indexed / total)."""
     return reindex_status(db, provider=get_embedding_provider(db=db))
+
+
+def _active_capability_status(config: dict, providers: dict) -> dict:
+    """For each capability, report the selected provider/backend and whether it is available now.
+
+    An unavailable active selection (e.g. embedding=ollama while Ollama is down) still runs — the
+    services degrade to their dependency-free baseline — so we surface that honestly rather than
+    pretending it is off.
+    """
+
+    def _entry(group: str, key: str) -> dict:
+        info = (providers.get(group) or {}).get(key) or {}
+        return {
+            "selected": key,
+            "available": bool(info.get("available", False)),
+            "note": info.get("note"),
+        }
+
+    return {
+        "embedding": _entry("embedding", config["embedding_provider"]),
+        "summary": _entry("summary", config["summary_provider"]),
+        "topic": _entry("topic", config["topic_backend"]),
+    }
+
+
+@router.get("/ai/status")
+def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
+    """Everything the AI & Models tab needs in one call: config, provider availability, the
+    embedding-index coverage, capability flags and which selection is active per capability."""
+    config = get_ai_config(db)
+    config_dict = config.as_dict()
+    providers = detect_providers(ollama_url=config.ollama_url)
+    return {
+        "config": config_dict,
+        "allowed": {
+            "embedding_provider": list(EMBEDDING_PROVIDERS),
+            "summary_provider": list(SUMMARY_PROVIDERS),
+            "topic_backend": list(TOPIC_BACKENDS),
+        },
+        "providers": providers,
+        "reindex": reindex_status(db, provider=get_embedding_provider(db=db)),
+        "ollama_reachable": providers["ollama_reachable"],
+        "bertopic_installed": providers["bertopic_installed"],
+        "sentence_transformers_installed": providers["sentence_transformers_installed"],
+        "active": _active_capability_status(config_dict, providers),
+    }
