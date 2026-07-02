@@ -1254,6 +1254,7 @@
       onDeleteAnnotation={deleteAnnotation}
       onNavigateToReference={navigateToReference}
       initialJumpReferenceId={readerJumpReferenceId}
+      onFetchText={readerFile ? () => client.getFileText(readerFile.id) : null}
     />
   </Modal>
 {/if}

@@ -24,6 +24,10 @@
   export let onNavigateToReference: ((referenceId: string) => void) | null = null;
   // When set, the reader opens and jumps to the first in-text mention of this reference.
   export let initialJumpReferenceId: string | null = null;
+  // Optional server-side PDF text fetcher (GET /files/{id}/text): native text layer, else on-the-fly
+  // OCR. Used as the search / "copy text" fallback for scanned/OCR'd PDFs whose in-browser pdf.js
+  // text layer is empty. Normal PDFs keep using the pdf.js text layer.
+  export let onFetchText: (() => Promise<{ text: string; source: string }>) | null = null;
   // Whether the viewer may add/delete annotations on this paper. Defaults to the global edit floor
   // (contributor+); the host passes the per-paper "can modify this paper" decision so a contributor
   // can only annotate their own papers.
@@ -91,6 +95,17 @@
   // Lazily-built per-page cache: the lowercased concatenated page text used for the whole-doc
   // scan. The same join (ITEM_SEP) is replayed over the rendered spans to map offsets back.
   const pageTextCache = new Map<number, string>();
+
+  // --- server-text fallback (scanned / OCR'd PDFs) -----------------------
+  // Below this many non-space native chars across the whole doc, the pdf.js text layer is treated
+  // as empty (a scanned PDF), so search + copy fall back to the server-extracted text.
+  const NATIVE_SPARSE_THRESHOLD = 100;
+  let serverText: string | null = null; // full server-extracted text, cached (null = not fetched)
+  let serverTextSource = ''; // 'native' | 'ocr' | 'none'
+  let serverTextLoading = false;
+  let usedServerFallback = false; // the last search fell back to server text (no span highlights)
+  let serverSearchCount = 0; // match count in the server text (fallback mode)
+  let copyStatus = '';
 
   // --- selection → annotation --------------------------------------------
   // Generalised flash key, shared by citation overlays, annotation boxes and references.
@@ -161,6 +176,11 @@
       searchHits = [];
       searchPos = -1;
       pageTextCache.clear();
+      // Reset the server-text fallback cache for the newly-loaded document.
+      serverText = null;
+      serverTextSource = '';
+      usedServerFallback = false;
+      serverSearchCount = 0;
       await renderPage(1);
       if (initialJumpReferenceId) void jumpToReferenceMention(initialJumpReferenceId);
     } catch (error) {
@@ -291,11 +311,65 @@
     return text;
   }
 
+  // Lazily fetch + cache the server-extracted text (native layer, else on-the-fly OCR).
+  async function ensureServerText(): Promise<string> {
+    if (serverText !== null) return serverText;
+    if (!onFetchText) {
+      serverText = '';
+      serverTextSource = 'none';
+      return '';
+    }
+    serverTextLoading = true;
+    try {
+      const r = await onFetchText();
+      serverText = r.text ?? '';
+      serverTextSource = r.source ?? 'none';
+    } catch {
+      serverText = '';
+      serverTextSource = 'none';
+    } finally {
+      serverTextLoading = false;
+    }
+    return serverText;
+  }
+
+  // True when the whole-document pdf.js text layer is near-empty (a scanned PDF), so the native
+  // span-based search would find nothing and we should fall back to the server-extracted text.
+  async function nativeDocIsSparse(): Promise<boolean> {
+    let total = 0;
+    for (let p = 1; p <= numPages; p += 1) {
+      total += (await pageText(p)).replace(/\s/g, '').length;
+      if (total >= NATIVE_SPARSE_THRESHOLD) return false;
+    }
+    return true;
+  }
+
+  // Copy the paper's full text to the clipboard, using the server text (OCR fallback) when the
+  // in-browser text layer is empty — so scanned/OCR'd PDFs are still copyable.
+  async function copyExtractedText(): Promise<void> {
+    const text = await ensureServerText();
+    if (!text.trim()) {
+      copyStatus = 'No text';
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        copyStatus = `Copied (${serverTextSource})`;
+      } catch {
+        copyStatus = 'Copy failed';
+      }
+    }
+    window.setTimeout(() => {
+      copyStatus = '';
+    }, 1800);
+  }
+
   async function runSearch(): Promise<void> {
     const query = searchQuery.trim().toLowerCase();
     if (!query || !pdfDoc) {
       searchHits = [];
       searchPos = -1;
+      usedServerFallback = false;
+      serverSearchCount = 0;
       applySearchHighlights();
       return;
     }
@@ -314,6 +388,26 @@
       }
       searchHits = hits;
       searchPos = hits.length ? 0 : -1;
+      // Fallback for scanned / OCR'd PDFs: the pdf.js text layer is empty, so the native scan finds
+      // nothing. Count matches in the server-extracted text (native layer or on-the-fly OCR). We
+      // can't highlight on-page spans (there are none), so this reports the match count only.
+      usedServerFallback = false;
+      serverSearchCount = 0;
+      if (!hits.length && onFetchText && (await nativeDocIsSparse())) {
+        const text = (await ensureServerText()).toLowerCase();
+        if (text) {
+          let from = 0;
+          let count = 0;
+          for (;;) {
+            const at = text.indexOf(query, from);
+            if (at === -1) break;
+            count += 1;
+            from = at + query.length;
+          }
+          serverSearchCount = count;
+          usedServerFallback = true;
+        }
+      }
       if (hits.length) {
         const target = hits[0];
         if (target.page === currentPage) applySearchHighlights();
@@ -701,8 +795,23 @@
             >
             <span>{searchPos + 1}/{searchHits.length}</span>
             <button type="button" on:click={() => stepSearch(1)} aria-label="Next match" title="Next match">›</button>
+          {:else if usedServerFallback && searchQuery.trim()}
+            <!-- Scanned/OCR'd PDF: no in-browser text layer to highlight, so report the count
+                 of matches found in the server-extracted (OCR) text instead. -->
+            <span title="This looks like a scanned PDF. Matches are counted in the OCR-extracted text; on-page highlighting isn't available.">
+              {serverSearchCount} in text ({serverTextSource})
+            </span>
           {/if}
         </form>
+        <button
+          type="button"
+          class="copy-text-btn"
+          on:click={copyExtractedText}
+          disabled={serverTextLoading || !onFetchText}
+          title="Copy the paper's full extracted text (uses OCR for scanned PDFs)"
+        >
+          {serverTextLoading ? 'Extracting…' : copyStatus || 'Copy text'}
+        </button>
         <button
           type="button"
           class="select-btn"

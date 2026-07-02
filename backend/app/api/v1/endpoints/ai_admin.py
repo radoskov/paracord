@@ -46,6 +46,7 @@ class AIConfigUpdate(BaseModel):
     topic_backend: str | None = None
     topic_embedding_model: str | None = None
     ocr_backend: str | None = None
+    ocr_language: str | None = None
     ollama_url: str | None = None
 
 

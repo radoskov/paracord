@@ -692,8 +692,10 @@ export interface AiConfig {
   summary_model: string;
   topic_backend: string;
   topic_embedding_model: string | null;
-  // OCR / advanced-extraction backend (Phase B5): 'none' | 'ocrmypdf' | 'full_ml'.
+  // OCR / advanced-extraction backend (Phase B5): 'none' | 'ocrmypdf' | 'pymupdf' | 'full_ml'.
   ocr_backend: string;
+  // OCR languages in tesseract syntax; supports multi like 'eng+spa'.
+  ocr_language: string;
   ollama_url: string;
 }
 
@@ -1769,6 +1771,12 @@ export class ApiClient {
 
   async getFileBlob(fileId: string): Promise<Blob> {
     return this.requestBlob(`/api/v1/files/${fileId}/stream`);
+  }
+
+  // Server-extracted PDF text (native layer, else on-the-fly OCR). The reader uses this as a
+  // fallback for search / copy-text when the in-browser pdf.js text layer is empty (scanned PDFs).
+  async getFileText(fileId: string): Promise<{ text: string; source: string }> {
+    return this.request<{ text: string; source: string }>(`/api/v1/files/${fileId}/text`);
   }
 
   async semanticSearch(q: string, limit = 10): Promise<SemanticSearchResponse> {

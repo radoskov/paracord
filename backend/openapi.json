@@ -36,6 +36,17 @@
             ],
             "title": "Ocr Backend"
           },
+          "ocr_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Language"
+          },
           "ollama_url": {
             "anyOf": [
               {
@@ -2138,6 +2149,24 @@
           "title"
         ],
         "title": "FileSplitSegment",
+        "type": "object"
+      },
+      "FileTextRead": {
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "source"
+        ],
+        "title": "FileTextRead",
         "type": "object"
       },
       "FolderImportCreate": {
@@ -10722,6 +10751,66 @@
           }
         },
         "summary": "Stream File",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/text": {
+      "get": {
+        "description": "Return the served PDF's plain text (SEE-gated like ``/stream``).\n\nUses PyMuPDF's native text layer; when that is sparse (a scanned PDF), it falls back to\non-the-fly OCR (``get_textpage_ocr``) in the admin-configured OCR language. Powers the reader's\nsearch / \"copy text\" fallback for OCR'd or scanned PDFs. Never raises on OCR failure — it\ndegrades to whatever native text (possibly empty) was found.",
+        "operationId": "file_text_api_v1_files__file_id__text_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileTextRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "File Text",
         "tags": [
           "files"
         ]

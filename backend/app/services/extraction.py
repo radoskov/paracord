@@ -218,9 +218,12 @@ def extract_and_store(
 
     pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
 
-    # Effective OCR/advanced-extraction backend: DB row (runtime toggle) overlaid on Settings,
-    # honouring the admin's choice like the topic job does.
-    ocr_backend = get_ai_config(db, settings=settings).ocr_backend
+    # Effective OCR/advanced-extraction backend + languages: DB row (runtime toggle) overlaid on
+    # Settings, honouring the admin's choice like the topic job does. ocr_language is tesseract
+    # syntax and may be multi like "eng+spa".
+    ai_config = get_ai_config(db, settings=settings)
+    ocr_backend = ai_config.ocr_backend
+    ocr_language = ai_config.ocr_language
 
     # OCR pre-step: when an OCR backend is selected and the text layer is poor/none/unknown, add a
     # searchable text layer to a *transient* copy and feed that to GROBID. OCR never fails the
@@ -239,7 +242,7 @@ def extract_and_store(
                 ocr_result = ocr_service.pymupdf_ocr(
                     pdf_path,
                     out_dir=Path(scratch),
-                    language=settings.ocr_language,
+                    language=ocr_language,
                     timeout=settings.ocr_timeout_seconds,
                 )
             else:
@@ -248,7 +251,7 @@ def extract_and_store(
                     text_layer_quality=file.text_layer_quality,
                     out_dir=Path(scratch),
                     timeout=settings.ocr_timeout_seconds,
-                    language=settings.ocr_language,
+                    language=ocr_language,
                     skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
                 )
             tei_source_path = ocr_result.output_pdf_path

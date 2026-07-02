@@ -77,8 +77,11 @@ class AIConfig(Base):
     summary_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     topic_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
     topic_embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # OCR / advanced-extraction backend (Phase B5): none | ocrmypdf | full_ml. NULL → Settings.
+    # OCR / advanced-extraction backend (Phase B5): none | ocrmypdf | pymupdf | full_ml.
+    # NULL → Settings.
     ocr_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # OCR languages in tesseract syntax (e.g. "eng" or "eng+spa"). NULL → Settings.ocr_language.
+    ocr_language: Mapped[str | None] = mapped_column(String(128), nullable=True)
     ollama_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -42,6 +42,7 @@ EDITABLE_FIELDS = (
     "topic_backend",
     "topic_embedding_model",
     "ocr_backend",
+    "ocr_language",
     "ollama_url",
 )
 EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
@@ -62,6 +63,8 @@ class EffectiveAIConfig:
     topic_backend: str
     topic_embedding_model: str | None
     ocr_backend: str
+    # OCR languages in tesseract syntax; supports multi like "eng+spa" (passed through verbatim).
+    ocr_language: str
     ollama_url: str
 
     def as_dict(self) -> dict:
@@ -77,6 +80,7 @@ def _defaults(settings: Settings) -> EffectiveAIConfig:
         topic_backend=settings.topic_backend,
         topic_embedding_model=None,
         ocr_backend=settings.ocr_backend,
+        ocr_language=settings.ocr_language,
         ollama_url=settings.ollama_url,
     )
 

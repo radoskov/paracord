@@ -481,6 +481,12 @@
             <small class="hint">{note('extraction', config.ocr_backend)}</small>
           {/if}
         </label>
+        {#if config.ocr_backend === 'ocrmypdf' || config.ocr_backend === 'pymupdf'}
+          <label>OCR languages (tesseract codes, e.g. eng+spa)
+            <input bind:value={config.ocr_language} placeholder="eng" disabled={busy}
+              title="Tesseract language codes used for OCR; combine several with '+' (e.g. eng+spa)" />
+          </label>
+        {/if}
       </article>
     </div>
 
