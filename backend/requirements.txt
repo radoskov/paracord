@@ -8,18 +8,14 @@ psycopg[binary]>=3.2
 alembic>=1.13
 python-multipart>=0.0.9
 bcrypt>=4.1
-python-jose[cryptography]>=3.3
 httpx2==2.4.0
 redis>=5.0
 rq>=1.16
 lxml>=5.2
-networkx>=3.3
 # Numeric core for the BM25F+ lexical index (HS4): eager-scored scipy sparse matrix, mmap-shared
 # across workers. Light, ubiquitous wheels — installed by default (not an optional AI provider).
 numpy>=1.26
 scipy>=1.11
-bibtexparser>=1.4
-pybtex>=0.24
 citeproc-py>=0.8  # hard dep: renders the "styled" citation export from bundled CSL styles (Phase B4)
 PyYAML>=6.0
 PyMuPDF>=1.24

@@ -359,7 +359,6 @@ citation features rest directly on it.
 * **[Pydantic](https://docs.pydantic.dev/)** / **pydantic-settings** (MIT) — request/response models and settings.
 * **[httpx2](https://pypi.org/project/httpx2/)** — HTTP client (the Pydantic-maintained, security-patched fork of httpx) used for the GROBID client, agent communication, and outbound calls.
 * **[python-multipart](https://github.com/Kludex/python-multipart)** — multipart/form-data parsing for uploads.
-* **[python-jose](https://github.com/mpdavis/python-jose)** — JWT handling for authenticated sessions.
 * **[bcrypt](https://github.com/pyca/bcrypt)** — password hashing.
 
 ### Data & storage
@@ -377,8 +376,7 @@ citation features rest directly on it.
 * Optional, when enabled: **[Nougat](https://github.com/facebookresearch/nougat)** / **[Marker](https://github.com/VikParuchuri/marker)** — heavy ML PDF extractors (`ocr_backend=full_ml`). Pull PyTorch + model weights (multi-GB) and are **built only via the opt-in image** (`make build-ml-extraction`) — never installed at runtime from the web UI. Activate-when-present; otherwise the system degrades to GROBID.
 * **[PyMuPDF](https://pymupdf.readthedocs.io/)** (AGPL-3.0) — PDF rendering and coordinate handling.
 * **[lxml](https://lxml.de/)** (BSD-3-Clause) — parsing GROBID TEI output.
-* **[NetworkX](https://networkx.org/)** (BSD-3-Clause) — citation-graph construction and analysis.
-* **[bibtexparser](https://github.com/sciunto-org/python-bibtexparser)**, **[pybtex](https://pybtex.org/)**, **[citeproc-py](https://github.com/brechtm/citeproc-py)** — citation parsing and export (BibTeX, BibLaTeX, RIS, CSL JSON, and more). citeproc-py also renders the **styled** export format (APA/IEEE/Chicago/MLA/Harvard/Vancouver/Nature) from real CSL style files (see below).
+* **[citeproc-py](https://github.com/brechtm/citeproc-py)** — renders the **styled** citation export format (APA/IEEE/Chicago/MLA/Harvard/Vancouver/Nature) from real CSL style files (see below).
 * **[Citation Style Language (CSL) styles](https://github.com/citation-style-language/styles)** (CC-BY-SA 3.0) — the official `.csl` style definitions bundled under `backend/app/services/csl/styles/` and rendered via citeproc-py for the styled citation export. The bundled `chicago-author-date.csl` has a minor modification (a citeproc-py-incompatible `page-range-format` attribute removed); see `backend/app/services/csl/NOTICE` for the full per-style attribution. Any redistributed modifications are shared under the same CC-BY-SA 3.0 license.
 * Optional, when enabled: **[sentence-transformers](https://www.sbert.net/)** (Apache-2.0) for local embeddings, **[RapidFuzz](https://github.com/rapidfuzz/RapidFuzz)** (MIT) for faster fuzzy dedup, and **[Ollama](https://ollama.com/)** (run as an external service) for local summaries and embeddings.
 
