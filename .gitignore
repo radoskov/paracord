@@ -9,6 +9,7 @@ __pycache__/
 .coverage
 htmlcov/
 
+
 # Node
 node_modules/
 dist/
@@ -66,3 +67,4 @@ docs/latex/build/
 
 # Local scratch working notes (intentionally untracked)
 FOLLOWUPS.md
+drop-commit-msg-lines.sh
