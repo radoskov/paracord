@@ -362,6 +362,9 @@ export interface ImportBatch {
   started_at: string | null;
   finished_at: string | null;
   work_count?: number;
+  // False when the import intended extraction but the processing queue was offline, so the jobs
+  // were dropped; the recovery sweep will retry them (D7). Absent on older servers → treat as true.
+  extraction_queued?: boolean;
 }
 
 export interface CitationContext {
@@ -419,6 +422,7 @@ export interface WorkFile {
   text_layer_quality: string;
   status: string;
   content_available: boolean;
+  extraction_queued?: boolean;
 }
 
 export interface WebCandidate {
@@ -649,6 +653,7 @@ export interface IdentifierImportResponse {
   work_id: string;
   created: boolean;
   enriched_sources: string[];
+  extraction_queued?: boolean;
 }
 
 // Batch citation import (Phase J item 5).
@@ -910,6 +915,11 @@ export interface QueueStatus {
   workers: number;
   counts: Record<string, number>;
   jobs: JobRecord[];
+  // D7 queue-health fields for the Jobs-tab semaphore. Optional for compatibility with an older
+  // server; fall back to `available`/`workers` when absent.
+  redis_reachable?: boolean;
+  worker_count?: number;
+  queued?: number;
 }
 
 export class ApiClient {

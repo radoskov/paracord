@@ -31,12 +31,19 @@
   let cslContent = '';
   let loading = false;
   let message = '';
+  let warning = '';
+
+  // Shown when an import succeeded but the server couldn't queue extraction (queue/Redis offline);
+  // the file keeps its owed marker and the recovery sweep retries it (D7).
+  const EXTRACTION_QUEUE_WARNING =
+    "Imported, but extraction couldn't be queued — the processing queue looks offline. It'll retry automatically.";
 
   onMount(load);
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
     message = '';
+    warning = '';
     try {
       await fn();
       if (ok) message = ok;
@@ -80,6 +87,7 @@
     await run(async () => {
       const batch = await client.importFolder(selectedSourceId);
       message = `Folder import ${batch.status}: ${batch.stats?.seen ?? 0} PDFs scanned, ${batch.stats?.created_works ?? 0} papers created`;
+      if (batch.extraction_queued === false) warning = EXTRACTION_QUEUE_WARNING;
     });
   }
 
@@ -89,7 +97,9 @@
     await run(async () => {
       const batch = await client.uploadPdf(file, uploadShelfId || null);
       uploadFile = null;
-      message = `Uploaded “${file.name}” (batch ${batch.status}); extraction queued`;
+      const queued = batch.extraction_queued !== false;
+      message = `Uploaded “${file.name}” (batch ${batch.status})${queued ? '; extraction queued' : ''}`;
+      if (!queued) warning = EXTRACTION_QUEUE_WARNING;
     });
   }
 
@@ -140,6 +150,7 @@
 
 <section class="grid">
   {#if message}<p class="muted msg">{message}</p>{/if}
+  {#if warning}<p class="msg warn-msg" role="alert">⚠ {warning}</p>{/if}
 
   <div class="card">
     <h2>Upload a PDF</h2>
@@ -264,6 +275,15 @@
   .msg {
     grid-column: 1 / -1;
     margin: 0;
+  }
+
+  .warn-msg {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 6px;
+    color: #7c2d12;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
   }
 
   .wide {

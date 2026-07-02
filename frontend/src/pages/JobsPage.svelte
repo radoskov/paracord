@@ -31,6 +31,25 @@
 
   $: visibleJobs = (status?.jobs ?? []).filter((j) => filter === 'all' || j.status === filter);
 
+  // Queue-health semaphore (D7): GREEN reachable + workers draining, YELLOW reachable but no
+  // worker consuming (jobs pile up), RED Redis unreachable (imports won't be processed).
+  $: reachable = status ? (status.redis_reachable ?? status.available) : false;
+  $: workerCount = status ? (status.worker_count ?? status.workers ?? 0) : 0;
+  $: queued = status ? (status.queued ?? status.counts?.queued ?? 0) : 0;
+  $: health = !status
+    ? null
+    : !reachable
+      ? {
+          color: 'red',
+          text: "Processing queue offline (Redis unreachable) — imports won't be processed until it's back",
+        }
+      : workerCount === 0
+        ? { color: 'yellow', text: `Queue reachable but no workers running · ${queued} queued` }
+        : {
+            color: 'green',
+            text: `Queue healthy · ${workerCount} worker${workerCount === 1 ? '' : 's'} · ${queued} queued`,
+          };
+
   function setFilter(key: string): void {
     filter = filter === key ? 'all' : key;
   }
@@ -99,6 +118,13 @@
     </p>
 
     {#if message}<p class="danger">{message}</p>{/if}
+
+    {#if health}
+      <div class="semaphore semaphore-{health.color}" role="status" data-testid="queue-health">
+        <span class="light light-{health.color}" aria-hidden="true"></span>
+        <span class="semaphore-text">{health.text}</span>
+      </div>
+    {/if}
 
     {#if status}
       {#if !status.available}
@@ -197,6 +223,55 @@
     border-color: #fdba74;
     color: #7c2d12;
     text-align: left;
+  }
+
+  .semaphore {
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    display: flex;
+    font-weight: 600;
+    gap: 0.5rem;
+    margin: 0.6rem 0;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .semaphore-green {
+    background: #f0fdf4;
+    border-color: #86efac;
+    color: #14532d;
+  }
+
+  .semaphore-yellow {
+    background: #fff7ed;
+    border-color: #fdba74;
+    color: #7c2d12;
+  }
+
+  .semaphore-red {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #7f1d1d;
+  }
+
+  .light {
+    border-radius: 50%;
+    display: inline-block;
+    flex: none;
+    height: 0.75rem;
+    width: 0.75rem;
+  }
+
+  .light-green {
+    background: #22c55e;
+  }
+
+  .light-yellow {
+    background: #eab308;
+  }
+
+  .light-red {
+    background: #ef4444;
   }
 
   .counts {

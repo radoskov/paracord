@@ -25,6 +25,56 @@ function makeStatus(jobs: JobRecord[]): QueueStatus {
   };
 }
 
+describe('JobsPage queue-health semaphore (D7)', () => {
+  it('shows GREEN when Redis is reachable and workers are running', async () => {
+    const status: QueueStatus = {
+      ...makeStatus([]),
+      redis_reachable: true,
+      worker_count: 2,
+      queued: 3,
+    };
+    const client = { getJobs: vi.fn().mockResolvedValue(status) };
+    render(JobsPage, { client: client as never });
+    const el = await screen.findByTestId('queue-health');
+    expect(el.className).toContain('semaphore-green');
+    expect(el.textContent).toContain('Queue healthy');
+    expect(el.textContent).toContain('2 workers');
+    expect(el.textContent).toContain('3 queued');
+  });
+
+  it('shows YELLOW when Redis is reachable but no worker is running', async () => {
+    const status: QueueStatus = {
+      ...makeStatus([]),
+      redis_reachable: true,
+      worker_count: 0,
+      queued: 5,
+    };
+    const client = { getJobs: vi.fn().mockResolvedValue(status) };
+    render(JobsPage, { client: client as never });
+    const el = await screen.findByTestId('queue-health');
+    expect(el.className).toContain('semaphore-yellow');
+    expect(el.textContent).toContain('no workers running');
+    expect(el.textContent).toContain('5 queued');
+  });
+
+  it('shows RED when Redis is unreachable', async () => {
+    const status: QueueStatus = {
+      available: false,
+      redis_reachable: false,
+      worker_count: 0,
+      queued: 0,
+      workers: 0,
+      counts: { queued: 0, started: 0, finished: 0, failed: 0, scheduled: 0, deferred: 0 },
+      jobs: [],
+    };
+    const client = { getJobs: vi.fn().mockResolvedValue(status) };
+    render(JobsPage, { client: client as never });
+    const el = await screen.findByTestId('queue-health');
+    expect(el.className).toContain('semaphore-red');
+    expect(el.textContent).toContain('offline');
+  });
+});
+
 describe('JobsPage newest-first (Phase L, item 9)', () => {
   it('renders jobs in the order the API returns them (newest-first)', async () => {
     // The backend supplies newest-first order; the page must preserve it (no reversal/resort).
