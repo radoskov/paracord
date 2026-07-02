@@ -72,3 +72,22 @@ def test_removing_last_real_shelf_falls_back_to_default(client, auth_headers, db
     db.expire_all()
     shelves = _shelf_ids_for(db, _uuid.UUID(work_id))
     assert shelves == {get_default_shelf_id(db)}
+
+
+def test_multiple_loose_papers_share_one_default_shelf_in_one_txn(db):
+    """Regression: placing several loose papers before a flush must not create duplicate default
+    shelves / AccessSettings singletons (UNIQUE violation on access_settings.id)."""
+    from app.models.work import Work
+    from app.services.default_shelf import get_default_shelf_id, place_on_default_if_loose
+
+    works = [Work(canonical_title=f"p{i}", normalized_title=f"p{i}") for i in range(3)]
+    db.add_all(works)
+    db.flush()
+    for w in works:
+        place_on_default_if_loose(db, w.id)
+    db.commit()  # must not raise
+
+    default_id = get_default_shelf_id(db)
+    assert default_id is not None
+    for w in works:
+        assert default_id in _shelf_ids_for(db, w.id)

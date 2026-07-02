@@ -50,9 +50,12 @@ def get_default_shelf_id(db: Session) -> uuid.UUID | None:
 def get_or_create_default_shelf(db: Session, *, actor_id: uuid.UUID | None = None) -> Shelf | None:
     """Return the default shelf, creating it (at the global default access level) if absent.
 
-    The shelf id is assigned client-side so no intermediate ``flush`` is needed — the caller's
-    commit persists everything at once (an interleaved flush corrupts the shared StaticPool
-    connection used in tests). Returns None when the org tables are absent (narrow unit schemas)."""
+    The shelf id is assigned client-side, then the new shelf + settings singleton are flushed so
+    that a *second* call within the same (autoflush-off) transaction — e.g. an import placing
+    several loose papers in one commit — sees the row via ``db.get`` and reuses it, instead of
+    inserting a duplicate ``AccessSettings`` singleton (UNIQUE violation). Safe against the earlier
+    StaticPool refresh issue because callers place-on-default *after* their own commit+refresh.
+    Returns None when the org tables are absent (narrow unit schemas)."""
     if not _tables_present(db):
         return None
     row = db.get(AccessSettings, ACCESS_SETTINGS_SINGLETON_ID)
@@ -71,6 +74,7 @@ def get_or_create_default_shelf(db: Session, *, actor_id: uuid.UUID | None = Non
         db.add(AccessSettings(id=ACCESS_SETTINGS_SINGLETON_ID, default_shelf_id=shelf.id))
     else:
         row.default_shelf_id = shelf.id
+    db.flush()  # make the shelf + singleton visible to subsequent get()s in the same transaction
     return shelf
 
 
