@@ -7,6 +7,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D35 + D37 — drop dead ML-extraction seam; pgvector on by default (2026-07-02)
+
+Two decided audit items sharing the backend config. **D35** removes the dead ML-extraction seam:
+the `full_ml` OCR backend and the `extraction_backend`/Nougat/Marker flags never had a real
+extractor (GROBID was always the structured extractor; PyMuPDF is the shipped hard extractor and is
+now its own `pymupdf` OCR backend). Removed the `extraction_backend` Setting + the
+`advanced_extraction` YAML mapping, dropped `full_ml` from `OCR_BACKENDS` (now
+`none|ocrmypdf|pymupdf`), removed the `full_ml` route + `run_ml_extraction`/`ml_extraction_available`
+in `ocr.py`, and pruned the `nougat`/`marker`/`full_ml` entries from `detect_providers`. A legacy
+row still holding `ocr_backend="full_ml"` degrades to the `Settings` default on read
+(`get_ai_config` tolerates any out-of-range value), and migration `0047` rewrites the stored value
+to NULL. Frontend: the AI-settings OCR card no longer offers `full_ml` or the ML-extraction install
+banner. **D37** flips `pgvector_enabled` default False→True: a registered real embedding model gets
+sub-linear HNSW ANN search out of the box, while the default `hash_bow` (and SQLite / no-pgvector)
+transparently falls back to the JSON + Python-cosine path. The flag is a no-op off Postgres, so the
+SQLite suite is unaffected; a defensive `_pgvector_rank` empty-result→None guard makes an
+un-backfilled `vector_pg` column fall back instead of returning a spurious empty result. Verified:
+full backend suite **720 passed**, migration parity **4 passed**, frontend green + build, ruff clean,
+`openapi.json` unchanged.
+
 ## D39 — queue-length cap + admin queue/worker controls (2026-07-02)
 
 Added a pending-queue depth cap plus admin recovery controls, extending D1's overload protection.
