@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, func, inspect, select
+from sqlalchemy import delete, exists, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.models.access_settings import ACCESS_SETTINGS_SINGLETON_ID, AccessSettings
 from app.models.organization import RackShelf, Shelf, ShelfWork
+from app.models.work import Work
 from app.services.access_settings import get_default_access_level
 
 DEFAULT_SHELF_NAME = "Inbox"
@@ -104,6 +105,35 @@ def place_on_default_if_loose(
     shelf = get_or_create_default_shelf(db, actor_id=actor_id)
     if shelf is not None and db.get(ShelfWork, {"shelf_id": shelf.id, "work_id": work_id}) is None:
         db.add(ShelfWork(shelf_id=shelf.id, work_id=work_id, added_by_user_id=actor_id))
+
+
+def backfill_loose_papers_onto_default(db: Session, *, actor_id: uuid.UUID | None = None) -> int:
+    """Place every loose paper (on no shelf) onto the default shelf; return how many were placed.
+
+    The idempotent, on-startup companion to migration 0037 (D11): it closes the rolling-deploy
+    window where a new-code API worker creates papers before the backfill migration has run on an
+    older DB. Idempotent — a paper already on any shelf (including the default) is not loose, so it
+    is skipped — and safe to run from several API workers at once (a concurrent double-insert on the
+    ``(shelf_id, work_id)`` PK surfaces as an IntegrityError the caller rolls back). No-ops on an
+    empty / not-yet-migrated DB (the org tables are absent). Does NOT commit — the caller owns the
+    transaction boundary.
+    """
+    if not _tables_present(db):
+        return 0
+    loose_ids = list(
+        db.scalars(select(Work.id).where(~exists().where(ShelfWork.work_id == Work.id)))
+    )
+    if not loose_ids:
+        return 0
+    shelf = get_or_create_default_shelf(db, actor_id=actor_id)
+    if shelf is None:
+        return 0
+    placed = 0
+    for work_id in loose_ids:
+        if db.get(ShelfWork, {"shelf_id": shelf.id, "work_id": work_id}) is None:
+            db.add(ShelfWork(shelf_id=shelf.id, work_id=work_id, added_by_user_id=actor_id))
+            placed += 1
+    return placed
 
 
 def hard_delete_shelf(db: Session, shelf: Shelf, *, actor_id: uuid.UUID | None = None) -> None:

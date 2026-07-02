@@ -18,11 +18,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """On startup, re-enqueue any extractions owed but lost to a dead Redis (D7 recovery sweep).
+    """Startup housekeeping. Each step is guarded so it never blocks the API from serving.
 
-    Guarded so a failing/absent queue never blocks the API from serving; idempotent (deterministic
-    job id) so it is safe even when several API workers run this in parallel.
+    * D11 — idempotently place any loose paper onto the default shelf, closing the rolling-deploy
+      window where new-code workers create papers before migration 0037 has run on an older DB.
+    * D7 — re-enqueue extractions owed but lost to a dead Redis (deterministic job id → safe to run
+      from several API workers in parallel).
     """
+    try:
+        from app.db.session import SessionLocal
+        from app.services.default_shelf import backfill_loose_papers_onto_default
+
+        with SessionLocal() as db:
+            placed = backfill_loose_papers_onto_default(db)
+            db.commit()
+        if placed:
+            logger.info("Startup: placed %d loose paper(s) on the default shelf (D11)", placed)
+    except Exception as exc:  # noqa: BLE001 - startup must not fail on a backfill hiccup / race
+        logger.warning("Startup default-shelf backfill skipped: %s", exc)
     try:
         from app.workers.recovery import sweep_owed_extractions
 

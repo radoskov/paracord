@@ -214,3 +214,41 @@ def test_delete_rack_requires_modify_permission(client, auth_headers):
     assert (
         client.delete(f"/api/v1/racks/{rack_id}", headers=auth_headers("reader")).status_code == 403
     )
+
+
+# --- D11: idempotent startup backfill of loose papers ---
+
+
+def test_backfill_places_loose_papers_and_is_idempotent(db):
+    """A paper created on no shelf is placed onto the default shelf by the startup backfill (D11)."""
+    import uuid as _uuid
+
+    from app.models.organization import ShelfWork
+    from app.models.work import Work
+    from app.services.default_shelf import backfill_loose_papers_onto_default, get_default_shelf_id
+
+    # A directly-created work with no shelf membership (simulates a pre-invariant / mid-deploy row).
+    work = Work(canonical_title="Loose", normalized_title="loose")
+    db.add(work)
+    db.commit()
+    assert (
+        db.query(ShelfWork).filter(ShelfWork.work_id == work.id).count() == 0
+    )  # loose to begin with
+
+    placed = backfill_loose_papers_onto_default(db)
+    db.commit()
+    assert placed == 1
+    default_id = get_default_shelf_id(db)
+    assert {sw.shelf_id for sw in db.query(ShelfWork).filter(ShelfWork.work_id == work.id)} == {
+        default_id
+    }
+
+    # Idempotent: a second run places nothing (the paper is no longer loose).
+    assert backfill_loose_papers_onto_default(db) == 0
+    assert isinstance(default_id, _uuid.UUID)
+
+
+def test_backfill_no_op_when_nothing_loose(db):
+    from app.services.default_shelf import backfill_loose_papers_onto_default
+
+    assert backfill_loose_papers_onto_default(db) == 0
