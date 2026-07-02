@@ -80,9 +80,14 @@ heaviest and weakest at networks.
 ## 2. Graph types
 
 ### 2a. Temporal citation map — "Litmaps-style" (the flagship)
-A scatter where each paper is a point, with **swappable axes** (this is the extensible core):
+A scatter where each paper is a point, with **swappable axes** (this is the extensible core).
+**Both axes are independently selectable** via a dropdown each, drawing from the *same* option set —
+so the user can put publication year on Y and citation count on X, or similarity on X and year on Y,
+etc. (More axis options can be added later; the set below is the launch set.)
+- **Axis options (either dropdown):** publication year · citation count · local citation degree ·
+  citation velocity · similarity-to-focus · topic-similarity-to-focus.
 - **X (default): publication year** (`Work.year`, already stored/indexed).
-- **Y options:**
+- **Detail on the value options:**
   - **Citation count** — external impact. *Needs the fetch below.* Only for papers that resolve to
     a DOI/arXiv/OpenAlex id (others: unknown → shown muted / excluded).
   - **Local citation degree** — how many of *your* papers cite it. Always available (from the
@@ -157,15 +162,28 @@ A **provider + renderer registry** so a new graph = one provider + one renderer 
 
 ---
 
-## 6. Open decisions (owner)
-1. **Plot library (see §1a):** ECharts (rec — one lib, canvas+WebGL, scales) · or the split
-   Observable Plot + Sigma.js (prettiest charts + strongest network scaler) · Vega-Lite · Plotly.js.
-2. **Embedding layout:** PCA-default (light, no dep) with UMAP as an opt-in extra? (rec: yes.)
-3. **Citation counts:** OK to add the field + fetch from OpenAlex/S2/Crossref + surface in the paper
-   view, with periodic refresh? (rec: yes — it unlocks the flagship Y-axis and the §8.11 analytics.)
-4. **Phasing:** suggested order — (P1) citation-count fetch + paper-view display; (P2) the
-   provider/renderer scaffold + the temporal citation map with local-degree & citation-count axes;
-   (P3) embedding-cluster (PCA) + topic coloring; (P4) §8.11 textual summaries on the same layer;
-   (P5) co-citation / topic-river / heatmap + §8.9 network depth. Each phase is shippable alone.
+## 6. Decisions (owner, 2026-07-02) — RESOLVED
+1. **Plot library: ECharts.** One lib, canvas+WebGL (scatterGL ~10⁶ pts, graphGL large networks),
+   full hover/tooltip/select/brush/click/legend/datazoom interactions retained. Lazy-loaded.
+2. **Both axes independently selectable** from the shared option set (§2a). All 2a encodings
+   (size, color, shape, optional edges) + the citation-velocity axis are in the launch set.
+3. **Embedding layout: PCA-2D default** (numpy, instant, no dep), **UMAP opt-in** — acceptable since
+   numba is likely being added anyway (see the heaviness note below), cached server-side.
+4. **2d views:** co-citation/bibliographic-coupling, topic river, similarity heatmap — **all in**;
+   per-paper citation-over-time is **out** (not available from free APIs).
+5. **Citation counts: yes** — add the field, fetch from OpenAlex/S2/Crossref, surface in the paper
+   view, periodic/opt-in refresh.
 
-This is a mini-project, not a one-shot — it should land phase by phase off this doc.
+**UMAP heaviness (answering the owner's question):** `umap-learn` itself is tiny; its weight is the
+**numba + llvmlite** stack it depends on (llvmlite bundles an LLVM build — tens of MB in the image)
+plus scipy/scikit-learn (already present). So *if numba is being added anyway, UMAP's marginal cost
+is small*. Two real caveats keep it opt-in rather than default: (a) numba **JIT cold-start** — the
+first projection in a process pays a compile cost; (b) numba/llvmlite **pin numpy/Python versions**
+fairly tightly and can lag new Python releases. Hence: **PCA stays the always-on light default;
+UMAP is the opt-in "nicer clusters" upgrade** (image extra), promoted cheaply once numba lands.
+
+**Phasing (each phase shippable alone):** (P1) citation-count fetch + paper-view display →
+(P2) provider/renderer scaffold + temporal citation map (both-axis dropdowns; year / local-degree /
+citation-count axes first) → (P3) embedding-cluster (PCA) + topic coloring → (P4) §8.11 textual
+summaries on the same computed layer → (P5) co-citation / topic-river / heatmap + §8.9 network depth
+(+ UMAP opt-in). Full plan in `docs/WORKPLAN_2026-07.md`.

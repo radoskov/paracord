@@ -60,6 +60,13 @@ was never built. Detailed so the scope is concrete:
    metadata-edit path; annotation create/edit endpoints; the RQ job wrapper for
    started/completed/failed; the backup/restore commands). Low risk — the only care is that a few
    tests assert audit-event *counts*, so update those expectations in the same pass.
+   *Owner note (2026-07-02) — persistence + browsing, already largely handled:* events persist in
+   the **Postgres `audit_events` table** (durable across server restarts — they are *not* erased on
+   shutdown; only a DB-volume wipe clears them), and the viewer endpoint
+   (`GET /admin/audit-events`) **already paginates** (newest-first, `limit`≤500 + `offset`, returns
+   `items`/`total`). Remaining, to add in this item: (a) an **append-only file sink** (JSONL on a
+   mounted volume) as tamper-evident, DB-independent defense-in-depth; (b) confirm the admin UI
+   surfaces the existing pagination (page controls like the library's).
 2. **Summary provenance columns (§8.14.2).** Summary generation already *computes* provenance
    (provider requested, provider actually used, whether it fell back to extractive) but only
    returns it transiently — it is never stored. *Impact:* for an existing stored summary you can't
@@ -79,12 +86,12 @@ was never built. Detailed so the scope is concrete:
    text/styled. Missing: LaTeX `\cite` command output, a Pandoc-Markdown citation list, plus
    import-batch / missing-references export *targets* and emitting unresolved-reference strings.
    *Fix:* add the two renderers alongside the existing ones and wire the extra scopes/targets.
-6. **Import can target a rack (§8.1).** Imports accept only `target_shelf_id`, not
-   `target_rack_id`. *Fix:* add `target_rack_id` to the import request(s) and place imported works
-   onto the rack the same way `target_shelf_id` does.
+6. ~~**Import can target a rack (§8.1).**~~ **DROPPED (owner, 2026-07-02):** doesn't fit the domain
+   model — a paper lives on a *shelf*, never directly on a rack (racks contain shelves). No change.
 
-**Recommended order: 1 → 2 → 3 first (a small, safe batch), then 4, 5, 6.** Awaiting owner go to
-implement (which items, and whether all at once).
+**DECIDED 2026-07-02 · implementing items 1–5** (6 dropped). Order: 1 → 2 → 3 (safe batch), then
+4, 5. Item 1 also adds the append-only file sink + confirms the audit-view pagination UI. Planned in
+`docs/WORKPLAN_2026-07.md`.
 
 **D35. ML extraction backend (Nougat/Marker).** — **DECIDED 2026-07-02 · option (b), implementing.**
 Keep only `ocrmypdf` + `pymupdf` OCR backends. Drop the dead Nougat/Marker extraction seam: the
