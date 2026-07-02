@@ -33,6 +33,7 @@ from app.services.file_paths import (
     FileLocationError,
     resolve_streamable_pdf_path,
 )
+from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work, mark_extraction_requested
@@ -1207,6 +1208,7 @@ def upload_work_file(
     actor: User = CONTRIBUTOR_DEP,
 ) -> WorkFileRead:
     """Upload a PDF and attach it to an existing work (so a manual work isn't a dead end)."""
+    assert_queue_has_capacity(db)  # D39: reject before reading the upload when the queue is full
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
@@ -1585,6 +1587,7 @@ def extract_work_endpoint(
     404 if the paper is missing; ``{status: "no_files"}`` when nothing is attached; 503 if the
     extraction queue is unavailable. Per-file extraction is still available via /files/{id}/extract.
     """
+    assert_queue_has_capacity(db)  # D39: reject when the processing queue is full
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")

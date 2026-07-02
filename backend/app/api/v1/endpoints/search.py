@@ -17,6 +17,7 @@ from app.services.chunk_embeddings import backfill_chunk_embeddings
 from app.services.chunk_search import semantic_search_papers
 from app.services.embeddings import resolve_embedding_provider
 from app.services.hybrid_search import hybrid_search
+from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.semantic_search import ensure_work_embeddings
 
 router = APIRouter()
@@ -243,6 +244,7 @@ def reindex_embeddings(
 
     Surfaces provider provenance so the UI can warn when the requested provider (e.g. an Ollama
     model) was unavailable and the reindex silently ran under the hash-BOW fallback instead."""
+    assert_queue_has_capacity(db)  # D39: reject when the processing queue is full
     resolved = resolve_embedding_provider(db=db)
     provider = resolved.provider
     added = ensure_work_embeddings(db, provider=provider)

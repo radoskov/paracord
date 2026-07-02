@@ -33,6 +33,11 @@ _DEFAULT_MAX_BATCH_ITEMS = 100
 # worker-container start; changing it requires a worker restart to apply.
 _DEFAULT_RQ_WORKER_COUNT = 2
 
+# Out-of-the-box ceiling on how many jobs may be pending in the RQ queue at once (D39). A
+# job-creating request is rejected with 429 when the pending depth is already at this cap; the
+# measurement fails open (allows) when Redis is unreachable.
+_DEFAULT_MAX_QUEUE_LEN = 1000
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -65,6 +70,11 @@ class AppConfig(Base):
     # Overload protection (D1): RQ worker processes the supervisor launches (apply-on-restart).
     rq_worker_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_RQ_WORKER_COUNT)
+    )
+    # Overload protection (D39): ceiling on the pending RQ queue depth. A job-creating request is
+    # rejected with 429 once the pending queue is at this cap (fail-open if Redis is unreachable).
+    max_queue_len: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_MAX_QUEUE_LEN)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

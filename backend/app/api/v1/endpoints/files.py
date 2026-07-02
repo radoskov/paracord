@@ -23,6 +23,7 @@ from app.services.file_paths import (
     resolve_backend_readable_pdf_path,
     resolve_streamable_pdf_path,
 )
+from app.services.queue_capacity import assert_queue_has_capacity
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
@@ -91,6 +92,7 @@ def extract_file(
 
     ``force_ocr=true`` re-runs OCRmyPDF even when the text layer looks fine / OCR is disabled —
     the manual "Force OCR" action for a scanned PDF that came out textless (#22)."""
+    assert_queue_has_capacity(db)  # D39: reject when the processing queue is full
     file = db.get(File, file_id)
     if file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")

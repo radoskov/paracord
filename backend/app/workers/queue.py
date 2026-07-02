@@ -33,6 +33,25 @@ def get_queue():
     )
 
 
+def pending_queue_depth() -> int | None:
+    """Return the number of pending (queued) jobs, or None when Redis is unreachable (D39).
+
+    Fail-open by design: a None result means the depth couldn't be measured, and the capacity
+    guard must then allow the request (a dropped enqueue is already surfaced via D7's
+    ``extraction_queued=false``). Never raises.
+    """
+    try:
+        from redis import Redis
+        from rq import Queue
+
+        conn = Redis.from_url(get_settings().redis_url)
+        conn.ping()
+        return Queue(QUEUE_NAME, connection=conn).count
+    except Exception as exc:  # noqa: BLE001 - fail open when the depth can't be measured
+        logger.warning("Could not measure pending queue depth: %s", exc)
+        return None
+
+
 # Job statuses that mean an extraction for a file is already in flight — a re-enqueue while the
 # file is in one of these is a no-op (the deterministic job id collides), so a file is never
 # enqueued twice (D7 invariant 2: no collision between the recovery sweep and a user re-extract).

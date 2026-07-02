@@ -69,6 +69,20 @@ def _rate_limit_fail_open(monkeypatch):
     rate_limit.reset_cache()
 
 
+@pytest.fixture(autouse=True)
+def _queue_capacity_fail_open(monkeypatch):
+    """Run the API suite as if the queue depth were unmeasurable so the D39 guard fails open.
+
+    Mirrors ``_rate_limit_fail_open``: the guard's contract is that it allows every request when
+    Redis is unreachable, and unit tests run without Redis. Forcing the fail-open path keeps the
+    suite deterministic and decoupled from any live queue state; the dedicated queue-cap tests
+    monkeypatch the depth themselves to exercise the enforced path.
+    """
+    from app.workers import queue
+
+    monkeypatch.setattr(queue, "pending_queue_depth", lambda: None)
+
+
 @pytest.fixture()
 def app(session_factory):
     from app.main import create_app

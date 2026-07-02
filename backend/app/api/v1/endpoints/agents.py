@@ -26,6 +26,7 @@ from app.schemas.agent import (
 )
 from app.services import agent_files
 from app.services import agents as agent_service
+from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.storage import mark_extraction_requested
 from app.workers.queue import enqueue_extraction
 
@@ -109,6 +110,7 @@ def upload_teleport_content(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the teleport privilege"
         )
+    assert_queue_has_capacity(db)  # D39: reject before reading the upload when the queue is full
     pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
@@ -151,6 +153,7 @@ def upload_for_extraction(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the extract privilege"
         )
+    assert_queue_has_capacity(db)  # D39: reject before reading the upload when the queue is full
     pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(

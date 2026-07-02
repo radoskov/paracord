@@ -23,6 +23,7 @@ from app.services.bibliography_import import import_csl, import_ris
 from app.services.bibtex import import_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.services.metadata_enrichment import enrich_work
+from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.storage import (
     file_ids_pending_extraction,
@@ -81,6 +82,7 @@ def import_folder(
     actor: User = EDITOR_DEP,
 ) -> ImportBatch:
     """Import PDFs from a configured server-folder source."""
+    assert_queue_has_capacity(db)  # D39: reject up front when the processing queue is full
     source = db.get(Source, payload.source_id)
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
@@ -121,6 +123,7 @@ def import_bibtex_entries(
     actor: User = EDITOR_DEP,
 ) -> ImportBatch:
     """Create works from pasted/uploaded BibTeX content."""
+    assert_queue_has_capacity(db)  # D39
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty BibTeX content")
     batch = import_bibtex(db, payload.content, actor=actor, target_shelf_id=payload.target_shelf_id)
@@ -136,6 +139,7 @@ def import_ris_entries(
     actor: User = EDITOR_DEP,
 ) -> ImportBatch:
     """Create works from pasted/uploaded RIS content."""
+    assert_queue_has_capacity(db)  # D39
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty RIS content")
     batch = import_ris(db, payload.content, actor=actor, target_shelf_id=payload.target_shelf_id)
@@ -151,6 +155,7 @@ def import_csl_entries(
     actor: User = EDITOR_DEP,
 ) -> ImportBatch:
     """Create works from pasted/uploaded CSL-JSON content."""
+    assert_queue_has_capacity(db)  # D39
     if not payload.content.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty CSL content")
     try:
@@ -222,6 +227,7 @@ def upload_pdf(
     already available and we keep the actor's request/ACL context (see report deviation note). A
     missing shelf / lack of modify access (404/403) aborts the upload via the helper.
     """
+    assert_queue_has_capacity(db)  # D39: reject before reading the upload when the queue is full
     if file.content_type and file.content_type not in (
         "application/pdf",
         "application/octet-stream",
@@ -301,6 +307,7 @@ def import_by_identifier(
     from app.services.audit import record_event
     from app.services.default_shelf import place_on_default_if_loose
 
+    assert_queue_has_capacity(db)  # D39
     value = payload.value.strip()
     if not value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty identifier")

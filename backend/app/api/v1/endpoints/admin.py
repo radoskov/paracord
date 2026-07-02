@@ -45,6 +45,7 @@ class AppConfigOut(BaseModel):
     rate_limit_global_per_min: int
     max_batch_items: int
     rq_worker_count: int
+    max_queue_len: int
 
 
 class AppConfigUpdate(BaseModel):
@@ -54,6 +55,7 @@ class AppConfigUpdate(BaseModel):
     rate_limit_global_per_min: int | None = Field(default=None, ge=1)
     max_batch_items: int | None = Field(default=None, ge=1)
     rq_worker_count: int | None = Field(default=None, ge=1)
+    max_queue_len: int | None = Field(default=None, ge=1)
 
 
 class AgentOut(BaseModel):
@@ -278,6 +280,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         rate_limit_global_per_min=app_config_service.effective_rate_limit_global_per_min(db),
         max_batch_items=app_config_service.effective_max_batch_items(db),
         rq_worker_count=app_config_service.effective_rq_worker_count(db),
+        max_queue_len=app_config_service.effective_max_queue_len(db),
     )
 
 
@@ -324,6 +327,10 @@ def update_app_config(
         if payload.rq_worker_count is not None:
             changed["rq_worker_count"] = app_config_service.update_rq_worker_count(
                 db, value=payload.rq_worker_count, actor_user_id=actor.id
+            )
+        if payload.max_queue_len is not None:
+            changed["max_queue_len"] = app_config_service.update_max_queue_len(
+                db, value=payload.max_queue_len, actor_user_id=actor.id
             )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

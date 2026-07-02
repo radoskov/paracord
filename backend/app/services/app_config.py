@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.models.app_config import (
     _DEFAULT_MAX_BATCH_ITEMS,
+    _DEFAULT_MAX_QUEUE_LEN,
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
     _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN,
     _DEFAULT_RQ_WORKER_COUNT,
@@ -110,6 +111,16 @@ def effective_rq_worker_count(db: Session, *, settings: Settings | None = None) 
     return row.rq_worker_count
 
 
+def effective_max_queue_len(db: Session, *, settings: Settings | None = None) -> int:
+    """Return the effective ceiling on the pending RQ queue depth (D39)."""
+    if not _app_config_table_present(db):
+        return _DEFAULT_MAX_QUEUE_LEN
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.max_queue_len is None:
+        return _DEFAULT_MAX_QUEUE_LEN
+    return row.max_queue_len
+
+
 def _ensure_row(db: Session) -> AppConfig:
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
     if row is None:
@@ -176,3 +187,16 @@ def update_rq_worker_count(
     row.updated_by_user_id = actor_user_id
     db.flush()
     return row.rq_worker_count
+
+
+def update_max_queue_len(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new pending-queue depth ceiling (D39). Returns the stored value."""
+    if value < 1:
+        raise ValueError("max_queue_len must be >= 1")
+    row = _ensure_row(db)
+    row.max_queue_len = value
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return row.max_queue_len
