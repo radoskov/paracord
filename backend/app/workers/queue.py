@@ -417,9 +417,17 @@ def queue_status(limit: int = 25) -> dict:
         )
         jobs = _order_jobs_newest_first(jobs)[:limit]
         _resolve_paper_targets(jobs)
+        # Worker count is scoped to THIS queue (a worker attached elsewhere can't drain our jobs) so
+        # the Jobs-tab semaphore can distinguish "reachable but nothing consuming" from healthy.
+        worker_count = Worker.count(queue=queue)
         return {
             "available": True,
-            "workers": Worker.count(connection=conn),
+            # D7 queue-health fields (semaphore): explicit, self-describing names alongside the
+            # legacy ``available``/``workers`` keys the UI already reads.
+            "redis_reachable": True,
+            "worker_count": worker_count,
+            "queued": counts["queued"],
+            "workers": worker_count,
             "counts": counts,
             "jobs": jobs,
         }
@@ -427,6 +435,9 @@ def queue_status(limit: int = 25) -> dict:
         return {
             "available": False,
             "error": str(exc),
+            "redis_reachable": False,
+            "worker_count": 0,
+            "queued": 0,
             "workers": 0,
             "counts": empty_counts,
             "jobs": [],
