@@ -7,6 +7,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Frontend + Infra audit batch — D16, D17, D29, D2, D5, D24, D4 (2026-07-03)
+
+Seven frontend/infra audit fixes; stack left healthy (api healthy, worker up with 2 RQ children).
+**D16** replaces serial `await`-in-a-loop batch library actions with a chunked
+`Promise.allSettled` helper (concurrency 6) that surfaces per-item failures in the status message and
+keeps a single final refresh (`batchDelete/batchReextract/batchSetStatus/batchPutInto`). **D17** stops
+the Cytoscape graph rebuilding+relaying-out on every display toggle: filters now show/hide elements on
+the live instance (`applyFilters()`), edges carry stable ids, and rebuild+layout runs only on a data/
+render-surface change (layout is laid out on the visible subset; explicit re-layout stays on the layout
+select). **D29** verified all seven frontend majors (Vite 8, TS 6, pdfjs 6, vitest 4, jsdom 29,
+vite-plugin-svelte 7, svelte 5) are stable/GA as of mid-2026 → **no version changes**. **D2** adds a
+tuned CSP + `X-Frame-Options DENY` / `X-Content-Type-Options nosniff` / `Referrer-Policy no-referrer` to
+`frontend/nginx.conf`, smoke-tested by serving the built bundle through nginx (document/JS/CSS/SPA route
+all 200 with headers; `connect-src` relaxed to `http:/https:` because the API is a separate origin).
+**D5** makes `make init` generate a random `POSTGRES_PASSWORD` (placeholder `change_me_generated_on_init`
+in `.env.example`; existing `.env` untouched). **D24** compiles a hash-pinned `backend/requirements.lock`
+(65 pkgs) installed via `--require-hashes` in both Dockerfile stages, and bumps httpx2 2.4.0→2.5.0; the
+lock matched the already-installed known-good versions. **D4** runs api/worker/agent as `appuser` and the
+frontend dev server as `node` (both UID 1000) via a root entrypoint that chowns the root-owned managed-
+library / node_modules volumes then drops privileges with gosu; verified health 200, storage writable,
+worker supervisor spawns. Verified: `make frontend-check` green (88 passed), full backend suite **749
+passed**, no Python touched (ruff N/A). See
+`docs/agent_handoffs/2026-07-03-frontend-infra-audit-batch.md`.
+
 ## Track A performance batch — D13, D14, D15, D19, D20, D22 (2026-07-03)
 
 Six performance audit fixes, all degrading gracefully with Redis/Ollama down; the SQLite-without-Redis
