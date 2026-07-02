@@ -127,10 +127,16 @@ def resolve_streamable_pdf_path(db: Session, *, file: File, settings: Settings) 
     copy exists. Serving the derived copy gives the reader selectable/searchable text natively;
     extraction still runs on the ORIGINAL (this resolver is for streaming only).
     """
+    # Validate the file's OWN location first (rejects out-of-root / unauthorized locations by
+    # raising FileLocationError) BEFORE considering the derived copy — otherwise a file pointing
+    # outside the configured root could be served just because a derived copy with the same sha256
+    # happens to exist on disk (security bypass). Only once the original is authorized do we prefer
+    # the searchable derived rendition.
+    original = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
     derived = derived_ocr_path(settings, file.sha256)
     if derived.exists() and derived.is_file():
         return derived
-    return resolve_backend_readable_pdf_path(db, file=file, settings=settings)
+    return original
 
 
 def _validated_path(internal_uri: str, *, root: Path, escape_msg: str) -> Path:
