@@ -101,7 +101,9 @@ services:
       - ./pyproject.toml:/app/pyproject.toml
       # Same managed-library volume as the api, so the worker can read uploaded PDFs.
       - paperracks_library:/app/storage
-    command: ["rq", "worker", "--url", "redis://redis:6379/0", "paracord"]
+    # Supervisor launches the owner-configured number of RQ workers (app_config.rq_worker_count,
+    # read once at start). Change the count in the admin Settings, then restart this container.
+    command: ["python", "-m", "app.workers.supervisor"]
 
   # PaRacORD local workstation agent (client). Idles by default; drive it with
   #   docker compose exec agent python -m paperracks_agent.cli --help

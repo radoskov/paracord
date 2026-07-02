@@ -29,6 +29,10 @@ _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN = 300
 # scans (a local scan, not a client batch) are exempt from this cap.
 _DEFAULT_MAX_BATCH_ITEMS = 100
 
+# Out-of-the-box number of RQ extraction worker processes the supervisor launches (D1). Read once at
+# worker-container start; changing it requires a worker restart to apply.
+_DEFAULT_RQ_WORKER_COUNT = 2
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -57,6 +61,10 @@ class AppConfig(Base):
     # Overload protection (D1): max items in a single client import batch (server scans are exempt).
     max_batch_items: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_MAX_BATCH_ITEMS)
+    )
+    # Overload protection (D1): RQ worker processes the supervisor launches (apply-on-restart).
+    rq_worker_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_RQ_WORKER_COUNT)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
