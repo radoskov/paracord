@@ -5,18 +5,22 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_librarian
 from app.db.session import get_db
 from app.models.access_settings import ACCESS_LEVELS
-from app.models.organization import RackShelf, Shelf, ShelfWork
+from app.models.organization import Shelf, ShelfWork
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.access_settings import get_default_access_level
-from app.services.default_shelf import get_default_shelf_id, place_on_default_if_loose
+from app.services.default_shelf import (
+    get_default_shelf_id,
+    hard_delete_shelf,
+    place_on_default_if_loose,
+)
 from app.services.shelf_membership import add_work_to_shelf_checked
 
 router = APIRouter()
@@ -255,14 +259,5 @@ def delete_shelf(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The default shelf cannot be deleted — it is where unshelved papers land.",
         )
-    # Capture the affected papers before removing the memberships, then delete the shelf's links
-    # (explicitly, so it works regardless of DB-level ON DELETE behaviour) and the shelf itself.
-    work_ids = list(db.scalars(select(ShelfWork.work_id).where(ShelfWork.shelf_id == shelf_id)))
-    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
-    db.execute(delete(RackShelf).where(RackShelf.shelf_id == shelf_id))
-    db.delete(shelf)
-    db.flush()
-    # Any paper now on zero shelves falls back to the default shelf (others are left as-is).
-    for work_id in work_ids:
-        place_on_default_if_loose(db, work_id, actor_id=actor.id)
+    hard_delete_shelf(db, shelf, actor_id=actor.id)
     db.commit()

@@ -115,6 +115,35 @@
       racks = await client.listRacks();
     }, 'Rack archived');
   }
+
+  async function removeRack(): Promise<void> {
+    if (!selected) return;
+    const rack = selected;
+    const n = rackShelves.length;
+    if (
+      !window.confirm(
+        `Delete rack “${rack.name}”? This permanently removes the rack and can't be undone.`,
+      )
+    )
+      return;
+    // Two-step: only when the rack has shelves, ask whether to delete them too.
+    let deleteShelves = false;
+    if (n > 0) {
+      deleteShelves = window.confirm(
+        `This rack contains ${n} shelf${n === 1 ? '' : 'ves'}.\n\n` +
+          `OK — also DELETE ${n === 1 ? 'that shelf' : 'those shelves'} (papers found only on ` +
+          `${n === 1 ? 'it' : 'them'} move to the default shelf).\n` +
+          `Cancel — KEEP the shelves; they just leave this rack.`,
+      );
+    }
+    await run(async () => {
+      await client.deleteRack(rack.id, deleteShelves);
+      selected = null;
+      selectedRackId.set(null);
+      rackShelves = [];
+      racks = await client.listRacks();
+    }, deleteShelves ? 'Rack and its shelves deleted' : 'Rack deleted');
+  }
 </script>
 
 <section class="layout">
@@ -183,6 +212,8 @@
           </label>
           <button type="button" class="secondary" on:click={archive} disabled={loading || !$canManageStructure}
             title={$canManageStructure ? 'Archive this rack (asks for confirmation)' : INSUFFICIENT_ROLE}>Archive rack</button>
+          <button type="button" class="danger" on:click={removeRack} disabled={loading || !$canManageStructure}
+            title={$canManageStructure ? 'Delete this rack; optionally delete its shelves too' : INSUFFICIENT_ROLE}>Delete rack</button>
         </div>
       </div>
 

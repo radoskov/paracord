@@ -156,3 +156,61 @@ def test_delete_shelf_requires_modify_permission(client, auth_headers, db):
         client.delete(f"/api/v1/shelves/{shelf_id}", headers=auth_headers("reader")).status_code
         == 403
     )
+
+
+# --- rack hard-delete: optional cascade to shelves ---
+
+
+def _new_rack(client, headers, name) -> str:
+    return client.post("/api/v1/racks", headers=headers, json={"name": name}).json()["id"]
+
+
+def _add_shelf_to_rack(client, headers, rack_id, shelf_id):
+    return client.post(
+        f"/api/v1/racks/{rack_id}/shelves", headers=headers, json={"shelf_id": shelf_id}
+    )
+
+
+def test_delete_rack_keeps_shelves_by_default(client, auth_headers, db):
+    owner = auth_headers("owner")
+    shelf_id = _new_shelf(client, owner, "Kept shelf")
+    rack_id = _new_rack(client, owner, "Rack keep")
+    _add_shelf_to_rack(client, owner, rack_id, shelf_id)
+
+    r = client.delete(f"/api/v1/racks/{rack_id}", headers=owner)  # delete_shelves defaults false
+    assert r.status_code == 204
+    assert client.get(f"/api/v1/racks/{rack_id}/shelves", headers=owner).status_code == 404
+    # The shelf survived (just left the rack).
+    assert client.get(f"/api/v1/shelves/{shelf_id}/works", headers=owner).status_code == 200
+
+
+def test_delete_rack_with_shelves_cascades_and_falls_back_to_default(client, auth_headers, db):
+    import uuid as _uuid
+
+    owner = auth_headers("owner")
+    only_paper = _new_paper(client, owner, "rack-only paper")
+    shared_paper = _new_paper(client, owner, "rack-shared paper")
+    in_rack = _new_shelf(client, owner, "In-rack shelf")
+    other = _new_shelf(client, owner, "Other shelf")
+    for wid in (only_paper, shared_paper):
+        client.post(f"/api/v1/shelves/{in_rack}/works", headers=owner, json={"work_id": wid})
+    client.post(f"/api/v1/shelves/{other}/works", headers=owner, json={"work_id": shared_paper})
+    rack_id = _new_rack(client, owner, "Rack cascade")
+    _add_shelf_to_rack(client, owner, rack_id, in_rack)
+
+    r = client.delete(f"/api/v1/racks/{rack_id}?delete_shelves=true", headers=owner)
+    assert r.status_code == 204
+    db.expire_all()
+    # The in-rack shelf was hard-deleted.
+    assert client.get(f"/api/v1/shelves/{in_rack}/works", headers=owner).status_code == 404
+    # Paper only on the deleted shelf → default; paper also on 'other' stays there (not default).
+    assert _shelf_ids_for(db, _uuid.UUID(only_paper)) == {get_default_shelf_id(db)}
+    assert _shelf_ids_for(db, _uuid.UUID(shared_paper)) == {_uuid.UUID(other)}
+
+
+def test_delete_rack_requires_modify_permission(client, auth_headers):
+    owner = auth_headers("owner")
+    rack_id = _new_rack(client, owner, "Perm rack")
+    assert (
+        client.delete(f"/api/v1/racks/{rack_id}", headers=auth_headers("reader")).status_code == 403
+    )

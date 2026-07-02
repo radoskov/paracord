@@ -3,8 +3,9 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_librarian
@@ -14,6 +15,7 @@ from app.models.organization import Rack, RackShelf, Shelf
 from app.models.user import User
 from app.services import access
 from app.services.access_settings import get_default_access_level
+from app.services.default_shelf import get_default_shelf_id, hard_delete_shelf
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -206,4 +208,41 @@ def remove_shelf_from_rack(
     if link is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack shelf not found")
     db.delete(link)
+    db.commit()
+
+
+@router.delete("/{rack_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_rack(
+    rack_id: uuid.UUID,
+    delete_shelves: bool = Query(default=False),
+    db: Session = DB_DEP,
+    actor: User = LIBRARIAN_DEP,
+) -> None:
+    """Hard-delete a rack (requires modify access).
+
+    ``delete_shelves=false`` (default): the rack and its rack↔shelf links are removed; the shelves
+    themselves survive (they simply leave this rack — a shelf with no rack is fine).
+    ``delete_shelves=true``: each associated shelf the caller may modify is ALSO hard-deleted (its
+    papers left with no shelf fall back to the default shelf), except the default shelf, which is
+    never deleted. Distinct from archiving (PATCH status), which keeps the rack.
+    """
+    rack = db.get(Rack, rack_id)
+    if rack is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rack not found")
+    _guard_modify_rack(db, actor, rack)
+
+    if delete_shelves:
+        default_id = get_default_shelf_id(db)
+        shelf_ids = list(db.scalars(select(RackShelf.shelf_id).where(RackShelf.rack_id == rack_id)))
+        for shelf_id in shelf_ids:
+            if shelf_id == default_id:  # the default shelf is the fallback home; never delete it
+                continue
+            shelf = db.get(Shelf, shelf_id)
+            # Only delete shelves the caller may modify; others are just un-racked below.
+            if shelf is not None and access.can_modify_shelf(db, actor, shelf):
+                hard_delete_shelf(db, shelf, actor_id=actor.id)
+
+    # Drop any remaining rack↔shelf links (kept/skipped shelves) and the rack itself.
+    db.execute(delete(RackShelf).where(RackShelf.rack_id == rack_id))
+    db.delete(rack)
     db.commit()

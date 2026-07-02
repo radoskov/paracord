@@ -11974,6 +11974,67 @@
       }
     },
     "/api/v1/racks/{rack_id}": {
+      "delete": {
+        "description": "Hard-delete a rack (requires modify access).\n\n``delete_shelves=false`` (default): the rack and its rack↔shelf links are removed; the shelves\nthemselves survive (they simply leave this rack — a shelf with no rack is fine).\n``delete_shelves=true``: each associated shelf the caller may modify is ALSO hard-deleted (its\npapers left with no shelf fall back to the default shelf), except the default shelf, which is\nnever deleted. Distinct from archiving (PATCH status), which keeps the rack.",
+        "operationId": "delete_rack_api_v1_racks__rack_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rack Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delete_shelves",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Delete Shelves",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Rack",
+        "tags": [
+          "racks"
+        ]
+      },
       "patch": {
         "description": "Edit or archive a rack (requires modify access to this rack).",
         "operationId": "update_rack_api_v1_racks__rack_id__patch",

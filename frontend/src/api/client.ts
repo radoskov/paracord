@@ -1268,6 +1268,13 @@ export class ApiClient {
     return this.request<Rack>(`/api/v1/racks/${id}`, { method: 'PATCH', body: payload });
   }
 
+  async deleteRack(id: string, deleteShelves = false): Promise<void> {
+    // Hard delete. When deleteShelves is true, associated shelves are also hard-deleted (papers
+    // only on them fall back to the default shelf); otherwise the shelves just leave this rack.
+    const suffix = deleteShelves ? '?delete_shelves=true' : '';
+    await this.request<void>(`/api/v1/racks/${id}${suffix}`, { method: 'DELETE' });
+  }
+
   async listRackShelves(rackId: string): Promise<Shelf[]> {
     return this.request<Shelf[]>(`/api/v1/racks/${rackId}/shelves`);
   }

@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, inspect, select
+from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.orm import Session
 
 from app.models.access_settings import ACCESS_SETTINGS_SINGLETON_ID, AccessSettings
-from app.models.organization import Shelf, ShelfWork
+from app.models.organization import RackShelf, Shelf, ShelfWork
 from app.services.access_settings import get_default_access_level
 
 DEFAULT_SHELF_NAME = "Inbox"
@@ -104,3 +104,20 @@ def place_on_default_if_loose(
     shelf = get_or_create_default_shelf(db, actor_id=actor_id)
     if shelf is not None and db.get(ShelfWork, {"shelf_id": shelf.id, "work_id": work_id}) is None:
         db.add(ShelfWork(shelf_id=shelf.id, work_id=work_id, added_by_user_id=actor_id))
+
+
+def hard_delete_shelf(db: Session, shelf: Shelf, *, actor_id: uuid.UUID | None = None) -> None:
+    """Delete a shelf + its links, moving papers left with no shelf onto the default shelf.
+
+    Shared by the shelf-delete endpoint and rack-delete (delete-shelves-too). The caller is
+    responsible for the permission check and for refusing to delete the default shelf itself. Does
+    NOT commit — the caller owns the transaction. Papers still on other shelves are left as-is;
+    a paper that was ONLY on this shelf falls back to the default shelf (no free-floating papers).
+    """
+    work_ids = list(db.scalars(select(ShelfWork.work_id).where(ShelfWork.shelf_id == shelf.id)))
+    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf.id))
+    db.execute(delete(RackShelf).where(RackShelf.shelf_id == shelf.id))
+    db.delete(shelf)
+    db.flush()
+    for work_id in work_ids:
+        place_on_default_if_loose(db, work_id, actor_id=actor_id)
