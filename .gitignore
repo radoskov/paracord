@@ -64,7 +64,9 @@ docs/latex/build/
 .DS_Store
 .vscode/
 .idea/
+.claude
 
 # Local scratch working notes (intentionally untracked)
 FOLLOWUPS.md
-drop-commit-msg-lines.sh
+FOLLOWUP.md
+drop-cl.sh
