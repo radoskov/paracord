@@ -7,6 +7,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track A audit batch — D6, D8, D9, D10, D11, D12 (2026-07-03)
+
+Six correctness/security audit fixes, each fail-open on optional external services. **D6** SSRF-guards
+the admin-set `ollama_url`: `ai_config._validate` now rejects a URL that isn't http(s) to a loopback
+IP / `localhost` / bare docker-service name unless `ALLOW_EXTERNAL_OLLAMA=true` (reuses find-on-web's
+host classification style). **D8** makes `enrich_work` per-source resilient — each source is queried
+in its own try/except, a failure is recorded in the new `failed` list (also surfaced as the
+`enrich_work_job` return value) and the remaining sources still run; chained chunk/embed enqueue is
+untouched. **D9 (contract change)** reworks folder import (`storage.import_server_folder`): the batch
+row is committed up front in its own txn, each file imports inside a SAVEPOINT so one bad file only
+rolls back itself (counted in the new `stats["errors"]`), and status/stats finalize in one commit at
+the end — **partial imports are now visible** (a scan with some unreadable files still commits the good
+files instead of rolling the whole batch back). The owed-extraction marking (D7) moved into the same
+final commit; the endpoint response shape is unchanged (`stats` gained an `errors` key). **D10** gates
+the RQ worker supervisor on `alembic current == head` via `wait_for_migrations()` (bounded wait, fails
+open after `PARACORD_MIGRATION_WAIT_TIMEOUT`s so a misconfigured DB starts anyway rather than wedging).
+**D11** adds `default_shelf.backfill_loose_papers_onto_default`, run idempotently in the FastAPI
+lifespan, so any loose paper is placed on the default shelf on startup (safe across API workers,
+no-ops on an empty/at-head DB). **D12** makes multimode topic clustering skip a model whose per-work
+embedding dimension doesn't match its registered/expected dim (logged warning) instead of padding —
+if every model is skipped it falls back to the TF-IDF baseline. Verified: full backend suite **738
+passed**, ruff clean (backend + agent), `openapi.json` unchanged (no API surface change).
+See `docs/agent_handoffs/2026-07-03-track-a-audit-batch.md`.
+
 ## D35 + D37 — drop dead ML-extraction seam; pgvector on by default (2026-07-02)
 
 Two decided audit items sharing the backend config. **D35** removes the dead ML-extraction seam:
