@@ -138,10 +138,10 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
     # Pull the server's view first so we can cache its title/authors metadata (#11) at upsert time.
     try:
         server_files = {f["local_file_id"]: f for f in await client.get_my_files()}
-    except Exception:  # noqa: BLE001 - status is best-effort; proceed without it
-        server_files = {}
+    except Exception:  # noqa: BLE001 - unknown server view; skip actions below, not re-upload all
+        server_files = None
     for s in scanned:
-        sf = server_files.get(s.local_file_id, {})
+        sf = server_files.get(s.local_file_id, {}) if server_files is not None else {}
         state.upsert(
             local_file_id=s.local_file_id,
             real_path=str(s.path),
@@ -160,25 +160,27 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
     if absent:
         await client.report_source_removed(absent)
 
-    server_state = {lid: f.get("processing_state") for lid, f in server_files.items()}
-
     applied = 0
-    for s in scanned:
-        pstate = server_state.get(s.local_file_id)
-        if s.action == "index_and_extract" and pstate not in (
-            "extracting",
-            "extracted",
-            "teleported",
-        ):
-            with s.path.open("rb") as handle:
-                await client.upload_for_extraction(s.local_file_id, handle)
-            state.set_processing_state(s.local_file_id, "extracting")
-            applied += 1
-        elif s.action == "teleport" and pstate != "teleported":
-            with s.path.open("rb") as handle:
-                await client.upload_teleport_content(s.local_file_id, handle)
-            state.set_processing_state(s.local_file_id, "teleported")
-            applied += 1
+    # Without the server's view we cannot tell what it already has, so skip the action phase
+    # this cycle rather than re-uploading the whole corpus.
+    if server_files is not None:
+        server_state = {lid: f.get("processing_state") for lid, f in server_files.items()}
+        for s in scanned:
+            pstate = server_state.get(s.local_file_id)
+            if s.action == "index_and_extract" and pstate not in (
+                "extracting",
+                "extracted",
+                "teleported",
+            ):
+                with s.path.open("rb") as handle:
+                    await client.upload_for_extraction(s.local_file_id, handle)
+                state.set_processing_state(s.local_file_id, "extracting")
+                applied += 1
+            elif s.action == "teleport" and pstate != "teleported":
+                with s.path.open("rb") as handle:
+                    await client.upload_teleport_content(s.local_file_id, handle)
+                state.set_processing_state(s.local_file_id, "teleported")
+                applied += 1
 
     fulfilled = await fulfil_requests(config, state, client)
     return {

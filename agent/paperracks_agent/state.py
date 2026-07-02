@@ -6,7 +6,9 @@ teleport policy, cached processing state, and the reject-forever block. Restored
 status/monitoring survive a stop/start.
 """
 
+import contextlib
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,20 +61,41 @@ class AgentState:
 
     def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path).expanduser() if path else default_state_path()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path))
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        # Migrate a pre-existing DB that lacks newer columns (idempotent ADD COLUMN guards).
-        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(files)")}
-        if "mtime" not in columns:
-            self._conn.execute("ALTER TABLE files ADD COLUMN mtime REAL")
-        # Server→agent metadata sync (#11): cached title + authors of the linked Work.
-        if "extracted_title" not in columns:
-            self._conn.execute("ALTER TABLE files ADD COLUMN extracted_title TEXT")
-        if "extracted_authors" not in columns:
-            self._conn.execute("ALTER TABLE files ADD COLUMN extracted_authors TEXT")
-        self._conn.commit()
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            self._conn = self._open()
+        except sqlite3.DatabaseError:
+            # Corrupt DB: move it aside and start fresh — it only caches hashes + local flags.
+            aside = self.path.with_name(f"{self.path.name}.corrupt-{time.strftime('%Y%m%d%H%M%S')}")
+            self.path.replace(aside)
+            for suffix in ("-wal", "-shm"):
+                with contextlib.suppress(OSError):
+                    Path(str(self.path) + suffix).replace(str(aside) + suffix)
+            self._conn = self._open()
+
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path))
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.executescript(_SCHEMA)
+            # Migrate a pre-existing DB that lacks newer columns (idempotent ADD COLUMN guards).
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(files)")}
+            if "mtime" not in columns:
+                conn.execute("ALTER TABLE files ADD COLUMN mtime REAL")
+            # Server→agent metadata sync (#11): cached title + authors of the linked Work.
+            if "extracted_title" not in columns:
+                conn.execute("ALTER TABLE files ADD COLUMN extracted_title TEXT")
+            if "extracted_authors" not in columns:
+                conn.execute("ALTER TABLE files ADD COLUMN extracted_authors TEXT")
+            conn.commit()
+        except sqlite3.DatabaseError:
+            conn.close()
+            raise
+        with contextlib.suppress(OSError):
+            self.path.chmod(0o600)  # maps real paths of everything indexed — keep it private
+        return conn
 
     def close(self) -> None:
         self._conn.close()

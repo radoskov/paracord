@@ -6,10 +6,12 @@ that file and stops the process; ``web status`` reports whether it is running. T
 local-only: it never listens off-host and every request is gated by the printed token.
 """
 
+import contextlib
 import json
 import os
 import secrets
 import signal
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -73,7 +75,9 @@ def web_up(args) -> None:
     token = secrets.token_urlsafe(24)
 
     runtime = runtime_path()
-    runtime.parent.mkdir(parents=True, exist_ok=True)
+    runtime.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        runtime.parent.chmod(0o700)
     log_file = runtime.parent / "web.log"
 
     env = dict(os.environ)
@@ -99,6 +103,8 @@ def web_up(args) -> None:
         json.dumps({"pid": proc.pid, "host": host, "port": port, "token": token}),
         encoding="utf-8",
     )
+    with contextlib.suppress(OSError):
+        runtime.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
     print(f"Web GUI started (pid {proc.pid}).")
     print(f"  Open: http://{host}:{port}/?token={token}")
     print("  Stop: paracord-agent web down")

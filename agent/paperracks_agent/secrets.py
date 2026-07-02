@@ -43,10 +43,13 @@ def _read_file() -> dict:
 
 def _write_file(data: dict) -> None:
     path = _secrets_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Create 0600 up-front and replace atomically, so the secrets are never world-readable.
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(data))
+    os.replace(tmp, path)
 
 
 def set_secret(name: str, value: str) -> None:

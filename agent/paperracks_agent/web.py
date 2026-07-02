@@ -548,8 +548,8 @@ async function refresh(){
   else if(s.me&&s.me.status==='approved'){setLight('green','reachable + approved');}
   else{setLight('yellow','reachable but '+((s.me&&s.me.status)||'no agent identity'));}
   document.getElementById('conn').innerHTML = s.connected
-    ? `<span class="ok">●</span> connected to ${s.server_url} — agent <b>${s.me.name}</b> [${s.me.status}]; can: ${Object.keys(s.me).filter(k=>k.startsWith('can_')&&s.me[k]).map(k=>k.slice(4)).join(', ')||'—'}`
-    : `<span class="bad">●</span> not connected (${s.server_url}) ${s.error?'— '+s.error:''}`;
+    ? `<span class="ok">●</span> connected to ${esc(s.server_url)} — agent <b>${esc(s.me.name)}</b> [${esc(s.me.status)}]; can: ${esc(Object.keys(s.me).filter(k=>k.startsWith('can_')&&s.me[k]).map(k=>k.slice(4)).join(', ')||'—')}`
+    : `<span class="bad">●</span> not connected (${esc(s.server_url)}) ${s.error?'— '+esc(s.error):''}`;
   const url=document.getElementById('url');if(document.activeElement!==url)url.value=s.server_url;
   // managed items
   const items=[...s.folders.map(f=>({...f,kind:'folder'})),...s.files.map(f=>({...f,kind:'file'}))];
