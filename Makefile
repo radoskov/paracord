@@ -39,10 +39,13 @@ help: ## Show this help.
 # ---------------------------------------------------------------------------
 
 .PHONY: init
-init: ## Create .env from .env.example if missing.
+init: ## Create .env from .env.example if missing, generating a random POSTGRES_PASSWORD.
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		echo "Created .env from .env.example"; \
+		pw=$$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32); \
+		if [ -z "$$pw" ]; then pw=$$(openssl rand -hex 16); fi; \
+		sed -i.bak "s/change_me_generated_on_init/$$pw/g" .env && rm -f .env.bak; \
+		echo "Created .env from .env.example (generated a random POSTGRES_PASSWORD)"; \
 	else \
 		echo ".env already exists"; \
 	fi
