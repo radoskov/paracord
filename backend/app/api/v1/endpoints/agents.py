@@ -97,7 +97,7 @@ def list_pending_teleports(
 
 
 @router.post("/teleports/{local_file_id}/content", status_code=status.HTTP_201_CREATED)
-async def upload_teleport_content(
+def upload_teleport_content(
     local_file_id: str,
     file: UploadFile,
     db: Session = DB_DEP,
@@ -108,7 +108,7 @@ async def upload_teleport_content(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the teleport privilege"
         )
-    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -132,7 +132,7 @@ async def upload_teleport_content(
 
 
 @router.post("/files/{local_file_id}/extract", status_code=status.HTTP_201_CREATED)
-async def upload_for_extraction(
+def upload_for_extraction(
     local_file_id: str,
     file: UploadFile,
     db: Session = DB_DEP,
@@ -144,7 +144,7 @@ async def upload_for_extraction(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the extract privilege"
         )
-    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -269,7 +269,7 @@ def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> li
 
 
 @router.post("/files/{local_file_id}/offer-teleport", status_code=status.HTTP_201_CREATED)
-async def offer_teleport(
+def offer_teleport(
     local_file_id: str,
     file: UploadFile,
     db: Session = DB_DEP,
@@ -284,7 +284,7 @@ async def offer_teleport(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the teleport privilege"
         )
-    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,

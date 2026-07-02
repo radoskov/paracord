@@ -13,13 +13,14 @@ from app.api.deps import require_authenticated_user, require_min_role
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import File
+from app.models.file import File, FileWorkLink
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.duplicate_detection import scan_duplicate_candidates
 from app.services.duplicate_resolution import (
     apply_duplicate_action,
+    candidate_entity_maps,
     describe_candidate,
     reopen_duplicate_candidate,
     split_multiwork_file,
@@ -77,10 +78,16 @@ class DuplicateCandidateRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
-def _candidate_view(db: Session, candidate: DuplicateCandidate) -> DuplicateCandidateRead:
+def _candidate_view(
+    db: Session,
+    candidate: DuplicateCandidate,
+    *,
+    works: dict[uuid.UUID, Work] | None = None,
+    files: dict[uuid.UUID, File] | None = None,
+) -> DuplicateCandidateRead:
     """Serialize a candidate with human-readable labels and a suggested merge target."""
     return DuplicateCandidateRead.model_validate(candidate).model_copy(
-        update=describe_candidate(db, candidate)
+        update=describe_candidate(db, candidate, works=works, files=files)
     )
 
 
@@ -130,11 +137,13 @@ def list_duplicate_candidates(
         stmt = stmt.where(DuplicateCandidate.candidate_type == candidate_type)
     stmt = stmt.order_by(DuplicateCandidate.created_at.desc()).limit(limit)
     visible = access.visible_work_ids(db, actor)
-    return [
-        _candidate_view(db, candidate)
+    candidates = [
+        candidate
         for candidate in db.scalars(stmt).all()
         if _candidate_visible(candidate, visible)
     ]
+    works, files = candidate_entity_maps(db, candidates)
+    return [_candidate_view(db, candidate, works=works, files=files) for candidate in candidates]
 
 
 @router.post("/scan", response_model=DuplicateScanResult, status_code=status.HTTP_201_CREATED)
@@ -174,14 +183,22 @@ def scan_duplicates(
     for file in files:
         candidates.extend(scan_duplicate_candidates(db, file=file))
 
+    candidate_ids = [candidate.id for candidate in candidates]
     db.commit()
-    for candidate in candidates:
-        db.refresh(candidate)
+    if candidate_ids:
+        # One IN() reload re-populates the committed (expired) rows instead of a refresh per row.
+        db.scalars(
+            select(DuplicateCandidate).where(DuplicateCandidate.id.in_(candidate_ids))
+        ).all()
+    entity_works, entity_files = candidate_entity_maps(db, candidates)
     return DuplicateScanResult(
         scanned_works=len(works),
         scanned_files=len(files),
         candidate_count=len(candidates),
-        candidates=[_candidate_view(db, candidate) for candidate in candidates],
+        candidates=[
+            _candidate_view(db, candidate, works=entity_works, files=entity_files)
+            for candidate in candidates
+        ],
     )
 
 
@@ -254,7 +271,25 @@ def _selected_works(db: Session, work_id: uuid.UUID | None, *, actor: User) -> l
 def _selected_files(db: Session, file_id: uuid.UUID | None, *, actor: User) -> list[File]:
     if file_id is None:
         files = list(db.scalars(select(File)).all())
-        return [f for f in files if access.can_see_file(db, actor, f.id)]
+        if access.is_admin_or_owner(actor):
+            return files
+        # Batched visibility: compute the visible-work set once and fetch all file->work links
+        # in one IN() query (instead of a can_see_file scan per file).
+        visible = access.visible_work_ids(db, actor)
+        linked_works: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for fid, wid in db.execute(
+            select(FileWorkLink.file_id, FileWorkLink.work_id).where(
+                FileWorkLink.file_id.in_([f.id for f in files])
+            )
+        ):
+            linked_works.setdefault(fid, []).append(wid)
+        return [
+            f
+            for f in files
+            if f.id not in linked_works  # loose file -> open
+            or visible is None
+            or any(wid in visible for wid in linked_works[f.id])
+        ]
     file = db.get(File, file_id)
     if file is None or not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")

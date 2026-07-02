@@ -6,6 +6,7 @@ manifest. A *user* requests a teleport for one of those entries; the agent then 
 bytes, which the server verifies against the manifest hash before storing the managed file.
 """
 
+import contextlib
 import hashlib
 import uuid
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services import storage
 from app.services.audit import record_event
+from app.services.default_shelf import place_on_default_if_loose
+from app.services.file_paths import derived_ocr_path
 from app.services.identifiers import arxiv_base_id
 from app.utils.normalization import normalize_title
 
@@ -215,6 +218,9 @@ def complete_teleport(
         db.add(work)
         db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+        place_on_default_if_loose(
+            db, work.id, actor_id=agent_file.requested_by_user_id
+        )  # no free-floating papers (#1)
 
     agent_file.teleport_status = "complete"
     agent_file.processing_state = "teleported"
@@ -304,6 +310,7 @@ def offer_teleport(
         db.add(work)
         db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+        place_on_default_if_loose(db, work.id)  # no free-floating papers (#1)
 
     agent_file.teleport_status = "complete"
     agent_file.processing_state = "teleported"
@@ -423,6 +430,7 @@ def extract_and_index(
         db.add(work)
         db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
+        place_on_default_if_loose(db, work.id)  # no free-floating papers (#1)
 
     agent_file.import_action = "index_and_extract"
     agent_file.processing_state = "extracting"
@@ -469,6 +477,10 @@ def discard_after_extract(db: Session, *, file: File, settings: Settings | None 
             except (OSError, ValueError):
                 pass
         db.delete(location)
+
+    if file.sha256:
+        with contextlib.suppress(OSError, ValueError):
+            derived_ocr_path(settings, file.sha256).unlink(missing_ok=True)
 
     file.status = "extracted_discarded"
     agent_file.processing_state = "extracted"

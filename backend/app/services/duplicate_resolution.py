@@ -13,6 +13,7 @@ from app.models.organization import ShelfWork, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services.audit import record_event
+from app.services.default_shelf import place_on_default_if_loose
 from app.services.duplicate_detection import split_arxiv_id
 
 DuplicateAction = Literal[
@@ -39,7 +40,7 @@ def apply_duplicate_action(
             "Candidate has already been resolved; reopen it before applying another action"
         )
     if action == "merge_works":
-        _merge_work_candidate(db, candidate, target_work_id=target_work_id)
+        _merge_work_candidate(db, candidate, target_work_id=target_work_id, actor=actor)
         _resolve(candidate, actor, "accepted", action)
     elif action == "link_as_version":
         _link_work_candidate_as_version(db, candidate, target_work_id=target_work_id)
@@ -157,11 +158,14 @@ def _merge_work_candidate(
     candidate: DuplicateCandidate,
     *,
     target_work_id: uuid.UUID | None,
+    actor: User,
 ) -> None:
     target, source = _work_pair(db, candidate, target_work_id=target_work_id)
     _move_file_links_to_work(db, source_work=source, target_work=target, version=None)
     _move_shelf_memberships(db, source_work=source, target_work=target)
     _move_work_tags(db, source_work=source, target_work=target)
+    db.flush()
+    place_on_default_if_loose(db, target.id, actor_id=actor.id)  # no free-floating papers (#1)
     source.work_type = "merged"
     source.canonical_metadata_source = "merged"
     source.updated_at = datetime.now(UTC)
@@ -336,14 +340,57 @@ _CANDIDATE_TYPE_LABELS = {
 }
 
 
-def describe_candidate(db: Session, candidate: DuplicateCandidate) -> dict[str, Any]:
+def candidate_entity_maps(
+    db: Session, candidates: list[DuplicateCandidate]
+) -> tuple[dict[uuid.UUID, Work], dict[uuid.UUID, File]]:
+    """Batch-load the works/files referenced by ``candidates`` (one IN() query per entity type).
+
+    Pass the maps into :func:`describe_candidate` to avoid per-candidate ``db.get`` round trips
+    when serializing a list of candidates.
+    """
+    work_ids: set[uuid.UUID] = set()
+    file_ids: set[uuid.UUID] = set()
+    for candidate in candidates:
+        for entity_type, entity_id in (
+            (candidate.entity_a_type, candidate.entity_a_id),
+            (candidate.entity_b_type, candidate.entity_b_id),
+        ):
+            if entity_type == "work":
+                work_ids.add(entity_id)
+            elif entity_type == "file":
+                file_ids.add(entity_id)
+    works: dict[uuid.UUID, Work] = {}
+    files: dict[uuid.UUID, File] = {}
+    if work_ids:
+        works = {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(work_ids)))}
+    if file_ids:
+        files = {f.id: f for f in db.scalars(select(File).where(File.id.in_(file_ids)))}
+    return works, files
+
+
+def describe_candidate(
+    db: Session,
+    candidate: DuplicateCandidate,
+    *,
+    works: dict[uuid.UUID, Work] | None = None,
+    files: dict[uuid.UUID, File] | None = None,
+) -> dict[str, Any]:
     """Build human-readable labels + a suggested merge target for a candidate.
 
     Returned as plain data so the API layer can attach it to the response without the ORM
-    needing relationships it does not declare.
+    needing relationships it does not declare. ``works``/``files`` optionally supply pre-loaded
+    lookup maps (see :func:`candidate_entity_maps`); without them each entity is fetched via
+    ``db.get``.
     """
-    a_label = _entity_label(db, candidate.entity_a_type, candidate.entity_a_id)
-    b_label = _entity_label(db, candidate.entity_b_type, candidate.entity_b_id)
+
+    def _work(work_id: uuid.UUID) -> Work | None:
+        return works.get(work_id) if works is not None else db.get(Work, work_id)
+
+    def _file(file_id: uuid.UUID) -> File | None:
+        return files.get(file_id) if files is not None else db.get(File, file_id)
+
+    a_label = _entity_label(candidate.entity_a_type, candidate.entity_a_id, _work, _file)
+    b_label = _entity_label(candidate.entity_b_type, candidate.entity_b_id, _work, _file)
 
     suggested_target_work_id: uuid.UUID | None = None
     if (
@@ -351,8 +398,8 @@ def describe_candidate(db: Session, candidate: DuplicateCandidate) -> dict[str, 
         and candidate.entity_b_type == "work"
         and candidate.entity_a_id != candidate.entity_b_id
     ):
-        work_a = db.get(Work, candidate.entity_a_id)
-        work_b = db.get(Work, candidate.entity_b_id)
+        work_a = _work(candidate.entity_a_id)
+        work_b = _work(candidate.entity_b_id)
         if work_a is not None and work_b is not None:
             suggested_target_work_id = choose_target_work(work_a, work_b).id
 
@@ -364,13 +411,13 @@ def describe_candidate(db: Session, candidate: DuplicateCandidate) -> dict[str, 
     }
 
 
-def _entity_label(db: Session, entity_type: str, entity_id: uuid.UUID) -> str:
+def _entity_label(entity_type: str, entity_id: uuid.UUID, get_work, get_file) -> str:
     if entity_type == "work":
-        work = db.get(Work, entity_id)
+        work = get_work(entity_id)
         if work is not None:
             return work.canonical_title or f"Untitled work ({str(work.id)[:8]})"
     elif entity_type == "file":
-        file = db.get(File, entity_id)
+        file = get_file(entity_id)
         if file is not None:
             return file.original_filename or f"file {file.sha256[:12]}"
     return f"{entity_type} {str(entity_id)[:8]}"

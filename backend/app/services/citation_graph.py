@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.citation import Reference
@@ -90,16 +90,21 @@ def build_citation_graph(
     if not scope_works:
         return CitationGraph(summary=_summary([], [], scope_count=0, unresolved=0))
 
-    local_index = _local_work_index(db, visible_ids=visible_ids)
+    references = db.scalars(
+        select(Reference).where(Reference.citing_work_id.in_(scope_works.keys()))
+    ).all()
+
+    local_index = _local_work_index(
+        db,
+        scope_works=scope_works,
+        references=references if node_mode == "include_external" else None,
+        visible_ids=visible_ids,
+    )
 
     nodes: dict[str, GraphNode] = {str(work.id): _local_node(work) for work in scope_works.values()}
     edge_weights: dict[tuple[str, str], int] = defaultdict(int)
     edge_resolution: dict[tuple[str, str], str] = {}
     unresolved = 0
-
-    references = db.scalars(
-        select(Reference).where(Reference.citing_work_id.in_(scope_works.keys()))
-    ).all()
 
     for reference in references:
         resolved = _resolve_reference(reference, local_index)
@@ -277,14 +282,44 @@ def _scope_works(
     return {work.id: work for work in works}
 
 
-def _local_work_index(db: Session, *, visible_ids: set[uuid.UUID] | None = None) -> dict[str, Work]:
+def _local_work_index(
+    db: Session,
+    *,
+    scope_works: dict[uuid.UUID, Work],
+    references: list[Reference] | None = None,
+    visible_ids: set[uuid.UUID] | None = None,
+) -> dict[str, Work]:
     """Map ``doi:<doi>`` / ``arxiv:<base>`` identifier keys to local works.
 
-    When ``visible_ids`` is provided, hidden works are excluded so a reference can never resolve to
-    (and leak the title/year/DOI of) a work the caller may not see.
+    Built from the already-loaded scope works instead of scanning the whole Work table. When
+    ``references`` are given (``include_external`` mode, where a reference may resolve to a local
+    work outside the scope), works matching the references' identifiers are fetched in one query
+    and added. When ``visible_ids`` is provided, hidden works are excluded so a reference can never
+    resolve to (and leak the title/year/DOI of) a work the caller may not see.
     """
+    candidates: list[Work] = list(scope_works.values())
+    if references is not None:
+        dois = {normalize_doi(ref.doi) for ref in references if ref.doi}
+        arxiv_bases = {
+            base
+            for base in (
+                split_arxiv_id(ref.arxiv_id)["base"] for ref in references if ref.arxiv_id
+            )
+            if base
+        }
+        conditions = []
+        if dois:
+            conditions.append(func.lower(Work.doi).in_(dois))
+        if arxiv_bases:
+            conditions.append(Work.arxiv_base_id.in_(arxiv_bases))
+        if conditions:
+            candidates.extend(
+                work
+                for work in db.scalars(select(Work).where(or_(*conditions))).all()
+                if work.id not in scope_works
+            )
     index: dict[str, Work] = {}
-    for work in db.scalars(select(Work)).all():
+    for work in candidates:
         if visible_ids is not None and work.id not in visible_ids:
             continue
         for key in _identifier_keys(doi=work.doi, arxiv_id=work.arxiv_id):

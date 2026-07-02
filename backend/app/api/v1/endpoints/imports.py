@@ -189,7 +189,7 @@ _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit
 
 
 @router.post("/upload", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
-async def upload_pdf(
+def upload_pdf(
     file: UploadFile,
     target_shelf_id: uuid.UUID | None = Form(default=None),
     db: Session = DB_DEP,
@@ -212,7 +212,7 @@ async def upload_pdf(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are accepted",
         )
-    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -277,6 +277,7 @@ def import_by_identifier(
     """
     from app.models.work import Work
     from app.services.audit import record_event
+    from app.services.default_shelf import place_on_default_if_loose
 
     value = payload.value.strip()
     if not value:
@@ -348,6 +349,8 @@ def import_by_identifier(
         add_work_to_shelf_checked(
             db, shelf_id=payload.target_shelf_id, work_id=work.id, actor=actor
         )
+    else:
+        place_on_default_if_loose(db, work.id, actor_id=actor.id)  # no free-floating papers (#1)
     db.commit()
     return IdentifierImportResponse(
         work_id=work.id, created=True, enriched_sources=result["sources"]
@@ -550,9 +553,17 @@ def list_import_batches(
 
 
 @router.get("/{batch_id}", response_model=ImportBatchRead)
-def get_import_batch(batch_id: uuid.UUID, db: Session = DB_DEP) -> ImportBatch:
-    """Return import batch status and stats."""
+def get_import_batch(
+    batch_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> ImportBatch:
+    """Return import batch status and stats (owner/admin see all; others only their own)."""
+    from app.services import access
+
     batch = db.get(ImportBatch, batch_id)
-    if batch is None:
+    if batch is None or (
+        not access.is_admin_or_owner(actor) and batch.created_by_user_id != actor.id
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import batch not found")
     return batch

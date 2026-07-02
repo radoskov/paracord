@@ -1083,7 +1083,7 @@ def list_work_files(
 
 
 @router.post("/{work_id}/files", response_model=WorkFileRead, status_code=status.HTTP_201_CREATED)
-async def upload_work_file(
+def upload_work_file(
     work_id: uuid.UUID,
     file: UploadFile,
     db: Session = DB_DEP,
@@ -1101,7 +1101,7 @@ async def upload_work_file(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are accepted"
         )
-    pdf_bytes = await file.read(_MAX_UPLOAD_BYTES + 1)
+    pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
