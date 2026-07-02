@@ -39,6 +39,18 @@ Finalized parameters (owner, 2026-07-02):
   not a client batch).
 - **Login throttle → Redis** (correctness across the 2 API workers; fail-open if Redis down).
 
+**D39 · MEDIUM — Queue-length cap + admin queue/worker controls.** — **DECIDED 2026-07-02 ·
+to implement** (completes the D1 overload story). Scope:
+- `max_queue_len` (AppConfig, admin-editable, **default 1000** — pending final owner confirm;
+  chosen over 500 because chained jobs (extraction → chunk → embed) + the 100-item batch cap mean
+  a few legitimate stacked imports reach several hundred pending jobs, and 500 would reject real
+  bulk work). When the pending RQ queue is at/over the cap, **new job creation** (import, extract,
+  force-OCR, reindex, …) is **rejected** with a clear "queue full — wait and retry" error
+  (429/503 → frontend pop-up). Fail-open if Redis unreachable (can't measure depth → allow, since
+  the job would be dropped/visible via D7 anyway).
+- Admin controls in the Jobs tab: **Clear queue** (drop pending jobs — builds on the existing
+  `clear_jobs`) and **Reset/restart workers** (recover stuck jobs — builds on the D1 supervisor).
+
 **D2 · MEDIUM — Browser token in `localStorage` + no CSP/security headers from nginx.**
 These compound: paper titles/abstracts are external (PDF/Crossref) data rendered in the SPA; any
 XSS anywhere reads the token → account takeover. The one `{@html}` is verified escaped, but there
