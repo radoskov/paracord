@@ -62,8 +62,12 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
         enqueue_enrichment(work_id)
 
 
-def enrich_work_job(work_id: str) -> None:
-    """Enrich a work from external metadata sources (arXiv/Crossref), then (re)index its embedding."""
+def enrich_work_job(work_id: str) -> dict | None:
+    """Enrich a work from external metadata sources (arXiv/Crossref), then (re)index its embedding.
+
+    Returns the enrichment result (``sources`` / ``promoted`` / ``failed`` sources) so a partly
+    failed run (e.g. arXiv down but Crossref fine, D8) is visible in the RQ job result.
+    """
     import uuid
 
     from app.core.config import get_settings
@@ -72,12 +76,13 @@ def enrich_work_job(work_id: str) -> None:
     from app.services.metadata_enrichment import enrich_work
     from app.workers.queue import enqueue_chunking, enqueue_embedding
 
+    result: dict | None = None
     with SessionLocal() as db:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
-            return
+            return None
         try:
-            enrich_work(db, work, settings=get_settings())
+            result = enrich_work(db, work, settings=get_settings())
             db.commit()
         finally:
             # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
@@ -85,6 +90,7 @@ def enrich_work_job(work_id: str) -> None:
             # enrichment failed (offline / rate-limited) so the paper still gets indexed.
             enqueue_chunking(work_id)
             enqueue_embedding(work_id)
+    return result
 
 
 def chunk_work_job(work_id: str) -> None:

@@ -7,7 +7,9 @@ trusted external value is promoted to the canonical work field only when the wor
 user-confirmed. Outbound requests carry only bibliographic identifiers (see SECURITY.md).
 """
 
+import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
@@ -21,6 +23,8 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
 from app.utils.normalization import normalize_title
+
+logger = logging.getLogger(__name__)
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 CROSSREF_API = "https://api.crossref.org/works"
@@ -347,20 +351,39 @@ def enrich_work(
     openalex_fetcher=fetch_openalex,
     semantic_scholar_fetcher=fetch_semantic_scholar,
 ) -> dict:
-    """Enrich a work from external sources matched by its arXiv id / DOI."""
+    """Enrich a work from external sources matched by its arXiv id / DOI.
+
+    Per-source resilient (D8): each source is queried independently and a source that raises
+    (down / rate-limited / malformed) is recorded in ``failed`` and skipped — the remaining sources
+    are still tried, so one flaky source never aborts the whole enrichment.
+    """
     if not getattr(settings, "enrichment_enabled", True):
-        return {"sources": [], "promoted": []}
+        return {"sources": [], "promoted": [], "failed": []}
 
     mailto = getattr(settings, "crossref_mailto", None)
-    metas: list[ExternalMetadata | None] = []
+    planned: list[tuple[str, Callable[[], ExternalMetadata | None]]] = []
     if getattr(settings, "enrichment_arxiv", True) and work.arxiv_id:
-        metas.append(arxiv_fetcher(work.arxiv_id))
+        planned.append(("arxiv", lambda: arxiv_fetcher(work.arxiv_id)))
     if getattr(settings, "enrichment_crossref", True) and work.doi:
-        metas.append(crossref_fetcher(work.doi, mailto=mailto))
+        planned.append(("crossref", lambda: crossref_fetcher(work.doi, mailto=mailto)))
     if getattr(settings, "enrichment_openalex", False) and work.doi:
-        metas.append(openalex_fetcher(work.doi, mailto=mailto))
+        planned.append(("openalex", lambda: openalex_fetcher(work.doi, mailto=mailto)))
     if getattr(settings, "enrichment_semantic_scholar", False) and (work.arxiv_id or work.doi):
-        metas.append(semantic_scholar_fetcher(arxiv_id=work.arxiv_id, doi=work.doi))
+        planned.append(
+            (
+                "semanticscholar",
+                lambda: semantic_scholar_fetcher(arxiv_id=work.arxiv_id, doi=work.doi),
+            )
+        )
+
+    metas: list[ExternalMetadata | None] = []
+    failed: list[str] = []
+    for name, fetch in planned:
+        try:
+            metas.append(fetch())
+        except Exception as exc:  # noqa: BLE001 - one failing source must not abort the rest
+            failed.append(name)
+            logger.warning("enrich_work source %s failed for work %s: %s", name, work.id, exc)
 
     sources: list[str] = []
     promoted: list[str] = []
@@ -379,4 +402,4 @@ def enrich_work(
         )
     if sources:
         work.updated_at = datetime.now(UTC)
-    return {"sources": sources, "promoted": promoted}
+    return {"sources": sources, "promoted": promoted, "failed": failed}

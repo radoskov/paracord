@@ -264,3 +264,44 @@ def test_enrich_work_without_identifier_is_noop(db_session) -> None:
     result = enrich_work(db_session, work, settings=_settings())
     assert result["sources"] == []
     assert db_session.scalar(select(func.count()).select_from(MetadataAssertion)) == 0
+
+
+def test_enrich_work_continues_past_a_failing_source(db_session) -> None:
+    """D8: arXiv raising must not stop Crossref from being tried; the failure is recorded."""
+    work = Work(
+        canonical_title="x",
+        normalized_title="x",
+        doi="10.1109/cvpr.2016.90",
+        arxiv_id="1706.03762",
+    )
+    db_session.add(work)
+    db_session.commit()
+
+    def _boom(_id):
+        raise RuntimeError("arXiv is down")
+
+    result = enrich_work(
+        db_session,
+        work,
+        settings=_settings(),
+        arxiv_fetcher=_boom,
+        crossref_fetcher=lambda _doi, mailto=None: parse_crossref(CROSSREF_JSON),
+    )
+    db_session.commit()
+
+    assert result["sources"] == ["crossref"]  # crossref still ran
+    assert result["failed"] == ["arxiv"]  # the failure is surfaced, not raised
+    assert work.canonical_title == "Deep Residual Learning for Image Recognition"
+
+
+def test_enrich_work_reports_no_failures_on_clean_run(db_session) -> None:
+    work = Work(canonical_title="x", normalized_title="x", arxiv_id="1706.03762")
+    db_session.add(work)
+    db_session.commit()
+    result = enrich_work(
+        db_session,
+        work,
+        settings=_settings(),
+        arxiv_fetcher=lambda _id: parse_arxiv_atom(ARXIV_XML),
+    )
+    assert result["failed"] == []
