@@ -863,6 +863,10 @@
             "title": "Max Papers Per Page",
             "type": "integer"
           },
+          "max_queue_len": {
+            "title": "Max Queue Len",
+            "type": "integer"
+          },
           "rate_limit_global_per_min": {
             "title": "Rate Limit Global Per Min",
             "type": "integer"
@@ -881,7 +885,8 @@
           "rate_limit_per_client_per_min",
           "rate_limit_global_per_min",
           "max_batch_items",
-          "rq_worker_count"
+          "rq_worker_count",
+          "max_queue_len"
         ],
         "title": "AppConfigOut",
         "type": "object"
@@ -911,6 +916,18 @@
               }
             ],
             "title": "Max Papers Per Page"
+          },
+          "max_queue_len": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Queue Len"
           },
           "rate_limit_global_per_min": {
             "anyOf": [
@@ -12101,6 +12118,58 @@
         ]
       }
     },
+    "/api/v1/jobs/clear-queue": {
+      "post": {
+        "description": "Empty the pending job queue (admin). Running jobs are untouched; returns how many dropped.\n\nDegrades gracefully (never 500) when Redis is unreachable — reports ``available: false``.",
+        "operationId": "clear_queue_api_v1_jobs_clear_queue_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clear Queue Api V1 Jobs Clear Queue Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Queue",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
     "/api/v1/jobs/reprocess-pending": {
       "post": {
         "description": "Re-enqueue extraction for every file still owed one (the D7 recovery sweep, on demand).\n\nIdempotent: a file already queued/running is left alone. Degrades gracefully (never 500) when\nthe queue is offline — reports ``redis_reachable: false`` instead.",
@@ -12148,6 +12217,58 @@
           }
         },
         "summary": "Reprocess Pending",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/reset-workers": {
+      "post": {
+        "description": "Recover stuck jobs (admin): requeue jobs stranded as started and clear failed history.\n\nCannot restart the worker *processes* (they run under the supervisor in the worker container);\nthe response ``note`` says a full reset is ``docker compose restart worker``. Degrades\ngracefully (never 500) when Redis is unreachable.",
+        "operationId": "reset_workers_api_v1_jobs_reset_workers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Workers Api V1 Jobs Reset Workers Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Workers",
         "tags": [
           "jobs"
         ]
