@@ -46,28 +46,64 @@ that fix — see the AUDIT D7 entry.)
 
 ## Feature scope (needs a workplan slot)
 
-**D31. Spec-conformance small batch** (old NEEDS_DISCUSSION §4, all verified still missing):
-audit-event wiring (`shelf.*`, `rack.*`, `paper.metadata_edited`, `annotation.*`, `job.*`,
-backup/restore — one line each at known sites), summary provenance columns (computed but not
-persisted), annotation JSON export (spec requires it), extra search operators
-(`abstract:`/`fulltext:`/`has:grobid`/`file:`/…), LaTeX/Pandoc export formats, import-to-rack.
-**Recommend implementing in that order**; audit events + provenance columns + annotation-JSON are
-a small, safe first batch.
+**D31. Spec-conformance gaps — six small, independent, additive items** (old NEEDS_DISCUSSION §4,
+all verified still missing at HEAD). None is a bug; each is a SPECIFICATION-required feature that
+was never built. Detailed so the scope is concrete:
 
-**D35. ML extraction backend (Nougat/Marker)** — the config flag exists, the worker ignores it,
-no extractor code exists; a large feature (torch image, markdown→persistence mapping). *Options:*
-(a) build it; (b) drop the flag + detection stub until there's a real need (OCRmyPDF already
-covers scanned PDFs). **Recommend (b) for now** — remove the dead seam or mark it experimental;
-revisit if GROBID quality on hard PDFs becomes a real pain.
+1. **Audit-event wiring (§7.6).** The audit log exists and emits many events (login, `work.deleted`,
+   `import.*`, `teleport.*`, …), but several the spec *requires* are never emitted:
+   `shelf.created`/`shelf.modified`, `rack.created`/`rack.modified`, `paper.metadata_edited`,
+   `annotation.created`/`annotation.edited`, `job.started`/`job.completed`/`job.failed`, and
+   backup/restore events. *Impact:* an admin auditing "who changed what" is blind to shelf/rack
+   creation+rename, metadata edits, annotation activity, and job lifecycle. *Fix:* one
+   `record_event(...)` line at each known site (shelf/rack create+update service fns; the
+   metadata-edit path; annotation create/edit endpoints; the RQ job wrapper for
+   started/completed/failed; the backup/restore commands). Low risk — the only care is that a few
+   tests assert audit-event *counts*, so update those expectations in the same pass.
+2. **Summary provenance columns (§8.14.2).** Summary generation already *computes* provenance
+   (provider requested, provider actually used, whether it fell back to extractive) but only
+   returns it transiently — it is never stored. *Impact:* for an existing stored summary you can't
+   tell how it was produced (model/provider, fallback, source sections). *Fix:* a small migration
+   adding columns to `Summary` (`provider_requested`, `provider_used`, `fallback`, + per spec
+   source-section labels / content hash / user + params) and write them on creation.
+3. **Annotation JSON export (§8.8.7).** Annotation export supports `markdown` + `text`; the spec
+   also requires `json`. *Impact:* no machine-readable annotation export. *Fix:* add a `json`
+   branch to the export endpoint (it already assembles the annotation objects — just serialize).
+4. **Additional search operators (§14.2).** The parser handles author:/year:/venue:/tag:/type:/
+   title:/doi:/arxiv:/status:/shelf:/rack:/cites:/cited_by_local:/has:pdf|references|notes|
+   annotations|summary|abstract. Still unparsed (silently ignored): `abstract:`/`fulltext:`/
+   `summary:` (field-scoped text), `has:grobid`/`has:ocr` (extraction state), `file:…` (filename),
+   `duplicate:`/`version:`/`warning:*` (review state). *Fix:* extend the parser with the missing
+   tokens and map each to the works query; `fulltext:` searches extracted body text (chunks/TEI).
+5. **Missing export formats/targets (§8.13).** Have: bibtex/biblatex/ris/csl-json/markdown/html/
+   text/styled. Missing: LaTeX `\cite` command output, a Pandoc-Markdown citation list, plus
+   import-batch / missing-references export *targets* and emitting unresolved-reference strings.
+   *Fix:* add the two renderers alongside the existing ones and wire the extra scopes/targets.
+6. **Import can target a rack (§8.1).** Imports accept only `target_shelf_id`, not
+   `target_rack_id`. *Fix:* add `target_rack_id` to the import request(s) and place imported works
+   onto the rack the same way `target_shelf_id` does.
 
-**D36. E2E journey coverage** (CI wiring itself is AUDIT D36a): missing identifier-import,
-annotate, export, and duplicates-review journeys. **Recommend: add opportunistically** as those
-areas change.
+**Recommended order: 1 → 2 → 3 first (a small, safe batch), then 4, 5, 6.** Awaiting owner go to
+implement (which items, and whether all at once).
 
-**D37. pgvector remainder** (old FOLLOWUP §3): chunk-level ANN is done (per-model HNSW columns).
-Left: document-level `Embedding` still JSON, `pgvector_enabled` default-off, `hash_bow` default
-provider. **Recommend: flip the defaults once you routinely run a real model**; keep the
-document-level JSON path as the SQLite/test fallback it already is.
+**D35. ML extraction backend (Nougat/Marker).** — **DECIDED 2026-07-02 · option (b), implementing.**
+Keep only `ocrmypdf` + `pymupdf` OCR backends. Drop the dead Nougat/Marker extraction seam: the
+`nougat`/`marker` extraction-backend config + `detect_providers()` "extraction" stubs and the
+`full_ml` OCR-backend option (worker never used them, no extractor code exists). Removal, not a
+feature; revisit only if GROBID quality on hard PDFs becomes a real pain.
+
+**D36. E2E journey coverage.** — **DECIDED 2026-07-02 · implementing, approach left to me.** Wire
+Playwright into CI and improve/expand the journeys as far as practical: identifier (arXiv/DOI)
+import, annotate, export, duplicates-review, plus admin flows and the new pagination/queue UI.
+Supersedes AUDIT D36a (CI wiring folded in here).
+
+**D37. pgvector defaults.** — **DECIDED 2026-07-02 · flip defaults so pgvector + ANN works.** Turn
+`pgvector_enabled` on by default and make the effective search/related path use the ANN (HNSW) route
+so a real registered model gets sub-linear search out of the box; keep the JSON + Python-cosine path
+as the SQLite/test and no-Redis/no-pgvector fallback. Open sub-choice being handled in
+implementation: the *default embedding provider* stays `hash_bow` (zero-dependency, so a lightweight
+install still works) — ANN kicks in once a real model (sentence-transformers / Ollama) is
+registered; forcing a heavy model as the out-of-box default is NOT part of this.
 
 **D38. Big spec features** (old NEEDS_DISCUSSION §5, all confirmed still absent):
 
