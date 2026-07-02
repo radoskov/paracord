@@ -7,6 +7,34 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track A performance batch — D13, D14, D15, D19, D20, D22 (2026-07-03)
+
+Six performance audit fixes, all degrading gracefully with Redis/Ollama down; the SQLite-without-Redis
+unit suite stays deterministic. **D13 (HIGH)** takes the BM25F+ lexical rebuild off the search read
+path: on Postgres a search now serves the persisted/last-known index and, when the corpus signature
+moved, enqueues a coalesced background rebuild job (`rebuild_bm25_job`, fixed id `bm25-rebuild`) and
+serves the slightly-stale index meanwhile — a search right after an edit may transiently miss that
+edit until the worker refreshes the on-disk copy; only a genuine cold start builds synchronously.
+`build_index` now reads body text from the materialized `work_chunks` rows (one bulk SELECT) instead
+of re-parsing each work's TEI XML; title/abstract come from the work row so an un-chunked paper is
+still indexed and title/abstract chunks aren't double-counted. SQLite builds synchronously (no Redis).
+**D14** adds `embed_many()` (Ollama `/api/embed` batch input; sentence-transformers `.encode(list)`;
+hash-BOW list-comp) used by both backfills so activating a real model is one round-trip per batch, not
+20 k sequential calls; `POST /search/reindex` is routed to the queued reindex job, falling back to a
+synchronous in-request build when the queue is unavailable (response gains `queued`/`job_id`). **D15**
+forces full-library duplicate scans onto the worker regardless of the `background` flag (queued shape;
+503 when the queue is down); single-work/-file scans stay synchronous. **D19** keeps topic views
+read-only: `_paper_dense_vectors` no longer embeds un-indexed papers inline — papers without a
+pre-indexed chunk vector for a column model are skipped and counted, surfaced as
+`unindexed_work_count` (topics) / `summary.unindexed_works` + note (graph). **D20** replaces the
+topic-graph O(n²) pure-Python cosine with a single numpy op (normalize once, `M @ M.T`, threshold);
+edges are identical to the old loop (stable sort tie-break, round(4)). **D22** commits HNSW
+provisioning (ALTER TABLE ADD COLUMN + CREATE INDEX) in its own short transaction *before* the reindex
+backfill loop, so the DDL locks aren't held for the whole job. Verified: full backend suite **749
+passed**, ruff clean (backend + agent), `openapi.json` regenerated (D14 reindex `queued`/`job_id`,
+D15 scan description, D19 `unindexed_work_count`). See
+`docs/agent_handoffs/2026-07-03-track-a-performance-batch.md`.
+
 ## Track A audit batch — D6, D8, D9, D10, D11, D12 (2026-07-03)
 
 Six correctness/security audit fixes, each fail-open on optional external services. **D6** SSRF-guards
