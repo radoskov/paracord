@@ -302,9 +302,7 @@ def _local_work_index(
         dois = {normalize_doi(ref.doi) for ref in references if ref.doi}
         arxiv_bases = {
             base
-            for base in (
-                split_arxiv_id(ref.arxiv_id)["base"] for ref in references if ref.arxiv_id
-            )
+            for base in (split_arxiv_id(ref.arxiv_id)["base"] for ref in references if ref.arxiv_id)
             if base
         }
         conditions = []

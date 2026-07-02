@@ -138,9 +138,7 @@ def list_duplicate_candidates(
     stmt = stmt.order_by(DuplicateCandidate.created_at.desc()).limit(limit)
     visible = access.visible_work_ids(db, actor)
     candidates = [
-        candidate
-        for candidate in db.scalars(stmt).all()
-        if _candidate_visible(candidate, visible)
+        candidate for candidate in db.scalars(stmt).all() if _candidate_visible(candidate, visible)
     ]
     works, files = candidate_entity_maps(db, candidates)
     return [_candidate_view(db, candidate, works=works, files=files) for candidate in candidates]
@@ -187,9 +185,7 @@ def scan_duplicates(
     db.commit()
     if candidate_ids:
         # One IN() reload re-populates the committed (expired) rows instead of a refresh per row.
-        db.scalars(
-            select(DuplicateCandidate).where(DuplicateCandidate.id.in_(candidate_ids))
-        ).all()
+        db.scalars(select(DuplicateCandidate).where(DuplicateCandidate.id.in_(candidate_ids))).all()
     entity_works, entity_files = candidate_entity_maps(db, candidates)
     return DuplicateScanResult(
         scanned_works=len(works),
