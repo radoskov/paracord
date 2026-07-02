@@ -13,8 +13,11 @@ from paperracks_agent.state import AgentState
 class FakeClient:
     """Records calls instead of hitting a server."""
 
-    def __init__(self, pending=None, my_files=None, extraction_queued=True) -> None:
+    def __init__(
+        self, pending=None, my_files=None, extraction_queued=True, max_batch_items=100
+    ) -> None:
         self.server_url = "http://test"
+        self._max_batch_items = max_batch_items
         self.manifests: list[dict] = []
         self.extracted: list[str] = []
         self.teleported: list[str] = []
@@ -28,6 +31,9 @@ class FakeClient:
 
     async def send_manifest(self, payload: dict) -> None:
         self.manifests.append(payload)
+
+    async def get_me(self) -> dict:
+        return {"status": "approved", "max_batch_items": self._max_batch_items}
 
     async def get_my_files(self) -> list[dict]:
         return self._my_files
@@ -61,6 +67,25 @@ def _folder(tmp_path: Path, action: str, policy: str = "ask") -> AgentConfig:
     root.mkdir()
     (root / "a.pdf").write_bytes(b"%PDF-1.4\nA")
     return AgentConfig(folders=[ManagedFolder(path=root, action=action, teleport_policy=policy)])
+
+
+def test_sync_chunks_oversized_manifest(tmp_path: Path) -> None:
+    """A scan larger than the server's max_batch_items is split into sequential ≤cap manifests."""
+    root = tmp_path / "papers"
+    root.mkdir()
+    for i in range(5):
+        (root / f"paper-{i}.pdf").write_bytes(f"%PDF-1.4\n{i}".encode())
+    config = AgentConfig(folders=[ManagedFolder(path=root, action="index_only")])
+    state = AgentState(tmp_path / "state.sqlite3")
+    client = FakeClient(max_batch_items=2)
+
+    summary = asyncio.run(agent_ops.sync(config, state, client))
+
+    assert summary["indexed"] == 5
+    # 5 items at a cap of 2 -> chunks of 2, 2, 1.
+    assert [len(m["items"]) for m in client.manifests] == [2, 2, 1]
+    sent = {item["local_file_id"] for m in client.manifests for item in m["items"]}
+    assert len(sent) == 5
 
 
 def test_sync_index_only_sends_manifest_no_bytes(tmp_path: Path) -> None:

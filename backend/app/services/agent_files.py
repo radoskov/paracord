@@ -31,8 +31,13 @@ from app.utils.normalization import normalize_title
 def ingest_manifest(db: Session, *, agent: Agent, items: list) -> int:
     """Upsert the agent's manifest entries. Returns the number of items processed.
 
-    Existing rows keep their teleport state; only the reported metadata is refreshed.
+    Existing rows keep their teleport state; only the reported metadata is refreshed. A manifest
+    over the configured ``max_batch_items`` cap is rejected (D1); the agent chunks large scans into
+    ≤cap manifests, so a rejection here means an unchunked/oversized client push.
     """
+    from app.services.app_config import enforce_batch_limit
+
+    enforce_batch_limit(db, len(items))
     now = datetime.now(UTC)
     for item in items:
         existing = db.scalar(

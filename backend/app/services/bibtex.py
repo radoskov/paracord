@@ -77,6 +77,9 @@ def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=Non
     shelf through the shared ACL-checked helper (404/403 abort the whole import before partial state).
     """
     entries = parse_bibtex(content)
+    from app.services.app_config import enforce_batch_limit
+
+    enforce_batch_limit(db, len(entries))
     created = 0
     matched = 0
     skipped = 0

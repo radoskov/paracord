@@ -16,11 +16,24 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.app_config import (
+    _DEFAULT_MAX_BATCH_ITEMS,
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
     _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN,
     APP_CONFIG_SINGLETON_ID,
     AppConfig,
 )
+
+
+class BatchTooLargeError(Exception):
+    """A client import batch exceeded the configured ``max_batch_items`` cap (D1)."""
+
+    def __init__(self, *, limit: int, count: int) -> None:
+        self.limit = limit
+        self.count = count
+        super().__init__(
+            f"Batch of {count} exceeds the {limit}-item limit; split it into smaller imports"
+        )
+
 
 # Per-engine memo of whether the ``app_config`` table exists (narrow unit-test schemas omit it).
 _TABLE_PRESENT: dict[int, bool] = {}
@@ -69,6 +82,23 @@ def effective_rate_limit_global_per_min(db: Session, *, settings: Settings | Non
     return row.rate_limit_global_per_min
 
 
+def effective_max_batch_items(db: Session, *, settings: Settings | None = None) -> int:
+    """Return the effective cap on items in a single client import batch (server scans exempt)."""
+    if not _app_config_table_present(db):
+        return _DEFAULT_MAX_BATCH_ITEMS
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.max_batch_items is None:
+        return _DEFAULT_MAX_BATCH_ITEMS
+    return row.max_batch_items
+
+
+def enforce_batch_limit(db: Session, count: int) -> None:
+    """Raise :class:`BatchTooLargeError` when ``count`` exceeds the configured batch-item cap."""
+    limit = effective_max_batch_items(db)
+    if count > limit:
+        raise BatchTooLargeError(limit=limit, count=count)
+
+
 def _ensure_row(db: Session) -> AppConfig:
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
     if row is None:
@@ -109,3 +139,16 @@ def update_rate_limits(
         row.rate_limit_global_per_min = global_per_min
     row.updated_by_user_id = actor_user_id
     db.flush()
+
+
+def update_max_batch_items(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new client import-batch item cap. Returns the stored value."""
+    if value < 1:
+        raise ValueError("max_batch_items must be >= 1")
+    row = _ensure_row(db)
+    row.max_batch_items = value
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return row.max_batch_items

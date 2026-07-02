@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # next sync re-attempts the push, and it is surfaced in the agent GUI (D7).
 EXTRACT_QUEUE_FAILED = "extract_queue_failed"
 
+# Fallback import-batch cap when the server doesn't report one (older server or a failed /me): chunk
+# conservatively at the server's out-of-the-box default so a large scan never trips the server cap.
+DEFAULT_MAX_BATCH_ITEMS = 100
+
 
 @dataclass
 class ScannedFile:
@@ -123,21 +127,48 @@ def folder_stats(config: AgentConfig) -> dict[str, dict]:
     return stats
 
 
-def _manifest_payload(scanned: list[ScannedFile]) -> dict:
+def _manifest_item(s: ScannedFile) -> dict:
     return {
-        "items": [
-            {
-                "local_file_id": s.local_file_id,
-                "sha256": s.sha256,
-                "size_bytes": s.size_bytes,
-                "display_path": s.path.name,
-                "virtual_path": s.virtual_path,
-                "import_action": s.action,
-                "teleport_policy": s.teleport_policy,
-            }
-            for s in scanned
-        ]
+        "local_file_id": s.local_file_id,
+        "sha256": s.sha256,
+        "size_bytes": s.size_bytes,
+        "display_path": s.path.name,
+        "virtual_path": s.virtual_path,
+        "import_action": s.action,
+        "teleport_policy": s.teleport_policy,
     }
+
+
+def _manifest_payload(scanned: list[ScannedFile]) -> dict:
+    return {"items": [_manifest_item(s) for s in scanned]}
+
+
+async def _resolve_batch_cap(client: PaRacORDServerClient) -> int:
+    """Fetch the server's import-batch cap (D1) so an oversized scan is split into ≤cap manifests.
+
+    Falls back to the built-in default on any error or a server that doesn't report the field, so a
+    reachable-but-old server (or a transient failure) never blocks a sync.
+    """
+    try:
+        me = await client.get_me()
+        cap = int(me.get("max_batch_items") or DEFAULT_MAX_BATCH_ITEMS)
+    except Exception as exc:  # noqa: BLE001 - degrade to the conservative default
+        logger.debug("Could not read server max_batch_items (%s); using default", exc)
+        cap = DEFAULT_MAX_BATCH_ITEMS
+    return max(1, cap)
+
+
+async def _send_manifest_chunked(
+    client: PaRacORDServerClient, scanned: list[ScannedFile], cap: int
+) -> None:
+    """Send the manifest in ≤cap chunks sequentially. An empty scan still sends one empty manifest
+    so the server sees the agent currently has no files."""
+    if not scanned:
+        await client.send_manifest({"items": []})
+        return
+    for start in range(0, len(scanned), cap):
+        chunk = scanned[start : start + cap]
+        await client.send_manifest({"items": [_manifest_item(s) for s in chunk]})
 
 
 async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerClient) -> dict:
@@ -162,7 +193,8 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
             extracted_title=sf.get("extracted_title"),
             extracted_authors=sf.get("extracted_authors"),
         )
-    await client.send_manifest(_manifest_payload(scanned))
+    cap = await _resolve_batch_cap(client)
+    await _send_manifest_chunked(client, scanned, cap)
 
     absent = state.mark_absent_except({s.local_file_id for s in scanned})
     if absent:

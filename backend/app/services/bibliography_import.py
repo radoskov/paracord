@@ -169,6 +169,9 @@ def import_records(
     shelf through the shared ACL-checked helper, so a missing shelf (404) or lack of modify access
     (403) aborts the whole import before any partial state.
     """
+    from app.services.app_config import enforce_batch_limit
+
+    enforce_batch_limit(db, len(records))
     created = 0
     matched = 0
     skipped = 0

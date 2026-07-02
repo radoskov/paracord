@@ -43,6 +43,7 @@ class AppConfigOut(BaseModel):
     max_papers_per_page: int
     rate_limit_per_client_per_min: int
     rate_limit_global_per_min: int
+    max_batch_items: int
 
 
 class AppConfigUpdate(BaseModel):
@@ -50,6 +51,7 @@ class AppConfigUpdate(BaseModel):
     max_papers_per_page: int | None = Field(default=None, ge=1)
     rate_limit_per_client_per_min: int | None = Field(default=None, ge=1)
     rate_limit_global_per_min: int | None = Field(default=None, ge=1)
+    max_batch_items: int | None = Field(default=None, ge=1)
 
 
 class AgentOut(BaseModel):
@@ -272,6 +274,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
             db
         ),
         rate_limit_global_per_min=app_config_service.effective_rate_limit_global_per_min(db),
+        max_batch_items=app_config_service.effective_max_batch_items(db),
     )
 
 
@@ -311,6 +314,10 @@ def update_app_config(
                 changed["rate_limit_per_client_per_min"] = payload.rate_limit_per_client_per_min
             if payload.rate_limit_global_per_min is not None:
                 changed["rate_limit_global_per_min"] = payload.rate_limit_global_per_min
+        if payload.max_batch_items is not None:
+            changed["max_batch_items"] = app_config_service.update_max_batch_items(
+                db, value=payload.max_batch_items, actor_user_id=actor.id
+            )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     record_event(

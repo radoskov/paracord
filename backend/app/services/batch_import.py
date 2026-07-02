@@ -317,6 +317,9 @@ def commit_drafts(
     missing shelf (404) / lack of modify access (403) aborts the whole commit before any partial
     work — the ACL is enforced in exactly one place. Does NOT commit the transaction.
     """
+    from app.services.app_config import enforce_batch_limit
+
+    enforce_batch_limit(db, len(drafts))
     input_type = f"batch_{engine}"
     event_type = f"import.batch_{engine}"
     created = 0

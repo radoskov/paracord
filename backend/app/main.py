@@ -53,6 +53,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    from app.services.app_config import BatchTooLargeError
+
+    @app.exception_handler(BatchTooLargeError)
+    async def _batch_too_large(_request: Request, exc: BatchTooLargeError) -> JSONResponse:
+        """A client import batch over ``max_batch_items`` is rejected with 413 (D1)."""
+        return JSONResponse(status_code=413, content={"detail": str(exc)})
+
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
         """Shared Redis rate limiting (D1). Fails open — a dead Redis never blocks requests."""

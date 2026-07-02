@@ -213,8 +213,14 @@ def unblock_teleport(
 
 
 @router.get("/me")
-def agent_self(agent: Agent = AGENT_DEP) -> dict:
-    """Return the calling agent's identity, approval, and granted privileges (reachability check)."""
+def agent_self(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> dict:
+    """Return the calling agent's identity, approval, and granted privileges (reachability check).
+
+    Also reports ``max_batch_items`` — the server's import-batch cap (D1) — so the agent can split
+    an oversized scan into ≤cap manifests before pushing them.
+    """
+    from app.services.app_config import effective_max_batch_items
+
     return {
         "agent_id": str(agent.id),
         "name": agent.name,
@@ -225,6 +231,7 @@ def agent_self(agent: Agent = AGENT_DEP) -> dict:
         "can_be_requested": agent.can_be_requested,
         "processing_visibility": agent.processing_visibility,
         "server_status_visibility": agent.server_status_visibility,
+        "max_batch_items": effective_max_batch_items(db),
     }
 
 

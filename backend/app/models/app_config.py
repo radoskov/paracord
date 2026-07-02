@@ -25,6 +25,10 @@ _DEFAULT_MAX_PAPERS_PER_PAGE = 500
 _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN = 60
 _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN = 300
 
+# Out-of-the-box ceiling on how many items a single client import batch may carry (D1). Server-folder
+# scans (a local scan, not a client batch) are exempt from this cap.
+_DEFAULT_MAX_BATCH_ITEMS = 100
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -49,6 +53,10 @@ class AppConfig(Base):
     )
     rate_limit_global_per_min: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN)
+    )
+    # Overload protection (D1): max items in a single client import batch (server scans are exempt).
+    max_batch_items: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_MAX_BATCH_ITEMS)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
