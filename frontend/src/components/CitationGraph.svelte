@@ -91,28 +91,40 @@
     return [] as REdge[];
   })();
 
-  // Apply the client-side filters (#7 hide singletons, #8 collapse external leaves) to produce the
-  // node/edge set actually rendered.
-  function filteredElements(): { nodes: RNode[]; edges: REdge[] } {
-    let nodes = rNodes;
-    let edges = rEdges;
-
-    if (hideExternalLeaves) {
-      // Drop external nodes and any edge touching them.
-      const localIds = new Set(nodes.filter((n) => n.kind === 'local').map((n) => n.id));
-      nodes = nodes.filter((n) => n.kind === 'local');
-      edges = edges.filter((e) => localIds.has(e.source) && localIds.has(e.target));
+  // Apply the client-side filters (#7 hide singletons, #8 collapse external leaves) to the live
+  // Cytoscape instance by showing/hiding elements — no rebuild, no re-layout (D17). The parameters
+  // let the reactive caller below re-run this whenever a toggle flips. Mirrors the old filter logic:
+  // hide external nodes + their edges, then hide any node left with no visible edge.
+  function applyFilters(
+    hideExt: boolean = hideExternalLeaves,
+    hideSing: boolean = hideSingletons,
+  ): void {
+    if (!cy) return;
+    const hiddenNodes = new Set<string>();
+    if (hideExt) {
+      for (const n of rNodes) if (n.kind === 'external') hiddenNodes.add(n.id);
     }
-
-    if (hideSingletons) {
+    const hiddenEdges = new Set<number>();
+    rEdges.forEach((e, index) => {
+      if (hiddenNodes.has(e.source) || hiddenNodes.has(e.target)) hiddenEdges.add(index);
+    });
+    if (hideSing) {
       const touched = new Set<string>();
-      for (const e of edges) {
+      rEdges.forEach((e, index) => {
+        if (hiddenEdges.has(index)) return;
         touched.add(e.source);
         touched.add(e.target);
-      }
-      nodes = nodes.filter((n) => touched.has(n.id));
+      });
+      for (const n of rNodes) if (!hiddenNodes.has(n.id) && !touched.has(n.id)) hiddenNodes.add(n.id);
     }
-    return { nodes, edges };
+    cy.batch(() => {
+      cy.nodes().forEach((node: { id: () => string; style: (k: string, v: string) => void }) =>
+        node.style('display', hiddenNodes.has(node.id()) ? 'none' : 'element'),
+      );
+      cy.edges().forEach((edge: { id: () => string; style: (k: string, v: string) => void }) =>
+        edge.style('display', hiddenEdges.has(Number(edge.id().slice(1))) ? 'none' : 'element'),
+      );
+    });
   }
 
   $: hasGraph = graphType === 'topic' ? topicGraph != null : graph != null;
@@ -155,11 +167,14 @@
         cy.destroy();
         cy = null;
       }
-      const { nodes, edges } = filteredElements();
-      const deg = degrees(edges);
+      // Build the FULL element set once (edges carry a stable `e{index}` id). The client-side
+      // filters (#7/#8) are applied by showing/hiding elements on the live instance (D17), so a
+      // filter toggle no longer rebuilds the graph or re-runs the layout — only a data change or an
+      // explicit re-layout does. Node size still maps degree over the whole edge set.
+      const deg = degrees(rEdges);
       const maxDeg = Math.max(1, ...Object.values(deg));
       const elements = [
-        ...nodes.map((node) => ({
+        ...rNodes.map((node) => ({
           data: {
             id: node.id,
             label: node.label,
@@ -171,8 +186,9 @@
             deg: deg[node.id] ?? 0,
           },
         })),
-        ...edges.map((edge) => ({
+        ...rEdges.map((edge, index) => ({
           data: {
+            id: `e${index}`,
             source: edge.source,
             target: edge.target,
             weight: edge.weight,
@@ -180,7 +196,6 @@
           },
         })),
       ];
-      const useLayout = layout === 'fcose' && !fcoseRegistered ? 'cose' : layout;
       cy = cytoscape({
         container: cyContainer,
         elements,
@@ -213,7 +228,9 @@
             },
           },
         ],
-        layout: { name: useLayout, animate: false },
+        // Positions come from the explicit relayout() below, which lays out only the visible
+        // subset so filtered-out nodes don't leave gaps.
+        layout: { name: 'preset' },
       });
       cy.on('tap', 'node', (event: { target: { data: (k: string) => unknown } }) => {
         const t = event.target;
@@ -241,6 +258,8 @@
         tooltip = { ...tooltip, show: false };
       });
       cyError = false;
+      applyFilters();
+      relayout();
     } catch {
       // Cytoscape needs a canvas-capable DOM; fall back to the list renderer.
       cyError = true;
@@ -252,11 +271,18 @@
   }
 
   function relayout(): void {
-    if (cy) cy.layout({ name: layout === 'fcose' && !fcoseRegistered ? 'cose' : layout, animate: false }).run();
+    if (!cy) return;
+    const name = layout === 'fcose' && !fcoseRegistered ? 'cose' : layout;
+    // Lay out only the currently-visible subset so filtered-out nodes don't leave gaps.
+    cy.elements(':visible').layout({ name, animate: false }).run();
   }
 
-  // Re-render when the active graph, render mode, or client-side filters change.
-  $: if (renderMode === 'graph' && hasGraph && cyContainer && (rNodes || hideSingletons || hideExternalLeaves)) void renderGraph();
+  // Rebuild + lay out only when the underlying data or the render surface changes (D17) — NOT on a
+  // filter toggle. rNodes/rEdges are fresh arrays whenever a new graph is loaded/built.
+  $: if (renderMode === 'graph' && hasGraph && cyContainer && rNodes && rEdges) void renderGraph();
+
+  // A filter toggle just shows/hides elements on the live instance — no rebuild, no re-layout (D17).
+  $: if (cy && renderMode === 'graph') applyFilters(hideExternalLeaves, hideSingletons);
 
   onDestroy(() => {
     if (cy) cy.destroy();
