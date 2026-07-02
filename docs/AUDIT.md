@@ -57,10 +57,42 @@ config opt-in for other hosts.
 ## Correctness / robustness
 
 **D7 · MEDIUM — Redis down at enqueue = imports "succeed" but files silently never get
-extracted.** Best-effort enqueue is a documented design choice, but there is no recovery sweep
-and no signal in the response — 40 uploaded PDFs keep filename-titles forever. *Fix:* add
-`extraction_queued: false` to import/upload responses (UI warns) + a startup sweep that
-re-enqueues files with no extraction. (Also surfaces queue health in the admin UI.)
+extracted.** (Detailed write-up requested by the owner 2026-07-02; **awaiting approval of the fix
+shape below before implementing.**)
+
+*What happens.* Import paths (folder scan, upload, agent teleport) create the File/Work rows,
+commit, then **enqueue** the background jobs — GROBID extraction, metadata enrichment, chunking,
+embedding — onto Redis/RQ. Enqueue is deliberately best-effort: `workers/queue.py` catches any
+failure to reach Redis, logs a warning, and returns `None` instead of raising (rationale: "a
+missing/unreachable Redis must not break the import flow").
+
+*The hole.* If Redis is down — or the worker container is mid-restart during a
+`docker compose up -d --build` upgrade — at the enqueue moment, the jobs are silently dropped: no
+retry, no dead-letter, no record they were owed. The import HTTP response still reports success.
+So you can upload 40 PDFs, see them all in the library, and none ever get extraction, references,
+real metadata, or embeddings — they keep filename-derived titles forever. Nothing surfaces it:
+the only endpoint that 503s on a dead queue is the manual `/files/{id}/extract`; bulk import
+swallows it. No sweep later notices "status=available but never extracted" and re-queues.
+
+*Why it's real, not theoretical.* A brief Redis blip is normal exactly during an upgrade — which
+is also when someone might import. On a single self-hosted box, one transient blip =
+permanently unprocessed papers with no signal.
+
+*Fix — two layers, recommended together:*
+1. **Make it visible (cheap, high value).** Thread the enqueue result into the response — e.g.
+   `extraction_queued: false` in the import/upload payload when `enqueue_*` returned `None` — so
+   the UI can show "imported, but extraction couldn't be queued (queue offline) — retry later."
+   The helpers already return `None` on failure; just surface it.
+2. **Make it self-heal (durable).** A recovery sweep that finds owed work and re-enqueues it: on
+   worker/api startup (and optionally hourly, or an admin "reprocess pending" button), query
+   files with `status='available'` and no extraction result (and works with no embeddings) and
+   enqueue the missing jobs. The folder-import path already tracks `file_ids_pending_extraction`
+   but only consults it on the *next manual folder import of the same source*; generalize that
+   into a startup/periodic sweep covering uploads + teleports too.
+
+*Not recommended at this scale:* a transactional `pending_jobs` outbox table (most robust, but
+duplicates RQ and is overkill unless the drop is seen repeatedly). **Recommendation: layer 1 +
+startup sweep; skip the outbox.** Ties to DISCUSSIONS D28 (keep RQ).
 
 **D8 · MEDIUM — Enrichment stops at the first failing source.**
 `enrich_work` raises on the first failing source (arXiv down → Crossref never tried). Chunk/embed

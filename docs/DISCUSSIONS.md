@@ -9,46 +9,40 @@ IDs are stable and shared with the 2026-07-02 consolidated audit.
 
 ## Product / UX
 
-**D18. Library table silently caps at 100 rows.**
-The client never sends `limit`, the backend defaults to 100 — with 300 papers the library view
-just truncates with no indicator. *Options:* pagination, infinite scroll, or a higher default +
-count display. **Recommend server-driven pagination with a total count** — also the prerequisite
-for D32.
+**D18. Library table silently caps at 100 rows.** — **DECIDED 2026-07-02 · implementing.**
+Server-controlled pagination, behaving like search results: **100 papers per page by default**,
+even with no query (then column ordering alone drives the order). Controls: prev/next, a "go to
+page" number field, and a page dropdown listing every valid page. A per-user **"max papers per
+page"** setting lives in the profile; a **global maximum** (server-protection cap) lives in the
+admin tab and clamps the per-user value. Effective per-page = `min(request or user pref or
+default, global max)`. Prerequisite for D32.
 
-**D32. Library table "Shelves"/"Racks" columns** (old NEEDS_DISCUSSION 2a). Needs a batched
-SEE-filtered serialization in `list_works` (one grouped query per page) + two `columns.ts`
-entries; a per-work endpoint already exists for the detail pane. **Recommend: yes, together with
-D18.**
+**D32. Library table "Shelves"/"Racks" columns** (old NEEDS_DISCUSSION 2a). — **DECIDED
+2026-07-02 · implementing** (with D18). Batched SEE-filtered serialization in `list_works` (one
+grouped query per page) + two `columns.ts` entries.
 
-**D33. Per-section BM25 scores for lexical hits** (old 2b). Would need `bm25_index` to return
-per-field contributions. **Recommend: skip** — semantic/hybrid hits already show the matching
-section; low value for the plumbing.
+**D33. Per-section BM25 scores for lexical hits** (old 2b). — **DECIDED 2026-07-02 · DEFERRED.**
+Semantic/hybrid hits already show the matching section; revisit if lexical-only users ask for it.
 
-**D34. `summary_provider` UX** (old 2d): both the provider AND the model must be set for LLM
-summaries; the admin panel shows a fallback badge. **Confirm the current UX is clear enough**, or
-ask for a one-line "provider is extractive — select local_llm to use this model" hint.
+**D34. `summary_provider` UX** (old 2d). — **DECIDED 2026-07-02 · skip for now** (owner can't
+validate the UX without a PC on hand; revisit later).
 
 ## Architecture / stack direction
 
-**D25. Embedding-model registry (runtime DDL, up to 8 models) is over-built for the product.**
-Works and is tested, but web-admin-triggered `ALTER TABLE` is a standing risk category, and one
-user needs one model (+ multimode experiments). *Options:* (a) keep as-is, treat as frozen;
-(b) simplify to single-configured-model + re-embed on change. **Recommend (a) freeze** — sunk
-cost that works; revisit only if it causes an incident.
+**D25. Embedding-model registry (runtime DDL, up to 8 models).** — **DECIDED 2026-07-02 · FROZEN.**
+Kept as-is; do not extend. Web-admin `ALTER TABLE` stays but is treated as a closed surface;
+revisit only if it causes an incident.
 
-**D26. Hand-rolled BM25F engine vs Postgres FTS.** Genuinely well-built, but permanent bespoke
-maintenance (mmap files, signatures, warm endpoint) for something `tsvector` does at this scale.
-**Recommend: freeze — never extend it**; if AUDIT D13 leads to a rebuild anyway, that's the
-moment to evaluate Postgres FTS instead.
+**D26. Hand-rolled BM25F engine vs Postgres FTS.** — **DECIDED 2026-07-02 · FROZEN.** Kept, never
+extended. If AUDIT D13 forces a rebuild, evaluate Postgres FTS at that point.
 
-**D27. Backend maintains dual SQLite/Postgres code paths so tests run on SQLite.**
-Every feature is written twice (vector fallbacks, dialect branches); most tests never exercise
-the dialect users run. **Recommend: gradually move the default test run to Postgres** (the parity
-harness exists), then delete SQLite branches — opportunistically, not big-bang.
+**D27. Backend dual SQLite/Postgres code paths.** — **DECIDED 2026-07-02 · accepted direction.**
+Gradually move the default test run to Postgres (parity harness exists), then delete SQLite
+branches — opportunistic, not big-bang.
 
-**D28. Redis/RQ: keep or replace?** Worker isolation for GROBID/OCR/embedding jobs is worth two
-containers; the real pain is the fail-open enqueue (AUDIT D7). **Recommend: keep RQ; fix D7.**
-(Alternative: a Postgres-backed queue, e.g. procrastinate, drops two containers.)
+**D28. Redis/RQ: keep or replace?** — **DECIDED 2026-07-02 · keep RQ**; the real pain is the
+fail-open enqueue (AUDIT D7), to be fixed there. (Owner asked for a detailed D7 write-up before
+that fix — see the AUDIT D7 entry.)
 
 ## Feature scope (needs a workplan slot)
 
