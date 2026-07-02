@@ -1,5 +1,6 @@
 """BM25F+ lexical engine tests (HS4): field weighting, BM25+ behavior, cache, API wiring."""
 
+import os
 import uuid
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from app.services.bm25_index import (
     get_index,
     invalidate_cache,
     lexical_search_papers,
+    load_index,
+    save_index,
     tokenize,
 )
 from sqlalchemy import create_engine
@@ -118,6 +121,24 @@ def test_get_index_caches_and_rebuilds_on_change(db_session) -> None:
     rebuilt = get_index(db_session)
     assert rebuilt is not first
     assert len(rebuilt.work_ids) == len(first.work_ids) + 1
+
+
+def test_save_index_prunes_superseded_signatures(db_session, tmp_path: Path) -> None:
+    db_session.add(Work(canonical_title="alpha", normalized_title="alpha"))
+    db_session.commit()
+    directory = str(tmp_path / "index")
+
+    old = build_index(db_session)
+    old.signature, old.key = "sig-old", "oldkey"
+    save_index(old, directory)
+    assert any(name.startswith("bm25-oldkey.") for name in os.listdir(directory))
+
+    new = build_index(db_session)
+    new.signature, new.key = "sig-new", "newkey"
+    save_index(new, directory)
+    names = os.listdir(directory)
+    assert not any(name.startswith("bm25-oldkey.") for name in names)
+    assert load_index(directory, "newkey", "sig-new") is not None
 
 
 def test_lexical_search_papers_ranks_and_filters_visible(db_session) -> None:

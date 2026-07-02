@@ -19,6 +19,7 @@ index is rebuilt when the corpus signature changes; a warm call (``POST /search/
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -315,6 +316,13 @@ def save_index(index: Bm25fIndex, directory: str) -> None:
     with open(tmp_meta, "w", encoding="utf-8") as handle:
         json.dump(meta, handle)
     os.replace(tmp_meta, paths["meta"])  # meta written last = commit marker
+    # Superseded signatures are never read again — prune them so the dir doesn't grow unbounded.
+    # Unlinking is safe even while other workers still mmap the old arrays (mmap survives unlink).
+    current = f"bm25-{index.key or 'default'}."
+    for name in os.listdir(directory):
+        if name.startswith("bm25-") and not name.startswith(current):
+            with contextlib.suppress(OSError):
+                os.unlink(os.path.join(directory, name))
 
 
 def load_index(directory: str, key: str, signature: str) -> Bm25fIndex | None:
