@@ -92,6 +92,47 @@ def resolve_backend_readable_pdf_path(
     )
 
 
+def derived_ocr_path(settings: Settings, sha256: str) -> Path:
+    """Return the derived searchable-OCR PDF path for a file's ``sha256``.
+
+    Lives under a ``derived_ocr/`` subtree of the managed library root — NEVER the content-addressed
+    original (that stays immutable so dedup by SHA is preserved). The mere presence of this file is
+    the "has a searchable OCR copy" signal; there is no DB column.
+    """
+    if len(sha256) != 64:
+        raise ValueError("Expected a 64-character SHA-256 digest")
+    root = Path(settings.managed_library_root).expanduser().resolve()
+    return root / "derived_ocr" / sha256[:2] / f"{sha256}.pdf"
+
+
+def save_derived_ocr_pdf(settings: Settings, sha256: str, src: Path) -> Path | None:
+    """Persist the searchable OCR'd bytes at ``src`` to the derived location. Best-effort.
+
+    Returns the derived path on success, or ``None`` on any failure (persisting the derived copy
+    must never fail extraction). The original PDF is never touched.
+    """
+    try:
+        dest = derived_ocr_path(settings, sha256)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(Path(src).read_bytes())
+        return dest
+    except Exception:  # noqa: BLE001 - a failed derived-copy persist must not fail extraction
+        return None
+
+
+def resolve_streamable_pdf_path(db: Session, *, file: File, settings: Settings) -> Path:
+    """Return the PDF path to serve to the reader: the derived searchable-OCR copy when present.
+
+    Falls back to the validated original (:func:`resolve_backend_readable_pdf_path`) when no derived
+    copy exists. Serving the derived copy gives the reader selectable/searchable text natively;
+    extraction still runs on the ORIGINAL (this resolver is for streaming only).
+    """
+    derived = derived_ocr_path(settings, file.sha256)
+    if derived.exists() and derived.is_file():
+        return derived
+    return resolve_backend_readable_pdf_path(db, file=file, settings=settings)
+
+
 def _validated_path(internal_uri: str, *, root: Path, escape_msg: str) -> Path:
     """Resolve ``internal_uri`` and assert it stays within ``root`` (no path traversal)."""
     resolved_root = root.expanduser().resolve()

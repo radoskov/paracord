@@ -157,6 +157,36 @@ def test_pymupdf_ocr_adds_searchable_text_layer(tmp_path: Path) -> None:
     assert "HELLO" in text.upper()
 
 
+def test_pymupdf_extract_text_native_and_run_ml_extraction(tmp_path: Path) -> None:
+    """The PyMuPDF hard extractor reads the native text layer; run_ml_extraction wraps it."""
+    if not ocr_service.pymupdf_available():
+        import pytest as _pytest
+
+        _pytest.skip("PyMuPDF / tesseract not available in this environment")
+    import fitz  # type: ignore[import-not-found]
+
+    src = tmp_path / "native.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    for i in range(10):
+        page.insert_text((72, 90 + i * 18), "machine learning neural networks study", fontsize=11)
+    doc.save(str(src))
+    doc.close()
+
+    text, source = ocr_service.pymupdf_extract_text(src, language="eng")
+    assert source == "native"
+    assert "neural networks" in text.lower()
+    # run_ml_extraction(backend="pymupdf") is the shipped hard extractor (no torch, never raises).
+    assert "neural" in ocr_service.run_ml_extraction(src, backend="pymupdf").lower()
+
+
+def test_pymupdf_extract_text_graceful_on_bad_pdf(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"not a pdf")
+    text, source = ocr_service.pymupdf_extract_text(bad, language="eng")
+    assert text == "" and source == "none"
+
+
 def test_ml_extraction_unavailable_gives_clear_error(tmp_path: Path, monkeypatch) -> None:
     # find_spec returns None → selected-but-absent → a clear install-path error, no torch import.
     monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)

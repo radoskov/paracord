@@ -1,6 +1,5 @@
 """File and PDF access endpoints."""
 
-import os
 import uuid
 from datetime import datetime
 
@@ -19,12 +18,12 @@ from app.services import access
 from app.services import ocr as ocr_service
 from app.services.ai_config import get_ai_config
 from app.services.audit import record_event
-from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
+from app.services.file_paths import (
+    FileLocationError,
+    resolve_backend_readable_pdf_path,
+    resolve_streamable_pdf_path,
+)
 from app.workers.queue import enqueue_extraction
-
-# Below this many non-space characters, the native PDF text layer is treated as too sparse to be
-# useful (a scanned PDF), so the /text endpoint falls back to on-the-fly OCR.
-_SPARSE_TEXT_THRESHOLD = 100
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -118,7 +117,8 @@ def stream_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     try:
-        path = resolve_backend_readable_pdf_path(db, file=file, settings=get_settings())
+        # Prefer the derived searchable-OCR copy (selectable text) when one exists; else the original.
+        path = resolve_streamable_pdf_path(db, file=file, settings=get_settings())
     except FileLocationError as exc:
         code = status.HTTP_403_FORBIDDEN if exc.kind == "forbidden" else status.HTTP_404_NOT_FOUND
         raise HTTPException(status_code=code, detail=str(exc)) from exc
@@ -173,38 +173,5 @@ def file_text(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not available")
 
     language = get_ai_config(db).ocr_language
-    text, source = _extract_pdf_text(path, language=language)
+    text, source = ocr_service.pymupdf_extract_text(path, language=language)
     return FileTextRead(text=text, source=source)
-
-
-def _extract_pdf_text(path, *, language: str) -> tuple[str, str]:
-    """Return ``(text, source)`` for a PDF: native text layer, else OCR fallback, else empty.
-
-    ``source`` is ``"native"`` / ``"ocr"`` / ``"none"``. Import + OCR are best-effort: any failure
-    degrades to the native text found so far (never raises).
-    """
-    try:
-        import fitz  # type: ignore[import-not-found]
-    except ImportError:
-        return "", "none"
-
-    try:
-        with fitz.open(path) as document:
-            native = "".join(page.get_text() for page in document)
-            if len(native.replace(" ", "").replace("\n", "")) >= _SPARSE_TEXT_THRESHOLD:
-                return native, "native"
-            # Sparse native layer → OCR each page on the fly (scanned PDF).
-            prefix = ocr_service._tessdata_prefix()
-            if prefix is None:
-                return (native, "native") if native.strip() else ("", "none")
-            os.environ["TESSDATA_PREFIX"] = prefix
-            ocr_parts: list[str] = []
-            for page in document:
-                textpage = page.get_textpage_ocr(flags=0, language=language, full=True)
-                ocr_parts.append(page.get_text(textpage=textpage))
-            ocr_text = "".join(ocr_parts)
-            if ocr_text.strip():
-                return ocr_text, "ocr"
-            return (native, "native") if native.strip() else ("", "none")
-    except Exception:  # noqa: BLE001 - text extraction must never 500 the reader
-        return "", "none"

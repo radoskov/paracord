@@ -27,7 +27,10 @@ from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
 from app.services.audit import record_event
-from app.services.file_paths import FileLocationError, resolve_backend_readable_pdf_path
+from app.services.file_paths import (
+    FileLocationError,
+    resolve_streamable_pdf_path,
+)
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import attach_uploaded_pdf_to_work
@@ -1045,7 +1048,9 @@ def _file_content_available(db: Session, file: File) -> bool:
     if file.status in _PDF_DISCARDED_STATUSES:
         return False
     try:
-        path = resolve_backend_readable_pdf_path(db, file=file, settings=get_settings())
+        # Derived-aware: a searchable OCR copy counts as streamable content even if it is served
+        # in place of the original.
+        path = resolve_streamable_pdf_path(db, file=file, settings=get_settings())
     except FileLocationError:
         return False
     return path.exists() and path.is_file()

@@ -100,11 +100,13 @@ def detect_providers(*, ollama_url: str) -> dict:
                 "(bundles PyMuPDF + tesseract-ocr).",
             },
             "full_ml": {
-                "available": nougat_available or marker_available,
+                # The shipped hard extractor is PyMuPDF (get_text + OCR fallback); Nougat/Marker are
+                # opt-in heavier extractors. Available whenever any of them can run.
+                "available": pymupdf_available or nougat_available or marker_available,
                 "note": None
-                if (nougat_available or marker_available)
-                else "No ML extractor installed — build the opt-in ML-extraction image "
-                "(`make build-ml-extraction`); it degrades to GROBID until then.",
+                if (pymupdf_available or nougat_available or marker_available)
+                else "No hard extractor available — PyMuPDF (fitz) + tesseract are missing and no "
+                "opt-in ML extractor is installed (`make build-ml-extraction`); degrades to GROBID.",
             },
             "grobid": {"available": True, "note": "Default TEI extractor (GROBID service)."},
             "nougat": {

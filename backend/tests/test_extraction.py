@@ -535,6 +535,63 @@ def test_extract_routes_to_pymupdf_backend(db_session, tmp_path, monkeypatch) ->
     assert file.text_layer_quality == "ocr_added"
 
 
+def test_extract_persists_derived_ocr_pdf(db_session, tmp_path, monkeypatch) -> None:
+    """When OCR produces a searchable copy, its bytes are persisted to the derived location."""
+    from app.core.config import get_settings
+    from app.services import ocr as ocr_service
+    from app.services.file_paths import derived_ocr_path
+
+    work, file, pdf, _ = _make_extractable_file(db_session, tmp_path, quality="poor")
+    managed_root = tmp_path / "lib"
+    settings = get_settings().model_copy(update={"managed_library_root": str(managed_root)})
+    ocr_pdf = tmp_path / "paper.ocr.pdf"
+    ocr_pdf.write_bytes(b"%PDF-1.4\n% searchable ocr copy\n%%EOF\n")
+
+    def fake_maybe_ocr(path, **_kw):
+        return ocr_service.OcrResult(
+            ocr_pdf, ran=True, engine="ocrmypdf", text_layer_quality="ocr_added", error=None
+        )
+
+    monkeypatch.setattr(ocr_service, "maybe_ocr", fake_maybe_ocr)
+    monkeypatch.setattr(ocr_service, "ocrmypdf_available", lambda: True)
+
+    extract_and_store(db_session, file=file, fetch_tei=lambda _p: FIXTURE, settings=settings)
+    db_session.commit()
+
+    derived = derived_ocr_path(settings, file.sha256)
+    assert derived.exists()
+    assert derived.read_bytes() == ocr_pdf.read_bytes()  # the searchable copy, byte-for-byte
+
+
+def test_extract_full_ml_enriches_with_pymupdf_hard_text(db_session, tmp_path, monkeypatch) -> None:
+    """full_ml route runs the PyMuPDF hard extractor and enriches keywords when GROBID body is weak."""
+    from app.core.config import get_settings
+    from app.services import ocr as ocr_service
+
+    # A minimal TEI with a title but no abstract/body → without extra_text, no keywords.
+    weak_tei = (
+        "<TEI xmlns='http://www.tei-c.org/ns/1.0'><teiHeader><fileDesc><titleStmt>"
+        "<title>Scanned Paper</title></titleStmt></fileDesc></teiHeader>"
+        "<text><body></body></text></TEI>"
+    )
+    work, file, pdf, _ = _make_extractable_file(db_session, tmp_path, quality="good")
+    settings = get_settings().model_copy(update={"ocr_backend": "full_ml"})
+
+    called = {}
+
+    def fake_run_ml(path, *, backend, language="eng"):
+        called["backend"] = backend
+        return "reinforcement learning policy gradient optimization for robotics control systems"
+
+    monkeypatch.setattr(ocr_service, "run_ml_extraction", fake_run_ml)
+
+    extract_and_store(db_session, file=file, fetch_tei=lambda _p: weak_tei, settings=settings)
+    db_session.commit()
+
+    assert called["backend"] == "pymupdf"  # the shipped hard extractor, not nougat/marker
+    assert work.keywords  # enriched from the PyMuPDF hard text despite an empty GROBID body
+
+
 def test_extract_force_ocr_runs_even_on_good_text_layer(db_session, tmp_path, monkeypatch) -> None:
     """#22: force_ocr re-runs OCRmyPDF regardless of quality; summary surfaces provenance."""
     from app.services import ocr as ocr_service

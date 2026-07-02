@@ -113,6 +113,27 @@ def test_file_text_missing_file_is_404(client, auth_headers):
     assert r.status_code == 404
 
 
+def test_stream_prefers_derived_ocr_pdf(client, auth_headers, db, tmp_path, monkeypatch):
+    """When a derived searchable-OCR copy exists, /stream serves THAT, not the original bytes."""
+    from app.services.file_paths import derived_ocr_path
+
+    original = b"%PDF-1.4\n% ORIGINAL scanned bytes\n%%EOF\n"
+    file = _seed_managed_pdf(db, tmp_path, monkeypatch, original)
+    # The endpoint reads settings via the monkeypatched get_settings; mirror it here to locate the
+    # derived path under the same managed root.
+    from app.api.v1.endpoints.files import get_settings as _gs
+
+    settings = _gs()
+    derived = derived_ocr_path(settings, file.sha256)
+    derived.parent.mkdir(parents=True, exist_ok=True)
+    derived_bytes = b"%PDF-1.4\n% DERIVED searchable ocr copy\n%%EOF\n"
+    derived.write_bytes(derived_bytes)
+
+    r = client.get(f"/api/v1/files/{file.id}/stream", headers=auth_headers("reader"))
+    assert r.status_code == 200
+    assert r.content == derived_bytes  # served the derived copy, not the original
+
+
 def test_file_text_is_see_gated(client, auth_headers, db, tmp_path, monkeypatch):
     file = _seed_managed_pdf(db, tmp_path, monkeypatch, _text_pdf_bytes("secret content " * 20))
     # SEE-gating mirrors /stream: a user who can't see the file gets 404, not the text.

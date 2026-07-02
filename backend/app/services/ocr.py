@@ -217,23 +217,72 @@ def pymupdf_ocr(
         return OcrResult(pdf, ran=False, engine="pymupdf", text_layer_quality=None, error=str(exc))
 
 
+# Below this many non-space characters, a PDF's native text layer is treated as too sparse to be
+# useful (a scanned PDF), so ``pymupdf_extract_text`` falls back to on-the-fly OCR.
+_SPARSE_TEXT_THRESHOLD = 100
+
+
+def pymupdf_extract_text(pdf: Path, *, language: str = "eng") -> tuple[str, str]:
+    """Extract a PDF's plain text via PyMuPDF: native text layer, else on-the-fly OCR.
+
+    Returns ``(text, source)`` where ``source`` is ``"native"`` / ``"ocr"`` / ``"none"``. The native
+    ``get_text()`` layer is used when it has enough characters; when it is sparse (a scanned PDF) and
+    tesseract is available, each page is OCR'd via ``get_textpage_ocr`` in ``language`` (tesseract
+    syntax, multi-language ``"eng+spa"`` supported). Never raises — degrades to the native text found
+    so far (possibly empty).
+    """
+    try:
+        import fitz  # type: ignore[import-not-found]  # noqa: PLC0415 (optional heavy dep)
+    except ImportError:
+        return "", "none"
+    try:
+        with fitz.open(pdf) as document:
+            native = "".join(page.get_text() for page in document)
+            if len(native.replace(" ", "").replace("\n", "")) >= _SPARSE_TEXT_THRESHOLD:
+                return native, "native"
+            prefix = _tessdata_prefix()
+            if prefix is None:
+                return (native, "native") if native.strip() else ("", "none")
+            os.environ["TESSDATA_PREFIX"] = prefix
+            ocr_parts: list[str] = []
+            for page in document:
+                textpage = page.get_textpage_ocr(flags=0, language=language, full=True)
+                ocr_parts.append(page.get_text(textpage=textpage))
+            ocr_text = "".join(ocr_parts)
+            if ocr_text.strip():
+                return ocr_text, "ocr"
+            return (native, "native") if native.strip() else ("", "none")
+    except Exception as exc:  # noqa: BLE001 - text extraction must never fail extraction
+        logger.warning("PyMuPDF text extraction failed for %s: %s", pdf, exc)
+        return "", "none"
+
+
 def ml_extraction_available(backend: str) -> bool:
-    """True when the ML extractor for ``backend`` (nougat/marker) is importable in this image."""
+    """True when the extractor for ``backend`` is available in this image.
+
+    ``pymupdf`` (the lightweight, always-available hard extractor) is available whenever PyMuPDF is
+    importable; the opt-in ``nougat``/``marker`` backends require their module to be installed.
+    """
+    if backend == "pymupdf":
+        return importlib.util.find_spec("fitz") is not None
     module = _ML_BACKEND_MODULES.get(backend)
     if module is None:
         return False
     return importlib.util.find_spec(module) is not None
 
 
-def run_ml_extraction(pdf: Path, *, backend: str) -> str:
-    """Run an opt-in ML extractor (Nougat/Marker), returning plain text/markdown for the paper.
+def run_ml_extraction(pdf: Path, *, backend: str, language: str = "eng") -> str:
+    """Extract plain text for a paper — the "hard extractor" path used by the ``full_ml`` route.
 
-    Gated behind an ``importlib`` spec check so torch/model deps are never imported unless the
-    backend is both selected and actually installed. When selected-but-absent, raises a clear
-    error naming the opt-in install path (the ML-extraction image extra / ``make
-    build-ml-extraction``). The concrete model invocation lives behind the guard so CI — which does
-    not install these — never imports torch.
+    The shipped extractor is **PyMuPDF** (``backend="pymupdf"``): it reads the PDF text layer and
+    OCRs pages that lack one — lightweight, maintained, AGPL-compatible, no torch. The opt-in
+    Nougat/Marker backends stay gated behind an ``importlib`` spec check (torch is never imported in
+    CI) and raise a clear install-path error when selected-but-absent; when present they too fall
+    back to the PyMuPDF extractor (their heavy model invocation is deferred — PyMuPDF covers the
+    need).
     """
+    if backend == "pymupdf":
+        return pymupdf_extract_text(pdf, language=language)[0]
     module = _ML_BACKEND_MODULES.get(backend)
     if module is None:
         raise ValueError(f"Unknown ML extraction backend: {backend!r}")
@@ -242,8 +291,5 @@ def run_ml_extraction(pdf: Path, *, backend: str) -> str:
             f"ML extraction backend {backend!r} is not installed in this image — install it via "
             f"the ML-extraction image extra (`make build-ml-extraction`)."
         )
-    # Import + invocation are deliberately kept inside the guard (torch is multi-GB and never
-    # imported in CI). The concrete PDF->text call is a follow-up once the opt-in image ships.
-    raise NotImplementedError(
-        f"ML extraction backend {backend!r} is installed but its extractor is not wired yet."
-    )
+    # Installed but its heavy model path is deferred: use the PyMuPDF hard extractor (never raises).
+    return pymupdf_extract_text(pdf, language=language)[0]
