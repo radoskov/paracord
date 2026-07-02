@@ -48,7 +48,7 @@ def test_m1_import_organize_search_read(client, auth_headers, server_root, no_qu
     assert batch.json()["stats"]["created_works"] == 1
 
     # the work exists, with the arXiv id detected from the filename
-    works = client.get("/api/v1/works", headers=h).json()
+    works = client.get("/api/v1/works", headers=h).json()["items"]
     assert len(works) == 1
     work = works[0]
     wid = work["id"]
@@ -84,17 +84,20 @@ def test_m1_import_organize_search_read(client, auth_headers, server_root, no_qu
 
     # search / filter by shelf, rack, tag, reading status
     assert [
-        w["id"] for w in client.get(f"/api/v1/works?shelf_id={shelf['id']}", headers=h).json()
+        w["id"]
+        for w in client.get(f"/api/v1/works?shelf_id={shelf['id']}", headers=h).json()["items"]
     ] == [wid]
     assert [
-        w["id"] for w in client.get(f"/api/v1/works?rack_id={rack['id']}", headers=h).json()
+        w["id"]
+        for w in client.get(f"/api/v1/works?rack_id={rack['id']}", headers=h).json()["items"]
     ] == [wid]
-    assert [w["id"] for w in client.get(f"/api/v1/works?tag_id={tag['id']}", headers=h).json()] == [
-        wid
-    ]
+    assert [
+        w["id"] for w in client.get(f"/api/v1/works?tag_id={tag['id']}", headers=h).json()["items"]
+    ] == [wid]
     client.patch(f"/api/v1/works/{wid}", headers=h, json={"reading_status": "reading"})
     assert [
-        w["id"] for w in client.get("/api/v1/works?reading_status=reading", headers=h).json()
+        w["id"]
+        for w in client.get("/api/v1/works?reading_status=reading", headers=h).json()["items"]
     ] == [wid]
 
     # read: stream the PDF from the configured source
@@ -116,7 +119,7 @@ def test_m1_reimport_is_idempotent(client, auth_headers, server_root, no_queue):
         "created_works": 0,
         "existing_files": 1,
     }
-    assert len(client.get("/api/v1/works", headers=h).json()) == 1
+    assert len(client.get("/api/v1/works", headers=h).json()["items"]) == 1
 
 
 def test_reader_role_cannot_import_or_create(client, auth_headers, server_root, no_queue):

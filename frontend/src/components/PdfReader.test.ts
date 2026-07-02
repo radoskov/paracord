@@ -13,6 +13,7 @@ const EDITOR: CurrentUser = {
   email: null,
   created_at: null,
   last_login_at: null,
+  papers_per_page: null,
 };
 
 const ANNOTATION: Annotation = {

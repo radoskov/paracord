@@ -21,6 +21,8 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listShelves: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
+    getAppConfig: vi.fn().mockResolvedValue({ max_papers_per_page: 500 }),
+    updateAppConfig: vi.fn().mockResolvedValue({ max_papers_per_page: 250 }),
     ...overrides,
   };
 }
@@ -47,5 +49,22 @@ describe('AdminPage groups section', () => {
     expect(screen.getByText('personal')).toBeTruthy();
     // The Defaults subsection with its default-access-level control renders too.
     expect(screen.getByLabelText('Default access level')).toBeTruthy();
+  });
+
+  it('saves the global max papers per page from the Settings tab', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.getAppConfig).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const input = screen.getByLabelText('Global max papers per page') as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('500'));
+
+    await fireEvent.input(input, { target: { value: '250' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(client.updateAppConfig).toHaveBeenCalledWith({ max_papers_per_page: 250 }),
+    );
   });
 });

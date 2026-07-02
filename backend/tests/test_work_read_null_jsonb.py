@@ -22,7 +22,7 @@ def test_works_list_with_null_jsonb_columns(client, auth_headers, db):
 
     listed = client.get("/api/v1/works", headers=auth_headers("reader"))
     assert listed.status_code == 200
-    row = next(w for w in listed.json() if w["id"] == wid)
+    row = next(w for w in listed.json()["items"] if w["id"] == wid)
     assert row["confirmed_fields"] == []
     assert row["keywords"] == []
 

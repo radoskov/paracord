@@ -72,7 +72,7 @@ def test_hash_search_returns_owning_paper(client, auth_headers, db):
     # Full hash.
     full = client.get(f"/api/v1/works?q={sha}", headers=h)
     assert full.status_code == 200
-    assert any(w["id"] == str(work.id) for w in full.json())
+    assert any(w["id"] == str(work.id) for w in full.json()["items"])
     # Hash prefix (as shown truncated in the UI).
     prefix = client.get(f"/api/v1/works?q={sha[:12]}", headers=h)
-    assert any(w["id"] == str(work.id) for w in prefix.json())
+    assert any(w["id"] == str(work.id) for w in prefix.json()["items"])

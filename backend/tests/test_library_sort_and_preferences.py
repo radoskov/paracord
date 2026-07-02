@@ -10,7 +10,7 @@ def _create(client, headers, title: str) -> dict:
 def _titles(client, headers, **params) -> list[str]:
     resp = client.get("/api/v1/works", headers=headers, params=params)
     assert resp.status_code == 200, resp.text
-    return [w["canonical_title"] for w in resp.json()]
+    return [w["canonical_title"] for w in resp.json()["items"]]
 
 
 # --- #3 sort allowlist ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def test_unknown_sort_falls_back_to_default(client, auth_headers):
     # An unknown key must not error and must not be interpolated — it falls back to updated_at desc.
     resp = client.get("/api/v1/works", headers=h, params={"sort": "bogus_column"})
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    assert len(resp.json()["items"]) == 2
 
 
 def test_sort_injection_is_safe(client, auth_headers):
@@ -62,7 +62,7 @@ def test_added_at_sort_uses_created_at(client, auth_headers):
     a = _create(client, h, "First added")
     b = _create(client, h, "Second added")
     asc = client.get("/api/v1/works", headers=h, params={"sort": "added_at", "order": "asc"}).json()
-    ids = [w["id"] for w in asc]
+    ids = [w["id"] for w in asc["items"]]
     assert ids.index(a["id"]) < ids.index(b["id"])
 
 

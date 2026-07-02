@@ -272,7 +272,7 @@ def test_http_list_works_filters_hidden(client, db, make_user):
     _work(db, title="loose-http")
     titles = {
         w["canonical_title"]
-        for w in client.get("/api/v1/works", headers=_headers(db, reader)).json()
+        for w in client.get("/api/v1/works", headers=_headers(db, reader)).json()["items"]
     }
     assert "loose-http" in titles
     assert "hidden-http" not in titles

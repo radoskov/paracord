@@ -129,7 +129,7 @@ def test_tags_on_shelves_and_racks_do_not_match_work_tag_filters(client, auth_he
             == 204
         )
 
-    assert client.get(f"/api/v1/works?tag_id={tag['id']}", headers=headers).json() == []
+    assert client.get(f"/api/v1/works?tag_id={tag['id']}", headers=headers).json()["items"] == []
 
     assert (
         client.post(
@@ -140,5 +140,5 @@ def test_tags_on_shelves_and_racks_do_not_match_work_tag_filters(client, auth_he
         == 204
     )
 
-    tagged_works = client.get(f"/api/v1/works?tag_id={tag['id']}", headers=headers).json()
+    tagged_works = client.get(f"/api/v1/works?tag_id={tag['id']}", headers=headers).json()["items"]
     assert [item["id"] for item in tagged_works] == [work["id"]]

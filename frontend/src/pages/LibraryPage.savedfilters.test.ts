@@ -22,7 +22,9 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listTags: vi.fn().mockResolvedValue([]),
     listSavedFilters: vi.fn().mockResolvedValue([SAVED]),
     getPreferences: vi.fn().mockResolvedValue({}),
-    listWorks: vi.fn().mockResolvedValue([]),
+    listWorks: vi
+      .fn()
+      .mockResolvedValue({ items: [], total: 0, page: 1, pages: 1, per_page: 100 }),
     createSavedFilter: vi.fn().mockResolvedValue({ ...SAVED, id: 'sf-2', name: 'New filter' }),
     deleteSavedFilter: vi.fn().mockResolvedValue(undefined),
     ...overrides,

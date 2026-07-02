@@ -36,7 +36,13 @@ function makeClient() {
     listRacks: vi.fn().mockResolvedValue([]),
     listImportBatches: vi.fn().mockResolvedValue([BATCH]),
     listSavedFilters: vi.fn().mockResolvedValue([SAVED_FILTER]),
-    listWorks: vi.fn().mockResolvedValue([{ id: 'w1' }, { id: 'w2' }]),
+    listWorks: vi.fn().mockResolvedValue({
+      items: [{ id: 'w1' }, { id: 'w2' }],
+      total: 2,
+      page: 1,
+      pages: 1,
+      per_page: 500,
+    }),
     citationGraph: vi.fn().mockResolvedValue(EMPTY_GRAPH),
     semanticSearch: vi.fn(),
   };
@@ -65,7 +71,9 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     await fireEvent.input(input, { target: { value: 'attention' } });
     await build();
 
-    await waitFor(() => expect(client.listWorks).toHaveBeenCalledWith({ q: 'attention' }));
+    await waitFor(() =>
+      expect(client.listWorks).toHaveBeenCalledWith({ q: 'attention', perPage: 500 }),
+    );
     expect(client.citationGraph).toHaveBeenCalledWith({
       scopeType: 'search_result',
       workIds: ['w1', 'w2'],

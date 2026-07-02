@@ -12,6 +12,7 @@ function user(role: UserRole, id = 'me'): CurrentUser {
     email: null,
     created_at: null,
     last_login_at: null,
+    papers_per_page: null,
   };
 }
 

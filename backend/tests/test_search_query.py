@@ -78,7 +78,7 @@ def test_list_works_year_and_title_operators(client, auth_headers):
     _make(client, h, canonical_title="Unrelated baking", year=2022)
 
     reader = auth_headers("reader")
-    got = client.get("/api/v1/works?q=transformer year:>=2020", headers=reader).json()
+    got = client.get("/api/v1/works?q=transformer year:>=2020", headers=reader).json()["items"]
     titles = {w["canonical_title"] for w in got}
     assert titles == {"New transformer paper"}
 
@@ -86,12 +86,12 @@ def test_list_works_year_and_title_operators(client, auth_headers):
 def test_list_works_has_pdf_operator(client, auth_headers):
     h = auth_headers("editor")
     _make(client, h, canonical_title="No-file paper xyz")
-    got = client.get("/api/v1/works?q=xyz has:no-pdf", headers=h).json()
+    got = client.get("/api/v1/works?q=xyz has:no-pdf", headers=h).json()["items"]
     assert any(w["canonical_title"] == "No-file paper xyz" for w in got)
 
 
 def _titles(resp):
-    return {w["canonical_title"] for w in resp.json()}
+    return {w["canonical_title"] for w in resp.json()["items"]}
 
 
 def test_list_works_doi_and_arxiv_operators(client, auth_headers):

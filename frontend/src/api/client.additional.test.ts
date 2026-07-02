@@ -44,6 +44,39 @@ describe('ApiClient request contracts', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-123');
   });
 
+  it('maps pagination params and returns the paginated envelope', async () => {
+    fetchMock = vi.fn(async () =>
+      jsonResponse({ items: [{ id: 'w1' }], total: 1, page: 2, pages: 5, per_page: 25 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new ApiClient('http://api.test', 'token-123');
+
+    const result = await client.listWorks({ page: 2, perPage: 25 });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('page')).toBe('2');
+    expect(parsed.searchParams.get('per_page')).toBe('25');
+    expect(result.total).toBe(1);
+    expect(result.pages).toBe(5);
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('reads and updates the admin app-config (global max papers per page)', async () => {
+    fetchMock = vi.fn(async () => jsonResponse({ max_papers_per_page: 300 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new ApiClient('http://api.test', 'token-123');
+
+    const read = await client.getAppConfig();
+    expect(read.max_papers_per_page).toBe(300);
+
+    await client.updateAppConfig({ max_papers_per_page: 300 });
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/api/v1/admin/app-config');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ max_papers_per_page: 300 });
+  });
+
   it('does not attach bearer auth to login requests', async () => {
     fetchMock = vi.fn(async () => jsonResponse({ access_token: 'server-token' }));
     vi.stubGlobal('fetch', fetchMock);

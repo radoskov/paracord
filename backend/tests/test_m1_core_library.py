@@ -229,10 +229,11 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
                 shelf_id=filters.get("shelf_id"),
                 rack_id=filters.get("rack_id"),
                 tag_id=filters.get("tag_id"),
-                limit=100,
+                page=1,
+                per_page=100,
                 db=db_session,
                 actor=owner,
-            )
+            ).items
         ]
 
     assert filtered_ids(shelf_id=shelf.id) == [included.id]
@@ -265,11 +266,12 @@ def test_work_list_filters_by_extraction_status(db_session, owner: User) -> None
                 shelf_id=None,
                 rack_id=None,
                 tag_id=None,
-                limit=100,
+                page=1,
+                per_page=100,
                 db=db_session,
                 actor=owner,
                 **filters,
-            )
+            ).items
         }
 
     assert ids(has_pdf=True) == {with_pdf.id}

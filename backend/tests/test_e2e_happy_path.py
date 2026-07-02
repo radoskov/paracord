@@ -34,7 +34,7 @@ def test_happy_path(client, db):
     ).json()
 
     # They appear in the library list.
-    works = client.get("/api/v1/works", headers=headers).json()
+    works = client.get("/api/v1/works", headers=headers).json()["items"]
     titles = {w["canonical_title"] for w in works}
     assert {"Attention transformer model", "Sourdough bread baking"} <= titles
 
