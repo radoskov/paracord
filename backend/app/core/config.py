@@ -125,13 +125,6 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["ocr_language"] = ocr["language"]
     if "skip_if_text_layer_good" in ocr:
         values["ocr_skip_if_text_layer_good"] = ocr["skip_if_text_layer_good"]
-    advanced = processing.get("advanced_extraction") or {}
-    if advanced.get("nougat_enabled"):
-        values["ocr_backend"] = "full_ml"
-        values["extraction_backend"] = "nougat"
-    elif advanced.get("marker_enabled"):
-        values["ocr_backend"] = "full_ml"
-        values["extraction_backend"] = "marker"
     return values
 
 
@@ -218,15 +211,11 @@ class Settings(BaseSettings):
     # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (the JSON-array +
     # Python-cosine path stays the default + the SQLite path). Additive; default off.
     pgvector_enabled: bool = False
-    # PDF extraction backend: grobid (default) | nougat | marker (opt-in ML extractors for hard/
-    # scanned PDFs; detected + selectable like the other providers, full impl is a follow-up).
-    # Kept for backward compat; the effective OCR/extraction mode is chosen via `ocr_backend`.
-    extraction_backend: str = "grobid"
     # OCR / advanced extraction (Phase B5). `ocrmypdf` (default) adds a searchable text layer to
     # scanned/poor-text PDFs before GROBID (bounded local subprocess; no egress). `none` disables
-    # the pre-step; `full_ml` routes to an opt-in ML extractor (activate-when-present) and
-    # otherwise degrades to GROBID.
-    ocr_backend: str = "ocrmypdf"  # none | ocrmypdf | full_ml
+    # the pre-step; `pymupdf` adds a text layer via PyMuPDF + tesseract (no ocrmypdf/ghostscript
+    # dependency). GROBID stays the structured TEI extractor either way.
+    ocr_backend: str = "ocrmypdf"  # none | ocrmypdf | pymupdf
     ocr_timeout_seconds: int = 300
     ocr_language: str = "eng"
     ocr_skip_if_text_layer_good: bool = True

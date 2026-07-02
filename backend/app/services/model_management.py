@@ -37,8 +37,6 @@ def detect_providers(*, ollama_url: str) -> dict:
     ocrmypdf_available = shutil.which("ocrmypdf") is not None
     # PyMuPDF OCR shells out to tesseract, so both must be present for the pymupdf backend to run.
     pymupdf_available = _module_available("fitz") and shutil.which("tesseract") is not None
-    nougat_available = _module_available("nougat")
-    marker_available = _module_available("marker")
     return {
         "embedding": {
             "hash_bow": {"available": True, "note": "Default, dependency-free."},
@@ -77,9 +75,9 @@ def detect_providers(*, ollama_url: str) -> dict:
                 "when a real model is active); real BERTopic is deferred.",
             },
         },
-        # Extraction / OCR backends. Keyed by the ``ocr_backend`` enum (none|ocrmypdf|full_ml) so
-        # the active-capability status can look up the selected value directly; grobid/nougat/marker
-        # entries are also reported for detection visibility.
+        # Extraction / OCR backends. Keyed by the ``ocr_backend`` enum (none|ocrmypdf|pymupdf) so
+        # the active-capability status can look up the selected value directly; the grobid entry is
+        # also reported for detection visibility (it is always the structured TEI extractor).
         "extraction": {
             "none": {
                 "available": True,
@@ -99,38 +97,13 @@ def detect_providers(*, ollama_url: str) -> dict:
                 else "PyMuPDF (fitz) + tesseract not found in this image — rebuild the base image "
                 "(bundles PyMuPDF + tesseract-ocr).",
             },
-            "full_ml": {
-                # The shipped hard extractor is PyMuPDF (get_text + OCR fallback); Nougat/Marker are
-                # opt-in heavier extractors. Available whenever any of them can run.
-                "available": pymupdf_available or nougat_available or marker_available,
-                "note": None
-                if (pymupdf_available or nougat_available or marker_available)
-                else "No hard extractor available — PyMuPDF (fitz) + tesseract are missing and no "
-                "opt-in ML extractor is installed (`make build-ml-extraction`); degrades to GROBID.",
-            },
             "grobid": {"available": True, "note": "Default TEI extractor (GROBID service)."},
-            "nougat": {
-                "available": nougat_available,
-                "note": None
-                if nougat_available
-                else "Opt-in ML extractor for hard/scanned PDFs — install via the ML-extraction "
-                "image extra (`make build-ml-extraction`).",
-            },
-            "marker": {
-                "available": marker_available,
-                "note": None
-                if marker_available
-                else "Opt-in ML extractor — install via the ML-extraction image extra "
-                "(`make build-ml-extraction`).",
-            },
         },
         "ollama_reachable": ollama_models is not None,
         "bertopic_installed": bertopic_available,
         "sentence_transformers_installed": st_available,
         "ocrmypdf_installed": ocrmypdf_available,
         "pymupdf_installed": pymupdf_available,
-        "nougat_installed": nougat_available,
-        "marker_installed": marker_available,
     }
 
 

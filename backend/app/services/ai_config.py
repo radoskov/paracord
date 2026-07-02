@@ -50,8 +50,8 @@ SUMMARY_PROVIDERS = ("extractive", "local_llm")
 TOPIC_BACKENDS = ("tfidf", "embedding", "bertopic")
 # OCR / advanced-extraction backends (Phase B5): none disables OCR; ocrmypdf adds a searchable
 # text layer before GROBID; pymupdf adds one via PyMuPDF + tesseract (no ocrmypdf/ghostscript
-# dependency); full_ml routes to an opt-in ML extractor (activate-when-present).
-OCR_BACKENDS = ("none", "ocrmypdf", "pymupdf", "full_ml")
+# dependency). GROBID stays the structured TEI extractor either way.
+OCR_BACKENDS = ("none", "ocrmypdf", "pymupdf")
 
 
 @dataclass
@@ -100,6 +100,10 @@ def get_ai_config(db: Session, *, settings: Settings | None = None) -> Effective
         value = getattr(row, field, None)
         if value:
             setattr(cfg, field, value)
+    # Tolerate a legacy/removed ocr_backend value (e.g. the dropped "full_ml") stored in an older
+    # row: degrade to the Settings default rather than surfacing an out-of-range enum to callers.
+    if cfg.ocr_backend not in OCR_BACKENDS:
+        cfg.ocr_backend = settings.ocr_backend
     return cfg
 
 

@@ -9,9 +9,8 @@ constraints:
 * The OCR'd PDF is **transient**: it is written to a scratch temp dir and fed to GROBID; only the
   improved TEI/abstract/keywords + an updated ``text_layer_quality`` ("ocr_added") persist. We do
   not store it as a managed artifact (a different SHA would pollute content-addressed dedup).
-* The heavy ML extractors (Nougat/Marker) are **activate-when-present**: gated behind an
-  ``importlib`` spec check so CI never imports torch, and they are installed only via the opt-in
-  ML-extraction image extra (``make build-ml-extraction``) — never at runtime from the web UI.
+* The OCR backends are ``ocrmypdf`` and ``pymupdf`` only; GROBID stays the structured TEI
+  extractor. There is no ML-extraction (Nougat/Marker) seam.
 """
 
 from __future__ import annotations
@@ -41,8 +40,6 @@ _TESSDATA_CANDIDATES = (
 # OCR pass already ran (re-running ocrmypdf --skip-text is a cheap no-op, so it is safe either way,
 # but we treat it as "no OCR needed" to keep the pipeline idempotent).
 _NEEDS_OCR_QUALITIES = frozenset({"poor", "none", "unknown"})
-# The map from a selected ML backend to the Python module whose presence activates it.
-_ML_BACKEND_MODULES = {"nougat": "nougat", "marker": "marker"}
 
 
 @dataclass
@@ -255,41 +252,3 @@ def pymupdf_extract_text(pdf: Path, *, language: str = "eng") -> tuple[str, str]
     except Exception as exc:  # noqa: BLE001 - text extraction must never fail extraction
         logger.warning("PyMuPDF text extraction failed for %s: %s", pdf, exc)
         return "", "none"
-
-
-def ml_extraction_available(backend: str) -> bool:
-    """True when the extractor for ``backend`` is available in this image.
-
-    ``pymupdf`` (the lightweight, always-available hard extractor) is available whenever PyMuPDF is
-    importable; the opt-in ``nougat``/``marker`` backends require their module to be installed.
-    """
-    if backend == "pymupdf":
-        return importlib.util.find_spec("fitz") is not None
-    module = _ML_BACKEND_MODULES.get(backend)
-    if module is None:
-        return False
-    return importlib.util.find_spec(module) is not None
-
-
-def run_ml_extraction(pdf: Path, *, backend: str, language: str = "eng") -> str:
-    """Extract plain text for a paper — the "hard extractor" path used by the ``full_ml`` route.
-
-    The shipped extractor is **PyMuPDF** (``backend="pymupdf"``): it reads the PDF text layer and
-    OCRs pages that lack one — lightweight, maintained, AGPL-compatible, no torch. The opt-in
-    Nougat/Marker backends stay gated behind an ``importlib`` spec check (torch is never imported in
-    CI) and raise a clear install-path error when selected-but-absent; when present they too fall
-    back to the PyMuPDF extractor (their heavy model invocation is deferred — PyMuPDF covers the
-    need).
-    """
-    if backend == "pymupdf":
-        return pymupdf_extract_text(pdf, language=language)[0]
-    module = _ML_BACKEND_MODULES.get(backend)
-    if module is None:
-        raise ValueError(f"Unknown ML extraction backend: {backend!r}")
-    if importlib.util.find_spec(module) is None:
-        raise RuntimeError(
-            f"ML extraction backend {backend!r} is not installed in this image — install it via "
-            f"the ML-extraction image extra (`make build-ml-extraction`)."
-        )
-    # Installed but its heavy model path is deferred: use the PyMuPDF hard extractor (never raises).
-    return pymupdf_extract_text(pdf, language=language)[0]

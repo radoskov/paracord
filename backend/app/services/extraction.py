@@ -5,7 +5,6 @@ every value is recorded as a MetadataAssertion, and canonical fields are only pr
 the work has not been user-confirmed and the field is empty or filename-derived.
 """
 
-import contextlib
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -50,7 +49,7 @@ def _resolve_ocr_engine(
     Gated on the engine being installed AND either the admin selected an OCR backend and the text
     layer needs OCR, OR the caller forced it (#22). ``pymupdf`` is used only when that backend is
     selected; ``ocrmypdf`` covers the ``ocrmypdf`` backend and is the fallback engine for a forced
-    re-OCR under a non-OCR backend (``none`` / ``full_ml``), preserving the prior force behaviour.
+    re-OCR under the non-OCR backend (``none``), preserving the prior force behaviour.
     """
     needs = ocr_service.needs_ocr(text_layer_quality)
     if ocr_backend == "pymupdf":
@@ -62,11 +61,6 @@ def _resolve_ocr_engine(
     return None
 
 
-# Below this many chars, GROBID's parsed body is treated as "weak" (e.g. a scan it couldn't read),
-# so the PyMuPDF hard-extracted text is folded in to enrich keyword extraction + the text-layer signal.
-_WEAK_BODY_THRESHOLD = 200
-
-
 def store_parsed_extraction(
     db: Session,
     *,
@@ -75,13 +69,8 @@ def store_parsed_extraction(
     source: str = "grobid",
     file: File | None = None,
     raw_tei_xml: str | None = None,
-    extra_text: str | None = None,
 ) -> dict[str, Any]:
-    """Record assertions, promote safe canonical fields, and (re)create references.
-
-    ``extra_text`` is optional PyMuPDF hard-extracted text (full_ml route); it enriches the keyword
-    input and the text-layer signal when GROBID's own body is weak/empty.
-    """
+    """Record assertions, promote safe canonical fields, and (re)create references."""
     promotable = not work.user_confirmed
     promoted: list[str] = []
 
@@ -127,10 +116,6 @@ def store_parsed_extraction(
     # Deterministic keyword extraction (SPEC §8.15.1) over the richest available text, and a
     # text-layer / needs-OCR signal for the file (SPEC §8.3).
     body_text = (extract_body_text(raw_tei_xml) if raw_tei_xml else "") or ""
-    # When GROBID's body is weak (e.g. a scanned PDF it couldn't parse), fold in the PyMuPDF
-    # hard-extracted text so keyword extraction + the text-layer-quality signal still have material.
-    if extra_text and len(body_text) < _WEAK_BODY_THRESHOLD:
-        body_text = f"{body_text}\n{extra_text}".strip() if body_text else extra_text
     keyword_source = " ".join(part for part in (parsed.abstract, body_text) if part)
     if keyword_source:
         work.keywords = extract_keywords(keyword_source, top_k=12)
@@ -244,9 +229,6 @@ def extract_and_store(
     # extraction (the OCR helpers swallow errors and return the original path on failure/skip).
     ocr_result: ocr_service.OcrResult | None = None
     tei_source_path = pdf_path
-    hard_text: str | None = (
-        None  # PyMuPDF hard-extracted text (full_ml route) to enrich weak GROBID
-    )
     # Pick the OCR engine to run (or None): ocrmypdf or pymupdf, gated on availability + the
     # text-layer-quality/#22-force rule. force_ocr uses the selected OCR engine (pymupdf when that
     # backend is chosen, else ocrmypdf) regardless of the current quality.
@@ -278,22 +260,11 @@ def extract_and_store(
             # copy is about to be deleted, so it must be persisted inside this block.
             if ocr_result.ran and tei_source_path != pdf_path:
                 save_derived_ocr_pdf(settings, file.sha256, tei_source_path)
-    elif ocr_backend == "full_ml":
-        # Hard-extraction route: GROBID stays the structured extractor, but we also pull raw text via
-        # the PyMuPDF core extractor (get_text + OCR fallback) to enrich keywords/body when GROBID's
-        # body is weak. Never fails extraction (run_ml_extraction with the pymupdf backend swallows).
-        tei_xml = fetch_tei(pdf_path)
-        with contextlib.suppress(Exception):  # hard-extraction failure never fails extraction
-            hard_text = ocr_service.run_ml_extraction(
-                pdf_path, backend="pymupdf", language=ocr_language
-            )
     else:
         tei_xml = fetch_tei(pdf_path)
 
     parsed = parse_tei(tei_xml)
-    summary = store_parsed_extraction(
-        db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml, extra_text=hard_text
-    )
+    summary = store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml)
 
     # OCR provenance in the summary + audit. When OCR actually ran, "ocr_added" wins over the
     # post-GROBID text-layer recompute (the file now carries a text layer we added).

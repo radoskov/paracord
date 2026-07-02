@@ -1,7 +1,7 @@
 """Add ai_config.ocr_backend (Phase B5, OCR / advanced-extraction backend)
 
 Additive, nullable column: the owner-selectable OCR / advanced-extraction backend
-(none | ocrmypdf | full_ml). NULL falls back to the ``Settings.ocr_backend`` default, so an
+(none | ocrmypdf | pymupdf). NULL falls back to the ``Settings.ocr_backend`` default, so an
 empty/absent row keeps the out-of-the-box OCRmyPDF pre-step behaviour.
 
 Revision ID: 0031_ai_config_ocr_backend
