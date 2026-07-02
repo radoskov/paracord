@@ -37,6 +37,18 @@ guest flag, `SECURITY.md` reconciled, selection-scope export + preview/copy, `pa
 (pgvector/H7, CSL citeproc styles, the C3/C4 FK+JSONB migration, a Postgres integration suite) is
 non-blocking and tracked in WORKPLAN Stage 7.
 
+## Library pagination + shelves/racks columns (2026-07-02)
+
+D18 + D32 implemented. `GET /api/v1/works` now returns a `PaginatedWorks` envelope
+(`items/total/page/pages/per_page`): effective page size = per-request override, else the new
+per-user `papers_per_page` profile field, else the server default, clamped to an owner/admin-editable
+global maximum (`AppConfig` singleton + `GET/PATCH /admin/app-config`). Each row also carries its
+SEE-filtered `shelves`/`racks` (D32), batch-loaded in O(1) queries per page. Frontend: Library
+pagination controls (prev/next, page dropdown, go-to-page), opt-in Shelves/Racks columns, a Profile
+"Papers per page" field, and an Admin "Settings" tab for the global max. Verified: fast backend tier
+508 passed + migration parity 4 passed (Postgres); frontend 78 passed + build green. See
+`docs/agent_handoffs/2026-07-02-library-pagination-and-columns.md`.
+
 ## Current status
 
 **Milestones 0–7 have an implemented vertical for every acceptance contract (all
