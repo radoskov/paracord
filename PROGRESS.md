@@ -7,6 +7,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D39 — queue-length cap + admin queue/worker controls (2026-07-02)
+
+Added a pending-queue depth cap plus admin recovery controls, extending D1's overload protection.
+(1) A new `max_queue_len` knob on the `app_config` singleton (default 1000, migration
+`0046_max_queue_len`, admin-editable from the Settings tab). (2) A fail-open capacity guard
+(`services/queue_capacity.assert_queue_has_capacity` + `queue.pending_queue_depth`) runs at the
+start of every job-creating request (folder/upload/identifier/BibTeX/RIS/CSL import, file &
+work extract/re-extract, agent extract/teleport push, `/search/reindex`); it rejects with 429 when
+the pending RQ queue is already at the cap and **allows** the request when the depth can't be
+measured (Redis unreachable) — a dropped enqueue is already surfaced by D7's `extraction_queued`.
+The unit suite forces the fail-open path via an autouse conftest fixture. (3) Admin-only
+`POST /jobs/clear-queue` (empties the pending queue) and `POST /jobs/reset-workers` (requeues jobs
+stranded in the StartedJobRegistry, clears the FailedJobRegistry) recover a stuck queue; both record
+an audit event and degrade gracefully (never 500) when Redis is down. Since the API can't restart
+the worker *processes* (they run under the supervisor in the worker container), the reset response
+notes a full reset is `docker compose restart worker`. Frontend: an app-wide "queue full" toast
+(triggered from the client request wrapper on a 429/503 "queue is full" detail) plus admin-only
+Clear queue / Reset workers buttons on the Jobs tab. Verified: full backend suite 722 passed,
+migration parity 4 passed, agent 34 passed, frontend green + build; ruff clean.
+
 ## D1 — overload protection + shared throttle (2026-07-02)
 
 Added shared, fail-open overload protection across four slices. (1) The login throttle
