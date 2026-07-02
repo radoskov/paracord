@@ -41,8 +41,13 @@ ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]
 # ── development: dev deps installed, live-reload via bind-mount ────────────────
 FROM base AS development
 
-COPY backend/requirements.txt backend/requirements-dev.txt /app/backend/
-RUN pip install -r /app/backend/requirements-dev.txt
+COPY backend/requirements.txt backend/requirements-dev.txt backend/requirements.lock /app/backend/
+# Install the hash-pinned runtime lock (D24), then layer on the dev/test tools. The lock is the
+# reproducible source of runtime versions; requirements.txt is the human-edited intent it is
+# compiled from (regenerate with `pip-compile --generate-hashes`). The second install keeps the
+# already-satisfied locked runtime deps and only adds pytest/ruff.
+RUN pip install --require-hashes -r /app/backend/requirements.lock \
+    && pip install -r /app/backend/requirements-dev.txt
 
 # Application code (overlaid by a bind mount in docker-compose for live reload).
 COPY backend /app/backend
@@ -55,8 +60,9 @@ CMD ["uvicorn", "app.main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--
 # ── production: runtime deps only, gunicorn + uvicorn workers ─────────────────
 FROM base AS production
 
-COPY backend/requirements.txt /app/backend/
-RUN pip install -r /app/backend/requirements.txt
+COPY backend/requirements.txt backend/requirements.lock /app/backend/
+# Install from the hash-pinned lock (D24) so a production rebuild can't silently pull a new major.
+RUN pip install --require-hashes -r /app/backend/requirements.lock
 
 COPY backend /app/backend
 COPY scripts /app/scripts

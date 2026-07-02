@@ -8,7 +8,7 @@ psycopg[binary]>=3.2
 alembic>=1.13
 python-multipart>=0.0.9
 bcrypt>=4.1
-httpx2==2.4.0
+httpx2==2.5.0
 redis>=5.0
 rq>=1.16
 lxml>=5.2
