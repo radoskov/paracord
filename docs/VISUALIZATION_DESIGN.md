@@ -31,7 +31,49 @@ clean-and-readable look without bloat:
 - A **shared theme layer**: one accessible categorical palette + sequential/diverging ramps,
   consistent light/dark, applied across every view so they read as one system.
 
-**DECISION NEEDED — plot library:** Observable Plot (rec) / ECharts / Vega-Lite / Plotly.js.
+**DECISION NEEDED — plot library:** see the comparison in §1a.
+
+### 1a. Library feature + performance comparison
+
+The module has **two distinct rendering needs**, and no single library is best at both *at scale*:
+- **(A) node-link networks** — citation / co-citation / cluster graphs (nodes + edges, layouts);
+- **(B) XY statistical charts** — the Litmaps temporal map, embedding scatter, heatmaps, topic river.
+
+The decisive performance factor is the **rendering backend**: **SVG** (one DOM node per mark) is the
+prettiest/easiest but stalls in the low thousands of marks; **Canvas** scales to ~10–50k; **WebGL**
+scales to 10⁵–10⁶. "Handles many nodes and edges" ⇒ prefer Canvas/WebGL for anything that can grow.
+
+Figures below are **approximate practical ceilings** for smooth interaction (pan/zoom/hover) from
+training knowledge (Jan 2026) — verify against current releases before committing. Weights are rough
+gzipped runtime size.
+
+| Library | Kind | Backend | ~Smooth ceiling | Readability / "nice" | Weight | Fit for PaRacORD |
+|---|---|---|---|---|---|---|
+| **Cytoscape.js** (+fcose) | Networks | Canvas | ~2–5k nodes / ~10k edges | Good, graph-tuned | ~mid (in use) | **Keep** for networks at current scale; struggles past a few k. |
+| **Sigma.js** (+graphology) | Networks | **WebGL** | ~10⁵ nodes / 10⁵ edges | Good, less styling than Cytoscape | ~mid | **Best network scaler** — swap/augment Cytoscape *if* graphs must grow large. |
+| **D3.js** | Both (DIY) | SVG (or canvas) | ~1–5k marks (SVG) | Best-in-class but hand-built | ~mid, tree-shakeable | Max flexibility, max effort; not a turnkey renderer. |
+| **Observable Plot** | Charts | SVG | ~5–10k marks | **Excellent** (Seaborn-like defaults) | **light** | Cleanest charts, lightest — great look, **but SVG caps scatter scale**. |
+| **Vega-Lite** | Charts | SVG or Canvas | ~10k (SVG) / ~50k (canvas) | Excellent, declarative | mid | Clean + canvas option for bigger scatter; no real network support. |
+| **ECharts** | **Both** | Canvas + **WebGL** | scatterGL ~10⁶ points; graphGL large networks | Very good, themable | mid (~heavier than Plot) | **Best single all-rounder** — clean charts *and* networks, WebGL for scale. |
+| **Plotly.js** | Charts (some net) | Canvas + WebGL (`scattergl`) | ~10⁵–10⁶ scatter | The look you named | **heavy** (~1 MB+ gz) | The exact aesthetic, WebGL scatter — but the heaviest; weak networks. |
+| **regl-scatterplot / deck.gl** | Scatter only | **WebGL** | 10⁶–10⁷ points | Minimal chrome (points only) | mid–heavy | Only if the embedding scatter must plot *huge* point clouds; specialized. |
+
+**Reading it:** at *today's* scale (graphs capped ~400 nodes, libraries of hundreds–few thousand
+papers) **every option is comfortable**, so the choice is really about *headroom* and dependency
+count. Two sensible strategies:
+
+- **One-library (simplest, scales): ECharts.** Covers both charts and networks, canvas+WebGL so it
+  absorbs growth (scatterGL → ~10⁶ points, graphGL → large networks), good theming for the
+  Plotly/Seaborn look. One dependency for the whole module. **This is my recommendation given your
+  "must handle many nodes/edges" priority.**
+- **Split (prettiest charts + strongest networks): Observable Plot + Sigma.js**, keeping Cytoscape
+  for now. Plot gives the nicest, lightest charts; Sigma (WebGL) is the strongest network scaler.
+  Two deps, and charts stay SVG-capped (~10k marks) — fine unless you scatter huge point clouds.
+
+Either way: **lazy-load** the chosen lib(s) (as PDF.js/Cytoscape already are) and drive everything
+through the normalized `VizPayload` (§4), so the renderer can be swapped later without touching the
+data layer. Avoid Plotly.js unless its exact look/interactions are a hard requirement — it's the
+heaviest and weakest at networks.
 
 ---
 
@@ -116,7 +158,8 @@ A **provider + renderer registry** so a new graph = one provider + one renderer 
 ---
 
 ## 6. Open decisions (owner)
-1. **Plot library:** Observable Plot (rec) / ECharts / Vega-Lite / Plotly.js.
+1. **Plot library (see §1a):** ECharts (rec — one lib, canvas+WebGL, scales) · or the split
+   Observable Plot + Sigma.js (prettiest charts + strongest network scaler) · Vega-Lite · Plotly.js.
 2. **Embedding layout:** PCA-default (light, no dep) with UMAP as an opt-in extra? (rec: yes.)
 3. **Citation counts:** OK to add the field + fetch from OpenAlex/S2/Crossref + surface in the paper
    view, with periodic refresh? (rec: yes — it unlocks the flagship Y-axis and the §8.11 analytics.)
