@@ -718,7 +718,7 @@ export interface AiConfig {
   summary_model: string;
   topic_backend: string;
   topic_embedding_model: string | null;
-  // OCR / advanced-extraction backend (Phase B5): 'none' | 'ocrmypdf' | 'pymupdf' | 'full_ml'.
+  // OCR / advanced-extraction backend (Phase B5): 'none' | 'ocrmypdf' | 'pymupdf'.
   ocr_backend: string;
   // OCR languages in tesseract syntax; supports multi like 'eng+spa'.
   ocr_language: string;

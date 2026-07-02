@@ -172,17 +172,15 @@
     if (config.ocr_backend === 'none') {
       return { kind: 'baseline', label: 'OCR off', reason: 'GROBID runs on the PDF as-is — scanned pages stay un-searchable.' };
     }
-    if (config.ocr_backend === 'ocrmypdf') {
-      const ok = avail('extraction', 'ocrmypdf');
-      return ok
-        ? { kind: 'ok', label: 'Available', reason: 'OCRmyPDF adds a text layer to scanned/poor-text PDFs before GROBID.' }
-        : { kind: 'off', label: 'OCR unavailable', reason: note('extraction', 'ocrmypdf') };
-    }
-    // full_ml
-    const ok = avail('extraction', 'full_ml');
+    const backend = config.ocr_backend;
+    const ok = avail('extraction', backend);
+    const reason =
+      backend === 'pymupdf'
+        ? 'PyMuPDF + tesseract adds a text layer to scanned/poor-text PDFs before GROBID.'
+        : 'OCRmyPDF adds a text layer to scanned/poor-text PDFs before GROBID.';
     return ok
-      ? { kind: 'ok', label: 'Available', reason: null }
-      : { kind: 'off', label: 'Degrades to GROBID', reason: note('extraction', 'full_ml') };
+      ? { kind: 'ok', label: 'Available', reason }
+      : { kind: 'off', label: 'OCR unavailable', reason: note('extraction', backend) };
   }
 
   // True when a topic backend that *sounds* like it uses embeddings/BERTopic is selected, so we
@@ -203,11 +201,6 @@
     topBadge = topicBadge();
     ocrBdg = ocrBadge();
   }
-
-  // True when full_ml OCR is selected but no ML extractor is installed — show install guidance
-  // (never a runtime install button; the opt-in image is built with `make build-ml-extraction`).
-  $: ocrMlUnavailable =
-    config != null && config.ocr_backend === 'full_ml' && !avail('extraction', 'full_ml');
 
   async function save(): Promise<void> {
     if (!config) return;
@@ -461,15 +454,9 @@
         <p class="what">Adds a searchable text layer to scanned or poor-text PDFs before extraction, so GROBID can read them.</p>
         <p class="used">Used for: extracting metadata, abstract, keywords and references from a paper's PDF. OCR runs locally on the stored file (no network).</p>
         {#if ocrBdg.reason}<p class="reason">{ocrBdg.reason}</p>{/if}
-        {#if ocrMlUnavailable}
-          <p class="banner" title="The full-ML extractors (Nougat/Marker) are an opt-in image build, not a runtime install">
-            No ML extractor is installed. Build the opt-in ML-extraction image
-            (<code>make build-ml-extraction</code>) to enable it; until then this degrades to GROBID.
-          </p>
-        {/if}
         <label>Extraction backend
           <select bind:value={config.ocr_backend} disabled={busy}
-            title="How PDF text is extracted before GROBID (OCRmyPDF adds a text layer; full_ml is an opt-in ML extractor)">
+            title="How PDF text is extracted before GROBID (OCRmyPDF or PyMuPDF adds a searchable text layer to scanned/poor-text PDFs)">
             {#each status.allowed.ocr_backend ?? [] as p}
               <option value={p} disabled={!avail('extraction', p)}
                 title={avail('extraction', p) ? (note('extraction', p) ?? '') : (note('extraction', p) ?? 'Not available in this deployment')}>

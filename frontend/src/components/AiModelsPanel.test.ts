@@ -21,7 +21,7 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       embedding_provider: ['hash_bow', 'sentence_transformers', 'ollama'],
       summary_provider: ['extractive', 'local_llm'],
       topic_backend: ['tfidf', 'embedding', 'bertopic'],
-      ocr_backend: ['none', 'ocrmypdf', 'full_ml'],
+      ocr_backend: ['none', 'ocrmypdf', 'pymupdf'],
     },
     providers: {
       embedding: {
@@ -37,7 +37,8 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       extraction: {
         none: { available: true, note: 'OCR pre-step disabled — GROBID runs on the PDF as-is.' },
         ocrmypdf: { available: true, note: null },
-        full_ml: { available: false, note: 'No ML extractor installed — build the opt-in ML-extraction image (`make build-ml-extraction`).' },
+        pymupdf: { available: false, note: 'PyMuPDF (fitz) + tesseract not found in this image — rebuild the base image (bundles PyMuPDF + tesseract-ocr).' },
+        grobid: { available: true, note: 'Default TEI extractor (GROBID service).' },
       },
       ollama_reachable: false,
     },
@@ -114,23 +115,20 @@ describe('AiModelsPanel', () => {
     expect(screen.getByText(/Adds a searchable text layer to scanned/i)).toBeTruthy();
   });
 
-  it('shows full_ml install guidance (no install button) when the ML extractor is unavailable', async () => {
+  it('shows an OCR-unavailable reason (no install button) when the selected backend is missing', async () => {
     const status = makeStatus();
-    status.config.ocr_backend = 'full_ml';
+    status.config.ocr_backend = 'pymupdf';
     status.active.extraction = {
-      selected: 'full_ml',
+      selected: 'pymupdf',
       available: false,
-      note: 'No ML extractor installed — build the opt-in ML-extraction image (`make build-ml-extraction`).',
+      note: 'PyMuPDF (fitz) + tesseract not found in this image — rebuild the base image (bundles PyMuPDF + tesseract-ocr).',
     };
     const client = makeClient(status);
     render(AiModelsPanel, { client: client as never });
     await waitFor(() => expect(client.getAiStatus).toHaveBeenCalled());
 
-    // The banner names the opt-in build path and there is NO pip/install button.
-    expect(
-      await screen.findByText(/No ML extractor is installed/i, { exact: false }),
-    ).toBeTruthy();
-    expect(screen.getAllByText(/make build-ml-extraction/i).length).toBeGreaterThan(0);
+    // The reason names the rebuild path and there is NO pip/install button (backends are image-built).
+    expect((await screen.findAllByText(/rebuild the base image/i)).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /install/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /pip/i })).toBeNull();
   });
