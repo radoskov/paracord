@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     # Login throttling (Stage 7 auth hardening).
     login_max_failures: int = 5
     login_lockout_minutes: int = 15
+    # Library pagination (D18). ``default_papers_per_page`` is the fallback page size when a user has
+    # no ``papers_per_page`` preference; ``max_papers_per_page`` is the out-of-the-box global clamp
+    # (the owner may raise/lower it at runtime via the admin AppConfig row).
+    default_papers_per_page: int = 100
+    max_papers_per_page: int = 500
 
 
 def _environment_overrides() -> dict[str, Any]:

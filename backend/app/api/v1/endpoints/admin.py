@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from app.models.audit import AuditEvent
 from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
 from app.services import agents as agent_service
+from app.services import app_config as app_config_service
 from app.services import users as user_service
 from app.services.audit import record_event
 from app.services.users import PermissionError403
@@ -35,6 +36,14 @@ class EnrollTokenOut(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     new_password: str
+
+
+class AppConfigOut(BaseModel):
+    max_papers_per_page: int
+
+
+class AppConfigUpdate(BaseModel):
+    max_papers_per_page: int = Field(ge=1)
 
 
 class AgentOut(BaseModel):
@@ -248,6 +257,39 @@ def list_audit_events(
         for event in events
     ]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/app-config", response_model=AppConfigOut)
+def read_app_config(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> AppConfigOut:
+    """Return the runtime app configuration (owner or admin)."""
+    return AppConfigOut(max_papers_per_page=app_config_service.effective_max_papers_per_page(db))
+
+
+@router.patch("/app-config", response_model=AppConfigOut)
+def update_app_config(
+    payload: AppConfigUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> AppConfigOut:
+    """Update the runtime app configuration, e.g. the global max papers per page (owner or admin)."""
+    try:
+        value = app_config_service.update_max_papers_per_page(
+            db, value=payload.max_papers_per_page, actor_user_id=actor.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    record_event(
+        db,
+        "app.config_changed",
+        actor_user_id=actor.id,
+        entity_type="app_config",
+        details={"max_papers_per_page": value},
+    )
+    db.commit()
+    return AppConfigOut(max_papers_per_page=value)
 
 
 @router.post(

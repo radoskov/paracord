@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import math
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagL
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
+from app.services.app_config import effective_max_papers_per_page
 from app.services.audit import record_event
 from app.services.file_paths import (
     FileLocationError,
@@ -51,6 +53,9 @@ from app.workers.queue import (
 )
 
 _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
+
+# Fallback Library page size when a user has no ``papers_per_page`` preference (D18).
+DEFAULT_PAPERS_PER_PAGE = 100
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -131,6 +136,24 @@ class WorkUpdate(BaseModel):
     reading_status: str | None = None
 
 
+class WorkShelfRef(BaseModel):
+    """A shelf a paper sits on, SEE-filtered (id + name only; D32 library column)."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class WorkRackRef(BaseModel):
+    """A rack containing one of a paper's (see-able) shelves, SEE-filtered (D32 library column)."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class WorkRead(BaseModel):
     id: uuid.UUID
     canonical_title: str | None = None
@@ -152,15 +175,29 @@ class WorkRead(BaseModel):
     created_by_user_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    # Library columns (D32): the paper's SEE-filtered shelves and their SEE-filtered racks. Populated
+    # by ``list_works`` (batched across the page); other endpoints leave these empty.
+    shelves: list[WorkShelfRef] = []
+    racks: list[WorkRackRef] = []
 
     model_config = {"from_attributes": True}
 
-    @field_validator("confirmed_fields", "keywords", "topics", mode="before")
+    @field_validator("confirmed_fields", "keywords", "topics", "shelves", "racks", mode="before")
     @classmethod
     def _none_to_list(cls, value: object) -> object:
         # Pre-migration rows have NULL for these JSONB columns; treat NULL as an empty list so the
         # response stays a list rather than failing validation (would 500 the whole works list).
         return value or []
+
+
+class PaginatedWorks(BaseModel):
+    """Server-controlled Library pagination envelope (D18)."""
+
+    items: list[WorkRead]
+    total: int
+    page: int
+    pages: int
+    per_page: int
 
 
 class RelatedWorkRead(BaseModel):
@@ -430,7 +467,54 @@ def build_works_query(
     return stmt.distinct()
 
 
-@router.get("", response_model=list[WorkRead])
+def _batch_shelf_rack_refs(
+    db: Session, actor: User, work_ids: list[uuid.UUID]
+) -> tuple[dict[uuid.UUID, list[WorkShelfRef]], dict[uuid.UUID, list[WorkRackRef]]]:
+    """Batch-load the SEE-filtered shelves (and their SEE-filtered racks) for a page of works.
+
+    Two grouped queries total (O(1) per page, not O(n)): one over ``ShelfWork`` intersected with the
+    caller's visible shelves, one over ``RackShelf`` intersected with the caller's visible racks.
+    Returns ``(work_id -> shelves, work_id -> racks)``; a work's racks are the deduped union of the
+    racks containing any of its (see-able) shelves.
+    """
+    work_shelves: dict[uuid.UUID, list[WorkShelfRef]] = {}
+    work_racks: dict[uuid.UUID, list[WorkRackRef]] = {}
+    if not work_ids:
+        return work_shelves, work_racks
+    # Shelves the caller may SEE that contain any of the page's works (SEE-filtered subquery).
+    shelf_sub = access.visible_shelves_query(db, actor).subquery()
+    shelf_rows = db.execute(
+        select(ShelfWork.work_id, shelf_sub.c.id, shelf_sub.c.name)
+        .join(shelf_sub, shelf_sub.c.id == ShelfWork.shelf_id)
+        .where(ShelfWork.work_id.in_(work_ids))
+        .order_by(shelf_sub.c.name)
+    ).all()
+    shelf_to_works: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for work_id, shelf_id, shelf_name in shelf_rows:
+        work_shelves.setdefault(work_id, []).append(WorkShelfRef(id=shelf_id, name=shelf_name))
+        shelf_to_works.setdefault(shelf_id, []).append(work_id)
+    if not shelf_to_works:
+        return work_shelves, work_racks
+    # Racks the caller may SEE that contain any of those shelves (SEE-filtered subquery).
+    rack_sub = access.visible_racks_query(db, actor).subquery()
+    rack_rows = db.execute(
+        select(RackShelf.shelf_id, rack_sub.c.id, rack_sub.c.name)
+        .join(rack_sub, rack_sub.c.id == RackShelf.rack_id)
+        .where(RackShelf.shelf_id.in_(list(shelf_to_works)))
+        .order_by(rack_sub.c.name)
+    ).all()
+    seen: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for shelf_id, rack_id, rack_name in rack_rows:
+        for work_id in shelf_to_works.get(shelf_id, []):
+            rack_ids = seen.setdefault(work_id, set())
+            if rack_id in rack_ids:
+                continue
+            rack_ids.add(rack_id)
+            work_racks.setdefault(work_id, []).append(WorkRackRef(id=rack_id, name=rack_name))
+    return work_shelves, work_racks
+
+
+@router.get("", response_model=PaginatedWorks)
 def list_works(
     q: str | None = Query(default=None),
     reading_status: str | None = Query(default=None),
@@ -442,11 +526,12 @@ def list_works(
     missing: str | None = None,
     sort: str | None = Query(default=None),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    limit: int = Query(default=100, ge=1, le=500),
+    page: int = Query(default=1, ge=1),
+    per_page: int | None = Query(default=None, ge=1),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
-) -> list[Work]:
-    """List/search works by basic metadata and extraction/metadata completeness.
+) -> PaginatedWorks:
+    """List/search works by basic metadata and extraction/metadata completeness (paginated).
 
     ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
     ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
@@ -455,9 +540,14 @@ def list_works(
     precedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE
     filter (only see-able shelves/racks contribute; they never widen visibility).
 
+    Pagination (D18): ``per_page`` overrides the caller's ``papers_per_page`` preference (else the
+    server default); the effective size is clamped to the admin global maximum. ``page`` is clamped
+    into ``1..pages``. The response envelope carries ``items``/``total``/``page``/``pages``/
+    ``per_page``. Each item also carries its SEE-filtered ``shelves``/``racks`` (D32).
+
     Access control: only papers the caller may SEE are returned (most-permissive governing shelf;
     loose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by
-    the saved-filter/graph/export resolvers); ``list_works`` only adds sort + limit.
+    the saved-filter/graph/export resolvers); ``list_works`` adds sort + pagination.
     """
     stmt = build_works_query(
         db,
@@ -471,13 +561,37 @@ def list_works(
         has_references=has_references,
         missing=missing,
     )
+    # Effective page size: explicit override, else the user preference, else the server default —
+    # then clamp to the admin-controlled global maximum.
+    requested = (
+        per_page if per_page is not None else (actor.papers_per_page or DEFAULT_PAPERS_PER_PAGE)
+    )
+    effective_per_page = max(1, min(requested, effective_max_papers_per_page(db)))
+    # Total over the SAME filtered query (respects the query's DISTINCT) before limit/offset.
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    pages = max(1, math.ceil(total / effective_per_page))
+    page = min(max(page, 1), pages)
     # SAFE sort: look the key up in the allowlist (never interpolate the raw string); fall back to
     # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
     # order when the sort column has ties.
     sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
     direction = sort_column.asc() if order == "asc" else sort_column.desc()
-    stmt = stmt.order_by(direction, Work.id).limit(limit)
-    return list(db.scalars(stmt).all())
+    stmt = (
+        stmt.order_by(direction, Work.id)
+        .offset((page - 1) * effective_per_page)
+        .limit(effective_per_page)
+    )
+    works = list(db.scalars(stmt).all())
+    work_shelves, work_racks = _batch_shelf_rack_refs(db, actor, [w.id for w in works])
+    items = [
+        WorkRead.model_validate(w).model_copy(
+            update={"shelves": work_shelves.get(w.id, []), "racks": work_racks.get(w.id, [])}
+        )
+        for w in works
+    ]
+    return PaginatedWorks(
+        items=items, total=total, page=page, pages=pages, per_page=effective_per_page
+    )
 
 
 class ReorderQueueRequest(BaseModel):

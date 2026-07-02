@@ -1,6 +1,6 @@
 """Authentication API schemas."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
@@ -23,3 +23,6 @@ class ProfileUpdateRequest(BaseModel):
 
     display_name: str | None = None
     email: str | None = None
+    # Preferred Library page size (D18); None resets to the server default. Only enforced when the
+    # key is present in the request (partial update).
+    papers_per_page: int | None = Field(default=None, ge=1)

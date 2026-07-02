@@ -246,7 +246,7 @@ def delete_user(
     )
 
 
-_PROFILE_FIELDS = {"display_name", "email"}
+_PROFILE_FIELDS = {"display_name", "email", "papers_per_page"}
 
 
 def update_profile(
@@ -256,7 +256,7 @@ def update_profile(
     changes: dict[str, str | None],
     actor_user_id: uuid.UUID,
 ) -> User:
-    """Update a user's own editable profile fields (display name, email).
+    """Update a user's own editable profile fields (display name, email, papers per page).
 
     The username and role are intentionally immutable here. Only keys in ``changes`` are
     touched, so an absent key is left unchanged while ``None``/"" clears the field.

@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String, Uuid
+from sqlalchemy import Boolean, DateTime, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -25,6 +25,9 @@ class User(Base):
     # Profile + account metadata (SPEC §9.3).
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Preferred Library page size (D18). NULL falls back to ``Settings.default_papers_per_page``;
+    # the effective value is additionally clamped by the admin global maximum.
+    papers_per_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
