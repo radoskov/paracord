@@ -208,9 +208,11 @@ class Settings(BaseSettings):
     summary_llm_enabled: bool = False  # allow summary_type=local_llm via Ollama
     summary_llm_model: str = "qwen3:4b"
     topic_backend: str = "tfidf"  # tfidf | embedding (BERTopic-style, embedding-clustered)
-    # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (the JSON-array +
-    # Python-cosine path stays the default + the SQLite path). Additive; default off.
-    pgvector_enabled: bool = False
+    # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (a registered real model
+    # gets sub-linear HNSW search out of the box). On SQLite / no-pgvector, or when the ANN column is
+    # empty, the code transparently falls back to the JSON-array + Python-cosine path — so the
+    # dependency-free hash_bow default keeps working. Enabled by default; a no-op off Postgres.
+    pgvector_enabled: bool = True
     # OCR / advanced extraction (Phase B5). `ocrmypdf` (default) adds a searchable text layer to
     # scanned/poor-text PDFs before GROBID (bounded local subprocess; no egress). `none` disables
     # the pre-step; `pymupdf` adds a text layer via PyMuPDF + tesseract (no ocrmypdf/ghostscript

@@ -78,6 +78,11 @@ def _pgvector_rank(
             ),
             {"q": _vec_literal(query_vector), "m": model_name, "n": limit},
         ).all()
+        # No rows means this model has nothing mirrored into ``vector_pg`` yet (e.g. vectors indexed
+        # before pgvector was enabled). Return None so the caller falls back to the JSON+Python path
+        # (the source of truth) rather than reporting a spurious empty result.
+        if not rows:
+            return None
         return [(r[0], float(r[1])) for r in rows]
     except SQLAlchemyError:
         return None
