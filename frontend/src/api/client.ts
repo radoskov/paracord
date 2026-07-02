@@ -83,6 +83,9 @@ export interface EmbeddingModelInfo {
   provider: string;
   dim: number;
   slug: string;
+  // Whether the model's provider is installed/usable in this deployment; false for a seeded model
+  // whose provider (e.g. sentence-transformers) isn't in the image.
+  available?: boolean;
 }
 
 export interface EmbeddingModelsResponse {

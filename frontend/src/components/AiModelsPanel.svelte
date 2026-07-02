@@ -254,6 +254,26 @@
     const gb = bytes / 1e9;
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1e6).toFixed(0)} MB`;
   }
+
+  // The Ollama models actually pulled locally — the option pool for the embedding/summary model
+  // dropdowns (the common ollama / local_llm case).
+  $: ollamaModelNames = models.filter((m) => m.provider === 'ollama').map((m) => m.name);
+
+  // Keep an already-configured model selectable even when it isn't among the currently-pulled
+  // options, so saving never silently drops a saved value.
+  function withCurrent(options: string[], current: string | null | undefined): string[] {
+    const c = (current ?? '').trim();
+    return c && !options.includes(c) ? [...options, c] : options;
+  }
+
+  $: embeddingModelOptions = withCurrent(
+    ollamaModelNames,
+    config?.embedding_provider === 'ollama' ? config?.embedding_model : '',
+  );
+  $: summaryModelOptions = withCurrent(
+    ollamaModelNames,
+    config?.summary_provider === 'local_llm' ? config?.summary_model : '',
+  );
 </script>
 
 <section class="card">
@@ -292,11 +312,36 @@
             <small class="hint">{note('embedding', config.embedding_provider)}</small>
           {/if}
         </label>
-        <label>Embedding model
-          <input bind:value={config.embedding_model} on:blur={validateEmbedding}
-            placeholder="(provider default)" disabled={busy}
-            title="Specific embedding model name, or blank for the provider default" />
-        </label>
+        {#if config.embedding_provider === 'ollama'}
+          <label>Embedding model
+            <select bind:value={config.embedding_model} on:change={validateEmbedding} disabled={busy}
+              title="Pulled Ollama embedding model to use for semantic search">
+              <option value="">(provider default)</option>
+              {#each embeddingModelOptions as name}
+                <option value={name}>{name}</option>
+              {/each}
+            </select>
+            <small class="hint">Pick a pulled Ollama model, or add one with “Pull model” below (e.g. nomic-embed-text).</small>
+          </label>
+        {:else if config.embedding_provider === 'sentence_transformers'}
+          <label>Embedding model
+            <select disabled title="sentence-transformers is not installed in this image">
+              <option>{config.embedding_model || '—'}</option>
+            </select>
+            <small class="hint">
+              {avail('embedding', 'sentence_transformers')
+                ? 'No runtime model list — manage the weights via “Pull model” below.'
+                : 'sentence-transformers is not installed in this image.'}
+            </small>
+          </label>
+        {:else}
+          <label>Embedding model
+            <select disabled title="No model needed for the built-in hashed bag-of-words baseline">
+              <option>—</option>
+            </select>
+            <small class="hint">No model needed for this provider.</small>
+          </label>
+        {/if}
         <!-- #2: validate the Ollama embedding model + show the resolved effective model. -->
         {#if config.embedding_provider === 'ollama' && config.embedding_model?.trim()}
           {#if validating}
@@ -375,10 +420,25 @@
             <small class="hint">{note('summary', config.summary_provider)}</small>
           {/if}
         </label>
-        <label>Summary model (Ollama)
-          <input bind:value={config.summary_model} disabled={busy}
-            title="Ollama model used for summaries when the provider is local_llm" />
-        </label>
+        {#if config.summary_provider === 'local_llm'}
+          <label>Summary model (Ollama)
+            <select bind:value={config.summary_model} disabled={busy}
+              title="Pulled Ollama model used to generate summaries">
+              <option value="">(provider default)</option>
+              {#each summaryModelOptions as name}
+                <option value={name}>{name}</option>
+              {/each}
+            </select>
+            <small class="hint">Pick a pulled Ollama model, or add one with “Pull model” below.</small>
+          </label>
+        {:else}
+          <label>Summary model
+            <select disabled title="No model needed for the built-in extractive summariser">
+              <option>{config.summary_model || '—'}</option>
+            </select>
+            <small class="hint">No model needed for this provider.</small>
+          </label>
+        {/if}
       </article>
 
       <!-- Keyword extraction (read-only, always available) -->
@@ -500,12 +560,15 @@
     {:else}
       <ul class="models">
         {#each embeddingModels as m (m.model_name)}
-          <li>
+          <li class:unavailable={m.available === false}>
             <span>
               <button type="button" class="copy-name" on:click={() => copyModelName(m.model_name)}
                 title="Click to copy this model name">{m.model_name}</button>
               {#if copiedModel === m.model_name}<span class="copied">copied ✓</span>{/if}
               <small class="muted">{m.provider} · dim {m.dim}</small>
+              {#if m.available === false}
+                <span class="unavail-badge" title="This model's provider isn't installed in this image, so it can't be selected.">unavailable — provider not installed</span>
+              {/if}
             </span>
           </li>
         {/each}
@@ -621,6 +684,17 @@
     text-decoration: underline dotted;
   }
   .copied { color: #14532d; font-size: 0.75rem; font-weight: 700; margin-left: 0.35rem; }
+  .models li.unavailable { opacity: 0.7; }
+  .unavail-badge {
+    background: #fed7aa;
+    border-radius: 999px;
+    color: #7c2d12;
+    font-size: 0.68rem;
+    font-weight: 700;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    white-space: nowrap;
+  }
   .pull-status {
     align-items: center;
     background: #eef4ef;

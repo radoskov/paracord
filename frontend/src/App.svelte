@@ -472,6 +472,26 @@
     padding: 0.4rem 0.55rem;
   }
 
+  /* Make placeholder text visually distinct from real typed input: italic + a muted warm/amber
+     hue (not merely a fainter grey, which reads as real text). Normal input text is unchanged. */
+  :global(input::placeholder),
+  :global(textarea::placeholder) {
+    color: #9a6b2f;
+    font-style: italic;
+    opacity: 1;
+  }
+  :global(input::-webkit-input-placeholder),
+  :global(textarea::-webkit-input-placeholder) {
+    color: #9a6b2f;
+    font-style: italic;
+  }
+  :global(input::-moz-placeholder),
+  :global(textarea::-moz-placeholder) {
+    color: #9a6b2f;
+    font-style: italic;
+    opacity: 1;
+  }
+
   :global(label) {
     color: #526070;
     display: grid;

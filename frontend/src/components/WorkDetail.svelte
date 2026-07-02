@@ -723,6 +723,11 @@
         title={mainFile.content_available ? 'Open the main file in a new browser tab' : 'The main file’s PDF is not on the server.'}>New tab ↗</button>
       <span class="hintline">Main file: {mainFile.original_filename ?? mainFile.id.slice(0, 8)}</span>
     </div>
+  {:else if files.length === 0}
+    <!-- No attached files, so the quick-read buttons can't render — explain why. -->
+    <div class="quick-read">
+      <span class="hintline muted">No file to read yet — attach a PDF below.</span>
+    </div>
   {/if}
   {#if work.keywords && work.keywords.length}
     <div class="keywords">
