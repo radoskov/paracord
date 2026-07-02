@@ -152,12 +152,20 @@ def reindex_embeddings_job() -> None:
     """
     from app.db.session import SessionLocal
     from app.services.chunk_embeddings import backfill_chunk_embeddings
+    from app.services.embedding_registry import register_provider
     from app.services.embeddings import get_embedding_provider
     from app.services.semantic_search import ensure_work_embeddings
 
     with SessionLocal() as db:
         provider = get_embedding_provider(db=db)
         ensure_work_embeddings(db, provider=provider, commit_every=50)
+        # D22: provision the model's chunk-vector column + HNSW index in its OWN short transaction
+        # and commit it BEFORE the long per-chunk backfill. The ALTER TABLE / CREATE INDEX take
+        # heavy locks on work_chunks; committing them up front releases those locks so they aren't
+        # held for the whole backfill job. The backfill below then finds the column already present
+        # (register is idempotent) and only does per-chunk UPDATEs. No-op off Postgres.
+        register_provider(db, provider)
+        db.commit()
         backfill_chunk_embeddings(db, provider=provider, commit_every=200)
         db.commit()
 

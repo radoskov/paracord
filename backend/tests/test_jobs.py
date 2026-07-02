@@ -40,3 +40,46 @@ def test_clear_jobs_requires_editor_and_returns_shape(client, auth_headers) -> N
 def test_clear_jobs_rejects_bad_which(client, auth_headers) -> None:
     bad = client.post("/api/v1/jobs/clear?which=nonsense", headers=auth_headers("owner"))
     assert bad.status_code == 422
+
+
+def test_reindex_job_provisions_before_backfill(monkeypatch) -> None:
+    """D22: HNSW provisioning commits in its own txn BEFORE the long per-chunk backfill loop."""
+    import contextlib
+
+    from app.workers import jobs
+
+    order: list[str] = []
+
+    class _FakeSession:
+        def commit(self) -> None:
+            order.append("commit")
+
+    @contextlib.contextmanager
+    def _fake_session_local():
+        yield _FakeSession()
+
+    class _Provider:
+        model_name = "st:fake"
+
+        def embed(self, text: str):
+            return [0.0]
+
+    monkeypatch.setattr("app.db.session.SessionLocal", _fake_session_local)
+    monkeypatch.setattr("app.services.embeddings.get_embedding_provider", lambda **k: _Provider())
+    monkeypatch.setattr(
+        "app.services.semantic_search.ensure_work_embeddings",
+        lambda db, **k: order.append("ensure_docs") or 0,
+    )
+    monkeypatch.setattr(
+        "app.services.embedding_registry.register_provider",
+        lambda db, provider: order.append("provision") or None,
+    )
+    monkeypatch.setattr(
+        "app.services.chunk_embeddings.backfill_chunk_embeddings",
+        lambda db, **k: order.append("backfill") or 0,
+    )
+
+    jobs.reindex_embeddings_job()
+
+    # Provisioning is committed before the backfill even begins.
+    assert order.index("provision") < order.index("commit") < order.index("backfill")
