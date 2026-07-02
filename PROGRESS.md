@@ -7,6 +7,24 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D1 — overload protection + shared throttle (2026-07-02)
+
+Added shared, fail-open overload protection across four slices. (1) The login throttle
+(`login_throttle.py`) moved from a per-process dict to a Redis sliding-window sorted set keyed by
+username, shared across API workers; it falls back to the in-process dict when Redis is unreachable
+(fail-open, never fail-closed) and keeps the injectable clock + public API. (2) A new
+`services/rate_limit.py` + ASGI middleware enforces per-client (bearer-token, else IP) and global
+requests-per-minute ceilings via a Redis fixed-window counter, returning 429 + `Retry-After`;
+it fails open when Redis is down and exempts health/docs. (3) A `max_batch_items` cap (default 100)
+rejects oversized client import batches (BibTeX/RIS/CSL, agent manifest, citation batch) with 413;
+server-folder scans are exempt and the local agent chunks oversized scans (reads the cap from
+`/agents/me`). (4) The worker container now runs a supervisor (`app/workers/supervisor.py`) that
+launches the owner-configured `rq_worker_count` (default 2, read once at start — restart to apply;
+falls back to the default if the DB is unreachable). All three new knobs plus the rate limits live
+on the `app_config` singleton (migrations `0043`–`0045`), are admin-editable from the Settings tab,
+and go through the existing app-config PATCH. Verified: backend fast tier green, migration parity
+4 passed, agent tests green (+chunking), frontend 82 passed + build; ruff clean.
+
 ## D7 — extraction-enqueue visibility + self-healing recovery (2026-07-02)
 
 Fixed the silent-drop of extraction jobs when Redis is down at import time. (1) Every import/extract

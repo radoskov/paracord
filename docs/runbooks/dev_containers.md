@@ -251,6 +251,39 @@ make up-ai
 
 Local AI features should be optional and should not block core library functionality.
 
+## Overload protection knobs (D1)
+
+Four owner-editable settings live on the `app_config` singleton and are edited from the admin
+**Settings** tab (or `PATCH /api/v1/admin/app-config`). They overlay the built-in defaults; an
+absent row reproduces the defaults.
+
+| Setting | Default | Effect | Applies |
+| --- | --- | --- | --- |
+| `rate_limit_per_client_per_min` | 60 | Max requests/minute per client (bearer token, else IP). Over → HTTP 429. | immediately |
+| `rate_limit_global_per_min` | 300 | Max requests/minute across all clients. Over → HTTP 429. | immediately |
+| `max_batch_items` | 100 | Max items in one client import batch (BibTeX/RIS/CSL/agent manifest/citation batch). Over → HTTP 413. | immediately |
+| `rq_worker_count` | 2 | Number of RQ extraction worker processes the supervisor launches. | **worker restart** |
+
+Rate limiting is a shared Redis counter across API workers and **fails open** — if Redis is
+unreachable the request is allowed rather than blocked (a dead Redis must never take the API down).
+`/api/v1/health` and the docs/schema are exempt. Server-folder scans are exempt from `max_batch_items`
+(a local scan is not a client batch); the local agent splits oversized scans into `max_batch_items`
+chunks automatically (it reads the cap from `GET /api/v1/agents/me`).
+
+The worker container runs a supervisor (`python -m app.workers.supervisor`) that reads
+`rq_worker_count` **once at startup** and launches that many `rq worker … paracord` children
+(restarting any that die; terminating them cleanly on SIGTERM). Because the count is read only at
+start, changing it requires a worker-container restart:
+
+```bash
+# after saving a new rq_worker_count in the admin Settings tab
+docker compose restart worker
+make logs-worker            # confirms "launching N RQ worker(s)"
+```
+
+If the DB/config is unreachable at worker startup the supervisor logs a warning and falls back to
+the default count (never zero workers).
+
 ## Resetting state
 
 Soft stop:
