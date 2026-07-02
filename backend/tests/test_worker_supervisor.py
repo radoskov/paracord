@@ -116,3 +116,49 @@ def test_shutdown_kills_children_that_ignore_terminate():
     sup.shutdown()
     assert stubborn.terminated
     assert stubborn.killed
+
+
+# --- D10: gate worker startup on migrations being at head ---
+
+
+def test_migrations_at_head_true_when_db_matches_scripts(monkeypatch):
+    monkeypatch.setattr(supervisor, "_alembic_script_heads", lambda: {"0037_default_shelf"})
+    monkeypatch.setattr(supervisor, "_alembic_db_heads", lambda: {"0037_default_shelf"})
+    assert supervisor.migrations_at_head() is True
+
+
+def test_migrations_at_head_false_when_db_behind(monkeypatch):
+    monkeypatch.setattr(supervisor, "_alembic_script_heads", lambda: {"0037_default_shelf"})
+    monkeypatch.setattr(supervisor, "_alembic_db_heads", lambda: {"0036_embedding_model_registry"})
+    assert supervisor.migrations_at_head() is False
+
+
+def test_migrations_at_head_false_when_db_empty(monkeypatch):
+    monkeypatch.setattr(supervisor, "_alembic_script_heads", lambda: {"0037_default_shelf"})
+    monkeypatch.setattr(supervisor, "_alembic_db_heads", lambda: set())
+    assert supervisor.migrations_at_head() is False
+
+
+def test_wait_for_migrations_returns_true_when_at_head(monkeypatch):
+    monkeypatch.setattr(supervisor, "migrations_at_head", lambda: True)
+    assert supervisor.wait_for_migrations(timeout=5.0, interval=0.01) is True
+
+
+def test_wait_for_migrations_fails_open_after_timeout(monkeypatch):
+    monkeypatch.setattr(supervisor, "migrations_at_head", lambda: False)
+    # timeout=0 → the deadline is already reached, so it returns False without sleeping.
+    assert supervisor.wait_for_migrations(timeout=0.0, interval=0.01) is False
+
+
+def test_wait_for_migrations_keeps_waiting_when_db_probe_raises(monkeypatch):
+    calls = {"n": 0}
+
+    def _flaky() -> bool:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("db not ready")
+        return True
+
+    monkeypatch.setattr(supervisor, "migrations_at_head", _flaky)
+    assert supervisor.wait_for_migrations(timeout=5.0, interval=0.001) is True
+    assert calls["n"] == 3

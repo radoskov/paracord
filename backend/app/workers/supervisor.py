@@ -33,6 +33,62 @@ _SHUTDOWN_GRACE_SECONDS = 10.0
 # Poll interval for the supervise loop (detecting dead children).
 _POLL_SECONDS = 2.0
 
+# Migration gate (D10): the worker must not run jobs against a not-yet-migrated schema. The api
+# container applies migrations on startup; the worker waits for the DB to reach alembic head before
+# spawning children. Bounded so a misconfigured DB fails open (starts anyway) rather than wedging.
+_ALEMBIC_INI = "backend/alembic.ini"
+_MIGRATION_POLL_SECONDS = 2.0
+_MIGRATION_WAIT_TIMEOUT = float(os.environ.get("PARACORD_MIGRATION_WAIT_TIMEOUT", "300"))
+
+
+def _alembic_script_heads() -> set[str]:
+    """The head revision(s) defined by the migration scripts."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    return set(ScriptDirectory.from_config(Config(_ALEMBIC_INI)).get_heads())
+
+
+def _alembic_db_heads() -> set[str]:
+    """The migration revision(s) currently applied to the database."""
+    from alembic.runtime.migration import MigrationContext
+
+    from app.db.session import engine
+
+    with engine.connect() as conn:
+        return set(MigrationContext.configure(conn).get_current_heads())
+
+
+def migrations_at_head() -> bool:
+    """True when every alembic head has been applied to the DB. Raises if either side is unreadable."""
+    heads = _alembic_script_heads()
+    return bool(heads) and _alembic_db_heads() == heads
+
+
+def wait_for_migrations(
+    *, timeout: float = _MIGRATION_WAIT_TIMEOUT, interval: float = _MIGRATION_POLL_SECONDS
+) -> bool:
+    """Block until the DB schema is at alembic head (D10) so the worker never runs on a stale schema.
+
+    Bounded: after ``timeout`` seconds it logs a warning and proceeds anyway rather than wedging the
+    container forever on a misconfigured/unreachable DB. Returns True only if head was confirmed.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if migrations_at_head():
+                logger.info("Worker supervisor: DB schema is at alembic head; starting workers")
+                return True
+        except Exception as exc:  # noqa: BLE001 - DB not ready / transient; keep waiting to retry
+            logger.info("Worker supervisor: waiting for DB migrations (%s)", exc)
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "Worker supervisor: DB not confirmed at alembic head after %.0fs; starting anyway",
+                timeout,
+            )
+            return False
+        time.sleep(interval)
+
 
 def resolve_worker_count() -> int:
     """Return the effective RQ worker count, falling back to the default if the DB is unreachable."""
@@ -115,6 +171,7 @@ def main() -> int:
         level=os.environ.get("PARACORD_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    wait_for_migrations()  # D10: don't run jobs against a not-yet-migrated schema
     supervisor = _Supervisor(resolve_worker_count())
     supervisor._install_signal_handlers()
     supervisor.start()
