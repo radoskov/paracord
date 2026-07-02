@@ -18,7 +18,12 @@ from sqlalchemy.orm import Session
 
 from app.models.chunk import WorkChunk
 from app.models.work import Work
-from app.services.embeddings import EmbeddingProvider, get_embedding_provider
+from app.services.embeddings import (
+    EMBED_BATCH_SIZE,
+    EmbeddingProvider,
+    embed_many,
+    get_embedding_provider,
+)
 
 # model_name -> (pgvector column, dimension). Keep in sync with migration 0035's _COLUMNS.
 # Keyed by the *resolved* provider model_name (e.g. "st:..."/"ollama:...").
@@ -115,14 +120,18 @@ def backfill_chunk_embeddings(
         text(f"SELECT id, text FROM work_chunks WHERE {column} IS NULL")  # noqa: S608
     ).all()
     written = 0
-    for chunk_id, chunk_text in rows:
-        db.execute(
-            text(f"UPDATE work_chunks SET {column} = CAST(:v AS vector) WHERE id = :id"),  # noqa: S608
-            {"v": _vec_literal(provider.embed(chunk_text or "")), "id": str(chunk_id)},
-        )
-        written += 1
-        if commit_every and written % commit_every == 0:
-            db.commit()
+    # D14: embed a batch of chunks per provider round-trip instead of one HTTP call per chunk.
+    for start in range(0, len(rows), EMBED_BATCH_SIZE):
+        batch = rows[start : start + EMBED_BATCH_SIZE]
+        vectors = embed_many(provider, [chunk_text or "" for _id, chunk_text in batch])
+        for (chunk_id, _chunk_text), vector in zip(batch, vectors, strict=False):
+            db.execute(
+                text(f"UPDATE work_chunks SET {column} = CAST(:v AS vector) WHERE id = :id"),  # noqa: S608
+                {"v": _vec_literal(vector), "id": str(chunk_id)},
+            )
+            written += 1
+            if commit_every and written % commit_every == 0:
+                db.commit()
     return written
 
 

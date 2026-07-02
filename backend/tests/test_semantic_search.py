@@ -6,7 +6,7 @@ import pytest
 from app.db.base import Base
 from app.models.ai import Embedding
 from app.models.work import Work
-from app.services.embeddings import cosine_similarity, embed_text
+from app.services.embeddings import HashBowProvider, cosine_similarity, embed_many, embed_text
 from app.services.semantic_search import ensure_work_embeddings, semantic_search
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -148,7 +148,9 @@ def test_semantic_search_on_empty_library_is_empty(db_session) -> None:
 # --- API --------------------------------------------------------------------
 
 
-def test_semantic_search_api(client, auth_headers, db) -> None:
+def test_semantic_search_api(client, auth_headers, db, monkeypatch) -> None:
+    from app.workers import queue as queue_module
+
     db.add(
         Work(
             canonical_title="Graph Neural Networks",
@@ -157,9 +159,13 @@ def test_semantic_search_api(client, auth_headers, db) -> None:
         )
     )
     db.commit()
-    # Build embeddings off the read path first (reindex requires editor+).
+    # Build embeddings off the read path first (reindex requires editor+). With the queue reachable
+    # reindex is queued (D14) and a worker can't see this in-request DB, so force the synchronous
+    # fallback (queue unavailable) to build embeddings inline for the assertion below.
+    monkeypatch.setattr(queue_module, "enqueue_reindex", lambda: None)
     reindex = client.post("/api/v1/search/reindex", headers=auth_headers("editor"))
     assert reindex.status_code == 200
+    assert reindex.json()["queued"] is False
     r = client.post(
         "/api/v1/search/semantic",
         headers=auth_headers("reader"),
@@ -175,6 +181,64 @@ def test_semantic_search_api(client, auth_headers, db) -> None:
 def test_reindex_requires_editor(client, auth_headers) -> None:
     assert client.post("/api/v1/search/reindex", headers=auth_headers("reader")).status_code == 403
     assert client.post("/api/v1/search/reindex", headers=auth_headers("editor")).status_code == 200
+
+
+# --- D14: batched embedding + queued reindex --------------------------------
+
+
+def test_embed_many_matches_per_text_embed() -> None:
+    """D14: batch embedding returns the same vectors as one-at-a-time ``embed``, in order."""
+    texts = ["attention transformer", "graph neural network", ""]
+    provider = HashBowProvider()
+    batched = embed_many(provider, texts)
+    assert batched == [provider.embed(t) for t in texts]
+
+
+def test_embed_many_uses_provider_batch_path_once() -> None:
+    """D14: a provider that exposes ``embed_many`` is called once for the whole batch, not per text."""
+    calls = {"batch": 0, "single": 0}
+
+    class _BatchProvider:
+        model_name = "st:fake-batch"
+
+        def embed(self, text: str):
+            calls["single"] += 1
+            return [0.0]
+
+        def embed_many(self, texts):
+            calls["batch"] += 1
+            return [[float(len(t))] for t in texts]
+
+    vectors = embed_many(_BatchProvider(), ["a", "bb", "ccc"])
+    assert vectors == [[1.0], [2.0], [3.0]]
+    assert calls == {"batch": 1, "single": 0}  # one batched round-trip, no per-text fan-out
+
+
+def test_reindex_enqueues_when_queue_available(client, auth_headers, db, monkeypatch) -> None:
+    """D14: with the queue reachable, /search/reindex enqueues the job instead of embedding inline."""
+    from app.api.v1.endpoints import search as search_endpoint
+    from app.workers import queue as queue_module
+
+    db.add(Work(canonical_title="Queued Paper", normalized_title="qp", abstract="text"))
+    db.commit()
+
+    monkeypatch.setattr(queue_module, "enqueue_reindex", lambda: "reindex-job-1")
+    called = {"inline": False}
+    monkeypatch.setattr(
+        search_endpoint,
+        "ensure_work_embeddings",
+        lambda *a, **k: called.__setitem__("inline", True) or 0,
+    )
+
+    r = client.post("/api/v1/search/reindex", headers=auth_headers("editor"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued"] is True
+    assert body["job_id"] == "reindex-job-1"
+    assert body["status"] == "queued"
+    assert called["inline"] is False  # the pipeline did NOT run in-request
+    # No embeddings were written by the request (the worker builds them).
+    assert db.scalar(select(func.count()).select_from(Embedding)) == 0
 
 
 # --- provider-fallback provenance (Phase B2) --------------------------------

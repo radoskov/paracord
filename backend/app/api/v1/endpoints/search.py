@@ -235,16 +235,34 @@ def search_semantic(
 def reindex_embeddings(
     db: Session = DB_DEP, _: User = EDITOR_DEP
 ) -> dict[str, int | str | bool | None]:
-    """Embed any works missing a vector for the active provider (owner/editor). Returns count added.
+    """Rebuild embeddings for the active provider (owner/editor). Queued to the background worker.
 
     Embeddings are normally created on import in the background; this rebuilds them on demand (e.g.
-    after a bulk import while the worker was down, or after switching embedding providers). Also
-    backfills chunk-level embeddings for the active model (no-op unless a real model with a pgvector
-    column is active on Postgres).
+    after a bulk import while the worker was down, or after switching embedding providers). At real
+    scale this is 20 k+ embed calls, so it is routed to the queued reindex job rather than run in
+    the request (D14). Also backfills chunk-level embeddings for the active model.
 
-    Surfaces provider provenance so the UI can warn when the requested provider (e.g. an Ollama
-    model) was unavailable and the reindex silently ran under the hash-BOW fallback instead."""
+    Falls back to a synchronous in-request reindex when the queue is unavailable (e.g. Redis down)
+    so embeddings still get built — the response's ``queued`` flag says which path ran. The
+    synchronous fallback surfaces provider provenance so the UI can warn when the requested provider
+    (e.g. an Ollama model) was unavailable and the reindex ran under the hash-BOW fallback."""
     assert_queue_has_capacity(db)  # D39: reject when the processing queue is full
+    from app.workers.queue import enqueue_reindex  # noqa: PLC0415 (keep Redis import lazy)
+
+    job_id = enqueue_reindex()
+    if job_id is not None:
+        return {
+            "status": "queued",
+            "queued": True,
+            "job_id": job_id,
+            "indexed": None,
+            "chunks_indexed": None,
+            "embedding_provider_used": None,
+            "embedding_provider_requested": None,
+            "degraded": False,
+            "degraded_reason": None,
+        }
+    # Queue unavailable → run inline so embeddings still get built (graceful degradation).
     resolved = resolve_embedding_provider(db=db)
     provider = resolved.provider
     added = ensure_work_embeddings(db, provider=provider)
@@ -254,6 +272,8 @@ def reindex_embeddings(
         "indexed": added,
         "chunks_indexed": chunks_indexed,
         "status": "ok",
+        "queued": False,
+        "job_id": None,
         "embedding_provider_used": provider.model_name,
         "embedding_provider_requested": resolved.requested,
         "degraded": resolved.degraded,

@@ -13113,7 +13113,7 @@
     },
     "/api/v1/search/reindex": {
       "post": {
-        "description": "Embed any works missing a vector for the active provider (owner/editor). Returns count added.\n\nEmbeddings are normally created on import in the background; this rebuilds them on demand (e.g.\nafter a bulk import while the worker was down, or after switching embedding providers). Also\nbackfills chunk-level embeddings for the active model (no-op unless a real model with a pgvector\ncolumn is active on Postgres).\n\nSurfaces provider provenance so the UI can warn when the requested provider (e.g. an Ollama\nmodel) was unavailable and the reindex silently ran under the hash-BOW fallback instead.",
+        "description": "Rebuild embeddings for the active provider (owner/editor). Queued to the background worker.\n\nEmbeddings are normally created on import in the background; this rebuilds them on demand (e.g.\nafter a bulk import while the worker was down, or after switching embedding providers). At real\nscale this is 20 k+ embed calls, so it is routed to the queued reindex job rather than run in\nthe request (D14). Also backfills chunk-level embeddings for the active model.\n\nFalls back to a synchronous in-request reindex when the queue is unavailable (e.g. Redis down)\nso embeddings still get built — the response's ``queued`` flag says which path ran. The\nsynchronous fallback surfaces provider provenance so the UI can warn when the requested provider\n(e.g. an Ollama model) was unavailable and the reindex ran under the hash-BOW fallback.",
         "operationId": "reindex_embeddings_api_v1_search_reindex_post",
         "parameters": [
           {

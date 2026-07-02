@@ -20,9 +20,11 @@ from sqlalchemy.orm import Session
 from app.models.ai import Embedding
 from app.models.work import Work
 from app.services.embeddings import (
+    EMBED_BATCH_SIZE,
     EmbeddingProvider,
     HashBowProvider,
     cosine_similarity,
+    embed_many,
     get_embedding_provider,
 )
 
@@ -111,7 +113,7 @@ def ensure_work_embeddings(
             )
         ).all()
     )
-    added = 0
+    pending: list[tuple[uuid.UUID, str]] = []
     for work_id, title, abstract in db.execute(
         select(Work.id, Work.canonical_title, Work.abstract)
     ).all():
@@ -120,10 +122,18 @@ def ensure_work_embeddings(
         doc = " ".join(part for part in (title, abstract) if part).strip()
         if not doc:
             continue
-        if _store_embedding(db, work_id=work_id, model_name=model_name, vector=provider.embed(doc)):
-            added += 1
-            if commit_every and added % commit_every == 0:
-                db.commit()
+        pending.append((work_id, doc))
+
+    added = 0
+    # D14: embed a batch of docs per provider round-trip instead of one call per work.
+    for start in range(0, len(pending), EMBED_BATCH_SIZE):
+        batch = pending[start : start + EMBED_BATCH_SIZE]
+        vectors = embed_many(provider, [doc for _wid, doc in batch])
+        for (work_id, _doc), vector in zip(batch, vectors, strict=False):
+            if _store_embedding(db, work_id=work_id, model_name=model_name, vector=vector):
+                added += 1
+                if commit_every and added % commit_every == 0:
+                    db.commit()
     if added:
         db.flush()
     return added

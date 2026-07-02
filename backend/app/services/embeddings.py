@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 EMBEDDING_DIM = 256
 DEFAULT_EMBEDDING_MODEL = "hash-bow-v1"
 
+# Batch size for backfill/reindex embedding (D14): one batched round-trip per this many texts
+# instead of one HTTP call per chunk. Kept modest so a single failed batch is cheap to retry.
+EMBED_BATCH_SIZE = 64
+
 _WORD = re.compile(r"[A-Za-z][A-Za-z0-9'-]+")
 
 
@@ -60,6 +64,20 @@ class EmbeddingProvider(Protocol):
     def embed(self, text: str) -> list[float]: ...
 
 
+def embed_many(provider: EmbeddingProvider, texts: list[str]) -> list[list[float]]:
+    """Embed a list of texts, using the provider's native batch path when it has one (D14).
+
+    Providers expose ``embed_many`` for a single batched round-trip (Ollama ``/api/embed`` with a
+    list ``input``; sentence-transformers ``.encode(list)``); providers without it (e.g. test fakes)
+    fall back to one ``embed`` per text. Used by the backfill/reindex so activating a real embedding
+    model does not fan out into one HTTP call per chunk. Order is preserved (result[i] ↔ texts[i]).
+    """
+    batch = getattr(provider, "embed_many", None)
+    if batch is not None:
+        return batch(list(texts))
+    return [provider.embed(text) for text in texts]
+
+
 class HashBowProvider:
     """Deterministic feature-hashing bag-of-words — the default + test provider."""
 
@@ -67,6 +85,9 @@ class HashBowProvider:
 
     def embed(self, text: str) -> list[float]:
         return embed_text(text)
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        return [embed_text(text) for text in texts]
 
 
 class SentenceTransformerProvider:
@@ -80,6 +101,12 @@ class SentenceTransformerProvider:
 
     def embed(self, text: str) -> list[float]:
         return [float(x) for x in self._model.encode(text or "", normalize_embeddings=True)]
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        vectors = self._model.encode([t or "" for t in texts], normalize_embeddings=True)
+        return [[float(x) for x in vec] for vec in vectors]
 
 
 def normalize_ollama_model(model_name: str) -> str:
@@ -120,6 +147,32 @@ class OllamaProvider:
         )
         response.raise_for_status()
         return [float(x) for x in response.json()["embedding"]]
+
+    def embed_many(self, texts: list[str]) -> list[list[float]]:
+        """Batch-embed via Ollama's ``/api/embed`` (list ``input`` → list ``embeddings``) (D14).
+
+        Falls back to one ``embed`` per text when the daemon is too old to expose ``/api/embed`` or
+        returns an unexpected shape, so batching is a pure speed-up and never breaks the backfill."""
+        import httpx2 as httpx  # noqa: PLC0415
+
+        if not texts:
+            return []
+        if self._client is None:
+            self._client = httpx.Client(timeout=30)
+        try:
+            response = self._client.post(
+                f"{self._base_url}/api/embed",
+                json={"model": self._model, "input": [t or "" for t in texts]},
+                timeout=120,
+            )
+            response.raise_for_status()
+            embeddings = response.json().get("embeddings")
+            if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+                raise ValueError("unexpected /api/embed response shape")
+            return [[float(x) for x in vec] for vec in embeddings]
+        except Exception as exc:  # noqa: BLE001 - batch is a speed-up; degrade to per-text embed
+            logger.warning("Ollama /api/embed batch failed (%s); falling back to per-text.", exc)
+            return [self.embed(text) for text in texts]
 
 
 # Providers memoized per (kind, model, url) so SentenceTransformer weights load once per process
