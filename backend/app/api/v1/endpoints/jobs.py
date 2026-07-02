@@ -6,13 +6,14 @@ queued, running, finished, or failed — and whether the background worker is av
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import require_min_role
+from app.api.deps import require_admin, require_min_role
 from app.core.security import Role
 from app.models.user import User
 from app.workers.queue import clear_jobs, queue_status
 
 router = APIRouter()
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
+ADMIN_DEP = Depends(require_admin)
 
 
 @router.get("")
@@ -30,3 +31,15 @@ def clear_job_history(
 ) -> dict:
     """Clear finished/failed (and optionally queued) job history. Running jobs are untouched."""
     return clear_jobs(which)
+
+
+@router.post("/reprocess-pending")
+def reprocess_pending(_: User = ADMIN_DEP) -> dict:
+    """Re-enqueue extraction for every file still owed one (the D7 recovery sweep, on demand).
+
+    Idempotent: a file already queued/running is left alone. Degrades gracefully (never 500) when
+    the queue is offline — reports ``redis_reachable: false`` instead.
+    """
+    from app.workers.recovery import sweep_owed_extractions
+
+    return sweep_owed_extractions()

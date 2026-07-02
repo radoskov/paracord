@@ -43,9 +43,14 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
             file = db.get(File, uuid.UUID(str(file_id)))
             if file is not None:
                 file.status = "extract_failed"
+                # Clear the owed-extraction marker: this is a terminal outcome, not "still owed"
+                # (D7). The marker means "we haven't attempted a terminal extraction yet", so the
+                # recovery sweep must not re-enqueue a file that already failed.
+                file.extraction_requested_at = None
                 db.commit()
             raise
         file.status = "extracted"
+        file.extraction_requested_at = None  # terminal success — no longer owed (D7)
         link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
         work_id = str(link.work_id) if link else None
         # For index_and_extract uploads, discard the PDF now that extraction is stored —

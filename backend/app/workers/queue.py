@@ -33,14 +33,52 @@ def get_queue():
     )
 
 
+# Job statuses that mean an extraction for a file is already in flight — a re-enqueue while the
+# file is in one of these is a no-op (the deterministic job id collides), so a file is never
+# enqueued twice (D7 invariant 2: no collision between the recovery sweep and a user re-extract).
+_LIVE_JOB_STATUSES = {"queued", "started", "deferred", "scheduled"}
+
+
+def extraction_job_id(file_id) -> str:
+    """Deterministic RQ job id for a file's extraction (``extract:{file_id}``).
+
+    A stable id makes re-enqueuing an already-queued/running file a no-op instead of a duplicate.
+    """
+    return f"extract:{file_id}"
+
+
+def _live_extraction_job_id(conn, job_id: str) -> str | None:
+    """Return ``job_id`` if an extraction job with that id is still in flight, else None.
+
+    Only a genuinely-missing job (``NoSuchJobError``) yields None-without-raising; a dead Redis
+    connection propagates so the caller reports the enqueue as failed.
+    """
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job
+
+    try:
+        job = Job.fetch(job_id, connection=conn)
+    except NoSuchJobError:
+        return None
+    return job.id if job.get_status(refresh=True) in _LIVE_JOB_STATUSES else None
+
+
 def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     """Best-effort enqueue of a GROBID extraction job. Returns the job id, or None.
 
-    ``force_ocr`` re-runs OCRmyPDF regardless of the configured backend / current text-layer
-    quality (#22). Never raises: a missing/unreachable Redis must not break the import flow.
+    Uses the deterministic id ``extract:{file_id}`` and skips the enqueue when a live job with that
+    id already exists, so the same file is queued exactly once even if the recovery sweep and a
+    user's re-extract race (D7 invariant 2). ``force_ocr`` re-runs OCRmyPDF regardless of the
+    configured backend / current text-layer quality (#22). Never raises: a missing/unreachable
+    Redis must not break the import flow (callers surface the ``None`` as ``extraction_queued``).
     """
+    job_id = extraction_job_id(file_id)
     try:
-        job = get_queue().enqueue(EXTRACT_JOB, str(file_id), force_ocr)
+        queue = get_queue()
+        existing = _live_extraction_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        job = queue.enqueue(EXTRACT_JOB, str(file_id), force_ocr, job_id=job_id)
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue extraction for file %s: %s", file_id, exc)

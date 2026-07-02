@@ -24,6 +24,13 @@ class File(Base):
     status: Mapped[str] = mapped_column(String(32), default="available", index=True)
     preview_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # Durable "extraction owed" marker (D7): set in the same commit that intends this file to be
+    # extracted, cleared by the extraction worker on terminal success OR failure. The recovery
+    # sweep re-enqueues files whose marker is still set. NULL means nobody ever requested an
+    # extraction (e.g. attach-without-extract) — such files are never swept.
+    extraction_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
