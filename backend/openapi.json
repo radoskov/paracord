@@ -853,6 +853,105 @@
         "title": "AnnotationRead",
         "type": "object"
       },
+      "AppConfigOut": {
+        "properties": {
+          "max_batch_items": {
+            "title": "Max Batch Items",
+            "type": "integer"
+          },
+          "max_papers_per_page": {
+            "title": "Max Papers Per Page",
+            "type": "integer"
+          },
+          "rate_limit_global_per_min": {
+            "title": "Rate Limit Global Per Min",
+            "type": "integer"
+          },
+          "rate_limit_per_client_per_min": {
+            "title": "Rate Limit Per Client Per Min",
+            "type": "integer"
+          },
+          "rq_worker_count": {
+            "title": "Rq Worker Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_papers_per_page",
+          "rate_limit_per_client_per_min",
+          "rate_limit_global_per_min",
+          "max_batch_items",
+          "rq_worker_count"
+        ],
+        "title": "AppConfigOut",
+        "type": "object"
+      },
+      "AppConfigUpdate": {
+        "properties": {
+          "max_batch_items": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Batch Items"
+          },
+          "max_papers_per_page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Papers Per Page"
+          },
+          "rate_limit_global_per_min": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit Global Per Min"
+          },
+          "rate_limit_per_client_per_min": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit Per Client Per Min"
+          },
+          "rq_worker_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rq Worker Count"
+          }
+        },
+        "title": "AppConfigUpdate",
+        "type": "object"
+      },
       "BatchCommitDraft": {
         "properties": {
           "abstract": {
@@ -2751,6 +2850,11 @@
             "title": "Enriched Sources",
             "type": "array"
           },
+          "extraction_queued": {
+            "default": true,
+            "title": "Extraction Queued",
+            "type": "boolean"
+          },
           "work_id": {
             "format": "uuid",
             "title": "Work Id",
@@ -2783,6 +2887,11 @@
               }
             ],
             "title": "Created By User Id"
+          },
+          "extraction_queued": {
+            "default": true,
+            "title": "Extraction Queued",
+            "type": "boolean"
           },
           "finished_at": {
             "anyOf": [
@@ -3070,6 +3179,43 @@
         "title": "ModelRef",
         "type": "object"
       },
+      "PaginatedWorks": {
+        "description": "Server-controlled Library pagination envelope (D18).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "per_page"
+        ],
+        "title": "PaginatedWorks",
+        "type": "object"
+      },
       "ParsedDraftRead": {
         "properties": {
           "candidates": {
@@ -3244,6 +3390,18 @@
               }
             ],
             "title": "Email"
+          },
+          "papers_per_page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Papers Per Page"
           }
         },
         "title": "ProfileUpdateRequest",
@@ -5697,6 +5855,11 @@
             "title": "Content Available",
             "type": "boolean"
           },
+          "extraction_queued": {
+            "default": true,
+            "title": "Extraction Queued",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -5749,6 +5912,26 @@
           "status"
         ],
         "title": "WorkFileRead",
+        "type": "object"
+      },
+      "WorkRackRef": {
+        "description": "A rack containing one of a paper's (see-able) shelves, SEE-filtered (D32 library column).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "WorkRackRef",
         "type": "object"
       },
       "WorkRead": {
@@ -5858,9 +6041,25 @@
             ],
             "title": "Main File Id"
           },
+          "racks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkRackRef"
+            },
+            "title": "Racks",
+            "type": "array"
+          },
           "reading_status": {
             "title": "Reading Status",
             "type": "string"
+          },
+          "shelves": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkShelfRef"
+            },
+            "title": "Shelves",
+            "type": "array"
           },
           "topics": {
             "default": [],
@@ -5963,6 +6162,26 @@
           "name"
         ],
         "title": "WorkShelfRackRef",
+        "type": "object"
+      },
+      "WorkShelfRef": {
+        "description": "A shelf a paper sits on, SEE-filtered (id + name only; D32 library column).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "WorkShelfRef",
         "type": "object"
       },
       "WorkUpdate": {
@@ -7202,6 +7421,114 @@
         "tags": [
           "admin",
           "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/app-config": {
+      "get": {
+        "description": "Return the runtime app configuration (owner or admin).",
+        "operationId": "read_app_config_api_v1_admin_app_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read App Config",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "description": "Update the runtime app configuration (owner or admin); only supplied fields change.",
+        "operationId": "update_app_config_api_v1_admin_app_config_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update App Config",
+        "tags": [
+          "admin"
         ]
       }
     },
@@ -9082,7 +9409,14 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
                   },
                   "title": "Response Upload For Extraction Api V1 Agents Files  Local File Id  Extract Post",
                   "type": "object"
@@ -9155,7 +9489,14 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
                   },
                   "title": "Response Offer Teleport Api V1 Agents Files  Local File Id  Offer Teleport Post",
                   "type": "object"
@@ -9254,7 +9595,7 @@
     },
     "/api/v1/agents/me": {
       "get": {
-        "description": "Return the calling agent's identity, approval, and granted privileges (reachability check).",
+        "description": "Return the calling agent's identity, approval, and granted privileges (reachability check).\n\nAlso reports ``max_batch_items`` — the server's import-batch cap (D1) — so the agent can split\nan oversized scan into ≤cap manifests before pushing them.",
         "operationId": "agent_self_api_v1_agents_me_get",
         "parameters": [
           {
@@ -9447,7 +9788,14 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
                   },
                   "title": "Response Upload Teleport Content Api V1 Agents Teleports  Local File Id  Content Post",
                   "type": "object"
@@ -10079,7 +10427,7 @@
         ]
       },
       "patch": {
-        "description": "Update the caller's own editable profile (display name, email).",
+        "description": "Update the caller's own editable profile (display name, email, papers per page).",
         "operationId": "update_me_api_v1_auth_me_patch",
         "parameters": [
           {
@@ -11568,7 +11916,7 @@
     },
     "/api/v1/imports/{batch_id}": {
       "get": {
-        "description": "Return import batch status and stats.",
+        "description": "Return import batch status and stats (owner/admin see all; others only their own).",
         "operationId": "get_import_batch_api_v1_imports__batch_id__get",
         "parameters": [
           {
@@ -11748,6 +12096,58 @@
           }
         },
         "summary": "Clear Job History",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/reprocess-pending": {
+      "post": {
+        "description": "Re-enqueue extraction for every file still owed one (the D7 recovery sweep, on demand).\n\nIdempotent: a file already queued/running is left alone. Degrades gracefully (never 500) when\nthe queue is offline — reports ``redis_reachable: false`` instead.",
+        "operationId": "reprocess_pending_api_v1_jobs_reprocess_pending_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reprocess Pending Api V1 Jobs Reprocess Pending Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reprocess Pending",
         "tags": [
           "jobs"
         ]
@@ -13555,7 +13955,7 @@
     },
     "/api/v1/works": {
       "get": {
-        "description": "List/search works by basic metadata and extraction/metadata completeness.\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``\n``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches\ntitle/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take\nprecedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE\nfilter (only see-able shelves/racks contribute; they never widen visibility).\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by\nthe saved-filter/graph/export resolvers); ``list_works`` only adds sort + limit.",
+        "description": "List/search works by basic metadata and extraction/metadata completeness (paginated).\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``\n``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches\ntitle/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take\nprecedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE\nfilter (only see-able shelves/racks contribute; they never widen visibility).\n\nPagination (D18): ``per_page`` overrides the caller's ``papers_per_page`` preference (else the\nserver default); the effective size is clamped to the admin global maximum. ``page`` is clamped\ninto ``1..pages``. The response envelope carries ``items``/``total``/``page``/``pages``/\n``per_page``. Each item also carries its SEE-filtered ``shelves``/``racks`` (D32).\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by\nthe saved-filter/graph/export resolvers); ``list_works`` adds sort + pagination.",
         "operationId": "list_works_api_v1_works_get",
         "parameters": [
           {
@@ -13718,14 +14118,30 @@
           },
           {
             "in": "query",
-            "name": "limit",
+            "name": "page",
             "required": false,
             "schema": {
-              "default": 100,
-              "maximum": 500,
+              "default": 1,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Per Page"
             }
           },
           {
@@ -13750,11 +14166,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/WorkRead"
-                  },
-                  "title": "Response List Works Api V1 Works Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/PaginatedWorks"
                 }
               }
             },
