@@ -23,7 +23,9 @@
 
   // Parsed page-size (null = reset to server default); NaN/<1 is treated as "unset" for the diff.
   $: parsedPerPage =
-    papersPerPage.trim() === '' ? null : Math.trunc(Number(papersPerPage)) || null;
+    String(papersPerPage ?? '').trim() === ''
+      ? null
+      : Math.trunc(Number(papersPerPage)) || null;
   $: dirty =
     !!me &&
     ((me.display_name ?? '') !== displayName.trim() ||
