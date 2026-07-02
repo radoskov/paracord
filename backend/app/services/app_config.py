@@ -189,9 +189,7 @@ def update_rq_worker_count(
     return row.rq_worker_count
 
 
-def update_max_queue_len(
-    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
-) -> int:
+def update_max_queue_len(db: Session, *, value: int, actor_user_id: uuid.UUID | None = None) -> int:
     """Persist a new pending-queue depth ceiling (D39). Returns the stored value."""
     if value < 1:
         raise ValueError("max_queue_len must be >= 1")
