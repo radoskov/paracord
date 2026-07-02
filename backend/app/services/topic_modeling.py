@@ -10,6 +10,7 @@ fast development/test feedback. A real embedding/BERTopic backend can replace
 ``topic_model_id`` so results from different models never mix.
 """
 
+import logging
 import math
 import re
 import uuid
@@ -21,6 +22,8 @@ from sqlalchemy.orm import Session
 from app.models.ai import TopicAssignment
 from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOPICS = 5
 KEYWORDS_PER_TOPIC = 6
@@ -360,6 +363,7 @@ def _paper_dense_vectors(
 
     work_ids = [w.id for w in works]
     per_work: dict[uuid.UUID, list[float]] = {w.id: [] for w in works}
+    contributed = 0
     for model_name, provider in selected:
         col = column_for(db, model_name)
         pooled = (
@@ -367,12 +371,40 @@ def _paper_dense_vectors(
             if col is not None and _is_postgres(db)
             else {}
         )
+        # Enforce one fixed dimension per model (D12). The registry column carries the model's dim;
+        # without a column, adopt the first vector's length as the model's dimension. A vector that
+        # does not match is a real registry/provider bug — skip the whole model with a warning
+        # rather than padding/truncating (which would silently corrupt the concatenated vectors).
+        expected_dim = col[1] if col is not None else None
+        model_vectors: dict[uuid.UUID, list[float]] = {}
+        mismatch = False
         for work in works:
             vec = pooled.get(work.id)
             if not vec:  # no stored chunk vectors for this work/model → embed its text now
                 vec = provider.embed(_doc_text(work))
-            per_work[work.id].extend(_l2([float(x) for x in vec]))
+            vec = [float(x) for x in vec]
+            if expected_dim is None:
+                expected_dim = len(vec)
+            if len(vec) != expected_dim:
+                logger.warning(
+                    "Topic multimode: model %r produced a %d-dim vector (expected %d) for work %s; "
+                    "skipping this model rather than padding",
+                    model_name,
+                    len(vec),
+                    expected_dim,
+                    work.id,
+                )
+                mismatch = True
+                break
+            model_vectors[work.id] = _l2(vec)
+        if mismatch or not expected_dim:
+            continue
+        for work in works:
+            per_work[work.id].extend(model_vectors[work.id])
+        contributed += 1
 
+    if contributed == 0:
+        return None, None  # every model was skipped → let the caller use the TF-IDF baseline
     label = MULTIMODE if embedding_model == MULTIMODE else selected[0][0]
     vectors = [{i: x for i, x in enumerate(per_work[w.id])} for w in works]
     return vectors, label

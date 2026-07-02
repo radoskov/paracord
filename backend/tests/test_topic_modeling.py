@@ -664,3 +664,62 @@ def test_embedding_backend_uses_dense_vectors_when_model_active(db_session, monk
     assert (
         by_title["Alpha translation model"]["topic_id"] != by_title["Yak vision model"]["topic_id"]
     )
+
+
+# --- D12: multimode clustering enforces per-model dimensions (skip, never pad) ---
+
+
+def _loose_works(db_session, titles):
+    from app.models.work import Work
+
+    works = []
+    for title in titles:
+        w = Work(canonical_title=title, normalized_title=title.lower())
+        db_session.add(w)
+        works.append(w)
+    db_session.commit()
+    return works
+
+
+def test_paper_dense_vectors_skips_model_on_dim_mismatch(db_session, monkeypatch) -> None:
+    """A model emitting an inconsistent per-work dimension is skipped, not padded/truncated (D12)."""
+    from app.services import embedding_registry as reg
+    from app.services.topic_modeling import _paper_dense_vectors
+
+    works = _loose_works(db_session, ["Alpha paper", "Beta paper", "Gamma paper"])
+
+    class _BadProvider:
+        model_name = "st:bad-dims"
+
+        def embed(self, text: str):
+            # The "Beta" doc gets a different dimension — a real registry/provider bug.
+            return [1.0, 0.0] if "Beta" in text else [1.0, 0.0, 0.0]
+
+    monkeypatch.setattr(reg, "column_for", lambda db, name: None)
+    monkeypatch.setattr(reg, "provider_for", lambda db, name, **k: _BadProvider())
+
+    vectors, label = _paper_dense_vectors(db_session, works, "st:bad-dims")
+    assert vectors is None  # the only model was skipped → fall back to the TF-IDF baseline
+    assert label is None
+
+
+def test_paper_dense_vectors_keeps_model_with_consistent_dims(db_session, monkeypatch) -> None:
+    """A model whose per-work vectors all share one dimension is used normally (D12 happy path)."""
+    from app.services import embedding_registry as reg
+    from app.services.topic_modeling import _paper_dense_vectors
+
+    works = _loose_works(db_session, ["Alpha paper", "Beta paper"])
+
+    class _GoodProvider:
+        model_name = "st:good-dims"
+
+        def embed(self, text: str):
+            return [1.0, 0.0, 0.0] if "Alpha" in text else [0.0, 1.0, 0.0]
+
+    monkeypatch.setattr(reg, "column_for", lambda db, name: None)
+    monkeypatch.setattr(reg, "provider_for", lambda db, name, **k: _GoodProvider())
+
+    vectors, label = _paper_dense_vectors(db_session, works, "st:good-dims")
+    assert label == "st:good-dims"
+    assert vectors is not None
+    assert all(len(v) == 3 for v in vectors)  # one 3-dim vector per work, nothing padded
