@@ -348,8 +348,9 @@
 
   async function updateStatus(work: Work, status: ReadingStatus): Promise<void> {
     await run(async () => {
-      await client.updateWork(work.id, { reading_status: status });
-      await loadWorks();
+      const updated = await client.updateWork(work.id, { reading_status: status });
+      works = works.map((w) => (w.id === updated.id ? updated : w));
+      if (selected?.id === updated.id) selected = updated;
     });
   }
 
