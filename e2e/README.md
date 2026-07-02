@@ -43,6 +43,11 @@ The suite signs in as a dedicated **admin** account with fixed credentials, crea
 docker compose exec -T api python scripts/ensure_e2e_user.py
 ```
 
+That script also **raises the D1 request rate-limit ceilings** for the run — the out-of-the-box
+limits (60/client, 300/global per minute) throttle the browser suite (the sign-in POST is bucketed
+per client IP), so without this the run trips 429s partway through. `make e2e` and the CI job both
+call this script, so the bump happens automatically.
+
 Credentials come from the environment, with dev defaults that match the seed script:
 
 | Variable       | Default          |
@@ -68,17 +73,34 @@ form itself.
 6. **Tab navigation** — click + arrow-key navigation, and a Search query surviving a tab switch
    (tab-state caching).
 
-Mutating journeys use unique `E2E …` names and clean up after themselves via the API, so reruns and
-parallel runs never collide.
+7. **Shelf delete → Inbox fallback** — a paper only on a deleted shelf falls back to the Inbox.
+8. **Attach PDF + reader** — attach the fixture PDF and assert it renders in the in-app reader.
+9. **Import + GROBID extract** — upload a PDF on the Import tab; skips-with-reason if GROBID is down.
+10. **Reader search** — the reader's whole-paper search finds a phrase in the PDF.
+11. **Racks** — create a rack and add a shelf to it.
+12. **Duplicates/Insights smoke** — both tabs load without error.
+13. **Pagination** — per-page size, prev/next, page dropdown and go-to-page (D18).
+14. **Annotate** — add a note in the reader and assert it survives a reload.
+15. **Export** — export a selected paper as BibTeX and a styled/CSL citation.
+16. **Duplicates review** — scan for a near-duplicate candidate and mark it not-a-duplicate.
+17. **Admin settings** — change a global app-config value and confirm it persists (D18/D1).
+18. **Jobs health** — the queue-health semaphore renders a sane status (D7).
+19. **Identifier import** — import by arXiv id; **skips unless `E2E_ONLINE=1`** (needs external
+    network to arXiv), so CI stays deterministic.
 
-Journeys that require GROBID/Ollama (PDF import, extraction, the reader with a real PDF) are out of
-scope here and are intentionally not covered rather than made flaky.
+Mutating journeys use unique `E2E …` / distinctive-token names and clean up after themselves via
+the API, so reruns and parallel runs never collide. Journeys that need GROBID/Ollama self-skip when
+those profile-gated services aren't up (see journey 9's pattern) rather than being made flaky.
 
 ## CI wiring
 
-1. Bring the stack up (`make up`) and wait for the frontend + API to be healthy.
-2. `cd e2e && npm ci && npx playwright install --with-deps chromium`.
-3. Seed the user: `docker compose exec -T api python scripts/ensure_e2e_user.py`.
-4. `npx playwright test`.
-5. On failure, upload `e2e/playwright-report/` and `e2e/test-results/` (traces, screenshots, video)
-   as build artifacts.
+Wired as the `e2e` job in `.github/workflows/ci.yml` (runs on push/PR). It:
+
+1. `cp .env.example .env`, then `docker compose up -d --build postgres redis api worker frontend`
+   (GROBID/Ollama stay down — profile-gated — so extraction/AI journeys self-skip).
+2. Waits for the API (`/api/v1/health`) and frontend to answer.
+3. Bootstraps the owner (`scripts/bootstrap_admin.py`, piped, tolerates already-exists), then seeds
+   the test admin: `docker compose exec -T api python scripts/ensure_e2e_user.py`.
+4. `cd e2e && npm ci && npx playwright install --with-deps chromium && npx playwright test`.
+5. On failure, uploads `e2e/playwright-report/` and `e2e/test-results/` (traces, screenshots,
+   video) as build artifacts.

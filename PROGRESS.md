@@ -618,6 +618,7 @@ Progress notes:
 - Alembic is initialized for the first security tables and sessions; broader domain models still need migrations.
 - Build/test now run in containers (Python 3.12). Validated end to end: `docker compose up -d --build` brings the api healthy after migrations, the full suite passes via `docker compose run --rm api pytest` (23 passed), and a live smoke test (bootstrap owner → login → owner `GET /admin/users` 200 → editor `GET /admin/users` 403 → bad login 401 → audit events) succeeds against real Postgres.
 - Replaced unmaintained `passlib` with the `bcrypt` library directly (passlib was incompatible with modern bcrypt); fixed Alembic revision ids that exceeded the 32-char `alembic_version` column.
+- D36: Playwright E2E is wired into CI (new `e2e` job in `.github/workflows/ci.yml`) and the suite expanded to 19 journeys — added pagination, annotate, export, duplicates-review, admin-settings, jobs-health, and (network-gated) identifier-import. Fixed the E2E helpers for the D18 paginated `/works` envelope and made E2E provisioning raise the D1 rate limits so the browser suite isn't throttled. Local: 17 passed / 2 skipped (GROBID + online-only). See `docs/agent_handoffs/2026-07-02-d36-e2e-journeys-and-ci.md` (notes a ProfilePage "Papers per page" number-field bug found but left for follow-up).
 
 ## Next milestone: M1 core library, organization, and files
 
