@@ -156,8 +156,8 @@ def test_pymupdf_ocr_adds_searchable_text_layer(tmp_path: Path) -> None:
     assert "HELLO" in text.upper()
 
 
-def test_pymupdf_extract_text_native_and_run_ml_extraction(tmp_path: Path) -> None:
-    """The PyMuPDF hard extractor reads the native text layer; run_ml_extraction wraps it."""
+def test_pymupdf_extract_text_native(tmp_path: Path) -> None:
+    """The PyMuPDF hard extractor reads the native text layer."""
     if not ocr_service.pymupdf_available():
         import pytest as _pytest
 
