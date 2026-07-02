@@ -91,7 +91,7 @@
   ): Promise<CitationGraphResponse> {
     if (scopeType === 'search_result') {
       // Run the metadata search now and pass the resulting ids as the explicit work set.
-      const works = await client.listWorks({ q: graphSearchQuery });
+      const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
       return client.citationGraph({
         scopeType,
         workIds: works.map((w) => w.id),
@@ -126,7 +126,7 @@
   // resolution so both graph types share the same scope picker.
   async function loadTopicGraph(): Promise<import('../api/client').TopicGraphResponse> {
     if (scopeType === 'search_result') {
-      const works = await client.listWorks({ q: graphSearchQuery });
+      const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
       return client.topicGraph({ scopeType, workIds: works.map((w) => w.id) });
     }
     if (scopeType === 'selected_papers') {

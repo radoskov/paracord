@@ -70,6 +70,7 @@
     { id: 'findweb', label: 'Find-on-web' },
     { id: 'folders', label: 'Folders', ownerOnly: true },
     { id: 'agents', label: 'Agents' },
+    { id: 'settings', label: 'Settings' },
   ];
   $: visibleAdminTabs = ADMIN_TABS.filter((t) => !t.ownerOnly || $isOwner);
   let activeAdminTab = 'users';
@@ -216,7 +217,32 @@
         ]);
         defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
       }
+      // Runtime app config (D18 global page-size clamp) is owner+admin.
+      if (get(canManageUsers)) {
+        maxPapersPerPage = String((await client.getAppConfig()).max_papers_per_page);
+      }
     });
+  }
+
+  // --- App settings (D18: global max papers per page) ---
+  let maxPapersPerPage = '';
+  let savingAppConfig = false;
+  let appConfigMsg = '';
+
+  async function saveAppConfig(): Promise<void> {
+    const value = Math.trunc(Number(maxPapersPerPage));
+    if (!Number.isFinite(value) || value < 1) {
+      message = 'Max papers per page must be a whole number of at least 1';
+      return;
+    }
+    savingAppConfig = true;
+    appConfigMsg = '';
+    await run(async () => {
+      const updated = await client.updateAppConfig({ max_papers_per_page: value });
+      maxPapersPerPage = String(updated.max_papers_per_page);
+      appConfigMsg = 'Saved.';
+    });
+    savingAppConfig = false;
   }
 
   // --- Groups ---
@@ -1129,6 +1155,31 @@
       {#if message}<p class="danger">{message}</p>{/if}
     </form>
   </Modal>
+{/if}
+
+{#if activeAdminTab === 'settings' && $canManageUsers}
+  <div class="admin-columns">
+    <section class="surface admin-section">
+      <div class="section-head">
+        <h2>Library</h2>
+        <button type="button" on:click={refresh} disabled={loading} title="Reload settings">Refresh</button>
+      </div>
+      <form on:submit|preventDefault={saveAppConfig} class="stack">
+        <label class="field">
+          Global max papers per page
+          <input type="number" min="1" bind:value={maxPapersPerPage} />
+        </label>
+        <p class="small-help">
+          The ceiling applied to every user’s Library page size. A user’s own “papers per page”
+          preference is clamped to this value.
+        </p>
+        <button type="submit" disabled={savingAppConfig || loading || !maxPapersPerPage}
+          title="Save the global maximum papers per page">Save</button>
+        {#if appConfigMsg}<p class="muted">{appConfigMsg}</p>{/if}
+        {#if message}<p class="danger">{message}</p>{/if}
+      </form>
+    </section>
+  </div>
 {/if}
 
 <style>

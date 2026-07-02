@@ -8,6 +8,8 @@
   // Editable fields are seeded from the store and kept local until saved.
   let displayName = '';
   let email = '';
+  // Preferred Library page size (D18). Kept as a string so an empty field means "reset to default".
+  let papersPerPage = '';
   let seededFor: string | null = null;
 
   $: me = $currentUser;
@@ -15,10 +17,18 @@
   $: if (me && me.id !== seededFor) {
     displayName = me.display_name ?? '';
     email = me.email ?? '';
+    papersPerPage = me.papers_per_page != null ? String(me.papers_per_page) : '';
     seededFor = me.id;
   }
 
-  $: dirty = !!me && ((me.display_name ?? '') !== displayName.trim() || (me.email ?? '') !== email.trim());
+  // Parsed page-size (null = reset to server default); NaN/<1 is treated as "unset" for the diff.
+  $: parsedPerPage =
+    papersPerPage.trim() === '' ? null : Math.trunc(Number(papersPerPage)) || null;
+  $: dirty =
+    !!me &&
+    ((me.display_name ?? '') !== displayName.trim() ||
+      (me.email ?? '') !== email.trim() ||
+      (me.papers_per_page ?? null) !== parsedPerPage);
 
   let savingProfile = false;
   let profileMsg = '';
@@ -32,6 +42,7 @@
       const updated: CurrentUser = await client.updateProfile({
         display_name: displayName.trim() || null,
         email: email.trim() || null,
+        papers_per_page: parsedPerPage,
       });
       currentUser.set(updated);
       profileMsg = 'Profile saved.';
@@ -131,6 +142,15 @@
         <label>
           Email
           <input type="email" bind:value={email} maxlength="320" placeholder="Contact email (optional)" />
+        </label>
+        <label>
+          Papers per page
+          <input
+            type="number"
+            min="1"
+            bind:value={papersPerPage}
+            placeholder="Library page size (blank = default)"
+          />
         </label>
         <div class="actions">
           <button type="submit" disabled={savingProfile || !dirty}

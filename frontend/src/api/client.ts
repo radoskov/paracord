@@ -20,6 +20,24 @@ export interface Work {
   created_by_user_id: string | null;
   created_at: string;
   updated_at: string;
+  // SEE-filtered shelves/racks for the Library columns (D32); only populated by listWorks.
+  shelves?: WorkRef[];
+  racks?: WorkRef[];
+}
+
+// A lightweight {id, name} reference (a paper's shelf or rack in the Library columns).
+export interface WorkRef {
+  id: string;
+  name: string;
+}
+
+// Server-controlled Library pagination envelope (D18).
+export interface PaginatedWorks {
+  items: Work[];
+  total: number;
+  page: number;
+  pages: number;
+  per_page: number;
 }
 
 export interface RelatedWork {
@@ -581,6 +599,9 @@ export interface WorkQuery {
   missing?: string[];
   sort?: WorkSortKey;
   order?: 'asc' | 'desc';
+  // Server-controlled pagination (D18). `perPage` overrides the user's saved preference.
+  page?: number;
+  perPage?: number;
 }
 
 // --- Saved filters (Phase B7): a per-user named Library query, usable as a graph/export scope ---
@@ -816,6 +837,13 @@ export interface CurrentUser {
   email: string | null;
   created_at: string | null;
   last_login_at: string | null;
+  // Preferred Library page size (D18); null falls back to the server default.
+  papers_per_page: number | null;
+}
+
+// Runtime app configuration (admin-editable; D18 global page-size clamp).
+export interface AppConfig {
+  max_papers_per_page: number;
 }
 
 export interface AgentRecord {
@@ -906,7 +934,7 @@ export class ApiClient {
     return response.access_token;
   }
 
-  async listWorks(query: WorkQuery = {}): Promise<Work[]> {
+  async listWorks(query: WorkQuery = {}): Promise<PaginatedWorks> {
     const params = new URLSearchParams();
     if (query.q) params.set('q', query.q);
     if (query.readingStatus) params.set('reading_status', query.readingStatus);
@@ -918,8 +946,10 @@ export class ApiClient {
     if (query.missing?.length) params.set('missing', query.missing.join(','));
     if (query.sort) params.set('sort', query.sort);
     if (query.order) params.set('order', query.order);
+    if (query.page !== undefined) params.set('page', String(query.page));
+    if (query.perPage !== undefined) params.set('per_page', String(query.perPage));
     const suffix = params.toString() ? `?${params.toString()}` : '';
-    return this.request<Work[]>(`/api/v1/works${suffix}`);
+    return this.request<PaginatedWorks>(`/api/v1/works${suffix}`);
   }
 
   async getWork(workId: string): Promise<Work> {
@@ -1641,8 +1671,20 @@ export class ApiClient {
   async updateProfile(changes: {
     display_name?: string | null;
     email?: string | null;
+    papers_per_page?: number | null;
   }): Promise<CurrentUser> {
     return this.request<CurrentUser>('/api/v1/auth/me', { method: 'PATCH', body: changes });
+  }
+
+  async getAppConfig(): Promise<AppConfig> {
+    return this.request<AppConfig>('/api/v1/admin/app-config');
+  }
+
+  async updateAppConfig(changes: { max_papers_per_page: number }): Promise<AppConfig> {
+    return this.request<AppConfig>('/api/v1/admin/app-config', {
+      method: 'PATCH',
+      body: changes,
+    });
   }
 
   async resetUserPassword(

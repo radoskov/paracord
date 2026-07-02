@@ -148,6 +148,10 @@
                   </span>
                 {:else}-{/if}
               </td>
+            {:else if col.id === 'shelves'}
+              <td>{work.shelves?.length ? work.shelves.map((s) => s.name).join(', ') : '-'}</td>
+            {:else if col.id === 'racks'}
+              <td>{work.racks?.length ? work.racks.map((r) => r.name).join(', ') : '-'}</td>
             {/if}
           {/each}
         </tr>

@@ -51,7 +51,12 @@
 
   async function load(): Promise<void> {
     await run(async () => {
-      [shelves, allWorks] = await Promise.all([client.listShelves(), client.listWorks()]);
+      const [shelfList, worksPage] = await Promise.all([
+        client.listShelves(),
+        client.listWorks({ perPage: 500 }),
+      ]);
+      shelves = shelfList;
+      allWorks = worksPage.items;
       if (selected) selected = shelves.find((s) => s.id === selected?.id) ?? null;
     });
     // Restore the shelf left open on a previous visit to this tab.

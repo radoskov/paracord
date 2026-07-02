@@ -16,7 +16,9 @@ export type ColumnId =
   | 'status'
   | 'added_at'
   | 'doi'
-  | 'keywords';
+  | 'keywords'
+  | 'shelves'
+  | 'racks';
 
 export interface ColumnDef {
   id: ColumnId;
@@ -38,6 +40,8 @@ export const LIBRARY_COLUMNS: ColumnDef[] = [
   { id: 'added_at', label: 'Added', sortKey: 'added_at', default: true },
   { id: 'doi', label: 'DOI', default: true },
   { id: 'keywords', label: 'Keywords', default: false },
+  { id: 'shelves', label: 'Shelves', default: false },
+  { id: 'racks', label: 'Racks', default: false },
 ];
 
 // Soft cap on visible columns — a warning, not a hard limit (the user can override).

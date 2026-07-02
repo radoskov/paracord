@@ -38,6 +38,11 @@
   export let client: ApiClient;
 
   let works: Work[] = [];
+  // Server-controlled pagination (D18). `page` is the 1-based current page; `totalPages`/`total`
+  // come from the response envelope. Semantic search is ranked separately and isn't paginated.
+  let page = 1;
+  let totalPages = 1;
+  let totalWorks = 0;
   let shelves: Shelf[] = [];
   let racks: Rack[] = [];
   let tags: Tag[] = [];
@@ -144,7 +149,7 @@
           : 'asc';
     columnPrefs = { ...columnPrefs, sort: { key, order } };
     persistColumnPrefs();
-    void loadWorks();
+    reload();
   }
 
   // A keyword chip (or other tab) requested a Library search — consume it once and run it.
@@ -153,7 +158,7 @@
     search = req.query;
     searchMode = req.mode;
     pendingLibrarySearch.set(null);
-    void loadWorks();
+    reload();
   });
   onDestroy(unsubscribePendingSearch);
   // Open a paper requested from another tab (e.g. a search result). Fetches it if it isn't in the
@@ -232,7 +237,7 @@
     pdfFilter = p.has_pdf === true ? 'yes' : p.has_pdf === false ? 'no' : '';
     refsFilter = p.has_references === true ? 'yes' : p.has_references === false ? 'no' : '';
     missing = [...(p.missing ?? [])];
-    void loadWorks();
+    reload();
   }
 
   function onApplyFilterChange(event: Event): void {
@@ -284,16 +289,20 @@
   async function loadWorks(): Promise<void> {
     await run(async () => {
       if (searchMode === 'semantic' && search.trim()) {
-        // Rank by semantic similarity, then intersect with the active structured filters.
+        // Rank by semantic similarity, then intersect with the active structured filters. Semantic
+        // results are capped at the ranked set (50), so request a full page for the intersection.
         const [ranked, filtered] = await Promise.all([
           client.semanticSearch(search.trim(), 50),
-          client.listWorks(structuredQuery()),
+          client.listWorks({ ...structuredQuery(), perPage: 500 }),
         ]);
         semanticDegraded = ranked.degraded === true;
-        const byId = new Map(filtered.map((w) => [w.id, w]));
+        const byId = new Map(filtered.items.map((w) => [w.id, w]));
         const ordered = ranked.items.map((i) => byId.get(i.work_id)).filter((w): w is Work => !!w);
         // Re-sort the ranked set client-side so the chosen column ordering applies in semantic mode.
         works = sortWorksClientSide(ordered);
+        page = 1;
+        totalPages = 1;
+        totalWorks = works.length;
         if (works.length === 0 && ranked.items.length === 0) {
           message =
             'No semantic matches. Embeddings are built on first search; if this stays empty, ' +
@@ -301,12 +310,18 @@
         }
       } else {
         semanticDegraded = false;
-        works = await client.listWorks({
+        const result = await client.listWorks({
           q: search,
           ...structuredQuery(),
           sort: columnPrefs.sort.key,
           order: columnPrefs.sort.order,
+          page,
         });
+        works = result.items;
+        // The server clamps `page` into range; mirror its value so the controls stay consistent.
+        page = result.page;
+        totalPages = result.pages;
+        totalWorks = result.total;
       }
       // Drop selections that fell out of the result set.
       const present = new Set(works.map((w) => w.id));
@@ -315,11 +330,26 @@
     });
   }
 
+  // Jump to a page (clamped locally; the server re-clamps too) and re-fetch.
+  function goToPage(target: number): void {
+    const next = Math.min(Math.max(1, Math.trunc(target) || 1), totalPages);
+    if (next === page) return;
+    page = next;
+    void loadWorks();
+  }
+
+  // Re-run the query from the first page (used when the filter/sort/search changes, so the user
+  // isn't stranded on a now-out-of-range page).
+  function reload(): void {
+    page = 1;
+    void loadWorks();
+  }
+
   function resetFilters(): void {
     statusFilter = shelfFilter = rackFilter = tagFilter = pdfFilter = refsFilter = '';
     missing = [];
     search = '';
-    void loadWorks();
+    reload();
   }
 
   function toggleMissing(field: string): void {
@@ -484,7 +514,7 @@
 <section class="layout">
   <div class="list-col">
     <div class="card">
-      <form class="filters" on:submit|preventDefault={loadWorks}>
+      <form class="filters" on:submit|preventDefault={reload}>
         <div class="search-row">
           <input
             bind:value={search}
@@ -503,24 +533,24 @@
           <p class="degraded-hint" role="status">Semantic search is using the built-in baseline (sentence-transformers not configured).</p>
         {/if}
         <div class="filter-row">
-          <select bind:value={statusFilter} on:change={loadWorks} aria-label="Reading status"
+          <select bind:value={statusFilter} on:change={reload} aria-label="Reading status"
             title="Filter the list by reading status">
             <option value="">Any status</option>
             {#each ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'] as s}
               <option value={s}>{s}</option>
             {/each}
           </select>
-          <select bind:value={shelfFilter} on:change={loadWorks} aria-label="Shelf"
+          <select bind:value={shelfFilter} on:change={reload} aria-label="Shelf"
             title="Filter the list by shelf">
             <option value="">Any shelf</option>
             {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
-          <select bind:value={rackFilter} on:change={loadWorks} aria-label="Rack"
+          <select bind:value={rackFilter} on:change={reload} aria-label="Rack"
             title="Filter the list by rack">
             <option value="">Any rack</option>
             {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
-          <select bind:value={tagFilter} on:change={loadWorks} aria-label="Tag"
+          <select bind:value={tagFilter} on:change={reload} aria-label="Tag"
             title="Filter the list by tag">
             <option value="">Any tag</option>
             {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
@@ -564,7 +594,7 @@
         {#if showMoreFilters}
           <div class="more-filters">
             <label class="inline">PDF
-              <select bind:value={pdfFilter} on:change={loadWorks}
+              <select bind:value={pdfFilter} on:change={reload}
                 title="Filter by whether the paper has an attached PDF">
                 <option value="">any</option>
                 <option value="yes">has file</option>
@@ -572,7 +602,7 @@
               </select>
             </label>
             <label class="inline">References
-              <select bind:value={refsFilter} on:change={loadWorks}
+              <select bind:value={refsFilter} on:change={reload}
                 title="Filter by whether references have been extracted">
                 <option value="">any</option>
                 <option value="yes">extracted</option>
@@ -591,7 +621,7 @@
                     : `Show only papers missing ${field}`}
                   on:click={() => {
                     toggleMissing(field);
-                    loadWorks();
+                    reload();
                   }}
                 >{field}</button>
               {/each}
@@ -602,7 +632,11 @@
         {/if}
       </form>
       <div class="bar">
-        <span class="muted">{works.length} papers{message ? ` · ${message}` : ''}</span>
+        <span class="muted"
+          >{totalWorks} papers{totalPages > 1 ? ` · page ${page} of ${totalPages}` : ''}{message
+            ? ` · ${message}`
+            : ''}</span
+        >
         <span class="bar-actions">
           <button type="button" class="secondary" on:click={() => (showColumns = true)}
             title="Choose which columns show and their order">Columns</button>
@@ -671,6 +705,48 @@
         />
       {/if}
     </div>
+
+    {#if totalPages > 1}
+      <div class="pagination" role="navigation" aria-label="Library pages">
+        <button
+          type="button"
+          class="secondary"
+          on:click={() => goToPage(page - 1)}
+          disabled={page <= 1 || loading}
+          title="Previous page"
+        >‹ Prev</button>
+        <label class="inline">Page
+          <select
+            aria-label="Go to page"
+            title="Jump to a page"
+            value={page}
+            on:change={(e) => goToPage(Number(e.currentTarget.value))}
+          >
+            {#each Array.from({ length: totalPages }, (_, i) => i + 1) as p}
+              <option value={p}>{p}</option>
+            {/each}
+          </select>
+          of {totalPages}
+        </label>
+        <input
+          type="number"
+          class="page-input"
+          min="1"
+          max={totalPages}
+          value={page}
+          aria-label="Go to page number"
+          title="Type a page number and press Enter"
+          on:change={(e) => goToPage(Number(e.currentTarget.value))}
+        />
+        <button
+          type="button"
+          class="secondary"
+          on:click={() => goToPage(page + 1)}
+          disabled={page >= totalPages || loading}
+          title="Next page"
+        >Next ›</button>
+      </div>
+    {/if}
   </div>
 
   <div class="detail-col card">
@@ -861,6 +937,19 @@
   .bar-actions {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .pagination {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.6rem;
+  }
+
+  .pagination .page-input {
+    width: 5rem;
   }
 
   .batch {
