@@ -43,3 +43,31 @@ def test_embedding_models_endpoint_is_admin_only(client, auth_headers):
         client.get("/api/v1/admin/ai/embedding-models", headers=auth_headers("editor")).status_code
         == 403
     )
+
+
+def test_embedding_models_flags_unavailable_provider(client, auth_headers, db, monkeypatch):
+    """A registered model whose provider isn't installed/reachable is listed but flagged
+    available=False (e.g. the seeded sentence-transformers model when the package is absent)."""
+    from app.models.embedding_registry import EmbeddingModelRegistry
+    from app.services import model_management
+
+    monkeypatch.setattr(model_management, "_module_available", lambda name: False)
+    monkeypatch.setattr(model_management, "_ollama_tags", lambda ollama_url: None)
+    db.add(
+        EmbeddingModelRegistry(
+            slug="minilm",
+            model_name="st:sentence-transformers/all-MiniLM-L6-v2",
+            provider="sentence_transformers",
+            raw_model="sentence-transformers/all-MiniLM-L6-v2",
+            dim=384,
+            column_name="vec_minilm",
+            active=True,
+        )
+    )
+    db.commit()
+    r = client.get("/api/v1/admin/ai/embedding-models", headers=auth_headers("owner"))
+    assert r.status_code == 200
+    body = r.json()
+    st = next(m for m in body["models"] if m["provider"] == "sentence_transformers")
+    assert st["available"] is False
+    assert body["multimode_available"] is False  # no usable providers

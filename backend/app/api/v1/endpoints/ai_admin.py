@@ -104,14 +104,29 @@ def ai_embedding_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     clustering (#21)."""
     from app.services.embedding_registry import MAX_EMBEDDING_MODELS, active_models
 
+    providers = detect_providers(ollama_url=get_ai_config(db).ollama_url)
+
+    def _available(provider: str) -> bool:
+        # A registered model is usable only if its provider can run here (e.g. a seeded
+        # sentence-transformers model is listed but unusable until that package is installed).
+        return bool((providers.get("embedding") or {}).get(provider, {}).get("available", False))
+
     models = active_models(db)
+    usable = [m for m in models if _available(m.provider)]
     return {
         "models": [
-            {"model_name": m.model_name, "provider": m.provider, "dim": m.dim, "slug": m.slug}
+            {
+                "model_name": m.model_name,
+                "provider": m.provider,
+                "dim": m.dim,
+                "slug": m.slug,
+                "available": _available(m.provider),
+            }
             for m in models
         ],
         "max_models": MAX_EMBEDDING_MODELS,
-        "multimode_available": len(models) > 1,
+        # Multimode only makes sense across models whose providers are actually usable.
+        "multimode_available": len(usable) > 1,
     }
 
 
