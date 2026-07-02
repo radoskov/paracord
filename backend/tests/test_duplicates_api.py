@@ -89,6 +89,51 @@ def test_scan_duplicates_endpoint_creates_and_lists_candidates(db_session, edito
     assert listed[0].id == result.candidates[0].id
 
 
+def test_full_library_scan_is_forced_to_background(db_session, editor: User, monkeypatch) -> None:
+    """D15: a full-library scan (no work/file id) always enqueues, returning a queued shape."""
+    from app.workers import queue as queue_module
+
+    monkeypatch.setattr(queue_module, "enqueue_duplicate_scan", lambda: "dedup-job-1")
+    # ``background=False`` must be ignored for a full scan — it still queues.
+    result = scan_duplicates(DuplicateScanRequest(background=False), db=db_session, actor=editor)
+    assert result.queued is True
+    assert result.job_id == "dedup-job-1"
+    assert result.scanned_works == 0
+    assert result.candidate_count == 0
+
+
+def test_full_library_scan_503_when_queue_unavailable(
+    db_session, editor: User, monkeypatch
+) -> None:
+    """D15: with the queue down the full scan reports 503 rather than running a slow request."""
+    from app.workers import queue as queue_module
+
+    monkeypatch.setattr(queue_module, "enqueue_duplicate_scan", lambda: None)
+    with pytest.raises(HTTPException) as exc:
+        scan_duplicates(DuplicateScanRequest(), db=db_session, actor=editor)
+    assert exc.value.status_code == 503
+
+
+def test_single_work_scan_stays_synchronous(db_session, editor: User) -> None:
+    """D15: a targeted single-work scan still runs inline (not queued)."""
+    first = Work(
+        canonical_title="Attention Is All You Need",
+        normalized_title="attention is all you need",
+        doi="10.5555/transformer",
+    )
+    second = Work(
+        canonical_title="Publisher Copy",
+        normalized_title="publisher copy",
+        doi="10.5555/transformer",
+    )
+    db_session.add_all([first, second])
+    db_session.commit()
+    result = scan_duplicates(DuplicateScanRequest(work_id=first.id), db=db_session, actor=editor)
+    assert result.queued is False
+    assert result.scanned_works == 1
+    assert result.candidate_count == 1
+
+
 def test_update_duplicate_candidate_marks_resolution(db_session, editor: User) -> None:
     first = Work(canonical_title="A", normalized_title="a")
     second = Work(canonical_title="B", normalized_title="b")

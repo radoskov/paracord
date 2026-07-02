@@ -94,7 +94,8 @@ def _candidate_view(
 class DuplicateScanRequest(BaseModel):
     work_id: uuid.UUID | None = None
     file_id: uuid.UUID | None = None
-    # Run a full-library scan in the background worker instead of inline (avoids a slow request).
+    # Deprecated hint: full-library scans (no work/file id) always run on the background worker now
+    # (D15), so this flag no longer changes behavior; kept for backward-compatible request bodies.
     background: bool = False
 
 
@@ -152,9 +153,13 @@ def scan_duplicates(
 ) -> DuplicateScanResult:
     """Scan selected or all known work/file identities for duplicate candidates.
 
-    Only papers/files the caller may SEE are scanned (a full-library scan skips hidden works)."""
-    # A full-library scan (no specific work/file) can be pushed to the background worker.
-    if payload.background and payload.work_id is None and payload.file_id is None:
+    Only papers/files the caller may SEE are scanned (a full-library scan skips hidden works).
+
+    A full-library scan (no specific work/file) is a minutes-long job at scale, so it is **always**
+    run on the background worker and returns a queued shape (D15); the ``background`` flag is only a
+    hint and full scans ignore it. Single-work/-file scans stay synchronous and inline."""
+    # D15: force full-library scans onto the worker regardless of the ``background`` flag.
+    if payload.work_id is None and payload.file_id is None:
         from app.workers.queue import enqueue_duplicate_scan
 
         job_id = enqueue_duplicate_scan()

@@ -5161,6 +5161,11 @@
             "title": "Topics",
             "type": "array"
           },
+          "unindexed_work_count": {
+            "default": 0,
+            "title": "Unindexed Work Count",
+            "type": "integer"
+          },
           "used_embeddings": {
             "default": false,
             "title": "Used Embeddings",
@@ -10611,7 +10616,7 @@
     },
     "/api/v1/duplicates/scan": {
       "post": {
-        "description": "Scan selected or all known work/file identities for duplicate candidates.\n\nOnly papers/files the caller may SEE are scanned (a full-library scan skips hidden works).",
+        "description": "Scan selected or all known work/file identities for duplicate candidates.\n\nOnly papers/files the caller may SEE are scanned (a full-library scan skips hidden works).\n\nA full-library scan (no specific work/file) is a minutes-long job at scale, so it is **always**\nrun on the background worker and returns a queued shape (D15); the ``background`` flag is only a\nhint and full scans ignore it. Single-work/-file scans stay synchronous and inline.",
         "operationId": "scan_duplicates_api_v1_duplicates_scan_post",
         "parameters": [
           {
