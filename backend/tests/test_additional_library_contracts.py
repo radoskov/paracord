@@ -75,7 +75,7 @@ def test_work_can_appear_in_multiple_shelves_and_rack_filters_remain_distinct(
     rack_filtered_works = client.get(
         f"/api/v1/works?rack_id={rack['id']}",
         headers=headers,
-    ).json()
+    ).json()["items"]
     assert [item["id"] for item in rack_filtered_works] == [work["id"]]
 
 
