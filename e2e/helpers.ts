@@ -99,6 +99,19 @@ export async function apiArchiveShelvesByName(
   }
 }
 
+/** Set (or clear, with null) the signed-in user's Library "papers per page" preference (D18). */
+export async function apiSetPapersPerPage(
+  request: APIRequestContext,
+  token: string,
+  value: number | null,
+): Promise<void> {
+  const res = await request.patch(`${API_URL}/api/v1/auth/me`, {
+    headers: auth(token),
+    data: { papers_per_page: value },
+  });
+  expect(res.ok(), `set papers_per_page failed: ${res.status()}`).toBeTruthy();
+}
+
 /** Wait until the authenticated tab-nav is visible (i.e. we are signed in). */
 export async function expectSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole('link', { name: 'Library' })).toBeVisible({ timeout: 15_000 });
