@@ -143,12 +143,12 @@ def test_detect_providers_reports_extraction_ocr_availability(monkeypatch):
     assert extraction["none"]["available"] is True
     assert extraction["ocrmypdf"]["available"] is False
     assert "rebuild the base image" in extraction["ocrmypdf"]["note"]
-    assert extraction["full_ml"]["available"] is False
-    assert "build-ml-extraction" in extraction["full_ml"]["note"]
-    assert "build-ml-extraction" in extraction["nougat"]["note"]
+    assert extraction["pymupdf"]["available"] is False
+    assert extraction["grobid"]["available"] is True
+    assert "full_ml" not in extraction  # the removed ML-extraction backend (D35)
+    assert "nougat" not in extraction
+    assert "marker" not in extraction
     assert providers["ocrmypdf_installed"] is False
-    assert providers["nougat_installed"] is False
-    assert providers["marker_installed"] is False
 
 
 def test_detect_providers_ocrmypdf_present(monkeypatch):
@@ -171,7 +171,7 @@ def test_ai_config_includes_ocr_backend_in_allowed_and_active(client, auth_heade
 
     cfg = client.get("/api/v1/admin/ai-config", headers=owner).json()
     assert cfg["config"]["ocr_backend"] == "ocrmypdf"  # Settings default
-    assert set(cfg["allowed"]["ocr_backend"]) == {"none", "ocrmypdf", "pymupdf", "full_ml"}
+    assert set(cfg["allowed"]["ocr_backend"]) == {"none", "ocrmypdf", "pymupdf"}
 
     status = client.get("/api/v1/admin/ai/status", headers=owner).json()
     assert "extraction" in status["active"]
@@ -195,6 +195,25 @@ def test_ai_config_rejects_unknown_ocr_backend(client, auth_headers):
         json={"ocr_backend": "made-up"},
     )
     assert r.status_code == 400
+
+
+def test_ocr_backends_no_longer_include_full_ml():
+    """D35: the ML-extraction seam is gone; ocrmypdf + pymupdf are the only OCR backends."""
+    from app.services.ai_config import OCR_BACKENDS
+
+    assert "full_ml" not in OCR_BACKENDS
+    assert OCR_BACKENDS == ("none", "ocrmypdf", "pymupdf")
+
+
+def test_legacy_full_ml_ocr_backend_degrades_to_default(db):
+    """A row storing the removed ``full_ml`` value degrades to the Settings default on read (D35)."""
+    from app.models.ai import AI_CONFIG_SINGLETON_ID, AIConfig
+    from app.services.ai_config import get_ai_config
+
+    db.add(AIConfig(id=AI_CONFIG_SINGLETON_ID, ocr_backend="full_ml"))
+    db.flush()
+    cfg = get_ai_config(db)
+    assert cfg.ocr_backend == "ocrmypdf"  # the Settings.ocr_backend default, not the stale value
 
 
 # --- #2: embedding-model capability validation ---

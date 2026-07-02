@@ -3,7 +3,6 @@
 import subprocess
 from pathlib import Path
 
-import pytest
 from app.services import ocr as ocr_service
 
 
@@ -176,8 +175,6 @@ def test_pymupdf_extract_text_native_and_run_ml_extraction(tmp_path: Path) -> No
     text, source = ocr_service.pymupdf_extract_text(src, language="eng")
     assert source == "native"
     assert "neural networks" in text.lower()
-    # run_ml_extraction(backend="pymupdf") is the shipped hard extractor (no torch, never raises).
-    assert "neural" in ocr_service.run_ml_extraction(src, backend="pymupdf").lower()
 
 
 def test_pymupdf_extract_text_graceful_on_bad_pdf(tmp_path: Path) -> None:
@@ -185,17 +182,3 @@ def test_pymupdf_extract_text_graceful_on_bad_pdf(tmp_path: Path) -> None:
     bad.write_bytes(b"not a pdf")
     text, source = ocr_service.pymupdf_extract_text(bad, language="eng")
     assert text == "" and source == "none"
-
-
-def test_ml_extraction_unavailable_gives_clear_error(tmp_path: Path, monkeypatch) -> None:
-    # find_spec returns None → selected-but-absent → a clear install-path error, no torch import.
-    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
-    assert ocr_service.ml_extraction_available("nougat") is False
-    with pytest.raises(RuntimeError, match="make build-ml-extraction"):
-        ocr_service.run_ml_extraction(tmp_path / "in.pdf", backend="nougat")
-
-
-def test_ml_extraction_unknown_backend() -> None:
-    assert ocr_service.ml_extraction_available("bogus") is False
-    with pytest.raises(ValueError, match="Unknown ML extraction backend"):
-        ocr_service.run_ml_extraction(Path("x.pdf"), backend="bogus")
