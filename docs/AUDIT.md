@@ -19,11 +19,19 @@ Status at last full audit (2026-07-02): `make test-full` green (660 backend + 32
 
 ## Security
 
-**D1 · MEDIUM — Login throttle is per-process, but production runs 2 gunicorn workers.**
-The brute-force lockout budget silently doubles (and the `paper.viewed` debounce halves) with
-`GUNICORN_WORKERS=2` (`backend/Dockerfile`); the throttle's docstring assumes one process.
-*Fix:* default `GUNICORN_WORKERS=1` now; back the throttle with Redis if the worker count is
-ever raised.
+**D1 · MEDIUM — Per-process login throttle across multiple API workers.** — **DECIDED
+2026-07-02 · fix properly (do NOT pin workers to 1).** Note: gunicorn/uvicorn workers (the API
+HTTP servers, `GUNICORN_WORKERS`) are separate from the RQ extraction workers (the `worker`
+container); RQ workers scale freely with no throttle effect. The owner wants the ability to raise
+**API** workers (e.g. 4), so the in-process throttle must move to a **shared Redis store**. Scope:
+- Move `login_throttle` to Redis (fall back to in-process if Redis down — fail-open).
+- Add **rate limiting** — per-client (user/IP) and global request caps, Redis-backed,
+  admin-configurable thresholds. A batch import counts as a single request for rate-limiting.
+- **Batch item cap** (`max_batch_items`, AppConfig, default **100**, admin-editable): applies to
+  all batch imports (agent, DOI/identifier, BibTeX, RIS/CSL, citation). Server web-GUI batches
+  over the cap are **rejected with a clear warning**; the **local agent chunks** oversized imports
+  into ≤cap batches client-side (fetches the server's cap).
+- Then API worker count can be raised safely (document `GUNICORN_WORKERS`).
 
 **D2 · MEDIUM — Browser token in `localStorage` + no CSP/security headers from nginx.**
 These compound: paper titles/abstracts are external (PDF/Crossref) data rendered in the SPA; any
@@ -78,21 +86,28 @@ swallows it. No sweep later notices "status=available but never extracted" and r
 is also when someone might import. On a single self-hosted box, one transient blip =
 permanently unprocessed papers with no signal.
 
-*Fix — two layers, recommended together:*
-1. **Make it visible (cheap, high value).** Thread the enqueue result into the response — e.g.
-   `extraction_queued: false` in the import/upload payload when `enqueue_*` returned `None` — so
-   the UI can show "imported, but extraction couldn't be queued (queue offline) — retry later."
-   The helpers already return `None` on failure; just surface it.
-2. **Make it self-heal (durable).** A recovery sweep that finds owed work and re-enqueues it: on
-   worker/api startup (and optionally hourly, or an admin "reprocess pending" button), query
-   files with `status='available'` and no extraction result (and works with no embeddings) and
-   enqueue the missing jobs. The folder-import path already tracks `file_ids_pending_extraction`
-   but only consults it on the *next manual folder import of the same source*; generalize that
-   into a startup/periodic sweep covering uploads + teleports too.
+*Fix — DECIDED 2026-07-02 · implementing (layer 1 + startup sweep; no outbox table):*
+1. **Make it visible — everywhere.** Thread the enqueue result into responses: `extraction_queued:
+   false` in the server web-GUI import/upload payloads (UI warns "imported, but couldn't queue
+   extraction — retry later"), AND in the **local-agent** push responses so the agent surfaces it
+   (log + status) and keeps the item retryable rather than marking it done. Also add a **queue/
+   worker health indicator to the Jobs tab**: a semaphore (green = workers up + queue draining;
+   yellow = queued but idle/degraded; red = Redis unreachable / no workers) + a short status line
+   (worker count, queue depth). Needs a queue-health endpoint (RQ worker count + depth + Redis
+   reachability).
+2. **Make it self-heal — with a durable "owed" marker (no double-work).** Add a durable
+   `File.extraction_requested_at` (or equivalent) set **transactionally at import** whenever
+   extraction is intended; the worker clears it on terminal success/failure. A startup (and
+   optionally periodic / admin-button) sweep re-enqueues files whose marker is set and that are
+   not currently `extracting`/queued. This cleanly distinguishes:
+   - **owed** (enqueue dropped): marker set, not extracted, not in-flight → re-enqueue;
+   - **never requested** (nobody clicked extract, if reachable): marker null → left alone;
+   - **user clicked re-extract**: sets the marker + status `extracting` + enqueues with a
+     **deterministic job id** (`extract:{file_id}`) so a concurrent sweep is a no-op, not a
+     duplicate — this closes the collision the owner flagged.
 
-*Not recommended at this scale:* a transactional `pending_jobs` outbox table (most robust, but
-duplicates RQ and is overkill unless the drop is seen repeatedly). **Recommendation: layer 1 +
-startup sweep; skip the outbox.** Ties to DISCUSSIONS D28 (keep RQ).
+*Not doing:* a transactional `pending_jobs` outbox table (most robust, but duplicates RQ; overkill
+at this scale). Ties to DISCUSSIONS D28 (keep RQ).
 
 **D8 · MEDIUM — Enrichment stops at the first failing source.**
 `enrich_work` raises on the first failing source (arXiv down → Crossref never tried). Chunk/embed
