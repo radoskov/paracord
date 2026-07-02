@@ -5,13 +5,17 @@ queued, running, finished, or failed — and whether the background worker is av
 """
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin, require_min_role
 from app.core.security import Role
+from app.db.session import get_db
 from app.models.user import User
-from app.workers.queue import clear_jobs, queue_status
+from app.services.audit import record_event
+from app.workers.queue import clear_jobs, empty_queue, queue_status, recover_stuck_jobs
 
 router = APIRouter()
+DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 ADMIN_DEP = Depends(require_admin)
 
@@ -43,3 +47,45 @@ def reprocess_pending(_: User = ADMIN_DEP) -> dict:
     from app.workers.recovery import sweep_owed_extractions
 
     return sweep_owed_extractions()
+
+
+@router.post("/clear-queue")
+def clear_queue(db: Session = DB_DEP, actor: User = ADMIN_DEP) -> dict:
+    """Empty the pending job queue (admin). Running jobs are untouched; returns how many dropped.
+
+    Degrades gracefully (never 500) when Redis is unreachable — reports ``available: false``.
+    """
+    result = empty_queue()
+    record_event(
+        db,
+        "queue.cleared",
+        actor_user_id=actor.id,
+        entity_type="queue",
+        details={"dropped": result.get("dropped", 0), "available": result.get("available", False)},
+    )
+    db.commit()
+    return result
+
+
+@router.post("/reset-workers")
+def reset_workers(db: Session = DB_DEP, actor: User = ADMIN_DEP) -> dict:
+    """Recover stuck jobs (admin): requeue jobs stranded as started and clear failed history.
+
+    Cannot restart the worker *processes* (they run under the supervisor in the worker container);
+    the response ``note`` says a full reset is ``docker compose restart worker``. Degrades
+    gracefully (never 500) when Redis is unreachable.
+    """
+    result = recover_stuck_jobs()
+    record_event(
+        db,
+        "queue.workers_reset",
+        actor_user_id=actor.id,
+        entity_type="queue",
+        details={
+            "requeued": result.get("requeued", 0),
+            "cleared_failed": result.get("cleared_failed", 0),
+            "available": result.get("available", False),
+        },
+    )
+    db.commit()
+    return result

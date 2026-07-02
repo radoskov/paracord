@@ -5,6 +5,7 @@ connection (keeps unit tests and the import path light). Enqueueing is best-effo
 if the queue is unavailable, callers (e.g. folder import) must still succeed.
 """
 
+import contextlib
 import logging
 
 from app.core.config import get_settings
@@ -239,6 +240,85 @@ def clear_jobs(which: str = "finished_failed") -> dict:
         return {"available": True, "cleared": removed}
     except Exception as exc:  # noqa: BLE001 - report unavailability instead of crashing
         return {"available": False, "error": str(exc), "cleared": 0}
+
+
+def empty_queue() -> dict:
+    """Empty the pending RQ queue (queued jobs only). Returns how many were dropped (D39).
+
+    Running, finished and failed jobs are left untouched — only jobs still waiting to start are
+    removed. Never raises: reports ``available: False`` when Redis is unreachable so the admin
+    endpoint degrades gracefully instead of 500-ing.
+    """
+    try:
+        from redis import Redis
+        from rq import Queue
+
+        conn = Redis.from_url(get_settings().redis_url)
+        conn.ping()
+        queue = Queue(QUEUE_NAME, connection=conn)
+        dropped = queue.count
+        queue.empty()
+        return {"available": True, "dropped": dropped}
+    except Exception as exc:  # noqa: BLE001 - report unavailability instead of crashing
+        return {"available": False, "error": str(exc), "dropped": 0}
+
+
+# The API can only reset queue *state* in Redis; the worker processes themselves run under the
+# supervisor in the worker container, so a full process reset is a container restart.
+WORKER_PROCESS_RESET_HINT = "A full worker process reset is `docker compose restart worker`."
+
+
+def recover_stuck_jobs() -> dict:
+    """Recover jobs stuck in RQ's StartedJobRegistry and clear the FailedJobRegistry (D39).
+
+    A job stranded as "started" (its worker died mid-job) is requeued so it runs again; one that
+    can't be requeued is dropped from the registry. The failed-job history is then cleared. This
+    recovers "something got stuck" without restarting the worker *processes* — those live in the
+    worker container under the supervisor, so a full process reset is a ``docker compose restart
+    worker`` (returned as ``note``). Never raises: reports ``available: False`` when Redis is down.
+    """
+    try:
+        from redis import Redis
+        from rq import Queue
+        from rq.job import Job
+
+        conn = Redis.from_url(get_settings().redis_url)
+        conn.ping()
+        queue = Queue(QUEUE_NAME, connection=conn)
+
+        started = queue.started_job_registry
+        requeued = 0
+        for job_id in list(started.get_job_ids()):
+            try:
+                started.requeue(job_id)
+                requeued += 1
+            except Exception:  # noqa: BLE001 - can't requeue (job gone/expired) → drop it
+                with contextlib.suppress(Exception):
+                    started.remove(job_id, delete_job=True)
+
+        failed = queue.failed_job_registry
+        cleared_failed = 0
+        for job_id in list(failed.get_job_ids()):
+            try:
+                Job.fetch(job_id, connection=conn).delete()
+            except Exception:  # noqa: BLE001 - job may already be gone
+                failed.remove(job_id)
+            cleared_failed += 1
+
+        return {
+            "available": True,
+            "requeued": requeued,
+            "cleared_failed": cleared_failed,
+            "note": WORKER_PROCESS_RESET_HINT,
+        }
+    except Exception as exc:  # noqa: BLE001 - report unavailability instead of crashing
+        return {
+            "available": False,
+            "error": str(exc),
+            "requeued": 0,
+            "cleared_failed": 0,
+            "note": WORKER_PROCESS_RESET_HINT,
+        }
 
 
 def _resolve_paper_targets(jobs: list[dict]) -> None:
