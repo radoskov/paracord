@@ -37,9 +37,13 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
             )
         except Exception:
             # Persist a durable failure marker (so the UI can show extraction never succeeded)
-            # before letting RQ record the job as failed.
-            file.status = "extract_failed"
-            db.commit()
+            # before letting RQ record the job as failed. Roll back first: the session may hold a
+            # half-applied extraction (or be in a failed transaction), which must not be committed.
+            db.rollback()
+            file = db.get(File, uuid.UUID(str(file_id)))
+            if file is not None:
+                file.status = "extract_failed"
+                db.commit()
             raise
         file.status = "extracted"
         link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
@@ -67,12 +71,15 @@ def enrich_work_job(work_id: str) -> None:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
-        enrich_work(db, work, settings=get_settings())
-        db.commit()
-    # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding unit), then
-    # (re)index embeddings — both off the search read path.
-    enqueue_chunking(work_id)
-    enqueue_embedding(work_id)
+        try:
+            enrich_work(db, work, settings=get_settings())
+            db.commit()
+        finally:
+            # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
+            # unit), then (re)index embeddings — both off the search read path. Runs even when
+            # enrichment failed (offline / rate-limited) so the paper still gets indexed.
+            enqueue_chunking(work_id)
+            enqueue_embedding(work_id)
 
 
 def chunk_work_job(work_id: str) -> None:
@@ -139,8 +146,8 @@ def reindex_embeddings_job() -> None:
 
     with SessionLocal() as db:
         provider = get_embedding_provider(db=db)
-        ensure_work_embeddings(db, provider=provider)
-        backfill_chunk_embeddings(db, provider=provider)
+        ensure_work_embeddings(db, provider=provider, commit_every=50)
+        backfill_chunk_embeddings(db, provider=provider, commit_every=200)
         db.commit()
 
 

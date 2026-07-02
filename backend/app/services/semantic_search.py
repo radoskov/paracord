@@ -87,12 +87,15 @@ def _work_text(work: Work) -> str:
     return " ".join(part for part in (work.canonical_title, work.abstract) if part).strip()
 
 
-def ensure_work_embeddings(db: Session, *, provider: EmbeddingProvider | None = None) -> int:
+def ensure_work_embeddings(
+    db: Session, *, provider: EmbeddingProvider | None = None, commit_every: int = 0
+) -> int:
     """Embed and store any works missing an embedding for the provider's model. Returns count added.
 
     Used by the background index job and the reindex endpoint — **not** by a search request. Each
     insert is guarded so a concurrent indexer racing on the unique ``(entity, model)`` key is a
-    no-op rather than an error.
+    no-op rather than an error. ``commit_every`` (when > 0) commits periodically so a provider flap
+    mid-reindex keeps the progress so far — the skip-if-present guard makes re-runs resume.
     """
     provider = provider or HashBowProvider()
     model_name = provider.model_name
@@ -104,14 +107,18 @@ def ensure_work_embeddings(db: Session, *, provider: EmbeddingProvider | None = 
         ).all()
     )
     added = 0
-    for work in db.scalars(select(Work)).all():
-        if work.id in indexed:
+    for work_id, title, abstract in db.execute(
+        select(Work.id, Work.canonical_title, Work.abstract)
+    ).all():
+        if work_id in indexed:
             continue
-        doc = _work_text(work)
+        doc = " ".join(part for part in (title, abstract) if part).strip()
         if not doc:
             continue
-        if _store_embedding(db, work_id=work.id, model_name=model_name, vector=provider.embed(doc)):
+        if _store_embedding(db, work_id=work_id, model_name=model_name, vector=provider.embed(doc)):
             added += 1
+            if commit_every and added % commit_every == 0:
+                db.commit()
     if added:
         db.flush()
     return added

@@ -136,11 +136,17 @@ def summarize_extractive(text: str, *, max_sentences: int = 5) -> str:
     return " ".join(sentences[index] for index in top_indices)
 
 
-def work_source_text(db: Session, work: Work) -> str:
-    """Gather the richest text available for a work: its abstract plus GROBID body text."""
+def _work_source(db: Session, work: Work) -> tuple[str, list[str]]:
+    """Gather the richest text available for a work plus its provenance labels, in ONE TEI fetch.
+
+    Returns ``(text, labels)``: the abstract plus the latest GROBID body text, and which of
+    those sources are present (abstract / body).
+    """
     parts: list[str] = []
+    labels: list[str] = []
     if work.abstract:
         parts.append(work.abstract)
+        labels.append("abstract")
     tei = db.scalar(
         select(RawTeiDocument)
         .where(RawTeiDocument.work_id == work.id)
@@ -150,18 +156,13 @@ def work_source_text(db: Session, work: Work) -> str:
         body = extract_body_text(tei.tei_xml)
         if body:
             parts.append(body)
-    return "\n".join(parts).strip()
-
-
-def _source_section_labels(db: Session, work: Work) -> list[str]:
-    """Which sources feed a work's summary, for provenance (abstract / extracted body text)."""
-    labels: list[str] = []
-    if work.abstract:
-        labels.append("abstract")
-    tei = db.scalar(select(RawTeiDocument).where(RawTeiDocument.work_id == work.id))
-    if tei is not None:
         labels.append("body")
-    return labels
+    return "\n".join(parts).strip(), labels
+
+
+def work_source_text(db: Session, work: Work) -> str:
+    """Gather the richest text available for a work: its abstract plus GROBID body text."""
+    return _work_source(db, work)[0]
 
 
 def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
@@ -218,8 +219,7 @@ def summarize_work(
     elif summary_type == "local_llm":
         stored_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
-        source_text = work_source_text(db, work)
-        source_sections = _source_section_labels(db, work)
+        source_text, source_sections = _work_source(db, work)
         text = ""
         # The LLM is attempted only when the owner has selected it (ai_config) — otherwise we go
         # straight to the deterministic fallback, so disabled/CI installs never hit the network.

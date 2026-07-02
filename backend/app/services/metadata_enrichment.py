@@ -184,11 +184,15 @@ def _idseg(identifier: str) -> str:
     return quote(identifier.strip(), safe="")
 
 
+# Shared across fetches (httpx.Client is thread-safe) so enrichment reuses pooled connections
+# instead of a TCP+TLS handshake per request.
+_HTTP_CLIENT = httpx.Client(timeout=30, follow_redirects=True)
+
+
 def _get(url: str, *, params: dict | None = None, headers: dict | None = None) -> httpx.Response:
     """GET ``url`` following only same-host redirects (SSRF guard)."""
     expected_host = urlsplit(url).hostname
-    with httpx.Client(timeout=30, headers=headers or {}, follow_redirects=True) as client:
-        response = client.get(url, params=params)
+    response = _HTTP_CLIENT.get(url, params=params, headers=headers or {})
     for hop in [*response.history, response]:
         if urlsplit(str(hop.url)).hostname != expected_host:
             raise ExternalFetchError(

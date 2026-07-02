@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -248,20 +249,28 @@ def _import_pdf_path(
     preview = _extract_pdf_preview(pdf_path)
 
     if file is None:
-        file = File(
-            sha256=sha256,
-            size_bytes=pdf_path.stat().st_size,
-            mime_type="application/pdf",
-            original_filename=pdf_path.name,
-            page_count=preview.get("page_count"),
-            text_layer_quality=preview.get("text_layer_quality", "unknown"),
-            status="available",
-            preview_text=preview.get("preview_text"),
-            last_seen_at=now,
-        )
-        db.add(file)
-        db.flush()
-    else:
+        # SAVEPOINT so a concurrent import racing on the unique sha256 loses gracefully: roll back
+        # just this insert and reuse the winner's row instead of failing the whole batch.
+        try:
+            with db.begin_nested():
+                file = File(
+                    sha256=sha256,
+                    size_bytes=pdf_path.stat().st_size,
+                    mime_type="application/pdf",
+                    original_filename=pdf_path.name,
+                    page_count=preview.get("page_count"),
+                    text_layer_quality=preview.get("text_layer_quality", "unknown"),
+                    status="available",
+                    preview_text=preview.get("preview_text"),
+                    last_seen_at=now,
+                )
+                db.add(file)
+        except IntegrityError:
+            file = db.scalar(select(File).where(File.sha256 == sha256))
+            if file is None:
+                raise
+            created_file = False
+    if not created_file:
         file.last_seen_at = now
         file.status = "available"
         if not file.preview_text and preview.get("preview_text"):
@@ -385,20 +394,28 @@ def _ensure_managed_file(
     if file is None:
         preview = _extract_pdf_preview(dest)
         safe_name = Path(filename).name or "upload.pdf"
-        file = File(
-            sha256=sha256,
-            size_bytes=len(pdf_bytes),
-            mime_type="application/pdf",
-            original_filename=safe_name,
-            page_count=preview.get("page_count"),
-            text_layer_quality=preview.get("text_layer_quality", "unknown"),
-            status="available",
-            preview_text=preview.get("preview_text"),
-            last_seen_at=now,
-        )
-        db.add(file)
-        db.flush()
-    else:
+        # SAVEPOINT so a concurrent upload racing on the unique sha256 loses gracefully: roll back
+        # just this insert and reuse the winner's row instead of failing the request.
+        try:
+            with db.begin_nested():
+                file = File(
+                    sha256=sha256,
+                    size_bytes=len(pdf_bytes),
+                    mime_type="application/pdf",
+                    original_filename=safe_name,
+                    page_count=preview.get("page_count"),
+                    text_layer_quality=preview.get("text_layer_quality", "unknown"),
+                    status="available",
+                    preview_text=preview.get("preview_text"),
+                    last_seen_at=now,
+                )
+                db.add(file)
+        except IntegrityError:
+            file = db.scalar(select(File).where(File.sha256 == sha256))
+            if file is None:
+                raise
+            created_file = False
+    if not created_file:
         file.last_seen_at = now
 
     # Location pointing to the managed store.

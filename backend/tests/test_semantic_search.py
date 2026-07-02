@@ -269,3 +269,15 @@ def test_nomic_keeps_its_chunk_column_after_canonicalization() -> None:
     from app.services.chunk_embeddings import chunk_column_for
 
     assert chunk_column_for("ollama:nomic-embed-text:latest") == ("vec_nomic", 768)
+
+
+def test_cached_provider_memoizes_per_key_and_evicts() -> None:
+    """Providers are built once per (kind, model, url) and dropped when the model is removed."""
+    from app.services.embeddings import cached_provider, evict_cached_providers
+
+    first = cached_provider("ollama", "nomic-embed-text", "http://ollama:11434")
+    assert cached_provider("ollama", "nomic-embed-text", "http://ollama:11434") is first
+    evict_cached_providers(first.model_name)
+    rebuilt = cached_provider("ollama", "nomic-embed-text", "http://ollama:11434")
+    assert rebuilt is not first
+    evict_cached_providers(rebuilt.model_name)

@@ -97,11 +97,15 @@ def embed_work_chunks(db: Session, work: Work, *, provider: EmbeddingProvider | 
     return written
 
 
-def backfill_chunk_embeddings(db: Session, *, provider: EmbeddingProvider | None = None) -> int:
+def backfill_chunk_embeddings(
+    db: Session, *, provider: EmbeddingProvider | None = None, commit_every: int = 0
+) -> int:
     """Fill the active model's chunk column for every chunk still missing it. Returns count written.
 
     Used by the reindex job / backfill-on-activation: enabling a real model embeds the whole corpus
-    once, after which switching back to it is instant (the column is retained).
+    once, after which switching back to it is instant (the column is retained). ``commit_every``
+    (when > 0) commits periodically so a provider flap mid-backfill keeps the progress so far —
+    the skip-if-missing query makes re-runs resume where they left off.
     """
     provider = provider or get_embedding_provider(db=db)
     column = _resolve_column(db, provider, provision=True)
@@ -117,6 +121,8 @@ def backfill_chunk_embeddings(db: Session, *, provider: EmbeddingProvider | None
             {"v": _vec_literal(provider.embed(chunk_text or "")), "id": str(chunk_id)},
         )
         written += 1
+        if commit_every and written % commit_every == 0:
+            db.commit()
     return written
 
 

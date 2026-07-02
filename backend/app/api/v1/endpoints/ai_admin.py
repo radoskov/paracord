@@ -174,9 +174,20 @@ def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User =
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     # Also drop the model's chunk-vector column + HNSW index so a cap slot is freed (#21).
     if payload.provider == "ollama":
+        from sqlalchemy.exc import OperationalError
+
         from app.services.embeddings import normalize_ollama_model
 
-        unregister_by_model_name(db, f"ollama:{normalize_ollama_model(payload.model)}")
+        try:
+            unregister_by_model_name(db, f"ollama:{normalize_ollama_model(payload.model)}")
+        except OperationalError as exc:
+            db.rollback()
+            if "lock timeout" in str(exc).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="reindex in progress — try again later",
+                ) from exc
+            raise
     record_event(
         db,
         "ai.model_deleted",

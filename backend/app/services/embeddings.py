@@ -105,17 +105,47 @@ class OllamaProvider:
         self.model_name = f"ollama:{canonical}"
         self._model = canonical
         self._base_url = base_url.rstrip("/")
+        self._client = None
 
     def embed(self, text: str) -> list[float]:
         import httpx2 as httpx  # noqa: PLC0415
 
-        with httpx.Client(timeout=30) as client:
-            response = client.post(
-                f"{self._base_url}/api/embeddings",
-                json={"model": self._model, "prompt": text or ""},
-            )
-            response.raise_for_status()
-            return [float(x) for x in response.json()["embedding"]]
+        # One client per provider instance (httpx.Client is thread-safe): embedding is driven
+        # per-chunk, so a client per call would mean one TCP handshake per chunk.
+        if self._client is None:
+            self._client = httpx.Client(timeout=30)
+        response = self._client.post(
+            f"{self._base_url}/api/embeddings",
+            json={"model": self._model, "prompt": text or ""},
+        )
+        response.raise_for_status()
+        return [float(x) for x in response.json()["embedding"]]
+
+
+# Providers memoized per (kind, model, url) so SentenceTransformer weights load once per process
+# instead of on every search/reindex. Evicted when a model is unregistered/deleted.
+_PROVIDER_CACHE: dict[tuple[str, str, str | None], EmbeddingProvider] = {}
+
+
+def cached_provider(kind: str, model_name: str, url: str | None = None) -> EmbeddingProvider:
+    """Return (building on first use) the memoized provider for a (kind, model, url) triple."""
+    key = (kind, model_name, url)
+    provider = _PROVIDER_CACHE.get(key)
+    if provider is None:
+        if kind == "sentence_transformers":
+            provider = SentenceTransformerProvider(model_name)
+        elif kind == "ollama":
+            provider = OllamaProvider(model_name, url or "")
+        else:
+            provider = HashBowProvider()
+        _PROVIDER_CACHE[key] = provider
+    return provider
+
+
+def evict_cached_providers(model_name: str) -> None:
+    """Drop cached providers whose resolved model_name matches (model unregistered/deleted)."""
+    for key in [k for k, p in _PROVIDER_CACHE.items() if p.model_name == model_name]:
+        _PROVIDER_CACHE.pop(key, None)
 
 
 @dataclass
@@ -158,10 +188,10 @@ def resolve_embedding_provider(
         ollama_url = settings.ollama_url
     try:
         if provider == "sentence_transformers":
-            active = SentenceTransformerProvider(model or "sentence-transformers/all-MiniLM-L6-v2")
+            active = cached_provider(provider, model or "sentence-transformers/all-MiniLM-L6-v2")
             return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
         if provider == "ollama":
-            active = OllamaProvider(model or "nomic-embed-text", ollama_url)
+            active = cached_provider(provider, model or "nomic-embed-text", ollama_url)
             return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
     except Exception as exc:  # noqa: BLE001 - optional providers degrade, never break a request
         logger.warning("Embedding provider %r unavailable (%s); using hash-BOW.", provider, exc)

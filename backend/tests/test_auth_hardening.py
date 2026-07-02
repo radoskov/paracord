@@ -1,6 +1,5 @@
 """Stage 7 auth hardening: login lockout, change-password + session revocation, SSRF guard."""
 
-import httpx2 as httpx
 import pytest
 from app.services import login_throttle
 from app.services.metadata_enrichment import ExternalFetchError, _get, _idseg
@@ -112,26 +111,19 @@ def test_identifier_is_percent_encoded():
 
 
 def test_cross_host_redirect_is_refused(monkeypatch):
+    from app.services import metadata_enrichment
+
     class _FakeResp:
         def __init__(self, url, history):
             self.url = url
             self.history = history
 
     class _FakeClient:
-        def __init__(self, *a, **k):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def get(self, url, params=None):
+        def get(self, url, params=None, headers=None):
             # Simulate a redirect that left the original API host.
             hop = _FakeResp("http://169.254.169.254/latest/meta-data", [])
             return _FakeResp("http://169.254.169.254/latest/meta-data", [hop])
 
-    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    monkeypatch.setattr(metadata_enrichment, "_HTTP_CLIENT", _FakeClient())
     with pytest.raises(ExternalFetchError):
         _get("https://api.crossref.org/works/10.1/x")

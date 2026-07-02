@@ -28,7 +28,9 @@ def get_queue():
     from redis import Redis
     from rq import Queue
 
-    return Queue(QUEUE_NAME, connection=Redis.from_url(get_settings().redis_url))
+    return Queue(
+        QUEUE_NAME, connection=Redis.from_url(get_settings().redis_url), default_timeout=900
+    )
 
 
 def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
@@ -220,28 +222,42 @@ def _resolve_paper_targets(jobs: list[dict]) -> None:
         files: dict = {}  # File.id -> (sha256, canonical_title-via-link)
         works: dict = {}  # Work.id -> (canonical_title, sha256-of-primary-file)
         with SessionLocal() as db:
+            file_links: dict = {}  # File.id -> first linked Work.id
+            work_links: dict = {}  # Work.id -> first linked File.id
+            if file_ids:
+                for link in db.scalars(
+                    select(FileWorkLink).where(FileWorkLink.file_id.in_(file_ids))
+                ):
+                    file_links.setdefault(link.file_id, link.work_id)
+            if work_ids:
+                for link in db.scalars(
+                    select(FileWorkLink).where(FileWorkLink.work_id.in_(work_ids))
+                ):
+                    work_links.setdefault(link.work_id, link.file_id)
+            need_files = file_ids | set(work_links.values())
+            need_works = work_ids | set(file_links.values())
+            shas = (
+                dict(db.execute(select(File.id, File.sha256).where(File.id.in_(need_files))).all())
+                if need_files
+                else {}
+            )
+            titles = (
+                dict(
+                    db.execute(
+                        select(Work.id, Work.canonical_title).where(Work.id.in_(need_works))
+                    ).all()
+                )
+                if need_works
+                else {}
+            )
             # File-target jobs: sha256 from File; title from the file's linked Work (if any).
             for fid in file_ids:
-                file = db.get(File, fid)
-                if file is None:
-                    continue
-                title = None
-                link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == fid))
-                if link is not None:
-                    work = db.get(Work, link.work_id)
-                    title = work.canonical_title if work else None
-                files[fid] = (file.sha256, title)
+                if fid in shas:
+                    files[fid] = (shas[fid], titles.get(file_links.get(fid)))
             # Work-target jobs: title from Work; sha256 from the work's first/primary linked File.
             for wid in work_ids:
-                work = db.get(Work, wid)
-                if work is None:
-                    continue
-                sha = None
-                link = db.scalar(select(FileWorkLink).where(FileWorkLink.work_id == wid))
-                if link is not None:
-                    file = db.get(File, link.file_id)
-                    sha = file.sha256 if file else None
-                works[wid] = (work.canonical_title, sha)
+                if wid in titles:
+                    works[wid] = (titles[wid], shas.get(work_links.get(wid)))
 
         for j in jobs:
             kind = j.get("target_kind")

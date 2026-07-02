@@ -70,7 +70,7 @@ class GrobidClient:
                     )
                 response.raise_for_status()
                 return response.text
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc
 
     def process_fulltext_document_sync(self, pdf_path: Path) -> str:
@@ -85,7 +85,7 @@ class GrobidClient:
                 )
             response.raise_for_status()
             return response.text
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc
 
     def _citation_form_data(self, citations: str | list[str]) -> dict[str, str | list[str]]:
@@ -116,7 +116,7 @@ class GrobidClient:
                 )
             response.raise_for_status()
             return response.text
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc
 
     def process_citation_list_sync(self, raw_citations: list[str]) -> str:
@@ -134,5 +134,5 @@ class GrobidClient:
                 )
             response.raise_for_status()
             return response.text
-        except httpx.ConnectError as exc:
+        except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc

@@ -21,6 +21,13 @@ class _ConnectErrorClient:
         raise httpx.ConnectError("[Errno -3] Temporary failure in name resolution")
 
 
+class _TimeoutClient(_ConnectErrorClient):
+    """Stand-in httpx.Client whose POST always times out (hung/overloaded service)."""
+
+    def post(self, *args, **kwargs):
+        raise httpx.ReadTimeout("timed out")
+
+
 def test_sync_extraction_raises_actionable_error_when_grobid_down(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(gc.httpx, "Client", _ConnectErrorClient)
     pdf = tmp_path / "paper.pdf"
@@ -32,3 +39,12 @@ def test_sync_extraction_raises_actionable_error_when_grobid_down(tmp_path, monk
     message = str(excinfo.value)
     assert "http://grobid:8070" in message
     assert "up-extraction" in message  # points the operator at the fix
+
+
+def test_sync_extraction_maps_timeout_to_unavailable(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gc.httpx, "Client", _TimeoutClient)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    with pytest.raises(gc.GrobidUnavailableError):
+        gc.GrobidClient("http://grobid:8070").process_fulltext_document_sync(pdf)

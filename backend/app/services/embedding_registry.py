@@ -25,8 +25,8 @@ from app.models.embedding_registry import EmbeddingModelRegistry
 from app.services.embeddings import (
     EmbeddingProvider,
     HashBowProvider,
-    OllamaProvider,
-    SentenceTransformerProvider,
+    cached_provider,
+    evict_cached_providers,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,9 +114,9 @@ def provider_for(
             from app.services.ai_config import get_ai_config  # noqa: PLC0415
 
             ollama_url = get_ai_config(db).ollama_url
-        return OllamaProvider(raw, ollama_url)
+        return cached_provider("ollama", raw, ollama_url)
     if provider == "sentence_transformers":
-        return SentenceTransformerProvider(raw)
+        return cached_provider("sentence_transformers", raw)
     return HashBowProvider()
 
 
@@ -158,13 +158,16 @@ def register(
     db.execute(
         text(f"ALTER TABLE work_chunks ADD COLUMN IF NOT EXISTS {column} vector({int(dim)})")
     )  # noqa: S608
+    # SAVEPOINT so a failed CREATE INDEX doesn't abort the surrounding transaction (Postgres would
+    # otherwise refuse every later statement with InFailedSqlTransaction).
     try:
-        db.execute(
-            text(
-                f"CREATE INDEX IF NOT EXISTS ix_work_chunks_{column} "  # noqa: S608
-                f"ON work_chunks USING hnsw ({column} vector_cosine_ops)"
+        with db.begin_nested():
+            db.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_work_chunks_{column} "  # noqa: S608
+                    f"ON work_chunks USING hnsw ({column} vector_cosine_ops)"
+                )
             )
-        )
     except Exception as exc:  # noqa: BLE001 - older pgvector without HNSW: exact scan still works
         logger.warning("Could not build HNSW index on work_chunks.%s (%s).", column, exc)
 
@@ -224,8 +227,14 @@ def unregister(db: Session, slug: str) -> bool:
     if row is None:
         return False
     if _is_postgres(db) and _SAFE_COLUMN.match(row.column_name):
+        # Bound the DDL wait: DROP COLUMN takes an ACCESS EXCLUSIVE lock on work_chunks, which
+        # would otherwise queue behind a long reindex and block every reader. Let the timeout
+        # propagate so the API layer can turn it into a 409.
+        db.execute(text("SET LOCAL lock_timeout = '5s'"))
         db.execute(text(f"DROP INDEX IF EXISTS ix_work_chunks_{row.column_name}"))  # noqa: S608
         db.execute(text(f"ALTER TABLE work_chunks DROP COLUMN IF EXISTS {row.column_name}"))  # noqa: S608
+    model_name = row.model_name
     db.delete(row)
     db.flush()
+    evict_cached_providers(model_name)
     return True
