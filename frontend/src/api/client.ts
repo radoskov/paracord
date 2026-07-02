@@ -1224,6 +1224,11 @@ export class ApiClient {
     return this.request<Shelf>(`/api/v1/shelves/${id}`, { method: 'PATCH', body: payload });
   }
 
+  async deleteShelf(id: string): Promise<void> {
+    // Hard delete: papers only on this shelf fall back to the default shelf (backend #1).
+    await this.request<void>(`/api/v1/shelves/${id}`, { method: 'DELETE' });
+  }
+
   async listShelfWorks(shelfId: string): Promise<Work[]> {
     return this.request<Work[]>(`/api/v1/shelves/${shelfId}/works`);
   }

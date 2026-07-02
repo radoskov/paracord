@@ -91,3 +91,68 @@ def test_multiple_loose_papers_share_one_default_shelf_in_one_txn(db):
     assert default_id is not None
     for w in works:
         assert default_id in _shelf_ids_for(db, w.id)
+
+
+# --- shelf hard-delete: orphaned papers fall back to the default shelf ---
+
+
+def _new_paper(client, headers, title="P") -> str:
+    return client.post("/api/v1/works", headers=headers, json={"canonical_title": title}).json()[
+        "id"
+    ]
+
+
+def _new_shelf(client, headers, name) -> str:
+    return client.post("/api/v1/shelves", headers=headers, json={"name": name}).json()["id"]
+
+
+def test_delete_shelf_moves_only_there_papers_to_default(client, auth_headers, db):
+    import uuid as _uuid
+
+    owner = auth_headers("owner")
+    work_id = _new_paper(client, owner, "only-here")
+    shelf_id = _new_shelf(client, owner, "Solo shelf")
+    client.post(f"/api/v1/shelves/{shelf_id}/works", headers=owner, json={"work_id": work_id})
+
+    r = client.delete(f"/api/v1/shelves/{shelf_id}", headers=owner)
+    assert r.status_code == 204
+    assert client.get(f"/api/v1/shelves/{shelf_id}/works", headers=owner).status_code == 404
+    db.expire_all()
+    # Was only on the deleted shelf → now back on the default shelf (never free-floating).
+    assert _shelf_ids_for(db, _uuid.UUID(work_id)) == {get_default_shelf_id(db)}
+
+
+def test_delete_shelf_leaves_papers_on_other_shelves(client, auth_headers, db):
+    import uuid as _uuid
+
+    owner = auth_headers("owner")
+    work_id = _new_paper(client, owner, "multi-home")
+    shelf_a = _new_shelf(client, owner, "Shelf A")
+    shelf_b = _new_shelf(client, owner, "Shelf B")
+    client.post(f"/api/v1/shelves/{shelf_a}/works", headers=owner, json={"work_id": work_id})
+    client.post(f"/api/v1/shelves/{shelf_b}/works", headers=owner, json={"work_id": work_id})
+
+    assert client.delete(f"/api/v1/shelves/{shelf_a}", headers=owner).status_code == 204
+    db.expire_all()
+    shelves = _shelf_ids_for(db, _uuid.UUID(work_id))
+    # Still on B; not re-added to default (it wasn't orphaned); A's association is gone.
+    assert shelves == {_uuid.UUID(shelf_b)}
+
+
+def test_cannot_delete_default_shelf(client, auth_headers, db):
+    owner = auth_headers("owner")
+    _new_paper(client, owner, "bootstrap default")  # ensures the default shelf exists
+    default_id = get_default_shelf_id(db)
+    assert default_id is not None
+    r = client.delete(f"/api/v1/shelves/{default_id}", headers=owner)
+    assert r.status_code == 400
+
+
+def test_delete_shelf_requires_modify_permission(client, auth_headers, db):
+    owner = auth_headers("owner")
+    shelf_id = _new_shelf(client, owner, "Perm shelf")
+    # A reader is below the librarian floor for structural changes.
+    assert (
+        client.delete(f"/api/v1/shelves/{shelf_id}", headers=auth_headers("reader")).status_code
+        == 403
+    )

@@ -12825,6 +12825,57 @@
       }
     },
     "/api/v1/shelves/{shelf_id}": {
+      "delete": {
+        "description": "Hard-delete a shelf (requires modify access). This removes the shelf and its memberships.\n\nNo free-floating papers (#1): a paper that was ONLY on this shelf is moved to the default\nshelf; a paper also on other shelves simply loses this association. The default shelf itself\ncannot be deleted (it is the fallback home). Distinct from archiving (PATCH status), which keeps\nthe shelf.",
+        "operationId": "delete_shelf_api_v1_shelves__shelf_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shelf_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Shelf Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Shelf",
+        "tags": [
+          "shelves"
+        ]
+      },
       "patch": {
         "description": "Edit or archive a shelf (requires modify access to this shelf).",
         "operationId": "update_shelf_api_v1_shelves__shelf_id__patch",

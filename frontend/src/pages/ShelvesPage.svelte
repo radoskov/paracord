@@ -122,6 +122,25 @@
       shelves = await client.listShelves();
     }, 'Shelf archived');
   }
+
+  async function removeShelf(): Promise<void> {
+    if (!selected) return;
+    if (
+      !window.confirm(
+        `Delete shelf “${selected.name}”? This can't be undone. Papers only on this shelf are ` +
+          `moved to the default shelf; papers also on other shelves just leave this one.`,
+      )
+    )
+      return;
+    const shelf = selected;
+    await run(async () => {
+      await client.deleteShelf(shelf.id);
+      selected = null;
+      selectedShelfId.set(null);
+      shelfWorks = [];
+      shelves = await client.listShelves();
+    }, 'Shelf deleted');
+  }
 </script>
 
 <section class="layout">
@@ -190,6 +209,8 @@
           </label>
           <button type="button" class="secondary" on:click={archive} disabled={loading || !$canManageStructure}
             title={$canManageStructure ? 'Archive this shelf (asks for confirmation)' : INSUFFICIENT_ROLE}>Archive shelf</button>
+          <button type="button" class="danger" on:click={removeShelf} disabled={loading || !$canManageStructure}
+            title={$canManageStructure ? 'Delete this shelf; papers only here move to the default shelf' : INSUFFICIENT_ROLE}>Delete shelf</button>
         </div>
       </div>
 

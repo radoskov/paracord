@@ -5,13 +5,13 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_librarian
 from app.db.session import get_db
 from app.models.access_settings import ACCESS_LEVELS
-from app.models.organization import Shelf, ShelfWork
+from app.models.organization import RackShelf, Shelf, ShelfWork
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
@@ -229,5 +229,40 @@ def remove_work_from_shelf(
     db.flush()
     # No free-floating papers (#1): if that was the paper's last real shelf, fall back to default.
     if shelf_id != get_default_shelf_id(db):
+        place_on_default_if_loose(db, work_id, actor_id=actor.id)
+    db.commit()
+
+
+@router.delete("/{shelf_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_shelf(
+    shelf_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = LIBRARIAN_DEP,
+) -> None:
+    """Hard-delete a shelf (requires modify access). This removes the shelf and its memberships.
+
+    No free-floating papers (#1): a paper that was ONLY on this shelf is moved to the default
+    shelf; a paper also on other shelves simply loses this association. The default shelf itself
+    cannot be deleted (it is the fallback home). Distinct from archiving (PATCH status), which keeps
+    the shelf.
+    """
+    shelf = db.get(Shelf, shelf_id)
+    if shelf is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf not found")
+    _guard_modify_shelf(db, actor, shelf)
+    if shelf_id == get_default_shelf_id(db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The default shelf cannot be deleted — it is where unshelved papers land.",
+        )
+    # Capture the affected papers before removing the memberships, then delete the shelf's links
+    # (explicitly, so it works regardless of DB-level ON DELETE behaviour) and the shelf itself.
+    work_ids = list(db.scalars(select(ShelfWork.work_id).where(ShelfWork.shelf_id == shelf_id)))
+    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
+    db.execute(delete(RackShelf).where(RackShelf.shelf_id == shelf_id))
+    db.delete(shelf)
+    db.flush()
+    # Any paper now on zero shelves falls back to the default shelf (others are left as-is).
+    for work_id in work_ids:
         place_on_default_if_loose(db, work_id, actor_id=actor.id)
     db.commit()
