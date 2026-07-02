@@ -70,3 +70,6 @@ docs/latex/build/
 FOLLOWUPS.md
 FOLLOWUP.md
 drop-cl.sh
+
+# Archived audit/discussion doc originals (zip; digest lives in docs/ARCHIVED_AUDIT_LOG.md)
+docs/archive/

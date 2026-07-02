@@ -1,26 +1,27 @@
 # Progress Report
 
-> **Read `docs/AUDIT.md` first.** A full functional + implementation audit (2026-06-25) maps what
-> the app actually does for a user vs. `SPECIFICATION.md`, lists correctness/infra/security
-> findings with severities, and gives a prioritized **"Path to a fully functional app"** backlog.
-> Two things every contributor must know: (1) models and migrations are **separate** schema
-> definitions and have drifted — change a model → write + verify the migration on Postgres; and
-> (2) "semantic search" and "topic modeling" are honest **lexical/TF-IDF approximations**, not
-> embedding/BERTopic implementations.
+> **Audit & decision docs (read these first):** `docs/AUDIT.md` — current & deferred technical
+> issues; `docs/DISCUSSIONS.md` — open product/architecture choices awaiting the owner's call;
+> `docs/ARCHIVED_AUDIT_LOG.md` — everything resolved or stale (chronological digest; full
+> originals in the gitignored `docs/archive/`). One rule every contributor must know: models and
+> migrations are **separate** schema definitions — change a model → write + verify the migration
+> on Postgres (parity + autogenerate-clean tests enforce this).
 
 ## Full audit + consolidated decisions + auto-fixes (2026-07-02)
 
 A six-pass audit (security, efficiency, stability, tech-stack suitability, plus verification of
-every open item in the old followup/needs-discussion docs) produced **`docs/DECISIONS.md`** —
-now the single decision list; `FOLLOWUP.md` and `docs/NEEDS_DISCUSSION.md` are superseded by it.
+every open item in the old followup/needs-discussion docs) was consolidated — after a second
+round of doc-merging — into the **AUDIT / DISCUSSIONS / ARCHIVED_AUDIT_LOG** triad above, which
+supersedes `docs/DECISIONS.md`, `FOLLOWUP.md`, `docs/NEEDS_DISCUSSION.md`, and the old
+1 100-line `docs/AUDIT.md` (all preserved in `docs/archive/audit_docs_pre-2026-07-02.zip`).
 ~30 unambiguous fixes were applied and committed in this pass (agent file perms + GUI XSS,
 import-batch IDOR, RQ 900 s job timeout, extraction-failure rollback discipline, transactional
-`make restore`, batched hot-path queries, HTTP-client + embedding-provider caching
-(NEEDS_DISCUSSION 3a), default-shelf hooks for the last creation paths (2c), derived-OCR-copy
-cleanup, 4 dead deps removed, and more — full table in DECISIONS §A). Verified with
-`make test-full` (660 backend + 32 agent green) and `make frontend-check` (75 green + build).
-`httpx2` was verified online as the legitimate Pydantic-maintained httpx fork. 38 items await
-owner decisions in DECISIONS §B, each with a recommendation.
+`make restore`, batched hot-path queries, HTTP-client + embedding-provider caching,
+default-shelf hooks for the last creation paths, derived-OCR-copy cleanup, 4 dead deps removed,
+and more — full list in `ARCHIVED_AUDIT_LOG.md` §2026-07-02). Verified with `make test-full`
+(660 backend + 32 agent green) and `make frontend-check` (75 green + build). `httpx2` was
+verified online as the legitimate Pydantic-maintained httpx fork. Open items await owner
+decisions in `AUDIT.md` + `DISCUSSIONS.md`, each with a recommendation.
 
 ## Stage 6 + 7 complete (2026-06-30)
 
@@ -41,7 +42,8 @@ non-blocking and tracked in WORKPLAN Stage 7.
 **Milestones 0–7 have an implemented vertical for every acceptance contract (all
 `test_future_milestones.py` tests enabled and green). Much of M3–M7 is backend-complete but
 under-exposed in the single-page UI, and several "AI" features are deliberate lightweight
-stand-ins — see `docs/AUDIT.md` for the gap analysis and what to build next.**
+stand-ins — see `docs/ARCHIVED_AUDIT_LOG.md` for how those gaps were closed and
+`docs/DISCUSSIONS.md` for what to build next.**
 
 What works today (real, tested in-container on Python 3.12):
 
@@ -468,10 +470,11 @@ H6 (`.env` prefix) is an operator action: regenerate a local `.env` from `.env.e
 
 ## Tech debt and cleanups
 
-> The authoritative, severity-ranked list (with the prioritized fix order) now lives in
-> **`docs/AUDIT.md`**. The items below are kept as quick pointers; AUDIT.md supersedes them.
+> The authoritative lists now live in **`docs/AUDIT.md`** (current issues) and
+> **`docs/DISCUSSIONS.md`** (open choices); the historical findings below are archived in
+> **`docs/ARCHIVED_AUDIT_LOG.md`**. The items below are kept as quick pointers only.
 
-**Top-priority from the 2026-06-25 audit (see AUDIT.md for detail):**
+**Top-priority from the 2026-06-25 audit (see ARCHIVED_AUDIT_LOG.md for detail):**
 - ~~`summaries`/`topic_assignments` model tables had no migration (prod-breaking).~~ **Fixed** —
   migration `0010_summaries_topics`, verified on Postgres (AUDIT C1).
 - ~~**No migration/Postgres test** — drift is invisible (this is why C1 shipped).~~ **Done** —
