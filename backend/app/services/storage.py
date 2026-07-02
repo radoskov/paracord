@@ -25,6 +25,16 @@ from app.utils.normalization import normalize_title
 _ARXIV_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
 
 
+def mark_extraction_requested(file: File) -> None:
+    """Flag ``file`` as owed a GROBID extraction, in the caller's current transaction (D7).
+
+    Set in the SAME commit that intends to extract the file so the durable marker and the file row
+    land together; the extraction worker clears it on terminal success/failure and the startup
+    recovery sweep re-enqueues anything still marked (e.g. an enqueue lost to a dead Redis).
+    """
+    file.extraction_requested_at = datetime.now(UTC)
+
+
 def file_ids_pending_extraction(db: Session, source_id) -> list:
     """Return file IDs for a source whose linked work has no GROBID extraction yet."""
     extracted_works = select(MetadataAssertion.entity_id).where(

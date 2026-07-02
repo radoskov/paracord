@@ -28,6 +28,7 @@ from app.services.storage import (
     file_ids_pending_extraction,
     import_server_folder,
     import_uploaded_pdf,
+    mark_extraction_requested,
 )
 from app.utils.normalization import normalize_title
 from app.workers.queue import enqueue_extraction
@@ -65,6 +66,10 @@ class ImportBatchRead(BaseModel):
     finished_at: datetime | None = None
     # Number of works currently attributed to this batch (Phase B6 picker label).
     work_count: int = 0
+    # False when this import intended to extract file(s) but the extraction queue was unreachable
+    # (Redis down), so the jobs were dropped and the recovery sweep will retry (D7). True when the
+    # jobs were queued or when the import had nothing to extract (e.g. citation-only imports).
+    extraction_queued: bool = True
 
     model_config = {"from_attributes": True}
 
@@ -88,11 +93,24 @@ def import_folder(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Mark every file we intend to extract as owed, in the same commit that creates them (D7), so a
+    # dropped enqueue below is recovered by the startup sweep.
+    from app.models.file import File
+
+    pending = file_ids_pending_extraction(db, source.id)
+    for file_id in pending:
+        file = db.get(File, file_id)
+        if file is not None:
+            mark_extraction_requested(file)
     db.commit()
     db.refresh(batch)
-    # Best-effort: queue GROBID extraction for newly imported files (no-op if Redis is down).
-    for file_id in file_ids_pending_extraction(db, source.id):
-        enqueue_extraction(file_id)
+    # Best-effort: queue GROBID extraction for newly imported files (no-op if Redis is down). Report
+    # whether every intended job was actually queued so the UI can warn on a dropped enqueue.
+    extraction_queued = True
+    for file_id in pending:
+        if enqueue_extraction(file_id) is None:
+            extraction_queued = False
+    batch.extraction_queued = extraction_queued
     return batch
 
 
@@ -241,9 +259,10 @@ def upload_pdf(
             add_work_to_shelf_checked(
                 db, shelf_id=target_shelf_id, work_id=link.work_id, actor=actor
             )
+    mark_extraction_requested(file_obj)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(batch)
-    enqueue_extraction(file_obj.id)
+    batch.extraction_queued = enqueue_extraction(file_obj.id) is not None
     return batch
 
 
@@ -258,6 +277,9 @@ class IdentifierImportResponse(BaseModel):
     work_id: uuid.UUID
     created: bool
     enriched_sources: list[str]
+    # Identifier import creates a metadata-only work with no PDF, so there is no extraction to
+    # queue; always True (nothing was dropped). Present for a uniform import-response contract (D7).
+    extraction_queued: bool = True
 
 
 @router.post(

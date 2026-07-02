@@ -35,7 +35,7 @@ from app.services.file_paths import (
 )
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
-from app.services.storage import attach_uploaded_pdf_to_work
+from app.services.storage import attach_uploaded_pdf_to_work, mark_extraction_requested
 from app.services.summarization import list_work_summaries, summarize_work
 from app.services.web_find import (
     WebCandidate,
@@ -1149,6 +1149,9 @@ class WorkFileRead(BaseModel):
     # `extracted_discarded` (PDF removed after extract-only) or no on-disk location resolves;
     # the reader uses this to disable "Read" instead of letting the stream 404 silently.
     content_available: bool = True
+    # False when the upload intended extraction but the queue was unreachable (Redis down); the
+    # file keeps its owed marker and the recovery sweep retries (D7). True for plain file listings.
+    extraction_queued: bool = True
 
     model_config = {"from_attributes": True}
 
@@ -1228,10 +1231,11 @@ def upload_work_file(
     file_obj, _created, _linked = attach_uploaded_pdf_to_work(
         db, work=work, filename=file.filename or "upload.pdf", pdf_bytes=pdf_bytes, actor=actor
     )
+    mark_extraction_requested(file_obj)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(file_obj)
-    enqueue_extraction(file_obj.id)
-    return _file_read(db, file_obj)
+    extraction_queued = enqueue_extraction(file_obj.id) is not None
+    return _file_read(db, file_obj).model_copy(update={"extraction_queued": extraction_queued})
 
 
 def _require_attached_file(db: Session, work_id: uuid.UUID, file_id: uuid.UUID) -> FileWorkLink:
@@ -1595,6 +1599,13 @@ def extract_work_endpoint(
     )
     if not file_ids:
         return {"status": "no_files", "queued": 0}
+    # Persist the owed marker for every file first (D7): even if the enqueue below fails on a dead
+    # queue, the recovery sweep re-enqueues these on the next startup.
+    for file_id in file_ids:
+        file = db.get(File, file_id)
+        if file is not None:
+            mark_extraction_requested(file)
+    db.commit()
     job_ids: list[str] = []
     for file_id in file_ids:
         job_id = enqueue_extraction(file_id)

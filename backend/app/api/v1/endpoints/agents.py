@@ -26,6 +26,7 @@ from app.schemas.agent import (
 )
 from app.services import agent_files
 from app.services import agents as agent_service
+from app.services.storage import mark_extraction_requested
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
@@ -102,7 +103,7 @@ def upload_teleport_content(
     file: UploadFile,
     db: Session = DB_DEP,
     agent: Agent = AGENT_DEP,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     """Agent pushes the bytes for a requested teleport; the server verifies the hash + stores it."""
     if not agent.can_teleport:
         raise HTTPException(
@@ -125,10 +126,16 @@ def upload_teleport_content(
     except ValueError as exc:
         db.commit()  # persist the teleport.failed audit/state before surfacing the error
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mark_extraction_requested(stored)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(stored)
-    enqueue_extraction(stored.id)
-    return {"file_id": str(stored.id), "sha256": stored.sha256, "status": "complete"}
+    extraction_queued = enqueue_extraction(stored.id) is not None
+    return {
+        "file_id": str(stored.id),
+        "sha256": stored.sha256,
+        "status": "complete",
+        "extraction_queued": extraction_queued,
+    }
 
 
 @router.post("/files/{local_file_id}/extract", status_code=status.HTTP_201_CREATED)
@@ -137,7 +144,7 @@ def upload_for_extraction(
     file: UploadFile,
     db: Session = DB_DEP,
     agent: Agent = AGENT_DEP,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     """`index_and_extract`: agent uploads a PDF; the server extracts it, keeps a preview, and
     discards the PDF afterwards (only the reference + metadata remain)."""
     if not agent.can_extract:
@@ -161,10 +168,15 @@ def upload_for_extraction(
     except ValueError as exc:
         db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mark_extraction_requested(stored)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(stored)
-    enqueue_extraction(stored.id)
-    return {"file_id": str(stored.id), "status": "extracting"}
+    extraction_queued = enqueue_extraction(stored.id) is not None
+    return {
+        "file_id": str(stored.id),
+        "status": "extracting",
+        "extraction_queued": extraction_queued,
+    }
 
 
 @router.post("/teleports/{local_file_id}/reject", status_code=status.HTTP_200_OK)
@@ -274,7 +286,7 @@ def offer_teleport(
     file: UploadFile,
     db: Session = DB_DEP,
     agent: Agent = AGENT_DEP,
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     """Agent-*initiated* teleport (#12): the agent pushes a file directly (no prior user request).
 
     Allowed only when the owner has granted ``can_teleport``. The server verifies the hash, stores
@@ -305,7 +317,13 @@ def offer_teleport(
     except ValueError as exc:
         db.commit()  # persist any teleport.failed audit/state before surfacing the error
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mark_extraction_requested(stored)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(stored)
-    enqueue_extraction(stored.id)
-    return {"file_id": str(stored.id), "sha256": stored.sha256, "status": "complete"}
+    extraction_queued = enqueue_extraction(stored.id) is not None
+    return {
+        "file_id": str(stored.id),
+        "sha256": stored.sha256,
+        "status": "complete",
+        "extraction_queued": extraction_queued,
+    }

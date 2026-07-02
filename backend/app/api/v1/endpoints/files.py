@@ -96,6 +96,11 @@ def extract_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    # Persist the owed marker before enqueue (D7) so a dropped enqueue is recovered on startup.
+    from app.services.storage import mark_extraction_requested
+
+    mark_extraction_requested(file)
+    db.commit()
     job_id = enqueue_extraction(file_id, force_ocr=force_ocr)
     if job_id is None:
         raise HTTPException(
