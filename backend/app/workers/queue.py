@@ -40,11 +40,13 @@ _LIVE_JOB_STATUSES = {"queued", "started", "deferred", "scheduled"}
 
 
 def extraction_job_id(file_id) -> str:
-    """Deterministic RQ job id for a file's extraction (``extract:{file_id}``).
+    """Deterministic RQ job id for a file's extraction (``extract-{file_id}``).
 
     A stable id makes re-enqueuing an already-queued/running file a no-op instead of a duplicate.
+    A dash (not a colon) separator is required: RQ 2.x rejects ``:`` in job ids, and a UUID file id
+    only contains hex digits and dashes.
     """
-    return f"extract:{file_id}"
+    return f"extract-{file_id}"
 
 
 def _live_extraction_job_id(conn, job_id: str) -> str | None:
@@ -66,7 +68,7 @@ def _live_extraction_job_id(conn, job_id: str) -> str | None:
 def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     """Best-effort enqueue of a GROBID extraction job. Returns the job id, or None.
 
-    Uses the deterministic id ``extract:{file_id}`` and skips the enqueue when a live job with that
+    Uses the deterministic id ``extract-{file_id}`` and skips the enqueue when a live job with that
     id already exists, so the same file is queued exactly once even if the recovery sweep and a
     user's re-extract race (D7 invariant 2). ``force_ocr`` re-runs OCRmyPDF regardless of the
     configured backend / current text-layer quality (#22). Never raises: a missing/unreachable

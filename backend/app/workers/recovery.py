@@ -6,7 +6,7 @@ extracted. To recover, every import sets a durable ``File.extraction_requested_a
 same commit; this sweep finds files that are still owed an extraction and re-enqueues them.
 
 Safe to run from multiple API workers concurrently and while Redis is down:
-* the deterministic extraction job id (``extract:{file_id}``) plus the live-job guard in
+* the deterministic extraction job id (``extract-{file_id}``) plus the live-job guard in
   :func:`app.workers.queue.enqueue_extraction` make a re-enqueue idempotent (D7 invariant 2), and
 * a dead Redis makes ``enqueue_extraction`` return ``None`` without raising, so the sweep simply
   skips those files and tries again next startup.
