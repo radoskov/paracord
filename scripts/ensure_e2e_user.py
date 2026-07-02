@@ -17,6 +17,9 @@ Credentials come from the environment (with dev defaults):
 
 * ``E2E_USERNAME`` (default ``e2e_admin``)
 * ``E2E_PASSWORD`` (default ``e2e-Passw0rd!``)
+
+Because the default password is well-known, the script refuses to run unless the server environment
+(``PARACORD_ENV``) is ``development``/``test`` or ``E2E_PASSWORD`` is explicitly set.
 """
 
 import os
@@ -27,6 +30,7 @@ from sqlalchemy import select
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
+from app.core.config import get_settings  # noqa: E402
 from app.core.security import Role  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, engine  # noqa: E402
@@ -73,6 +77,13 @@ def ensure_e2e_user(username: str, password: str) -> User:
 
 
 def main() -> None:
+    environment = get_settings().environment
+    if environment not in ("development", "test") and not os.environ.get("E2E_PASSWORD"):
+        raise SystemExit(
+            f"Refusing to create the E2E admin user: PARACORD_ENV={environment!r} is not "
+            "'development' or 'test', and E2E_PASSWORD is not set. Creating an admin account "
+            "with the well-known default password would be a backdoor on a real database."
+        )
     username = os.environ.get("E2E_USERNAME", DEFAULT_USERNAME).strip() or DEFAULT_USERNAME
     password = os.environ.get("E2E_PASSWORD", DEFAULT_PASSWORD) or DEFAULT_PASSWORD
     try:

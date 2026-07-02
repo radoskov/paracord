@@ -39,10 +39,15 @@ make restore-dry-run RESTORE=backups/db-20260630-120000.sql.gz
 ```
 
 This checks gzip integrity, confirms the file is a recognizable `pg_dump`, reports the target
-database name/user, and prints how many `CREATE TABLE` / `COPY` / `INSERT INTO` statements the dump
-contains — all **without** touching the database. Nothing is applied until you re-run `make restore`.
+database name/user, verifies the dump contains `DROP` statements (dumps taken before the
+`--clean` change would silently merge instead of replace, and are refused), and prints how many
+`DROP` / `CREATE TABLE` / `COPY` / `INSERT INTO` statements the dump contains — all **without**
+touching the database. Nothing is applied until you re-run `make restore`.
 
-`restore` pipes the dump into `psql`; objects are recreated and existing rows replaced. For the
+`restore` stops the `api` and `worker` containers, pipes the dump into `psql` with
+`ON_ERROR_STOP` (any error aborts instead of half-applying), and restarts them on success; on
+failure the services stay stopped so a half-restored database is not served. Objects are dropped
+and recreated, existing rows replaced. For the
 managed library, extract the tarball back into the volume:
 
 ```bash

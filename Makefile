@@ -85,7 +85,7 @@ backup: ## Back up the database + managed library to ./backups (BACKUP_DIR overr
 	@mkdir -p $${BACKUP_DIR:-./backups}
 	@ts=$$(date +%Y%m%d-%H%M%S); out=$${BACKUP_DIR:-./backups}; \
 	echo "Dumping database → $$out/db-$$ts.sql.gz"; \
-	$(COMPOSE) exec -T postgres sh -c 'pg_dump -U $$POSTGRES_USER $$POSTGRES_DB' | gzip > $$out/db-$$ts.sql.gz; \
+	$(COMPOSE) exec -T postgres sh -c 'pg_dump --clean --if-exists -U $$POSTGRES_USER $$POSTGRES_DB' | gzip > $$out/db-$$ts.sql.gz; \
 	echo "Archiving managed library → $$out/library-$$ts.tar.gz"; \
 	$(COMPOSE) run --rm --no-deps -T -v $$(pwd)/$$out:/backup $(API_SERVICE) \
 	  sh -c 'tar czf /backup/library-'$$ts'.tar.gz -C /app storage' 2>/dev/null || \
@@ -96,7 +96,10 @@ backup: ## Back up the database + managed library to ./backups (BACKUP_DIR overr
 restore: ## Restore the database from a dump: make restore RESTORE=backups/db-YYYYMMDD-HHMMSS.sql.gz
 	@test -n "$(RESTORE)" || { echo 'Usage: make restore RESTORE=backups/db-YYYYMMDD-HHMMSS.sql.gz'; exit 1; }
 	@echo "Restoring $(RESTORE) into the database (existing data is dropped)…"
-	@gunzip -c $(RESTORE) | $(COMPOSE) exec -T postgres sh -c 'psql -U $$POSTGRES_USER -d $$POSTGRES_DB'
+	@echo "Stopping api + worker during the restore…"
+	@$(COMPOSE) stop $(API_SERVICE) worker
+	@gunzip -c $(RESTORE) | $(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U $$POSTGRES_USER -d $$POSTGRES_DB'
+	@$(COMPOSE) start $(API_SERVICE) worker
 	@echo "✅ restore complete"
 
 .PHONY: restore-dry-run
@@ -108,7 +111,9 @@ restore-dry-run: ## Validate a dump + report what a restore WOULD change, withou
 	@echo -n "Gzip integrity: "; gzip -t "$(RESTORE)" && echo "OK" || { echo "FAILED"; exit 1; }
 	@echo -n "Target DB:      "; $(COMPOSE) exec -T postgres sh -c 'echo "$$POSTGRES_DB (user $$POSTGRES_USER)"' 2>/dev/null || echo "(postgres not running — start it to resolve the target DB)"
 	@echo "Looks like a pg dump: "; gunzip -c "$(RESTORE)" | head -n 40 | grep -Eq 'PostgreSQL database dump|CREATE TABLE|COPY |INSERT INTO|SET ' && echo "  yes — SQL statements detected" || { echo "  ❌ no recognizable pg dump statements in the header"; exit 1; }
+	@echo -n "Drops existing objects first (--clean dump): "; gunzip -c "$(RESTORE)" | grep -qE '^DROP ' && echo "yes" || { echo "❌ no DROP statements — this dump predates --clean backups and would MERGE into existing data. Re-create it with 'make backup'."; exit 1; }
 	@echo "Statements that WOULD run (counts from the dump):"
+	@gunzip -c "$(RESTORE)" | grep -cE '^DROP '         | sed 's/^/  DROP (clean-first): /'
 	@gunzip -c "$(RESTORE)" | grep -cE '^CREATE TABLE'  | sed 's/^/  CREATE TABLE: /'
 	@gunzip -c "$(RESTORE)" | grep -cE '^COPY '         | sed 's/^/  COPY (bulk load): /'
 	@gunzip -c "$(RESTORE)" | grep -cE '^INSERT INTO '  | sed 's/^/  INSERT INTO: /'
