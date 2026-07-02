@@ -7,6 +7,22 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D7 — extraction-enqueue visibility + self-healing recovery (2026-07-02)
+
+Fixed the silent-drop of extraction jobs when Redis is down at import time. (1) Every import/extract
+path now captures the `enqueue_extraction` result and surfaces `extraction_queued: bool` in its
+response (`ImportBatchRead`, `WorkFileRead`, `IdentifierImportResponse`, agent extract/teleport
+responses); the frontend shows a "retry automatically" warning when false. (2) The Jobs tab has a
+red/yellow/green queue-health semaphore backed by new `redis_reachable`/`worker_count`/`queued`
+fields on the jobs endpoint (degrades without a 500 when Redis is down). (3) A durable
+`File.extraction_requested_at` marker (migration `0042_file_extraction_owed`) is set in the same
+commit that queues extraction and cleared by the worker on terminal success **or** failure; a
+startup lifespan sweep (+ admin `POST /jobs/reprocess-pending`) re-enqueues anything still owed.
+Extraction now uses the deterministic RQ job id `extract-{file_id}` (dash, not colon — RQ 2.x
+rejects colons) so a re-enqueue of an in-flight file is a no-op. Agent keeps items retryable
+(`extract_queue_failed`) when the server couldn't queue. Verified: backend fast tier 519 passed,
+migration parity 4 passed, agent 33 passed, frontend 81 passed + build.
+
 ## Full audit + consolidated decisions + auto-fixes (2026-07-02)
 
 A six-pass audit (security, efficiency, stability, tech-stack suitability, plus verification of
