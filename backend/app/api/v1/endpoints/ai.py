@@ -125,6 +125,9 @@ class TopicModelResponse(BaseModel):
     # True when the embedding backend clustered on real dense vectors; False = TF-IDF fallback
     # (hash-BOW baseline) so the UI can be honest about which backend actually ran (B1).
     used_embeddings: bool = False
+    # Papers skipped because they lack pre-indexed chunk vectors for the model (D19); the read path
+    # never embeds inline, so the UI shows a "N papers not indexed for this model — reindex" notice.
+    unindexed_work_count: int = 0
 
 
 @router.post("/topics", response_model=TopicModelResponse)

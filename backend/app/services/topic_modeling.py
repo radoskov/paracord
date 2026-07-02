@@ -333,14 +333,21 @@ def _mean_pooled_by_column(
 
 def _paper_dense_vectors(
     db: Session, works: list[Work], embedding_model: str | None
-) -> tuple[list[dict[int, float]] | None, str | None]:
+) -> tuple[list[dict[int, float]] | None, list[Work], str | None, int]:
     """Dense per-paper vectors for embedding-based clustering (#21 / B1), as index-keyed dicts.
 
     Selects the model set (a specific registered model, ``multimode`` across all active models, or
     the configured default). Each model contributes a mean-pooled stored chunk vector when it has a
     column on Postgres, else a freshly embedded document vector; per-model vectors are L2-normalized
-    and concatenated. Returns ``(None, None)`` when only the hash-BOW baseline is available — the
-    caller then falls back to TF-IDF clustering and reports it honestly."""
+    and concatenated.
+
+    Returns ``(vectors, kept_works, label, skipped)`` where ``vectors`` is aligned to ``kept_works``
+    (a subset of the input, same order). A model with a chunk column that has **no pre-indexed
+    vector** for a paper does NOT embed it inline on the read path (D19): the paper is skipped and
+    counted in ``skipped`` so the caller can surface a "reindex" notice — the read path stays
+    read-only, consistent with search. Returns ``(None, [], None, 0)`` when only the hash-BOW
+    baseline is available — the caller then falls back to TF-IDF clustering and reports it honestly.
+    """
     from app.services.embedding_registry import active_models, column_for, provider_for
     from app.services.embeddings import (
         DEFAULT_EMBEDDING_MODEL,
@@ -359,18 +366,17 @@ def _paper_dense_vectors(
         if provider.model_name != DEFAULT_EMBEDDING_MODEL:
             selected = [(provider.model_name, provider)]
     if not selected:
-        return None, None  # hash-BOW only → let the caller use the TF-IDF baseline
+        return None, [], None, 0  # hash-BOW only → let the caller use the TF-IDF baseline
 
     work_ids = [w.id for w in works]
     per_work: dict[uuid.UUID, list[float]] = {w.id: [] for w in works}
     contributed = 0
+    # Papers a chunk-column model has not pre-indexed for this model — skipped, not embedded inline.
+    skip_ids: set[uuid.UUID] = set()
     for model_name, provider in selected:
         col = column_for(db, model_name)
-        pooled = (
-            _mean_pooled_by_column(db, work_ids, col[0])
-            if col is not None and _is_postgres(db)
-            else {}
-        )
+        has_column = col is not None and _is_postgres(db)
+        pooled = _mean_pooled_by_column(db, work_ids, col[0]) if has_column else {}
         # Enforce one fixed dimension per model (D12). The registry column carries the model's dim;
         # without a column, adopt the first vector's length as the model's dimension. A vector that
         # does not match is a real registry/provider bug — skip the whole model with a warning
@@ -380,7 +386,13 @@ def _paper_dense_vectors(
         mismatch = False
         for work in works:
             vec = pooled.get(work.id)
-            if not vec:  # no stored chunk vectors for this work/model → embed its text now
+            if not vec:
+                if has_column:
+                    # D19: this model can be pre-indexed at chunk level but this paper is not indexed
+                    # yet. Do not embed inline on the read path — skip + count it for a reindex notice.
+                    skip_ids.add(work.id)
+                    continue
+                # Column-less model (SQLite / doc-level fallback): embed the doc text now.
                 vec = provider.embed(_doc_text(work))
             vec = [float(x) for x in vec]
             if expected_dim is None:
@@ -400,14 +412,19 @@ def _paper_dense_vectors(
         if mismatch or not expected_dim:
             continue
         for work in works:
-            per_work[work.id].extend(model_vectors[work.id])
+            if work.id in model_vectors:
+                per_work[work.id].extend(model_vectors[work.id])
         contributed += 1
 
     if contributed == 0:
-        return None, None  # every model was skipped → let the caller use the TF-IDF baseline
+        return None, [], None, 0  # every model was skipped → let the caller use the TF-IDF baseline
     label = MULTIMODE if embedding_model == MULTIMODE else selected[0][0]
-    vectors = [{i: x for i, x in enumerate(per_work[w.id])} for w in works]
-    return vectors, label
+    # Keep only papers every chunk-column model indexed (not in skip_ids) that also got a vector, so
+    # the concatenated multimode vectors all share one length. The rest are reported as un-indexed.
+    kept = [w for w in works if w.id not in skip_ids and per_work[w.id]]
+    skipped = len(works) - len(kept)
+    vectors = [{i: x for i, x in enumerate(per_work[w.id])} for w in kept]
+    return vectors, kept, label, skipped
 
 
 def _model_topics_embedding(
@@ -448,10 +465,31 @@ def _model_topics_embedding(
     # Labels always come from TF-IDF (human-readable terms); clustering uses dense embedding
     # vectors when a real model is available, else falls back to the TF-IDF vectors themselves.
     tfidf_vectors = _tfidf([tokens for _, tokens in documents])
-    dense_vectors, resolved_model = _paper_dense_vectors(
+    dense_vectors, dense_works, resolved_model, unindexed = _paper_dense_vectors(
         db, [w for w, _ in documents], embedding_model
     )
     used_embeddings = dense_vectors is not None
+    if used_embeddings:
+        # D19: un-indexed papers were skipped (not embedded inline). Restrict the documents +
+        # TF-IDF labels to the papers the model actually vectorized, preserving order so the dense
+        # vectors stay aligned. Recompute TF-IDF over the surviving set for coherent labels.
+        keep_ids = {w.id for w in dense_works}
+        kept = [(i, doc) for i, doc in enumerate(documents) if doc[0].id in keep_ids]
+        documents = [doc for _, doc in kept]
+        if not documents:
+            db.flush()
+            return _embedding_result(
+                model_id,
+                scope_type,
+                scope_id,
+                backend,
+                resolved_model,
+                topics=[],
+                work_count=0,
+                used_embeddings=True,
+                unindexed_work_count=unindexed,
+            )
+        tfidf_vectors = _tfidf([tokens for _, tokens in documents])
     cluster_vectors = dense_vectors if used_embeddings else tfidf_vectors
     k = max(1, min(max_topics, len(documents)))
     assignments = _kmeans(cluster_vectors, k)
@@ -512,6 +550,7 @@ def _model_topics_embedding(
         outlier_work_ids=outliers,
         hierarchy=_topic_hierarchy(centroids) if hierarchical else None,
         used_embeddings=used_embeddings,
+        unindexed_work_count=unindexed if used_embeddings else 0,
     )
 
 
@@ -542,6 +581,7 @@ def _embedding_result(
     outlier_work_ids: list[str] | None = None,
     hierarchy: list[dict] | None = None,
     used_embeddings: bool = False,
+    unindexed_work_count: int = 0,
 ) -> dict:
     return {
         "model_id": model_id,
@@ -555,6 +595,9 @@ def _embedding_result(
         "hierarchy": hierarchy,
         # True when clustering used real dense embeddings; False = TF-IDF fallback (honest flag).
         "used_embeddings": used_embeddings,
+        # Papers skipped because they have no pre-indexed chunk vectors for the model (D19); the UI
+        # surfaces a "N papers not indexed for this model — reindex" notice.
+        "unindexed_work_count": unindexed_work_count,
     }
 
 

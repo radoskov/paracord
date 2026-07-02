@@ -698,8 +698,9 @@ def test_paper_dense_vectors_skips_model_on_dim_mismatch(db_session, monkeypatch
     monkeypatch.setattr(reg, "column_for", lambda db, name: None)
     monkeypatch.setattr(reg, "provider_for", lambda db, name, **k: _BadProvider())
 
-    vectors, label = _paper_dense_vectors(db_session, works, "st:bad-dims")
+    vectors, kept, label, skipped = _paper_dense_vectors(db_session, works, "st:bad-dims")
     assert vectors is None  # the only model was skipped → fall back to the TF-IDF baseline
+    assert kept == []
     assert label is None
 
 
@@ -719,7 +720,9 @@ def test_paper_dense_vectors_keeps_model_with_consistent_dims(db_session, monkey
     monkeypatch.setattr(reg, "column_for", lambda db, name: None)
     monkeypatch.setattr(reg, "provider_for", lambda db, name, **k: _GoodProvider())
 
-    vectors, label = _paper_dense_vectors(db_session, works, "st:good-dims")
+    vectors, kept, label, skipped = _paper_dense_vectors(db_session, works, "st:good-dims")
     assert label == "st:good-dims"
     assert vectors is not None
+    assert skipped == 0  # column-less model embeds inline; no paper is skipped
+    assert len(kept) == len(works)
     assert all(len(v) == 3 for v in vectors)  # one 3-dim vector per work, nothing padded
