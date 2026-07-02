@@ -30,6 +30,27 @@ function auth(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
+type WorkRow = { id: string; canonical_title: string | null };
+
+/**
+ * Fetch works matching `q` as a flat array. The list endpoint returns a paginated envelope
+ * ({ items, total, page, pages, per_page } — D18), so a large per_page keeps cleanup/lookups on a
+ * single page rather than silently missing matches beyond the first.
+ */
+async function fetchWorkRows(
+  request: APIRequestContext,
+  token: string,
+  q: string,
+): Promise<WorkRow[]> {
+  const res = await request.get(
+    `${API_URL}/api/v1/works?q=${encodeURIComponent(q)}&per_page=500`,
+    { headers: auth(token) },
+  );
+  if (!res.ok()) return [];
+  const body = (await res.json()) as { items?: WorkRow[] } | WorkRow[];
+  return Array.isArray(body) ? body : (body.items ?? []);
+}
+
 /** Create a paper via the API (setup shortcut for specs that only exercise later flows). */
 export async function apiCreateWork(
   request: APIRequestContext,
@@ -51,11 +72,7 @@ export async function apiDeleteWorksByTitle(
   title: string,
 ): Promise<void> {
   // Narrow with the shared "E2E" prefix, then match the exact title so we never touch other data.
-  const res = await request.get(`${API_URL}/api/v1/works?q=${encodeURIComponent('E2E')}`, {
-    headers: auth(token),
-  });
-  if (!res.ok()) return;
-  const works = (await res.json()) as Array<{ id: string; canonical_title: string | null }>;
+  const works = await fetchWorkRows(request, token, 'E2E');
   for (const w of works) {
     if ((w.canonical_title ?? '') === title) {
       await request.delete(`${API_URL}/api/v1/works/${w.id}`, { headers: auth(token) });
@@ -127,11 +144,7 @@ export async function apiDeleteWorksByTitleContains(
   token: string,
   needle: string,
 ): Promise<void> {
-  const res = await request.get(`${API_URL}/api/v1/works?q=${encodeURIComponent(needle)}`, {
-    headers: auth(token),
-  });
-  if (!res.ok()) return;
-  const works = (await res.json()) as Array<{ id: string; canonical_title: string | null }>;
+  const works = await fetchWorkRows(request, token, needle);
   for (const w of works) {
     if ((w.canonical_title ?? '').includes(needle)) {
       await request.delete(`${API_URL}/api/v1/works/${w.id}`, { headers: auth(token) });
@@ -175,10 +188,6 @@ export async function apiFindWorkByTitleContains(
   token: string,
   needle: string,
 ): Promise<{ id: string; canonical_title: string | null } | null> {
-  const res = await request.get(`${API_URL}/api/v1/works?q=${encodeURIComponent(needle)}`, {
-    headers: auth(token),
-  });
-  if (!res.ok()) return null;
-  const works = (await res.json()) as Array<{ id: string; canonical_title: string | null }>;
+  const works = await fetchWorkRows(request, token, needle);
   return works.find((w) => (w.canonical_title ?? '').includes(needle)) ?? null;
 }

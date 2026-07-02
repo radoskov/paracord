@@ -35,10 +35,18 @@ from app.core.security import Role  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.models.user import User  # noqa: E402
+from app.services import app_config  # noqa: E402
 from app.services.users import create_user  # noqa: E402
 
 DEFAULT_USERNAME = "e2e_admin"
 DEFAULT_PASSWORD = "e2e-Passw0rd!"  # pragma: allowlist secret (deliberate dev/test default)
+
+# The browser E2E suite drives the real UI, which fires many API calls in a short window (and the
+# unauthenticated sign-in POST is bucketed per client IP). The out-of-the-box D1 ceilings
+# (60/client, 300/global per minute) trip a 429 partway through the run, so raise them well clear of
+# anything the serial suite generates. Idempotent: re-running just re-asserts the ceilings.
+E2E_RATE_LIMIT_PER_CLIENT_PER_MIN = 100_000
+E2E_RATE_LIMIT_GLOBAL_PER_MIN = 100_000
 
 
 def ensure_e2e_user(username: str, password: str) -> User:
@@ -76,6 +84,17 @@ def ensure_e2e_user(username: str, password: str) -> User:
         return user
 
 
+def raise_test_rate_limits() -> None:
+    """Lift the D1 request rate-limit ceilings so the browser suite isn't throttled mid-run."""
+    with SessionLocal() as session:
+        app_config.update_rate_limits(
+            session,
+            per_client_per_min=E2E_RATE_LIMIT_PER_CLIENT_PER_MIN,
+            global_per_min=E2E_RATE_LIMIT_GLOBAL_PER_MIN,
+        )
+        session.commit()
+
+
 def main() -> None:
     environment = get_settings().environment
     if environment not in ("development", "test") and not os.environ.get("E2E_PASSWORD"):
@@ -88,6 +107,7 @@ def main() -> None:
     password = os.environ.get("E2E_PASSWORD", DEFAULT_PASSWORD) or DEFAULT_PASSWORD
     try:
         user = ensure_e2e_user(username, password)
+        raise_test_rate_limits()
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
     print(f"E2E test user ready: {user.username!r} (role={user.role})")
