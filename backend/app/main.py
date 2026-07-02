@@ -4,12 +4,14 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.security import assert_no_guest_roles
+from app.services import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,37 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def _rate_limit(request: Request, call_next):
+        """Shared Redis rate limiting (D1). Fails open — a dead Redis never blocks requests."""
+        if is_websocket_or_exempt(request):
+            return await call_next(request)
+        scheme, _, raw_token = (request.headers.get("authorization") or "").partition(" ")
+        token = raw_token.strip() if scheme.lower() == "bearer" else None
+        ip = request.client.host if request.client else None
+        decision = rate_limit.check(token=token, ip=ip)
+        if not decision.allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": (
+                        "Rate limit exceeded; slow down and retry shortly."
+                        if decision.scope == "client"
+                        else "The server is busy (global rate limit); retry shortly."
+                    )
+                },
+                headers={"Retry-After": str(decision.retry_after)},
+            )
+        return await call_next(request)
+
     app.include_router(api_router, prefix="/api/v1")
     return app
+
+
+def is_websocket_or_exempt(request: Request) -> bool:
+    """True when a request must skip rate limiting (non-HTTP scope or an exempt path)."""
+    return request.scope.get("type") != "http" or rate_limit.is_exempt(request.url.path)
 
 
 app = create_app()

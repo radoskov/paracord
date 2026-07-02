@@ -54,6 +54,21 @@ def db(session_factory):
         session.close()
 
 
+@pytest.fixture(autouse=True)
+def _rate_limit_fail_open(monkeypatch):
+    """Run the API suite as if Redis were absent so the D1 rate-limit middleware fails open.
+
+    The dev-stack Redis is reachable from the test container, but the D1 contract is that unit
+    tests run without Redis (the limiter allows every request). Forcing the fail-open path keeps
+    the suite deterministic and free of cross-test coupling through a shared live counter; the
+    dedicated limiter tests inject their own fake client to exercise the enforced path.
+    """
+    from app.services import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_redis", lambda: None)
+    rate_limit.reset_cache()
+
+
 @pytest.fixture()
 def app(session_factory):
     from app.main import create_app

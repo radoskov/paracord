@@ -20,6 +20,11 @@ APP_CONFIG_SINGLETON_ID = uuid.UUID(int=1)
 # Out-of-the-box global ceiling on the Library page size; mirrors ``Settings.max_papers_per_page``.
 _DEFAULT_MAX_PAPERS_PER_PAGE = 500
 
+# Out-of-the-box overload-protection defaults (D1). Rate limits are per rolling minute; a request
+# exceeding either the per-client or the global ceiling is rejected with 429.
+_DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN = 60
+_DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN = 300
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -37,6 +42,13 @@ class AppConfig(Base):
     # ``Settings.max_papers_per_page`` so a freshly-inserted row keeps the built-in ceiling.
     max_papers_per_page: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_MAX_PAPERS_PER_PAGE)
+    )
+    # Overload protection (D1): shared Redis rate-limit ceilings per rolling minute.
+    rate_limit_per_client_per_min: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN)
+    )
+    rate_limit_global_per_min: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

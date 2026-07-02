@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, UserRoleUpdate
 from app.services import agents as agent_service
 from app.services import app_config as app_config_service
+from app.services import rate_limit
 from app.services import users as user_service
 from app.services.audit import record_event
 from app.services.users import PermissionError403
@@ -40,10 +41,15 @@ class PasswordResetRequest(BaseModel):
 
 class AppConfigOut(BaseModel):
     max_papers_per_page: int
+    rate_limit_per_client_per_min: int
+    rate_limit_global_per_min: int
 
 
 class AppConfigUpdate(BaseModel):
-    max_papers_per_page: int = Field(ge=1)
+    # All fields optional: the admin panel PATCHes only the section it edits (partial update).
+    max_papers_per_page: int | None = Field(default=None, ge=1)
+    rate_limit_per_client_per_min: int | None = Field(default=None, ge=1)
+    rate_limit_global_per_min: int | None = Field(default=None, ge=1)
 
 
 class AgentOut(BaseModel):
@@ -259,13 +265,23 @@ def list_audit_events(
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
+def _app_config_out(db: Session) -> AppConfigOut:
+    return AppConfigOut(
+        max_papers_per_page=app_config_service.effective_max_papers_per_page(db),
+        rate_limit_per_client_per_min=app_config_service.effective_rate_limit_per_client_per_min(
+            db
+        ),
+        rate_limit_global_per_min=app_config_service.effective_rate_limit_global_per_min(db),
+    )
+
+
 @router.get("/app-config", response_model=AppConfigOut)
 def read_app_config(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ) -> AppConfigOut:
     """Return the runtime app configuration (owner or admin)."""
-    return AppConfigOut(max_papers_per_page=app_config_service.effective_max_papers_per_page(db))
+    return _app_config_out(db)
 
 
 @router.patch("/app-config", response_model=AppConfigOut)
@@ -274,11 +290,27 @@ def update_app_config(
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> AppConfigOut:
-    """Update the runtime app configuration, e.g. the global max papers per page (owner or admin)."""
+    """Update the runtime app configuration (owner or admin); only supplied fields change."""
+    changed: dict[str, int] = {}
     try:
-        value = app_config_service.update_max_papers_per_page(
-            db, value=payload.max_papers_per_page, actor_user_id=actor.id
-        )
+        if payload.max_papers_per_page is not None:
+            changed["max_papers_per_page"] = app_config_service.update_max_papers_per_page(
+                db, value=payload.max_papers_per_page, actor_user_id=actor.id
+            )
+        if (
+            payload.rate_limit_per_client_per_min is not None
+            or payload.rate_limit_global_per_min is not None
+        ):
+            app_config_service.update_rate_limits(
+                db,
+                per_client_per_min=payload.rate_limit_per_client_per_min,
+                global_per_min=payload.rate_limit_global_per_min,
+                actor_user_id=actor.id,
+            )
+            if payload.rate_limit_per_client_per_min is not None:
+                changed["rate_limit_per_client_per_min"] = payload.rate_limit_per_client_per_min
+            if payload.rate_limit_global_per_min is not None:
+                changed["rate_limit_global_per_min"] = payload.rate_limit_global_per_min
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     record_event(
@@ -286,10 +318,12 @@ def update_app_config(
         "app.config_changed",
         actor_user_id=actor.id,
         entity_type="app_config",
-        details={"max_papers_per_page": value},
+        details=changed,
     )
     db.commit()
-    return AppConfigOut(max_papers_per_page=value)
+    # Newly-persisted rate limits take effect after the short config cache expires.
+    rate_limit.reset_cache()
+    return _app_config_out(db)
 
 
 @router.post(
