@@ -8,6 +8,20 @@
 > (2) "semantic search" and "topic modeling" are honest **lexical/TF-IDF approximations**, not
 > embedding/BERTopic implementations.
 
+## Full audit + consolidated decisions + auto-fixes (2026-07-02)
+
+A six-pass audit (security, efficiency, stability, tech-stack suitability, plus verification of
+every open item in the old followup/needs-discussion docs) produced **`docs/DECISIONS.md`** —
+now the single decision list; `FOLLOWUP.md` and `docs/NEEDS_DISCUSSION.md` are superseded by it.
+~30 unambiguous fixes were applied and committed in this pass (agent file perms + GUI XSS,
+import-batch IDOR, RQ 900 s job timeout, extraction-failure rollback discipline, transactional
+`make restore`, batched hot-path queries, HTTP-client + embedding-provider caching
+(NEEDS_DISCUSSION 3a), default-shelf hooks for the last creation paths (2c), derived-OCR-copy
+cleanup, 4 dead deps removed, and more — full table in DECISIONS §A). Verified with
+`make test-full` (660 backend + 32 agent green) and `make frontend-check` (75 green + build).
+`httpx2` was verified online as the legitimate Pydantic-maintained httpx fork. 38 items await
+owner decisions in DECISIONS §B, each with a recommendation.
+
 ## Stage 6 + 7 complete (2026-06-30)
 
 The `docs/WORKPLAN.md` stages are implemented through Stage 7. **Stage 6 (AI provider hardening):**

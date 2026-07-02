@@ -1,5 +1,11 @@
 # Needs discussion / deferred items
 
+> **SUPERSEDED (2026-07-02): read `docs/DECISIONS.md` instead.** Every item below was
+> re-verified against the code and merged into that consolidated audit + decision list.
+> Already closed there: 2c (default-shelf hooks) and 3a (provider cache) were implemented;
+> the rest map to decisions D6, D12, D19–D22, D31–D34, D38. This file is kept only as the
+> original record of the B1-era reasoning.
+
 Companion to `WORKPLAN_B1_AND_ISSUES.md`. This collects everything that was **deferred, decided-with-an-assumption, or surfaced by the code audit as a design/behavior choice** during the autonomous implementation of B1 + the 24 issues, plus the follow-up test review and full audit. Nothing here blocks what shipped; these are decisions for you to make when you have a moment.
 
 Status legend: **[decided]** you already chose this; **[assumption]** I picked a sensible default, confirm or override; **[open]** genuinely needs your call.
