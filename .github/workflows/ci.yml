@@ -79,3 +79,72 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # End-to-end browser journeys (Playwright). Brings up the dev stack the harness expects
+  # (frontend :5173 + API :8000) and runs the journeys against it. GROBID/Ollama stay down
+  # (profile-gated), so extraction/AI-dependent journeys self-skip; the identifier-import journey
+  # self-skips unless E2E_ONLINE is set (it needs external network).
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Configure environment
+        run: cp .env.example .env
+
+      - name: Start the dev stack
+        run: docker compose up -d --build postgres redis api worker frontend
+
+      - name: Wait for the API and frontend
+        run: |
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1 && break
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:8000/api/v1/health
+          for _ in $(seq 1 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:5173 2>/dev/null && break
+            sleep 3
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:5173
+
+      # Fresh DB needs the single owner before an admin test user can be minted. Idempotent:
+      # a re-run (owner already present) is tolerated.
+      - name: Bootstrap the owner account
+        run: |
+          docker compose exec -T api sh -c \
+            'printf "admin\npaperracks\npaperracks\n" | python scripts/bootstrap_admin.py' \
+            || echo "owner already exists — continuing"
+
+      # Creates the e2e_admin test user (well-known dev-default credentials) and lifts the request
+      # rate-limit ceilings for the run. PARACORD_ENV=development in the api container satisfies the
+      # SEC-B5 guard, so no password needs to be passed here.
+      - name: Provision the E2E test user
+        run: docker compose exec -T api python scripts/ensure_e2e_user.py
+
+      - name: Install Playwright and Chromium
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run the E2E journeys
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload the Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
