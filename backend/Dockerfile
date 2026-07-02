@@ -33,7 +33,14 @@ RUN apt-get update \
         tesseract-ocr-eng \
         ghostscript \
         ocrmypdf \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
+
+# D4: run the server/worker as a non-root user. UID 1000 matches the host developer so the
+# bind-mounted source tree stays writable in dev. The entrypoint (still root) fixes ownership of the
+# root-owned managed-library volume, then drops to this user via gosu before exec'ing the process.
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --create-home appuser
 
 EXPOSE 8000
 ENTRYPOINT ["/app/backend/docker-entrypoint.sh"]

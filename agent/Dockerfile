@@ -14,4 +14,12 @@ RUN pip install -r /app/agent/requirements.txt && pip install "pytest>=8.2"
 
 COPY agent /app/agent
 
+# D4: run as a non-root user. UID 1000 matches the host developer so the bind-mounted ./agent tree
+# stays readable/writable. The agent mounts no root-owned named volume, so a plain USER is enough
+# (no entrypoint chown needed, unlike the api/worker managed-library volume).
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --create-home appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python", "-m", "paperracks_agent.cli", "--help"]
