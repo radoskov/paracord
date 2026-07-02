@@ -186,6 +186,22 @@
     }
   }
 
+  // Run an async op over many ids with bounded concurrency (D16) instead of one serial round-trip
+  // per id. Uses Promise.allSettled per chunk so a single failure doesn't abort the rest; returns
+  // how many failed so callers can surface it rather than silently swallowing errors.
+  async function runBatched<T>(
+    items: T[],
+    op: (item: T) => Promise<unknown>,
+    size = 6,
+  ): Promise<number> {
+    let failed = 0;
+    for (let i = 0; i < items.length; i += size) {
+      const results = await Promise.allSettled(items.slice(i, i + size).map(op));
+      failed += results.filter((r) => r.status === 'rejected').length;
+    }
+    return failed;
+  }
+
   function structuredQuery() {
     return {
       readingStatus: statusFilter,
@@ -400,31 +416,29 @@
       return;
     const ids = [...selectedIds];
     await run(async () => {
-      for (const id of ids) await client.deleteWork(id);
+      const failed = await runBatched(ids, (id) => client.deleteWork(id));
       if (selected && ids.includes(selected.id)) selectWork(null);
       selectedIds = [];
       await loadWorks();
-    }, `Deleted ${ids.length} paper(s)`);
+      message = failed
+        ? `Deleted ${ids.length - failed} paper(s); ${failed} failed.`
+        : `Deleted ${ids.length} paper(s)`;
+    });
   }
 
   async function batchReextract(): Promise<void> {
     const ids = [...selectedIds];
     await run(async () => {
-      let queued = 0;
-      let unavailable = false;
-      for (const id of ids) {
-        const files = await client.listWorkFiles(id);
-        for (const file of files) {
-          try {
-            await client.extractFile(file.id);
-            queued += 1;
-          } catch {
-            unavailable = true;
-          }
-        }
-      }
-      message = unavailable
-        ? `Queued ${queued} extraction(s); some failed (queue unavailable?).`
+      // Gather every attached file across the selected papers (bounded concurrency), then queue
+      // extraction for each file (also bounded) instead of N×M serial round-trips.
+      const fileIds: string[] = [];
+      await runBatched(ids, async (id) => {
+        for (const file of await client.listWorkFiles(id)) fileIds.push(file.id);
+      });
+      const failed = await runBatched(fileIds, (fileId) => client.extractFile(fileId));
+      const queued = fileIds.length - failed;
+      message = failed
+        ? `Queued ${queued} extraction(s); ${failed} failed (queue unavailable?).`
         : queued
           ? `Queued ${queued} extraction(s) — watch the Jobs tab.`
           : 'Nothing to extract: the selected papers have no attached files.';
@@ -436,10 +450,13 @@
     const ids = [...selectedIds];
     const status = batchStatus;
     await run(async () => {
-      for (const id of ids) await client.updateWork(id, { reading_status: status });
+      const failed = await runBatched(ids, (id) => client.updateWork(id, { reading_status: status }));
       batchStatus = '';
       await loadWorks();
-    }, `Set ${ids.length} paper(s) to “${status}”`);
+      message = failed
+        ? `Set ${ids.length - failed} paper(s) to “${status}”; ${failed} failed.`
+        : `Set ${ids.length} paper(s) to “${status}”`;
+    });
   }
 
   async function batchPutInto(): Promise<void> {
@@ -447,10 +464,13 @@
     const shelfId = batchPutIntoShelfId;
     const ids = [...selectedIds];
     await run(async () => {
-      for (const id of ids) await client.addWorkToShelf(shelfId, id);
+      const failed = await runBatched(ids, (id) => client.addWorkToShelf(shelfId, id));
       showBatchPutInto = false;
       batchPutIntoShelfId = '';
-    }, `Added ${ids.length} paper(s) to shelf`);
+      message = failed
+        ? `Added ${ids.length - failed} paper(s) to shelf; ${failed} failed.`
+        : `Added ${ids.length} paper(s) to shelf`;
+    });
   }
 
   function parseIdentifierUrl(url: string): { doi?: string; arxiv_id?: string } {
