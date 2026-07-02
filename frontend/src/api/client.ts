@@ -846,9 +846,13 @@ export interface CurrentUser {
   papers_per_page: number | null;
 }
 
-// Runtime app configuration (admin-editable; D18 global page-size clamp).
+// Runtime app configuration (admin-editable; D18 page-size clamp + D1 overload protection).
 export interface AppConfig {
   max_papers_per_page: number;
+  rate_limit_per_client_per_min: number;
+  rate_limit_global_per_min: number;
+  max_batch_items: number;
+  rq_worker_count: number;
 }
 
 export interface AgentRecord {
@@ -1690,7 +1694,7 @@ export class ApiClient {
     return this.request<AppConfig>('/api/v1/admin/app-config');
   }
 
-  async updateAppConfig(changes: { max_papers_per_page: number }): Promise<AppConfig> {
+  async updateAppConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
     return this.request<AppConfig>('/api/v1/admin/app-config', {
       method: 'PATCH',
       body: changes,

@@ -21,8 +21,21 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listShelves: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
-    getAppConfig: vi.fn().mockResolvedValue({ max_papers_per_page: 500 }),
-    updateAppConfig: vi.fn().mockResolvedValue({ max_papers_per_page: 250 }),
+    getAppConfig: vi.fn().mockResolvedValue({
+      max_papers_per_page: 500,
+      rate_limit_per_client_per_min: 60,
+      rate_limit_global_per_min: 300,
+      max_batch_items: 100,
+      rq_worker_count: 2,
+    }),
+    updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
+      max_papers_per_page: 250,
+      rate_limit_per_client_per_min: 60,
+      rate_limit_global_per_min: 300,
+      max_batch_items: 100,
+      rq_worker_count: 2,
+      ...changes,
+    })),
     ...overrides,
   };
 }
@@ -61,10 +74,33 @@ describe('AdminPage groups section', () => {
     await waitFor(() => expect(input.value).toBe('500'));
 
     await fireEvent.input(input, { target: { value: '250' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // The Settings tab has a Save button per section (Library + Overload protection).
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
     await waitFor(() =>
       expect(client.updateAppConfig).toHaveBeenCalledWith({ max_papers_per_page: 250 }),
+    );
+  });
+
+  it('saves the overload-protection settings from the Settings tab', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.getAppConfig).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const workers = screen.getByLabelText('Background worker processes') as HTMLInputElement;
+    await waitFor(() => expect(workers.value).toBe('2'));
+
+    await fireEvent.input(workers, { target: { value: '4' } });
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[1]);
+
+    await waitFor(() =>
+      expect(client.updateAppConfig).toHaveBeenCalledWith({
+        rate_limit_per_client_per_min: 60,
+        rate_limit_global_per_min: 300,
+        max_batch_items: 100,
+        rq_worker_count: 4,
+      }),
     );
   });
 });

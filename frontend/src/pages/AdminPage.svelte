@@ -6,6 +6,7 @@
     type AgentFileRecord,
     type AgentPrivilege,
     type AgentRecord,
+    type AppConfig,
     type DefaultGrant,
     type Grant,
     type GrantTargetType,
@@ -217,17 +218,31 @@
         ]);
         defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
       }
-      // Runtime app config (D18 global page-size clamp) is owner+admin.
+      // Runtime app config (D18 page-size clamp + D1 overload protection) is owner+admin.
       if (get(canManageUsers)) {
-        maxPapersPerPage = String((await client.getAppConfig()).max_papers_per_page);
+        applyAppConfig(await client.getAppConfig());
       }
     });
   }
 
-  // --- App settings (D18: global max papers per page) ---
+  // --- App settings (D18: page-size clamp; D1: overload protection) ---
   let maxPapersPerPage = '';
+  let rateLimitPerClient = '';
+  let rateLimitGlobal = '';
+  let maxBatchItems = '';
+  let rqWorkerCount = '';
   let savingAppConfig = false;
+  let savingOverload = false;
   let appConfigMsg = '';
+  let overloadMsg = '';
+
+  function applyAppConfig(cfg: AppConfig): void {
+    maxPapersPerPage = String(cfg.max_papers_per_page);
+    rateLimitPerClient = String(cfg.rate_limit_per_client_per_min);
+    rateLimitGlobal = String(cfg.rate_limit_global_per_min);
+    maxBatchItems = String(cfg.max_batch_items);
+    rqWorkerCount = String(cfg.rq_worker_count);
+  }
 
   async function saveAppConfig(): Promise<void> {
     const value = Math.trunc(Number(maxPapersPerPage));
@@ -238,11 +253,42 @@
     savingAppConfig = true;
     appConfigMsg = '';
     await run(async () => {
-      const updated = await client.updateAppConfig({ max_papers_per_page: value });
-      maxPapersPerPage = String(updated.max_papers_per_page);
+      applyAppConfig(await client.updateAppConfig({ max_papers_per_page: value }));
       appConfigMsg = 'Saved.';
     });
     savingAppConfig = false;
+  }
+
+  async function saveOverloadConfig(): Promise<void> {
+    const perClient = Math.trunc(Number(rateLimitPerClient));
+    const global = Math.trunc(Number(rateLimitGlobal));
+    const batch = Math.trunc(Number(maxBatchItems));
+    const workers = Math.trunc(Number(rqWorkerCount));
+    for (const [label, v] of [
+      ['Per-client rate limit', perClient],
+      ['Global rate limit', global],
+      ['Max papers per import', batch],
+      ['RQ worker count', workers],
+    ] as const) {
+      if (!Number.isFinite(v) || v < 1) {
+        message = `${label} must be a whole number of at least 1`;
+        return;
+      }
+    }
+    savingOverload = true;
+    overloadMsg = '';
+    await run(async () => {
+      applyAppConfig(
+        await client.updateAppConfig({
+          rate_limit_per_client_per_min: perClient,
+          rate_limit_global_per_min: global,
+          max_batch_items: batch,
+          rq_worker_count: workers,
+        }),
+      );
+      overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
+    });
+    savingOverload = false;
   }
 
   // --- Groups ---
@@ -1176,6 +1222,45 @@
         <button type="submit" disabled={savingAppConfig || loading || !maxPapersPerPage}
           title="Save the global maximum papers per page">Save</button>
         {#if appConfigMsg}<p class="muted">{appConfigMsg}</p>{/if}
+        {#if message}<p class="danger">{message}</p>{/if}
+      </form>
+    </section>
+
+    <section class="surface admin-section">
+      <div class="section-head">
+        <h2>Overload protection</h2>
+      </div>
+      <form on:submit|preventDefault={saveOverloadConfig} class="stack">
+        <label class="field">
+          Per-client requests per minute
+          <input type="number" min="1" bind:value={rateLimitPerClient} />
+        </label>
+        <label class="field">
+          Global requests per minute
+          <input type="number" min="1" bind:value={rateLimitGlobal} />
+        </label>
+        <p class="small-help">
+          Requests above either ceiling are rejected with HTTP 429. Limits are shared across API
+          workers; if the rate-limit store is unavailable the server allows the request (fail-open).
+        </p>
+        <label class="field">
+          Max papers per import batch
+          <input type="number" min="1" bind:value={maxBatchItems} />
+        </label>
+        <p class="small-help">
+          A single import over this size is rejected; split it into smaller imports. Server-folder
+          scans are exempt, and the local agent splits large scans automatically.
+        </p>
+        <label class="field">
+          Background worker processes
+          <input type="number" min="1" bind:value={rqWorkerCount} />
+        </label>
+        <p class="small-help">
+          Number of extraction worker processes. <strong>Restart the worker container to apply.</strong>
+        </p>
+        <button type="submit" disabled={savingOverload || loading}
+          title="Save overload-protection settings">Save</button>
+        {#if overloadMsg}<p class="muted">{overloadMsg}</p>{/if}
         {#if message}<p class="danger">{message}</p>{/if}
       </form>
     </section>
