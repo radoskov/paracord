@@ -35,6 +35,8 @@ def detect_providers(*, ollama_url: str) -> dict:
     st_available = _module_available("sentence_transformers")
     bertopic_available = _module_available("bertopic")
     ocrmypdf_available = shutil.which("ocrmypdf") is not None
+    # PyMuPDF OCR shells out to tesseract, so both must be present for the pymupdf backend to run.
+    pymupdf_available = _module_available("fitz") and shutil.which("tesseract") is not None
     nougat_available = _module_available("nougat")
     marker_available = _module_available("marker")
     return {
@@ -90,6 +92,13 @@ def detect_providers(*, ollama_url: str) -> dict:
                 else "ocrmypdf/tesseract not found in this image — rebuild the base image "
                 "(bundles tesseract-ocr + ghostscript + ocrmypdf).",
             },
+            "pymupdf": {
+                "available": pymupdf_available,
+                "note": None
+                if pymupdf_available
+                else "PyMuPDF (fitz) + tesseract not found in this image — rebuild the base image "
+                "(bundles PyMuPDF + tesseract-ocr).",
+            },
             "full_ml": {
                 "available": nougat_available or marker_available,
                 "note": None
@@ -117,6 +126,7 @@ def detect_providers(*, ollama_url: str) -> dict:
         "bertopic_installed": bertopic_available,
         "sentence_transformers_installed": st_available,
         "ocrmypdf_installed": ocrmypdf_available,
+        "pymupdf_installed": pymupdf_available,
         "nougat_installed": nougat_available,
         "marker_installed": marker_available,
     }

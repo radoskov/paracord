@@ -110,6 +110,53 @@ def test_maybe_ocr_swallows_timeout(tmp_path: Path, monkeypatch) -> None:
     assert result.error is not None
 
 
+# --- PyMuPDF OCR backend ---
+
+
+def test_pymupdf_available_reflects_fitz_and_tesseract(monkeypatch) -> None:
+    # Absent tesseract → unavailable even if fitz imports.
+    monkeypatch.setattr(ocr_service.shutil, "which", lambda _name: None)
+    assert ocr_service.pymupdf_available() is False
+
+
+def test_pymupdf_ocr_graceful_when_tessdata_missing(tmp_path: Path, monkeypatch) -> None:
+    # No tessdata dir found → swallow the failure and return the ORIGINAL pdf (never raises).
+    monkeypatch.setattr(ocr_service, "_tessdata_prefix", lambda: None)
+    pdf = tmp_path / "in.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    result = ocr_service.pymupdf_ocr(pdf, out_dir=tmp_path / "s", language="eng")
+    assert result.ran is False
+    assert result.engine == "pymupdf"
+    assert result.output_pdf_path == pdf  # falls back to the original PDF
+    assert result.error is not None
+
+
+def test_pymupdf_ocr_adds_searchable_text_layer(tmp_path: Path) -> None:
+    """Real OCR: rasterise a text PDF, OCR it back to a searchable copy (needs fitz + tesseract)."""
+    if not ocr_service.pymupdf_available():
+        import pytest as _pytest
+
+        _pytest.skip("PyMuPDF / tesseract not available in this environment")
+    import fitz  # type: ignore[import-not-found]
+
+    src = tmp_path / "src.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    # Large text so the rasterised page OCRs cleanly.
+    page.insert_text((72, 200), "HELLO", fontsize=96)
+    doc.save(str(src))
+    doc.close()
+
+    result = ocr_service.pymupdf_ocr(src, out_dir=tmp_path / "out", language="eng", dpi=200)
+    assert result.ran is True
+    assert result.engine == "pymupdf"
+    assert result.text_layer_quality == "ocr_added"
+    assert result.output_pdf_path.exists()
+    with fitz.open(result.output_pdf_path) as out:
+        text = "".join(p.get_text() for p in out)
+    assert "HELLO" in text.upper()
+
+
 def test_ml_extraction_unavailable_gives_clear_error(tmp_path: Path, monkeypatch) -> None:
     # find_spec returns None → selected-but-absent → a clear install-path error, no torch import.
     monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)

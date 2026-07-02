@@ -171,7 +171,7 @@ def test_ai_config_includes_ocr_backend_in_allowed_and_active(client, auth_heade
 
     cfg = client.get("/api/v1/admin/ai-config", headers=owner).json()
     assert cfg["config"]["ocr_backend"] == "ocrmypdf"  # Settings default
-    assert set(cfg["allowed"]["ocr_backend"]) == {"none", "ocrmypdf", "full_ml"}
+    assert set(cfg["allowed"]["ocr_backend"]) == {"none", "ocrmypdf", "pymupdf", "full_ml"}
 
     status = client.get("/api/v1/admin/ai/status", headers=owner).json()
     assert "extraction" in status["active"]

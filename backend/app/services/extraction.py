@@ -42,6 +42,26 @@ def _text_layer_quality(body_text: str, abstract: str | None, page_count: int | 
     return "good"
 
 
+def _resolve_ocr_engine(
+    ocr_backend: str, *, text_layer_quality: str | None, force_ocr: bool
+) -> str | None:
+    """Pick the OCR pre-step engine (``"ocrmypdf"`` / ``"pymupdf"``) or ``None``.
+
+    Gated on the engine being installed AND either the admin selected an OCR backend and the text
+    layer needs OCR, OR the caller forced it (#22). ``pymupdf`` is used only when that backend is
+    selected; ``ocrmypdf`` covers the ``ocrmypdf`` backend and is the fallback engine for a forced
+    re-OCR under a non-OCR backend (``none`` / ``full_ml``), preserving the prior force behaviour.
+    """
+    needs = ocr_service.needs_ocr(text_layer_quality)
+    if ocr_backend == "pymupdf":
+        if (force_ocr or needs) and ocr_service.pymupdf_available():
+            return "pymupdf"
+        return None
+    if (force_ocr or (ocr_backend == "ocrmypdf" and needs)) and ocr_service.ocrmypdf_available():
+        return "ocrmypdf"
+    return None
+
+
 def store_parsed_extraction(
     db: Session,
     *,
@@ -202,27 +222,35 @@ def extract_and_store(
     # honouring the admin's choice like the topic job does.
     ocr_backend = get_ai_config(db, settings=settings).ocr_backend
 
-    # OCR pre-step: when OCRmyPDF is selected and the text layer is poor/none/unknown, add a
+    # OCR pre-step: when an OCR backend is selected and the text layer is poor/none/unknown, add a
     # searchable text layer to a *transient* copy and feed that to GROBID. OCR never fails the
-    # extraction (maybe_ocr swallows errors and returns the original path on failure/skip).
+    # extraction (the OCR helpers swallow errors and return the original path on failure/skip).
     ocr_result: ocr_service.OcrResult | None = None
     tei_source_path = pdf_path
-    # Run OCRmyPDF when it is installed AND either the admin selected it and the text layer is
-    # poor, OR the caller explicitly forced it (#22 manual "Force OCR", regardless of the backend
-    # setting or current quality — skip_if_good is disabled so a re-OCR always runs).
-    run_ocrmypdf = ocr_service.ocrmypdf_available() and (
-        force_ocr or (ocr_backend == "ocrmypdf" and ocr_service.needs_ocr(file.text_layer_quality))
+    # Pick the OCR engine to run (or None): ocrmypdf or pymupdf, gated on availability + the
+    # text-layer-quality/#22-force rule. force_ocr uses the selected OCR engine (pymupdf when that
+    # backend is chosen, else ocrmypdf) regardless of the current quality.
+    ocr_engine = _resolve_ocr_engine(
+        ocr_backend, text_layer_quality=file.text_layer_quality, force_ocr=force_ocr
     )
-    if run_ocrmypdf:
+    if ocr_engine is not None:
         with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
-            ocr_result = ocr_service.maybe_ocr(
-                pdf_path,
-                text_layer_quality=file.text_layer_quality,
-                out_dir=Path(scratch),
-                timeout=settings.ocr_timeout_seconds,
-                language=settings.ocr_language,
-                skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
-            )
+            if ocr_engine == "pymupdf":
+                ocr_result = ocr_service.pymupdf_ocr(
+                    pdf_path,
+                    out_dir=Path(scratch),
+                    language=settings.ocr_language,
+                    timeout=settings.ocr_timeout_seconds,
+                )
+            else:
+                ocr_result = ocr_service.maybe_ocr(
+                    pdf_path,
+                    text_layer_quality=file.text_layer_quality,
+                    out_dir=Path(scratch),
+                    timeout=settings.ocr_timeout_seconds,
+                    language=settings.ocr_language,
+                    skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
+                )
             tei_source_path = ocr_result.output_pdf_path
             tei_xml = fetch_tei(tei_source_path)
     elif ocr_backend == "full_ml" and ocr_service.ml_extraction_available(
@@ -251,7 +279,11 @@ def extract_and_store(
     summary["ocr_error"] = ocr_result.error if ocr_result else None
     # Surface availability + text-layer quality so the UI can explain a textless scan (#22):
     # "OCR not installed" vs "OCR ran" vs "text layer already good".
-    summary["ocr_available"] = ocr_service.ocrmypdf_available()
+    summary["ocr_available"] = (
+        ocr_service.pymupdf_available()
+        if ocr_backend == "pymupdf"
+        else ocr_service.ocrmypdf_available()
+    )
     summary["ocr_forced"] = force_ocr
     summary["text_layer_quality"] = file.text_layer_quality
 

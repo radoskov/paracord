@@ -48,8 +48,9 @@ EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
 SUMMARY_PROVIDERS = ("extractive", "local_llm")
 TOPIC_BACKENDS = ("tfidf", "embedding", "bertopic")
 # OCR / advanced-extraction backends (Phase B5): none disables OCR; ocrmypdf adds a searchable
-# text layer before GROBID; full_ml routes to an opt-in ML extractor (activate-when-present).
-OCR_BACKENDS = ("none", "ocrmypdf", "full_ml")
+# text layer before GROBID; pymupdf adds one via PyMuPDF + tesseract (no ocrmypdf/ghostscript
+# dependency); full_ml routes to an opt-in ML extractor (activate-when-present).
+OCR_BACKENDS = ("none", "ocrmypdf", "pymupdf", "full_ml")
 
 
 @dataclass

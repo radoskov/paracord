@@ -18,13 +18,24 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Candidate tessdata locations, in preference order. Tesseract's traineddata files live here; a
+# PyMuPDF OCR call needs ``TESSDATA_PREFIX`` pointing at one of these (the dev image leaves it
+# unset). ``$TESSDATA_PREFIX`` wins when already set by the environment.
+_TESSDATA_CANDIDATES = (
+    "/usr/share/tesseract-ocr/5/tessdata",
+    "/usr/share/tesseract-ocr/4.00/tessdata",
+    "/usr/share/tessdata",
+)
 
 # Text-layer qualities for which OCR is worthwhile. "good" is skipped; "ocr_added" means a prior
 # OCR pass already ran (re-running ocrmypdf --skip-text is a cheap no-op, so it is safe either way,
@@ -39,8 +50,8 @@ class OcrResult:
     """Outcome of a ``maybe_ocr`` attempt (provenance for the extraction summary/audit)."""
 
     output_pdf_path: Path  # the path to feed GROBID (the OCR'd copy, or the original on skip/fail)
-    ran: bool  # whether ocrmypdf actually produced a new searchable PDF
-    engine: str | None  # engine used ("ocrmypdf") when it ran, else None
+    ran: bool  # whether the OCR engine actually produced a new searchable PDF
+    engine: str | None  # engine used ("ocrmypdf" / "pymupdf") when it ran, else None
     text_layer_quality: str | None  # the new quality to persist ("ocr_added") when it ran
     error: str | None  # a short error string when OCR was attempted but failed (swallowed)
 
@@ -129,6 +140,81 @@ def maybe_ocr(
         text_layer_quality="ocr_added",
         error=None,
     )
+
+
+def _tessdata_prefix() -> str | None:
+    """Return the tessdata directory to point ``TESSDATA_PREFIX`` at (or None if none is found).
+
+    Prefers an already-set ``$TESSDATA_PREFIX``; otherwise the first existing candidate. PyMuPDF's
+    OCR calls read tesseract's traineddata from here, and the dev image leaves the var unset.
+    """
+    env = os.environ.get("TESSDATA_PREFIX")
+    if env and Path(env).is_dir():
+        return env
+    for candidate in _TESSDATA_CANDIDATES:
+        if Path(candidate).is_dir():
+            return candidate
+    return None
+
+
+def pymupdf_available() -> bool:
+    """True when PyMuPDF (``import fitz``) is importable AND tesseract is on PATH.
+
+    PyMuPDF's OCR shells out to tesseract, so both must be present for ``pymupdf_ocr`` to work.
+    """
+    return importlib.util.find_spec("fitz") is not None and shutil.which("tesseract") is not None
+
+
+def pymupdf_ocr(
+    pdf: Path,
+    *,
+    out_dir: Path,
+    language: str = "eng",
+    dpi: int = 300,
+    timeout: int | None = None,
+) -> OcrResult:
+    """OCR ``pdf`` with PyMuPDF + tesseract, writing a searchable copy under ``out_dir``.
+
+    Each page is rasterised (``page.get_pixmap(dpi=dpi)``) and OCR'd to a single-page searchable
+    PDF (``pix.pdfocr_tobytes(language=language)``); the pages are concatenated into one output PDF.
+    ``language`` is passed through verbatim, so tesseract's multi-language syntax (``"eng+spa"``)
+    works. Sets ``TESSDATA_PREFIX`` first (the dev image leaves it unset).
+
+    Never raises — mirrors ``maybe_ocr``'s swallow-and-return contract: on any failure it returns an
+    ``OcrResult`` whose ``output_pdf_path`` is the ORIGINAL ``pdf`` with ``ran=False`` and a short
+    ``error``, so extraction proceeds on the original PDF. ``timeout`` (seconds), when given, is a
+    best-effort wall-clock budget checked between pages.
+    """
+    try:
+        import fitz  # type: ignore[import-not-found]  # noqa: PLC0415 (optional heavy dep)
+
+        prefix = _tessdata_prefix()
+        if prefix is None:
+            raise RuntimeError("tessdata directory not found (set TESSDATA_PREFIX)")
+        os.environ["TESSDATA_PREFIX"] = prefix
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        output_pdf = out_dir / f"{pdf.stem}.ocr.pdf"
+        started = time.monotonic()
+        with fitz.open(pdf) as document, fitz.open() as out:
+            for page in document:
+                if timeout is not None and time.monotonic() - started > timeout:
+                    raise TimeoutError(f"pymupdf OCR exceeded {timeout}s")
+                pixmap = page.get_pixmap(dpi=dpi)
+                ocr_bytes = pixmap.pdfocr_tobytes(language=language)
+                with fitz.open("pdf", ocr_bytes) as ocr_page:
+                    out.insert_pdf(ocr_page)
+            out.save(str(output_pdf))
+        return OcrResult(
+            output_pdf,
+            ran=True,
+            engine="pymupdf",
+            text_layer_quality="ocr_added",
+            error=None,
+        )
+    except Exception as exc:  # noqa: BLE001 - OCR failure must NEVER fail extraction (SPEC §8.3)
+        logger.warning("OCR (pymupdf) failed for %s: %s", pdf, exc)
+        return OcrResult(pdf, ran=False, engine="pymupdf", text_layer_quality=None, error=str(exc))
 
 
 def ml_extraction_available(backend: str) -> bool:

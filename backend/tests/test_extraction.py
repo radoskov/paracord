@@ -489,6 +489,52 @@ def test_extraction_stores_citation_contexts_with_pdf_coordinates(
     assert first["pdf_coordinates"] == [{"page": 3, "x": 123.4, "y": 456.7, "w": 12.0, "h": 10.5}]
 
 
+def test_extract_routes_to_pymupdf_backend(db_session, tmp_path, monkeypatch) -> None:
+    """ocr_backend="pymupdf" feeds a PyMuPDF-OCR'd searchable copy to GROBID (like ocrmypdf)."""
+    from app.core.config import get_settings
+    from app.services import ocr as ocr_service
+
+    work, file, pdf, _ = _make_extractable_file(db_session, tmp_path, quality="poor")
+    settings = get_settings().model_copy(update={"ocr_backend": "pymupdf"})
+    monkeypatch.setattr(ocr_service, "pymupdf_available", lambda: True)
+    # Guard: the ocrmypdf engine must NOT run when pymupdf is selected.
+    monkeypatch.setattr(
+        ocr_service,
+        "maybe_ocr",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no ocrmypdf")),
+    )
+    ocr_pdf = tmp_path / "paper.pymupdf.ocr.pdf"
+    ocr_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    seen: dict = {}
+
+    def fake_pymupdf_ocr(path, **kw):
+        seen["path"] = path
+        seen["language"] = kw.get("language")
+        return ocr_service.OcrResult(
+            ocr_pdf, ran=True, engine="pymupdf", text_layer_quality="ocr_added", error=None
+        )
+
+    monkeypatch.setattr(ocr_service, "pymupdf_ocr", fake_pymupdf_ocr)
+
+    fed: dict = {}
+
+    def fake_fetch(path):
+        fed["path"] = path
+        return FIXTURE
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    assert seen["path"] == pdf.resolve()  # OCR ran on the ORIGINAL PDF
+    assert fed["path"] == ocr_pdf  # GROBID fed the searchable copy
+    assert summary["ocr_ran"] is True
+    assert summary["ocr_engine"] == "pymupdf"
+    assert summary["ocr_backend"] == "pymupdf"
+    assert summary["ocr_available"] is True
+    assert file.text_layer_quality == "ocr_added"
+
+
 def test_extract_force_ocr_runs_even_on_good_text_layer(db_session, tmp_path, monkeypatch) -> None:
     """#22: force_ocr re-runs OCRmyPDF regardless of quality; summary surfaces provenance."""
     from app.services import ocr as ocr_service
