@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     # TEI elements to request PDF coordinates for (enables reader anchors); empty disables.
     grobid_coordinate_elements: list[str] = ["ref", "biblStruct", "s", "p"]
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
+    # SSRF opt-in for the admin-set ``ollama_url`` (D6): loopback + docker-service names are always
+    # allowed; any other host (an FQDN or a LAN/public IP) is refused unless this is explicitly set.
+    allow_external_ollama: bool = Field(default=False, alias="ALLOW_EXTERNAL_OLLAMA")
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
     # No guest/anonymous access exists by design; the role set is asserted guest-free at startup
     # (see app.core.security.assert_no_guest_roles). There is intentionally no guest_access flag.

@@ -260,3 +260,52 @@ def test_validate_non_ollama_provider_is_ok(client, auth_headers):
     )
     assert r.status_code == 200
     assert r.json()["embeddings"] is True
+
+
+# --- D6: ollama_url SSRF guard ---
+
+
+def test_ai_config_accepts_loopback_and_service_ollama_url(client, auth_headers):
+    owner = auth_headers("owner")
+    for url in (
+        "http://localhost:11434",
+        "http://127.0.0.1:11434",
+        "http://ollama:11434",  # docker-service name (single label)
+        "http://[::1]:11434",
+    ):
+        r = client.put("/api/v1/admin/ai-config", headers=owner, json={"ollama_url": url})
+        assert r.status_code == 200, url
+        assert r.json()["config"]["ollama_url"] == url
+
+
+def test_ai_config_rejects_external_ollama_url_without_optin(client, auth_headers):
+    owner = auth_headers("owner")
+    for url in ("http://evil.example.com:11434", "http://169.254.169.254", "ftp://ollama"):
+        r = client.put("/api/v1/admin/ai-config", headers=owner, json={"ollama_url": url})
+        assert r.status_code == 400, url
+
+
+def test_ollama_url_external_allowed_with_optin():
+    from app.core.config import Settings
+    from app.services.ai_config import _validate_ollama_url
+
+    permissive = Settings(allow_external_ollama=True)
+    # No raise: an FQDN is permitted once the opt-in is set.
+    _validate_ollama_url("http://ollama.lan.example.org:11434", settings=permissive)
+    # Scheme is still enforced even with the opt-in.
+    import pytest
+
+    with pytest.raises(ValueError):
+        _validate_ollama_url("ftp://ollama.example.org", settings=permissive)
+
+
+def test_ollama_host_classification():
+    from app.services.ai_config import _ollama_host_is_local
+
+    assert _ollama_host_is_local("localhost")
+    assert _ollama_host_is_local("127.0.0.1")
+    assert _ollama_host_is_local("::1")
+    assert _ollama_host_is_local("ollama")  # docker-service name
+    assert not _ollama_host_is_local("ollama.example.org")
+    assert not _ollama_host_is_local("169.254.169.254")
+    assert not _ollama_host_is_local("192.168.1.5")

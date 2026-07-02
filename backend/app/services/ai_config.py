@@ -8,8 +8,10 @@ here so it can be changed at runtime from the Admin UI rather than from a config
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from dataclasses import asdict, dataclass
+from urllib.parse import urlsplit
 
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
@@ -115,7 +117,7 @@ def update_ai_config(
     ``embedding_model_changed`` lets the caller schedule a reindex (vectors are stored per
     provider+model, so the active model must be rebuilt when it changes).
     """
-    _validate(changes)
+    _validate(changes, settings=get_settings())
     before = get_ai_config(db)
     row = db.get(AIConfig, AI_CONFIG_SINGLETON_ID)
     if row is None:
@@ -134,7 +136,51 @@ def update_ai_config(
     return after, changed
 
 
-def _validate(changes: dict) -> None:
+def _ollama_host_is_local(host: str) -> bool:
+    """True for a loopback IP, ``localhost``, or a bare docker-service name (single DNS label).
+
+    Mirrors find-on-web's egress classification (:mod:`app.services.web_find`): loopback and
+    single-label service names resolve inside the compose network and are always safe; an FQDN or a
+    LAN/public IP literal is "other" and needs the explicit opt-in.
+    """
+    host = (host or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # Not an IP literal: a bare single-label hostname is a docker-service name (e.g. "ollama");
+        # a dotted FQDN is external.
+        return "." not in host and ":" not in host
+
+
+def _validate_ollama_url(url: str | None, *, settings: Settings) -> None:
+    """Reject an admin-set ``ollama_url`` that could point egress at an arbitrary host (D6, SSRF).
+
+    An empty value clears the override (falls back to the loopback Settings default). A non-loopback,
+    non-service host is refused unless ``allow_external_ollama`` is explicitly enabled.
+    """
+    url = (url or "").strip()
+    if not url:
+        return
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https"):
+        raise ValueError("ollama_url must be an http(s) URL")
+    host = parts.hostname
+    if not host:
+        raise ValueError("ollama_url must include a host")
+    if _ollama_host_is_local(host):
+        return
+    if not settings.allow_external_ollama:
+        raise ValueError(
+            "ollama_url host must be loopback or a docker-service name; set "
+            "ALLOW_EXTERNAL_OLLAMA=true to allow an external Ollama host"
+        )
+
+
+def _validate(changes: dict, *, settings: Settings) -> None:
     if (
         changes.get("embedding_provider")
         and changes["embedding_provider"] not in EMBEDDING_PROVIDERS
@@ -146,3 +192,5 @@ def _validate(changes: dict) -> None:
         raise ValueError(f"Unknown topic_backend (allowed: {TOPIC_BACKENDS})")
     if changes.get("ocr_backend") and changes["ocr_backend"] not in OCR_BACKENDS:
         raise ValueError(f"Unknown ocr_backend (allowed: {OCR_BACKENDS})")
+    if "ollama_url" in changes:
+        _validate_ollama_url(changes["ollama_url"], settings=settings)
