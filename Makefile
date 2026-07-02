@@ -262,6 +262,15 @@ test-agent-full: init ## Run ALL agent tests inside the agent container, includi
 test-migrations: init ## Run the migration<->model parity test against the compose Postgres.
 	$(API_RUN) $(PYTEST) backend/tests/test_migration_parity.py -v
 
+.PHONY: e2e-install
+e2e-install: ## Install the Playwright E2E deps + Chromium browser (needs network; run once).
+	cd e2e && npm install && npx playwright install chromium
+
+.PHONY: e2e
+e2e: ## Run the Playwright end-to-end browser tests. Requires the dev stack up (make up).
+	$(COMPOSE) exec -T $(API_SERVICE) python scripts/ensure_e2e_user.py
+	cd e2e && npx playwright test
+
 .PHONY: test-local
 test-local: ## Run the FAST tier of tests on the host interpreter (skips @slow).
 	python -m pytest -m "not slow" $(PYTEST_PATHS)
