@@ -13,7 +13,7 @@ from paperracks_agent.state import AgentState
 class FakeClient:
     """Records calls instead of hitting a server."""
 
-    def __init__(self, pending=None, my_files=None) -> None:
+    def __init__(self, pending=None, my_files=None, extraction_queued=True) -> None:
         self.server_url = "http://test"
         self.manifests: list[dict] = []
         self.extracted: list[str] = []
@@ -23,6 +23,8 @@ class FakeClient:
         self.offered: list[str] = []
         self._pending = pending or []
         self._my_files = my_files or []
+        # Simulate the server's D7 report of whether it could queue extraction.
+        self._extraction_queued = extraction_queued
 
     async def send_manifest(self, payload: dict) -> None:
         self.manifests.append(payload)
@@ -39,7 +41,7 @@ class FakeClient:
 
     async def upload_for_extraction(self, local_file_id: str, handle) -> dict:
         self.extracted.append(local_file_id)
-        return {"status": "extracting"}
+        return {"status": "extracting", "extraction_queued": self._extraction_queued}
 
     async def upload_teleport_content(self, local_file_id: str, handle) -> dict:
         self.teleported.append(local_file_id)
@@ -79,6 +81,35 @@ def test_sync_extract_action_uploads_for_extraction(tmp_path: Path) -> None:
     asyncio.run(agent_ops.sync(config, state, client))
     assert len(client.extracted) == 1
     assert client.teleported == []
+
+
+def test_sync_extract_enqueue_failure_keeps_item_retryable(tmp_path: Path) -> None:
+    """D7: when the server can't queue extraction the item stays retryable and is re-attempted.
+
+    The item must NOT advance to the terminal "extracting" state, and a following sync must push it
+    again even though the server optimistically reports "extracting".
+    """
+    config = _folder(tmp_path, "index_and_extract")
+    state = AgentState(tmp_path / "state.sqlite3")
+
+    # First sync: server stored the file but couldn't queue extraction (queue offline).
+    client = FakeClient(extraction_queued=False)
+    asyncio.run(agent_ops.sync(config, state, client))
+    lid = state.all_files()[0].local_file_id
+    assert client.extracted == [lid]
+    rec = next(r for r in state.all_files() if r.local_file_id == lid)
+    assert rec.processing_state == agent_ops.EXTRACT_QUEUE_FAILED  # not terminal → retryable
+
+    # Second sync: the queue is back. Even though the server now reports "extracting", the local
+    # retry marker forces another push, which this time succeeds and reaches the terminal state.
+    client2 = FakeClient(
+        my_files=[{"local_file_id": lid, "processing_state": "extracting"}],
+        extraction_queued=True,
+    )
+    asyncio.run(agent_ops.sync(config, state, client2))
+    assert client2.extracted == [lid]  # retried despite server's "extracting"
+    rec = next(r for r in state.all_files() if r.local_file_id == lid)
+    assert rec.processing_state == "extracting"
 
 
 def test_sync_teleport_action_pushes_bytes(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ report removed sources, and handle server teleport requests (auto under an `allo
 explicit approve/reject otherwise).
 """
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from paperracks_agent.config import AgentConfig
 from paperracks_agent.manifest import build_manifest_item
 from paperracks_agent.state import AgentState
 from paperracks_agent.watcher import iter_pdf_files
+
+logger = logging.getLogger(__name__)
+
+# Local processing state for an item the server stored but could NOT queue for extraction (its
+# queue/Redis was down, so the extraction job was dropped). It is deliberately non-terminal so the
+# next sync re-attempts the push, and it is surfaced in the agent GUI (D7).
+EXTRACT_QUEUE_FAILED = "extract_queue_failed"
 
 
 @dataclass
@@ -165,22 +173,39 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
     # this cycle rather than re-uploading the whole corpus.
     if server_files is not None:
         server_state = {lid: f.get("processing_state") for lid, f in server_files.items()}
+        local_state = {r.local_file_id: r.processing_state for r in state.all_files()}
         for s in scanned:
             pstate = server_state.get(s.local_file_id)
-            if s.action == "index_and_extract" and pstate not in (
-                "extracting",
-                "extracted",
-                "teleported",
+            # A prior push the server couldn't queue for extraction (its queue was offline) is
+            # retryable: re-attempt it even though the server now reports "extracting" (D7).
+            retry_extract = local_state.get(s.local_file_id) == EXTRACT_QUEUE_FAILED
+            if s.action == "index_and_extract" and (
+                pstate not in ("extracting", "extracted", "teleported") or retry_extract
             ):
                 with s.path.open("rb") as handle:
-                    await client.upload_for_extraction(s.local_file_id, handle)
-                state.set_processing_state(s.local_file_id, "extracting")
-                applied += 1
+                    resp = await client.upload_for_extraction(s.local_file_id, handle)
+                if resp.get("extraction_queued", True):
+                    state.set_processing_state(s.local_file_id, "extracting")
+                    applied += 1
+                else:
+                    # Not fully processed — leave it retryable and surface it (the next sync retries).
+                    state.set_processing_state(s.local_file_id, EXTRACT_QUEUE_FAILED)
+                    logger.warning(
+                        "Server stored %s but could not queue extraction (queue offline); "
+                        "will retry next sync",
+                        s.local_file_id,
+                    )
             elif s.action == "teleport" and pstate != "teleported":
                 with s.path.open("rb") as handle:
-                    await client.upload_teleport_content(s.local_file_id, handle)
+                    resp = await client.upload_teleport_content(s.local_file_id, handle)
                 state.set_processing_state(s.local_file_id, "teleported")
                 applied += 1
+                if not resp.get("extraction_queued", True):
+                    logger.warning(
+                        "Teleported %s but the server could not queue extraction (queue offline); "
+                        "the server recovery sweep will re-enqueue it",
+                        s.local_file_id,
+                    )
 
     fulfilled = await fulfil_requests(config, state, client)
     return {

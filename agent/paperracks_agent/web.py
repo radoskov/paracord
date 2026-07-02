@@ -244,7 +244,13 @@ def create_app(
                     "teleport_policy": rec.teleport_policy,
                     "blocked": rec.teleport_blocked,
                     "present": rec.present,
-                    "processing_state": sf.get("processing_state", rec.processing_state),
+                    # Prefer the local "extract_queue_failed" marker over the server's optimistic
+                    # "extracting" so a dropped extraction enqueue is visible in the GUI (D7).
+                    "processing_state": (
+                        rec.processing_state
+                        if rec.processing_state == agent_ops.EXTRACT_QUEUE_FAILED
+                        else sf.get("processing_state", rec.processing_state)
+                    ),
                     "teleport_status": sf.get("teleport_status"),
                     # Server→agent metadata sync (#11): prefer the fresh server value, fall back to
                     # the locally cached copy so titles/authors survive an offline refresh.
