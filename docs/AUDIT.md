@@ -19,19 +19,25 @@ Status at last full audit (2026-07-02): `make test-full` green (660 backend + 32
 
 ## Security
 
-**D1 · MEDIUM — Per-process login throttle across multiple API workers.** — **DECIDED
-2026-07-02 · fix properly (do NOT pin workers to 1).** Note: gunicorn/uvicorn workers (the API
-HTTP servers, `GUNICORN_WORKERS`) are separate from the RQ extraction workers (the `worker`
-container); RQ workers scale freely with no throttle effect. The owner wants the ability to raise
-**API** workers (e.g. 4), so the in-process throttle must move to a **shared Redis store**. Scope:
-- Move `login_throttle` to Redis (fall back to in-process if Redis down — fail-open).
-- Add **rate limiting** — per-client (user/IP) and global request caps, Redis-backed,
-  admin-configurable thresholds. A batch import counts as a single request for rate-limiting.
+**D1 · MEDIUM — Overload protection + per-process throttle.** — **DECIDED 2026-07-02 (revised).**
+Architecture note: gunicorn/uvicorn workers (API HTTP servers, `GUNICORN_WORKERS`) are separate
+from RQ extraction workers (the `worker` container). Owner's decision: **keep API workers at 2**;
+**make RQ worker count admin-configurable, default raised to 4**; protect the host with
+rate-limiting + caps rather than more API workers. Scope:
+Finalized parameters (owner, 2026-07-02):
+- **RQ worker count = the global concurrency control** (`rq_worker_count`, AppConfig, **default 2**,
+  admin-editable). **Apply on restart** (option A): a supervisor entrypoint reads the count at
+  worker-container start and launches that many `rq worker` children; the admin UI notes "restart
+  the worker to apply." No per-job-type sub-limits — the worker count alone caps concurrent heavy
+  jobs.
+- **Rate limiting** — per-client (user/IP) + global request caps, Redis-backed, admin-editable.
+  Defaults: **per-client 60/min, global 300/min**. A batch import counts as one request.
 - **Batch item cap** (`max_batch_items`, AppConfig, default **100**, admin-editable): applies to
-  all batch imports (agent, DOI/identifier, BibTeX, RIS/CSL, citation). Server web-GUI batches
-  over the cap are **rejected with a clear warning**; the **local agent chunks** oversized imports
-  into ≤cap batches client-side (fetches the server's cap).
-- Then API worker count can be raised safely (document `GUNICORN_WORKERS`).
+  agent / DOI-identifier / BibTeX / RIS-CSL / citation imports. Server web-GUI batches over the cap
+  are **rejected with a clear warning**; the **local agent chunks** oversized imports into ≤cap
+  batches client-side (fetches the server's cap). **Server-folder scans are exempt** (local scan,
+  not a client batch).
+- **Login throttle → Redis** (correctness across the 2 API workers; fail-open if Redis down).
 
 **D2 · MEDIUM — Browser token in `localStorage` + no CSP/security headers from nginx.**
 These compound: paper titles/abstracts are external (PDF/Crossref) data rendered in the SPA; any
