@@ -83,6 +83,21 @@ def _queue_capacity_fail_open(monkeypatch):
     monkeypatch.setattr(queue, "pending_queue_depth", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _reindex_runs_inline(monkeypatch):
+    """Run the API suite as if Redis were absent so ``/search/reindex`` builds embeddings inline.
+
+    D14 routes ``/search/reindex`` to the queued reindex job; when the queue is unavailable it falls
+    back to a synchronous in-request build. The unit suite runs without Redis (mirroring
+    ``_rate_limit_fail_open``/``_queue_capacity_fail_open``), and a background worker could not see a
+    test's in-memory DB anyway, so force the synchronous fallback. Tests that assert the queued path
+    monkeypatch ``enqueue_reindex`` back to a live id themselves.
+    """
+    from app.workers import queue
+
+    monkeypatch.setattr(queue, "enqueue_reindex", lambda: None)
+
+
 @pytest.fixture()
 def app(session_factory):
     from app.main import create_app

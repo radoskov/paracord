@@ -84,17 +84,51 @@ def test_title_match_outranks_abstract_match(db_session) -> None:
 
 
 def test_methods_section_outranks_intro_section(db_session) -> None:
-    """A term in a high-value body section (Methods) beats the same term in intro/related work."""
+    """A term in a high-value body section (Methods) beats the same term in intro/related work.
+
+    Body text is indexed from the materialized ``work_chunks`` (D13b), so chunk the TEI first."""
+    from app.services.chunking import rechunk_work
+
     methods = Work(canonical_title="paper c", normalized_title="c")
     intro = Work(canonical_title="paper d", normalized_title="d")
     db_session.add_all([methods, intro])
     db_session.flush()
     db_session.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=methods.id, tei_xml=TEI_METHODS))
     db_session.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=intro.id, tei_xml=TEI_INTRO))
+    db_session.flush()
+    rechunk_work(db_session, methods)
+    rechunk_work(db_session, intro)
     db_session.commit()
     hits = build_index(db_session).search("zznovelterm", limit=5)
     assert hits
     assert hits[0][0] == str(methods.id)  # body_high (1.5) beats body_low (0.5)
+
+
+def test_build_index_reads_body_from_chunks_not_tei(db_session) -> None:
+    """D13b: build_index indexes body terms from work_chunks, and does NOT re-parse TEI itself.
+
+    A work with stored TEI but no chunks has its body text absent from the index; title/abstract
+    (read from the work row) are still indexed so an un-chunked paper is never dropped entirely."""
+    from app.models.chunk import WorkChunk
+
+    chunked = Work(canonical_title="zzchunkedtitle paper", normalized_title="e")
+    tei_only = Work(canonical_title="zzteititle paper", normalized_title="f")
+    db_session.add_all([chunked, tei_only])
+    db_session.flush()
+    # ``chunked`` gets a Methods body chunk; ``tei_only`` has TEI but no chunks materialized.
+    db_session.add(
+        WorkChunk(work_id=chunked.id, section="Methods", position=0, text="zzbodyterm mechanism")
+    )
+    db_session.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=tei_only.id, tei_xml=TEI_METHODS))
+    db_session.commit()
+
+    index = build_index(db_session)
+    body_hits = index.search("zzbodyterm", limit=5)
+    assert [h[0] for h in body_hits] == [str(chunked.id)]  # only the chunked work has the body term
+    # The TEI-only work is not re-parsed: its body term ("zznovelterm") is not in the index.
+    assert index.search("zznovelterm", limit=5) == []
+    # But the TEI-only work is still indexed by its title (read from the work row).
+    assert [h[0] for h in index.search("zzteititle", limit=5)] == [str(tei_only.id)]
 
 
 def test_search_returns_only_matching_docs(db_session) -> None:
@@ -138,7 +172,38 @@ def test_save_index_prunes_superseded_signatures(db_session, tmp_path: Path) -> 
     save_index(new, directory)
     names = os.listdir(directory)
     assert not any(name.startswith("bm25-oldkey.") for name in names)
-    assert load_index(directory, "newkey", "sig-new") is not None
+    loaded = load_index(directory, "newkey")
+    assert loaded is not None
+    assert loaded.signature == "sig-new"
+
+
+def test_postgres_serves_stale_index_and_enqueues_rebuild(db_session, tmp_path: Path, monkeypatch):
+    """D13a: after an edit, a search serves the stale index and enqueues a background rebuild —
+    it never rebuilds inline on the read path (the SQLite deterministic path is exercised elsewhere).
+    """
+    import app.workers.queue as queue_module
+    from app.core.config import get_settings
+    from app.services import bm25_index as bm
+
+    bm.invalidate_cache()
+    monkeypatch.setattr(get_settings(), "search_index_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(bm, "_is_postgres", lambda db: True)  # drive the Postgres serve-stale path
+    calls: list[int] = []
+    monkeypatch.setattr(queue_module, "enqueue_bm25_rebuild", lambda: calls.append(1))
+
+    db_session.add(Work(canonical_title="alpha", normalized_title="alpha"))
+    db_session.commit()
+    first = bm.get_index(db_session)
+    assert len(first.work_ids) == 1
+    assert calls == []  # cold start builds synchronously; no background rebuild needed
+
+    # Edit the corpus → signature changes. The next search must serve the STALE index + enqueue.
+    db_session.add(Work(canonical_title="beta", normalized_title="beta"))
+    db_session.commit()
+    served = bm.get_index(db_session)
+    assert len(served.work_ids) == 1  # stale index served (beta is not in it yet)
+    assert calls == [1]  # a background rebuild was enqueued, not run inline
+    bm.invalidate_cache()
 
 
 def test_lexical_search_papers_ranks_and_filters_visible(db_session) -> None:

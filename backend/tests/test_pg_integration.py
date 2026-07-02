@@ -347,12 +347,13 @@ def test_bm25f_index_persists_and_mmaps(pg_engine, tmp_path, monkeypatch):
         # First call builds the CSR matrix and persists it (Postgres path).
         bm.get_index(db)
         signature = bm.corpus_signature(db)
-        key = bm._disk_key(db, signature)
+        key = bm._disk_key(db)
         # The mmap-friendly arrays were written to disk.
         assert (tmp_path / f"bm25-{key}.data.npy").exists()
         # Load straight from disk (memory-mapped) and query it.
-        loaded = bm.load_index(str(tmp_path), key, signature)
+        loaded = bm.load_index(str(tmp_path), key)
         assert loaded is not None
+        assert loaded.signature == signature
         # Scope to the new work (the shared module DB holds other "graph" papers from prior tests).
         hits = loaded.search("graph message passing", limit=5, visible_ids={gnn.id})
         assert hits

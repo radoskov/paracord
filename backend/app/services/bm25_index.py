@@ -170,16 +170,6 @@ def _label_to_field(label: str | None) -> str:
     return "body_high"
 
 
-def _work_field_tokens(db: Session, work: Work) -> dict[str, list[str]]:
-    """Bucket a work's section texts into the BM25F fields, tokenized."""
-    from app.services.chunking import iter_work_sections  # local import avoids an import cycle
-
-    buckets: dict[str, list[str]] = {f: [] for f in FIELDS}
-    for label, text in iter_work_sections(db, work):
-        buckets[_label_to_field(label)].extend(tokenize(text))
-    return buckets
-
-
 # --- index ------------------------------------------------------------------
 
 
@@ -216,17 +206,41 @@ class Bm25fIndex:
 
 def build_index(db: Session, *, config: Bm25fConfig | None = None) -> Bm25fIndex:
     """Build the eager BM25F+ CSR index over every work with indexable text. Query-independent; call
-    off the read path (lazy warm / rebuild)."""
+    off the read path (lazy warm / background rebuild).
+
+    Body text is read from the already-materialized ``work_chunks`` rows rather than re-parsing each
+    work's TEI XML (D13b) — the chunker persists section-labelled passages, so this is one bulk SELECT
+    instead of a per-work XML parse. Title/abstract come from the ``works`` row directly (so a work
+    that isn't chunked yet is still indexed by its title+abstract, and the title/abstract chunks are
+    not double-counted against the overlap-carrying body chunks)."""
+    from app.models.chunk import WorkChunk  # local import avoids an import cycle
+
     cfg = config or Bm25fConfig()
     doc_fields: list[dict[str, list[str]]] = []
     work_ids: list[str] = []
     field_length_sum: dict[str, int] = {f: 0 for f in FIELDS}
 
-    for work in db.scalars(select(Work)):
-        fields = _work_field_tokens(db, work)
+    # Body sections, grouped by work, from the materialized chunks (title/abstract taken from the
+    # work row below, so those chunk rows are excluded here to avoid double counting).
+    body_by_work: dict[str, list[tuple[str | None, str]]] = defaultdict(list)
+    for work_id, section, chunk_text in db.execute(
+        select(WorkChunk.work_id, WorkChunk.section, WorkChunk.text)
+    ).all():
+        if section in ("title", "abstract"):
+            continue
+        body_by_work[str(work_id)].append((section, chunk_text))
+
+    for work_id, title, abstract in db.execute(
+        select(Work.id, Work.canonical_title, Work.abstract)
+    ).all():
+        fields: dict[str, list[str]] = {f: [] for f in FIELDS}
+        fields["title"].extend(tokenize(title or ""))
+        fields["abstract"].extend(tokenize(abstract or ""))
+        for section, chunk_text in body_by_work.get(str(work_id), ()):
+            fields[_label_to_field(section)].extend(tokenize(chunk_text or ""))
         if not any(fields.values()):
             continue
-        work_ids.append(str(work.id))
+        work_ids.append(str(work_id))
         doc_fields.append(fields)
         for name in FIELDS:
             field_length_sum[name] += len(fields[name])
@@ -325,16 +339,18 @@ def save_index(index: Bm25fIndex, directory: str) -> None:
                 os.unlink(os.path.join(directory, name))
 
 
-def load_index(directory: str, key: str, signature: str) -> Bm25fIndex | None:
-    """Load + mmap a persisted index if it matches ``signature``; else None. Never raises."""
+def load_index(directory: str, key: str) -> Bm25fIndex | None:
+    """Load + mmap the persisted index (whatever signature is on disk); None if absent. Never raises.
+
+    Returns the index tagged with the signature stored in its metadata so the caller can decide
+    whether it is current or stale — serving a stale index while a background rebuild runs is how the
+    read path avoids blocking on a rebuild (D13a)."""
     paths = _paths(directory, key)
     try:
         if not os.path.exists(paths["meta"]):
             return None
         with open(paths["meta"], encoding="utf-8") as handle:
             meta = json.load(handle)
-        if meta.get("signature") != signature:
-            return None
         data = np.load(paths["data"], mmap_mode="r")
         indices = np.load(paths["indices"], mmap_mode="r")
         indptr = np.load(paths["indptr"], mmap_mode="r")
@@ -343,7 +359,7 @@ def load_index(directory: str, key: str, signature: str) -> Bm25fIndex | None:
             work_ids=meta["work_ids"],
             vocab={term: int(row) for term, row in meta["vocab"].items()},
             matrix=matrix,
-            signature=signature,
+            signature=meta.get("signature"),
             key=key,
         )
     except Exception as exc:  # noqa: BLE001 - a bad/partial cache must fall back to a rebuild
@@ -372,43 +388,103 @@ def corpus_signature(db: Session) -> str:
     return f"{n_works}:{latest.isoformat() if latest else '0'}:{n_chunks}"
 
 
-def _disk_key(db: Session, signature: str) -> str:
-    """Filename key: stable across worker processes on one DB, distinct across databases."""
+def _disk_key(db: Session) -> str:
+    """Filename key: stable across worker processes AND signatures on one DB, distinct per database.
+
+    Signature-independent (unlike before) so the persisted file lives at a fixed path: a background
+    rebuild overwrites it in place and the read path can load the last-known index even when its
+    signature is stale (D13a)."""
     url = str(db.get_bind().url) if db.get_bind() is not None else ""
-    return hashlib.sha1(f"{url}:{signature}".encode()).hexdigest()[:16]  # noqa: S324
+    return hashlib.sha1(url.encode()).hexdigest()[:16]  # noqa: S324
+
+
+def _enqueue_rebuild() -> None:
+    """Best-effort enqueue of a background BM25F+ rebuild (D13a). Never raises."""
+    try:
+        from app.workers.queue import enqueue_bm25_rebuild  # noqa: PLC0415 (keep Redis import lazy)
+
+        enqueue_bm25_rebuild()
+    except Exception as exc:  # noqa: BLE001 - a search must keep serving the stale index regardless
+        logger.warning("Could not enqueue BM25F+ rebuild (%s); serving the stale index.", exc)
+
+
+def rebuild_persisted_index(db: Session, *, config: Bm25fConfig | None = None) -> Bm25fIndex:
+    """Build the BM25F+ index and (on Postgres) persist it. Entry point for the background job (D13).
+
+    Runs entirely off the search read path: a worker rebuilds the sparse matrix and overwrites the
+    on-disk copy, which the API processes then mmap-load on their next search."""
+    signature = corpus_signature(db)
+    index = build_index(db, config=config)
+    index.signature = signature
+    if _is_postgres(db):
+        index.key = _disk_key(db)
+        try:
+            save_index(index, get_settings().search_index_dir)
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+            logger.warning("Could not persist BM25F+ index (%s).", exc)
+    return index
 
 
 def get_index(db: Session, *, config: Bm25fConfig | None = None) -> Bm25fIndex:
-    """Return the index, rebuilding when the corpus signature changed. Thread-safe.
+    """Return the lexical index, **never blocking a search on a rebuild** (D13a). Thread-safe.
 
     In-memory cache is keyed by ``(engine identity, signature)`` (so distinct test databases never
-    collide). On Postgres the index is also persisted + mmap-loaded so worker processes share one
-    physical copy and survive restarts without rebuilding."""
+    collide). Behavior by dialect:
+
+    * **SQLite / tests** (no Redis, no shared disk): build synchronously whenever the signature
+      changed, so results are immediately consistent and deterministic.
+    * **Postgres**: serve the persisted/last-known index and, when the corpus signature has moved,
+      enqueue a background rebuild and serve the (slightly) stale index meanwhile — a search after an
+      edit may transiently miss that edit until the worker refreshes the on-disk copy. Only a genuine
+      cold start (nothing built yet) builds synchronously so the first search has something to serve.
+    """
     signature = corpus_signature(db)
     bind = db.get_bind()
     mem_key = (id(bind), signature)
     with _LOCK:
         if _CACHE["key"] == mem_key and _CACHE["index"] is not None:
             return _CACHE["index"]
+        # A previously-built index for THIS database (possibly a stale signature) we can serve now.
+        stale = _CACHE["index"] if (_CACHE["key"] and _CACHE["key"][0] == id(bind)) else None
 
-    index: Bm25fIndex | None = None
-    use_disk = _is_postgres(db)
-    disk_key = _disk_key(db, signature) if use_disk else None
-    directory = get_settings().search_index_dir if use_disk else None
-
-    if use_disk:
-        index = load_index(directory, disk_key, signature)
-
-    if index is None:
+    if not _is_postgres(db):
         index = build_index(db, config=config)
         index.signature = signature
-        index.key = disk_key
-        if use_disk:
-            try:
-                save_index(index, directory)
-            except Exception as exc:  # noqa: BLE001 - persistence is best-effort
-                logger.warning("Could not persist BM25F+ index (%s); using in-memory only.", exc)
+        with _LOCK:
+            _CACHE["key"] = mem_key
+            _CACHE["index"] = index
+        return index
 
+    directory = get_settings().search_index_dir
+    disk_key = _disk_key(db)
+
+    on_disk = load_index(directory, disk_key)
+    if on_disk is not None and on_disk.signature == signature:
+        with _LOCK:
+            _CACHE["key"] = mem_key
+            _CACHE["index"] = on_disk
+        return on_disk
+
+    serveable = stale or on_disk
+    if serveable is not None:
+        # Corpus changed but we have an index to serve → refresh in the background, serve stale now.
+        _enqueue_rebuild()
+        with _LOCK:
+            # Cache under the served index's own (stale) signature so the next search re-checks the
+            # disk and picks up the worker's fresh build as soon as it lands, instead of pretending
+            # the stale index matches the current signature.
+            _CACHE["key"] = (id(bind), serveable.signature)
+            _CACHE["index"] = serveable
+        return serveable
+
+    # Cold start: nothing built yet → one-time synchronous build so the first search has a result.
+    index = build_index(db, config=config)
+    index.signature = signature
+    index.key = disk_key
+    try:
+        save_index(index, directory)
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+        logger.warning("Could not persist BM25F+ index (%s); using in-memory only.", exc)
     with _LOCK:
         _CACHE["key"] = mem_key
         _CACHE["index"] = index

@@ -170,6 +170,19 @@ def reindex_embeddings_job() -> None:
         db.commit()
 
 
+def rebuild_bm25_job() -> None:
+    """Rebuild + persist the BM25F+ lexical index off the search read path (D13a).
+
+    Enqueued when the corpus signature changes so a search never blocks on a rebuild; the worker
+    rebuilds the sparse matrix and overwrites the on-disk copy that the API processes mmap-load.
+    """
+    from app.db.session import SessionLocal
+    from app.services.bm25_index import rebuild_persisted_index
+
+    with SessionLocal() as db:
+        rebuild_persisted_index(db)
+
+
 def pull_model_job(provider: str, model: str) -> None:
     """Download/pull an AI model (Ollama / sentence-transformers). Raises on failure (8C)."""
     from app.db.session import SessionLocal

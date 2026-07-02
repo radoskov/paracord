@@ -22,6 +22,10 @@ REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
 TOPIC_JOB = "app.workers.jobs.topic_work_job"
 KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
+BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
+
+# Deterministic id so a burst of edits coalesces into a single pending rebuild (D13a).
+BM25_REBUILD_JOB_ID = "bm25-rebuild"
 
 
 def get_queue():
@@ -167,6 +171,24 @@ def enqueue_duplicate_scan() -> str | None:
         return None
 
 
+def enqueue_bm25_rebuild() -> str | None:
+    """Best-effort enqueue of a background BM25F+ lexical-index rebuild (D13a). Returns id, or None.
+
+    Uses the fixed id ``bm25-rebuild`` and skips the enqueue when a live job with that id already
+    exists, so a burst of edits coalesces into a single pending rebuild instead of stacking many.
+    Never raises: with the queue unavailable the search simply keeps serving the stale index.
+    """
+    try:
+        queue = get_queue()
+        existing = _live_extraction_job_id(queue.connection, BM25_REBUILD_JOB_ID)
+        if existing is not None:
+            return existing
+        return queue.enqueue(BM25_REBUILD_JOB, job_id=BM25_REBUILD_JOB_ID).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue BM25F+ rebuild: %s", exc)
+        return None
+
+
 def enqueue_reindex() -> str | None:
     """Best-effort enqueue of a full embedding reindex for the active provider."""
     try:
@@ -195,6 +217,7 @@ _FUNC_LABELS = {
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",
     PULL_MODEL_JOB: "model-pull",
+    BM25_REBUILD_JOB: "bm25-rebuild",
 }
 
 
