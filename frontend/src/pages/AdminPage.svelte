@@ -231,6 +231,7 @@
   let rateLimitGlobal = '';
   let maxBatchItems = '';
   let rqWorkerCount = '';
+  let maxQueueLen = '';
   let savingAppConfig = false;
   let savingOverload = false;
   let appConfigMsg = '';
@@ -242,6 +243,7 @@
     rateLimitGlobal = String(cfg.rate_limit_global_per_min);
     maxBatchItems = String(cfg.max_batch_items);
     rqWorkerCount = String(cfg.rq_worker_count);
+    maxQueueLen = String(cfg.max_queue_len);
   }
 
   async function saveAppConfig(): Promise<void> {
@@ -264,11 +266,13 @@
     const global = Math.trunc(Number(rateLimitGlobal));
     const batch = Math.trunc(Number(maxBatchItems));
     const workers = Math.trunc(Number(rqWorkerCount));
+    const queueLen = Math.trunc(Number(maxQueueLen));
     for (const [label, v] of [
       ['Per-client rate limit', perClient],
       ['Global rate limit', global],
       ['Max papers per import', batch],
       ['RQ worker count', workers],
+      ['Max queue length', queueLen],
     ] as const) {
       if (!Number.isFinite(v) || v < 1) {
         message = `${label} must be a whole number of at least 1`;
@@ -284,6 +288,7 @@
           rate_limit_global_per_min: global,
           max_batch_items: batch,
           rq_worker_count: workers,
+          max_queue_len: queueLen,
         }),
       );
       overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
@@ -1257,6 +1262,15 @@
         </label>
         <p class="small-help">
           Number of extraction worker processes. <strong>Restart the worker container to apply.</strong>
+        </p>
+        <label class="field">
+          Max pending jobs in the queue
+          <input type="number" min="1" bind:value={maxQueueLen} />
+        </label>
+        <p class="small-help">
+          A new import, extraction or reindex is rejected with HTTP 429 once this many jobs are
+          already waiting. If the queue can’t be measured (Redis down) the request is allowed
+          (fail-open).
         </p>
         <button type="submit" disabled={savingOverload || loading}
           title="Save overload-protection settings">Save</button>

@@ -65,7 +65,21 @@
     clearSession();
   }
 
-  $: client = new ApiClient(apiBaseUrl, token || null, onUnauthorized);
+  // A "queue is full" rejection (D39) from any job-creating action surfaces one consistent toast.
+  let queueFullMessage = '';
+  let queueFullTimer: ReturnType<typeof setTimeout> | null = null;
+  function onQueueFull(detail: string): void {
+    queueFullMessage =
+      detail || 'Processing queue is full — please wait and try again shortly.';
+    if (queueFullTimer) clearTimeout(queueFullTimer);
+    queueFullTimer = setTimeout(() => (queueFullMessage = ''), 8000);
+  }
+  function dismissQueueFull(): void {
+    if (queueFullTimer) clearTimeout(queueFullTimer);
+    queueFullMessage = '';
+  }
+
+  $: client = new ApiClient(apiBaseUrl, token || null, onUnauthorized, onQueueFull);
   $: activeTab = visibleTabs.find((tab) => tab.id === active) ?? visibleTabs[0] ?? TABS[0];
 
   // Load the signed-in profile whenever the token changes; a failure clears the session.
@@ -164,6 +178,12 @@
 </script>
 
 <main>
+  {#if queueFullMessage}
+    <div class="queue-toast" role="alert" data-testid="queue-full-toast">
+      <span>{queueFullMessage}</span>
+      <button type="button" class="queue-toast-close" on:click={dismissQueueFull} title="Dismiss">×</button>
+    </div>
+  {/if}
   <header>
     <div class="header-inner">
       <div class="brand">
@@ -276,6 +296,36 @@
 
   main {
     min-height: 100vh;
+  }
+
+  .queue-toast {
+    align-items: center;
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    color: #7f1d1d;
+    display: flex;
+    font-weight: 600;
+    gap: 0.75rem;
+    left: 50%;
+    max-width: min(38rem, calc(100vw - 2rem));
+    padding: 0.7rem 1rem;
+    position: fixed;
+    top: 0.75rem;
+    transform: translateX(-50%);
+    z-index: 100;
+  }
+
+  .queue-toast-close {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    min-height: auto;
+    padding: 0 0.2rem;
   }
 
   header {

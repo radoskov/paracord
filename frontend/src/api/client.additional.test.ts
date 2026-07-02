@@ -77,6 +77,45 @@ describe('ApiClient request contracts', () => {
     expect(JSON.parse(init.body as string)).toEqual({ max_papers_per_page: 300 });
   });
 
+  it('fires onQueueFull for a 429 "queue is full" rejection but not for a rate-limit 429', async () => {
+    const onQueueFull = vi.fn();
+    const client = new ApiClient('http://api.test', 'token-123', undefined, onQueueFull);
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: 'The processing queue is full (1000 pending). Please wait and retry.' }, 429),
+    );
+    await expect(client.extractFile('file-1')).rejects.toThrow(/queue is full/i);
+    expect(onQueueFull).toHaveBeenCalledTimes(1);
+    expect(onQueueFull.mock.calls[0][0]).toMatch(/queue is full/i);
+
+    // A rate-limit 429 has a different detail and must NOT trigger the queue-full toast.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: 'Rate limit exceeded; slow down and retry shortly.' }, 429),
+    );
+    await expect(client.extractFile('file-2')).rejects.toThrow(/Rate limit/);
+    expect(onQueueFull).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the queue and resets workers via the admin job endpoints', async () => {
+    fetchMock = vi.fn(async () => jsonResponse({ available: true, dropped: 4 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new ApiClient('http://api.test', 'token-123');
+
+    const cleared = await client.clearQueue();
+    expect(cleared.dropped).toBe(4);
+    const [clearUrl, clearInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(clearUrl).pathname).toBe('/api/v1/jobs/clear-queue');
+    expect(clearInit.method).toBe('POST');
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ available: true, requeued: 1, cleared_failed: 2, note: 'restart' }),
+    );
+    await client.resetWorkers();
+    const [resetUrl, resetInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(new URL(resetUrl).pathname).toBe('/api/v1/jobs/reset-workers');
+    expect(resetInit.method).toBe('POST');
+  });
+
   it('does not attach bearer auth to login requests', async () => {
     fetchMock = vi.fn(async () => jsonResponse({ access_token: 'server-token' }));
     vi.stubGlobal('fetch', fetchMock);

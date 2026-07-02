@@ -853,6 +853,7 @@ export interface AppConfig {
   rate_limit_global_per_min: number;
   max_batch_items: number;
   rq_worker_count: number;
+  max_queue_len: number;
 }
 
 export interface AgentRecord {
@@ -933,10 +934,14 @@ export class ApiClient {
     // Called when an *authenticated* request is rejected with 401 (session expired, signed out,
     // or the account was disabled). The argument is the server's human-readable explanation.
     private readonly onUnauthorized?: (detail: string) => void,
+    // Called when a job-creating request is rejected because the processing queue is full (D39:
+    // HTTP 429 with a "queue is full" detail). The argument is the server's explanation. Lets the
+    // app surface one consistent toast wherever an import/extract/reindex is triggered.
+    private readonly onQueueFull?: (detail: string) => void,
   ) {}
 
   withToken(token: string | null): ApiClient {
-    return new ApiClient(this.baseUrl, token, this.onUnauthorized);
+    return new ApiClient(this.baseUrl, token, this.onUnauthorized, this.onQueueFull);
   }
 
   async login(username: string, password: string): Promise<string> {
@@ -1801,6 +1806,22 @@ export class ApiClient {
     return this.request(`/api/v1/jobs/clear?which=${which}`, { method: 'POST' });
   }
 
+  /** Empty the pending job queue (admin). Running jobs are kept; returns how many were dropped. */
+  async clearQueue(): Promise<{ available: boolean; dropped: number; error?: string }> {
+    return this.request('/api/v1/jobs/clear-queue', { method: 'POST' });
+  }
+
+  /** Recover stuck jobs (admin): requeue jobs stranded as started and clear failed history. */
+  async resetWorkers(): Promise<{
+    available: boolean;
+    requeued: number;
+    cleared_failed: number;
+    note: string;
+    error?: string;
+  }> {
+    return this.request('/api/v1/jobs/reset-workers', { method: 'POST' });
+  }
+
   async extractFile(
     fileId: string,
     forceOcr = false,
@@ -1999,6 +2020,14 @@ export class ApiClient {
       // hand the explanation to the app so it can force a clean logout.
       if (response.status === 401 && options.auth !== false && this.token) {
         this.onUnauthorized?.(detail);
+      }
+      // A "queue is full" rejection (D39: 429/503 from a job-creating action) is surfaced app-wide
+      // as a toast. Keyed off the detail phrase so it doesn't fire on the rate-limit 429.
+      if (
+        (response.status === 429 || response.status === 503) &&
+        /queue is full/i.test(detail)
+      ) {
+        this.onQueueFull?.(detail);
       }
       throw new Error(detail);
     }

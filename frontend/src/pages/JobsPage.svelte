@@ -2,9 +2,13 @@
   import { onDestroy, onMount } from 'svelte';
 
   import { ApiClient, type QueueStatus } from '../api/client';
+  import { canManageUsers } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // Queue/worker recovery controls are owner/admin-only (they empty or reset shared queue state);
+  // `canManageUsers` is the owner-or-admin gate that mirrors the endpoints' require_admin.
   // Whether this tab is the active one. Tabs stay mounted across switches (#9); pause polling
   // while hidden so background tabs don't keep hitting the API.
   export let visible = true;
@@ -65,6 +69,30 @@
     }
   }
 
+  async function clearQueue(): Promise<void> {
+    if (!window.confirm('Empty the pending job queue? Running jobs are kept, but every waiting task is dropped.')) return;
+    try {
+      const result = await client.clearQueue();
+      await refresh(); // refresh() clears `message` on success, so set the result note afterwards
+      message = result.available ? `Dropped ${result.dropped} pending job(s)` : `Unavailable: ${result.error ?? ''}`;
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
+  async function resetWorkers(): Promise<void> {
+    if (!window.confirm('Reset workers? Jobs stuck as "started" are requeued and failed history is cleared. To fully restart the worker processes, run `docker compose restart worker`.')) return;
+    try {
+      const result = await client.resetWorkers();
+      await refresh(); // refresh() clears `message` on success, so set the result note afterwards
+      message = result.available
+        ? `Requeued ${result.requeued} stuck job(s), cleared ${result.cleared_failed} failed. ${result.note}`
+        : `Unavailable: ${result.error ?? ''}`;
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
   onMount(() => {
     void refresh();
     startAuto();
@@ -110,6 +138,12 @@
         <button type="button" class="secondary" on:click={refresh} title="Refresh now">Refresh</button>
         <button type="button" class="secondary" on:click={clean}
           title="Clear finished and failed job history (running jobs are kept)">Clean</button>
+        {#if $canManageUsers}
+          <button type="button" class="secondary danger-btn" on:click={clearQueue}
+            title="Empty the pending job queue (running jobs are kept)">Clear queue</button>
+          <button type="button" class="secondary danger-btn" on:click={resetWorkers}
+            title="Requeue stuck jobs and clear failed history (a full worker restart is docker compose restart worker)">Reset workers</button>
+        {/if}
       </div>
     </div>
     <p class="muted">
@@ -207,6 +241,11 @@
     align-items: center;
     display: flex;
     gap: 0.75rem;
+  }
+
+  .danger-btn {
+    border-color: #fca5a5;
+    color: #b3261e;
   }
 
   .auto {

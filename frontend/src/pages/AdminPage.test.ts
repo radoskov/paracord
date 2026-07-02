@@ -27,6 +27,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       rate_limit_global_per_min: 300,
       max_batch_items: 100,
       rq_worker_count: 2,
+      max_queue_len: 1000,
     }),
     updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
       max_papers_per_page: 250,
@@ -34,6 +35,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       rate_limit_global_per_min: 300,
       max_batch_items: 100,
       rq_worker_count: 2,
+      max_queue_len: 1000,
       ...changes,
     })),
     ...overrides,
@@ -100,6 +102,7 @@ describe('AdminPage groups section', () => {
         rate_limit_global_per_min: 300,
         max_batch_items: 100,
         rq_worker_count: 4,
+        max_queue_len: 1000,
       }),
     );
   });
