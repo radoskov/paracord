@@ -118,6 +118,7 @@ def test_m1_reimport_is_idempotent(client, auth_headers, server_root, no_queue):
         "created_files": 0,
         "created_works": 0,
         "existing_files": 1,
+        "errors": 0,
     }
     assert len(client.get("/api/v1/works", headers=h).json()["items"]) == 1
 

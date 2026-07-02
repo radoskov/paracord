@@ -1,6 +1,7 @@
 """Managed library storage and server-folder import service."""
 
 import hashlib
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -20,6 +21,8 @@ from app.models.work import Work
 from app.services.audit import record_event
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.utils.normalization import normalize_title
+
+logger = logging.getLogger(__name__)
 
 # New-style arXiv id, optionally with a version suffix (e.g. 2106.01345 / 1706.03762v5).
 _ARXIV_ID_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
@@ -150,7 +153,15 @@ def import_server_folder(
     actor: User,
     recursive: bool = True,
 ) -> ImportBatch:
-    """Scan a configured server-folder source and import PDF file identities."""
+    """Scan a configured server-folder source and import PDF file identities.
+
+    Transaction shape (D9): the batch row is committed up front in its own short transaction so it
+    survives even if the scan later dies, each file is imported inside its own SAVEPOINT so one bad
+    file rolls back only that file (not the whole batch), and the status/stats are finalized in a
+    single commit at the end. Partial imports are therefore visible: a scan that hits some
+    unreadable files still commits the files it could import (with an ``errors`` count in the stats)
+    instead of rolling the whole batch back on the first failure.
+    """
     if source.type != "server_folder" or not source.is_active:
         raise ValueError("Source is not an active server folder")
 
@@ -163,10 +174,12 @@ def import_server_folder(
         status="running",
         settings={"recursive": recursive},
         started_at=started_at,
-        stats={"seen": 0, "created_files": 0, "created_works": 0, "existing_files": 0},
+        stats={"seen": 0, "created_files": 0, "created_works": 0, "existing_files": 0, "errors": 0},
     )
     db.add(batch)
-    db.flush()
+    db.commit()  # D9: persist the batch row up front so it (and its final status) survives a crash
+    db.refresh(batch)
+    batch_id = batch.id
 
     stats = dict(batch.stats or {})
     try:
@@ -174,31 +187,51 @@ def import_server_folder(
         for pdf_path in sorted(root.glob(pattern)):
             if not pdf_path.is_file():
                 continue
-            _assert_inside_root(root, pdf_path)
             stats["seen"] += 1
-            result = _import_pdf_path(
-                db, source=source, pdf_path=pdf_path, import_batch_id=batch.id
-            )
-            stats["created_files"] += int(result["created_file"])
-            stats["created_works"] += int(result["created_work"])
-            stats["existing_files"] += int(not result["created_file"])
+            try:
+                _assert_inside_root(root, pdf_path)
+                with db.begin_nested():  # D9: per-file savepoint — a bad file never aborts the scan
+                    result = _import_pdf_path(
+                        db, source=source, pdf_path=pdf_path, import_batch_id=batch_id
+                    )
+                stats["created_files"] += int(result["created_file"])
+                stats["created_works"] += int(result["created_work"])
+                stats["existing_files"] += int(not result["created_file"])
+            except Exception:  # noqa: BLE001 - isolate + record one bad file, keep importing
+                stats["errors"] += 1
+                logger.warning("Folder import: skipping file %s", pdf_path, exc_info=True)
+        # Mark every newly imported file owed an extraction in the SAME commit that persists them
+        # (D7 invariant): the durable marker and the file rows land together. Tolerate the narrow
+        # unit-test schema that omits the metadata_assertions table the pending query joins on.
+        from sqlalchemy import inspect
+
+        if inspect(db.get_bind()).has_table(MetadataAssertion.__tablename__):
+            for file_id in file_ids_pending_extraction(db, source.id):
+                file = db.get(File, file_id)
+                if file is not None:
+                    mark_extraction_requested(file)
         batch.status = "completed"
+        batch.finished_at = datetime.now(UTC)
+        batch.stats = stats
+        record_event(
+            db,
+            "import.folder_completed",
+            actor_user_id=actor.id,
+            entity_type="import_batch",
+            entity_id=str(batch_id),
+            details={"source_id": str(source.id), "stats": stats},
+        )
+        db.commit()
     except Exception:
+        # A catastrophic (non-per-file) error: finalize the durable batch row as failed in its own
+        # commit so the failure stays visible, then re-raise.
+        db.rollback()
         batch.status = "failed"
         batch.finished_at = datetime.now(UTC)
         batch.stats = stats
+        db.commit()
         raise
-
-    batch.finished_at = datetime.now(UTC)
-    batch.stats = stats
-    record_event(
-        db,
-        "import.folder_completed",
-        actor_user_id=actor.id,
-        entity_type="import_batch",
-        entity_id=str(batch.id),
-        details={"source_id": str(source.id), "stats": stats},
-    )
+    db.refresh(batch)
     return batch
 
 

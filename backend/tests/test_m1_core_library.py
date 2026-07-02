@@ -121,7 +121,13 @@ def test_import_server_folder_creates_file_work_location_batch_and_audit(
     db_session.commit()
 
     assert batch.status == "completed"
-    assert batch.stats == {"seen": 1, "created_files": 1, "created_works": 1, "existing_files": 0}
+    assert batch.stats == {
+        "seen": 1,
+        "created_files": 1,
+        "created_works": 1,
+        "existing_files": 0,
+        "errors": 0,
+    }
     file = db_session.scalar(select(File))
     assert file.original_filename == "A Useful Paper.pdf"
     assert file.mime_type == "application/pdf"
@@ -139,6 +145,67 @@ def test_import_server_folder_creates_file_work_location_batch_and_audit(
     assert second_batch.stats["created_files"] == 0
     assert second_batch.stats["existing_files"] == 1
     assert db_session.scalar(select(func.count()).select_from(File)) == 1
+
+
+def test_import_server_folder_isolates_a_bad_file_and_commits_the_rest(
+    db_session, owner: User, tmp_path: Path, monkeypatch
+) -> None:
+    """D9: one unreadable file is skipped (recorded in ``errors``); the good files still import."""
+    from app.services import storage
+
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (papers / "good1.pdf").write_bytes(b"%PDF-1.4\n% good one\n")
+    (papers / "bad.pdf").write_bytes(b"%PDF-1.4\n% will explode\n")
+    (papers / "good2.pdf").write_bytes(b"%PDF-1.4\n% good two\n")
+    settings = Settings(server_allowed_roots=[{"alias": "main", "path": str(papers)}])
+    source = create_server_folder_source(
+        db_session, settings=settings, name="Main", path_alias="main", actor=owner
+    )
+    db_session.commit()
+
+    real = storage._sha256_file
+
+    def boom_on_bad(path):
+        if path.name == "bad.pdf":
+            raise OSError("simulated unreadable file")
+        return real(path)
+
+    monkeypatch.setattr(storage, "_sha256_file", boom_on_bad)
+    batch = import_server_folder(db_session, source=source, actor=owner)
+
+    assert batch.status == "completed"  # not "failed": the batch as a whole succeeded
+    assert batch.stats["seen"] == 3
+    assert batch.stats["created_files"] == 2  # both good files imported
+    assert batch.stats["errors"] == 1  # the bad file is recorded, not fatal
+    # The two good files are durably committed (partial import is visible).
+    assert db_session.scalar(select(func.count()).select_from(File)) == 2
+
+
+def test_import_server_folder_commits_batch_row_up_front(
+    db_session, owner: User, tmp_path: Path
+) -> None:
+    """D9: the batch row is persisted before the scan finishes (survives a later crash)."""
+    from app.models.source import ImportBatch
+
+    papers = tmp_path / "papers"
+    papers.mkdir()
+    (papers / "p.pdf").write_bytes(b"%PDF-1.4\n% fixture\n")
+    settings = Settings(server_allowed_roots=[{"alias": "main", "path": str(papers)}])
+    source = create_server_folder_source(
+        db_session, settings=settings, name="Main", path_alias="main", actor=owner
+    )
+    db_session.commit()
+
+    batch = import_server_folder(db_session, source=source, actor=owner)
+    # A separate session sees the finalized batch without the caller committing again.
+    other = sessionmaker(bind=db_session.get_bind(), autoflush=False)()
+    try:
+        persisted = other.get(ImportBatch, batch.id)
+        assert persisted is not None
+        assert persisted.status == "completed"
+    finally:
+        other.close()
 
 
 def test_import_server_folder_skips_rehash_for_unchanged_files(

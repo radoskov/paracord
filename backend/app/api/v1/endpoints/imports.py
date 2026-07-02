@@ -87,6 +87,8 @@ def import_folder(
     if source is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     try:
+        # import_server_folder commits the batch + files itself (D9) and marks each imported file
+        # owed an extraction (D7) in that same commit.
         batch = import_server_folder(
             db,
             source=source,
@@ -95,19 +97,10 @@ def import_folder(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    # Mark every file we intend to extract as owed, in the same commit that creates them (D7), so a
-    # dropped enqueue below is recovered by the startup sweep.
-    from app.models.file import File
-
+    # Best-effort: queue GROBID extraction for the files just imported (no-op if Redis is down).
+    # Report whether every intended job was actually queued so the UI can warn on a dropped enqueue;
+    # any drop is recovered by the startup sweep via the owed marker set above.
     pending = file_ids_pending_extraction(db, source.id)
-    for file_id in pending:
-        file = db.get(File, file_id)
-        if file is not None:
-            mark_extraction_requested(file)
-    db.commit()
-    db.refresh(batch)
-    # Best-effort: queue GROBID extraction for newly imported files (no-op if Redis is down). Report
-    # whether every intended job was actually queued so the UI can warn on a dropped enqueue.
     extraction_queued = True
     for file_id in pending:
         if enqueue_extraction(file_id) is None:
