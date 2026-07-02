@@ -105,14 +105,38 @@ implementation: the *default embedding provider* stays `hash_bow` (zero-dependen
 install still works) — ANN kicks in once a real model (sentence-transformers / Ollama) is
 registered; forcing a heavy model as the out-of-box default is NOT part of this.
 
-**D38. Big spec features** (old NEEDS_DISCUSSION §5, all confirmed still absent):
+**D38. Big spec features** (old NEEDS_DISCUSSION §5) — the *large* items, each a real product
+feature (not a mechanical fix), all confirmed still absent at HEAD. Expanded:
 
-- **Citation summaries (§8.11)** — per-shelf/rack citation analytics; the `citations.py` router
-  is literally empty. The largest headline-goal gap — this is the feature that pays off the
-  product's own pitch.
-- **Citation-graph depth (§8.9)** — 8 graph modes / PageRank sizing / rich encodings vs today's
-  2 modes + degree sizing.
-- Smaller deltas: preprint↔published duplicate kind, backup REST endpoints, CSV/Zotero/
-  watched-folder import, reference-string fallback parser (anystyle/refextract).
+- **Citation summaries (§8.11) — the headline gap.** *What the spec wants:* citation *analytics*
+  computed over a scope (whole library / rack / shelf / search result / selection), surfacing
+  things like most-cited local works, most-cited external works, frequently-cited works missing
+  from the library ("you cite X a lot but don't have it"), **bridge papers** (works connecting
+  otherwise-separate clusters), isolated papers (no local citation links), and a chronological
+  citation distribution — cached and versioned so they're not recomputed every view. *Current
+  state:* the `citations.py` router is literally empty (`router = APIRouter()`, no endpoints); only
+  raw node/edge *counts* exist via the graph. *Why it matters:* this is a core part of the
+  product's own pitch ("scoped citation summaries" is in the README goals) — the single most
+  valuable missing feature. *Effort:* substantial — a new analytics service over the reference/
+  citation tables + a caching/versioning layer + endpoints + UI.
+- **Citation-graph depth (§8.9).** *Spec:* 8 graph *modes*, 4 edge-context modes, and rich visual
+  encodings — PageRank/centrality node sizing, color-by shelf/tag/topic/status, edge thickness by
+  mention count, warning badges — plus a per-work "neighborhood" endpoint. *Current state:* two
+  modes (`local_only` / `include_external`) + `collapse_versions`, with degree-based node sizing;
+  the #8 upgrades added fcose layout, tooltips, hide-singletons, and the topic-graph, but not the
+  full mode matrix or centrality/encoding options. *Effort:* medium-large — mostly graph-service
+  computation (centrality, neighborhood extraction) + frontend encoding controls.
+- **Smaller (but still net-new) deltas:**
+  - *Duplicate kinds (§8.4):* no **preprint↔published** detection (e.g. an arXiv preprint vs its
+    journal version) and no **same-file-different-paths** kind — today's dedup is exact-hash / DOI
+    / arXiv-base / fuzzy-title.
+  - *Backup/restore REST (§10.2):* backup+restore are **CLI/Makefile only**; the spec wants REST
+    endpoints (so an admin can trigger/monitor from the UI).
+  - *More ingestion (§8.1):* no **CSV/TSV** import, no **watched-folder** auto-ingest, no **Zotero**
+    import.
+  - *Reference-string fallback parser (§8.2):* when GROBID can't structure a raw citation, the spec
+    wants a fallback parser (anystyle/refextract) to still extract author/title/year — currently a
+    raw unparsed string is kept.
 
-**Say which (if any) to scope into the next workplan; recommend starting with §8.11.**
+**These need to be scoped into a workplan (each is its own mini-project). Recommend sequencing
+§8.11 first — it's the highest-value and most-cited-in-the-README. Tell me which to schedule.**
