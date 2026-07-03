@@ -710,6 +710,10 @@ export interface DuplicateScanResult {
   scanned_files: number;
   candidate_count: number;
   candidates: DuplicateCandidate[];
+  // A full-library scan runs on the background worker (D15): the response is empty and `queued` is
+  // true, with `job_id` naming the RQ job to poll for completion before reloading candidates.
+  queued?: boolean;
+  job_id?: string | null;
 }
 
 export interface DuplicateSplitSegment {

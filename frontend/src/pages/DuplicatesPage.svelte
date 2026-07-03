@@ -40,11 +40,42 @@
     });
   }
 
+  // Wait for the queued full-library scan job to leave the queue before reloading candidates: a
+  // full scan runs on the worker (D15), so the candidates it produces are not visible in the
+  // response. Polls the jobs list for the job's terminal state; bounded so a stuck/unavailable
+  // queue still returns control. Returns the failure message, or '' on success.
+  async function waitForScanJob(jobId: string): Promise<string> {
+    let seen = false;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      let job;
+      try {
+        const status = await client.getJobs(50);
+        job = status.jobs.find((j) => j.id === jobId);
+      } catch {
+        job = undefined; // queue introspection unavailable — fall through to the reload below
+      }
+      if (job) {
+        seen = true;
+        if (job.status === 'finished') return '';
+        if (job.status === 'failed') return 'Duplicate scan failed on the worker.';
+      } else if (seen) {
+        return ''; // the job completed and rolled out of the recent-jobs window
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return '';
+  }
+
   async function scan(): Promise<void> {
     await run(async () => {
       const result = await client.scanDuplicateCandidates();
+      let failure = '';
+      if (result.queued && result.job_id) {
+        message = 'Scan running…';
+        failure = await waitForScanJob(result.job_id);
+      }
       candidates = await client.listDuplicateCandidates(statusFilter);
-      message = `Scan complete: ${result.candidate_count} candidates across ${result.scanned_works} papers and ${result.scanned_files} files`;
+      message = failure || `Scan complete: ${candidates.length} candidate(s) found`;
     });
   }
 
