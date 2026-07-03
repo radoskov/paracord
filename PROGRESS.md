@@ -7,6 +7,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming P3 — theme picker + per-user persistence + live restyle (2026-07-03)
+
+Shipped the switcher (`docs/THEMING_DESIGN.md` P3). **Backend**: `User.theme` (nullable `String(32)`;
+NULL = boot default `latte-warm`), migration `0050_user_theme`, `theme` accepted by `PATCH
+/auth/me` (validated against the bundled ids in `app/core/themes.py` → **422** on an unknown id) and
+returned by `/auth/me`; `backend/openapi.json` regenerated. **Frontend**: a reactive theme store
+(`lib/theme/store.ts`) — `activeThemeId`/`activeVizTheme` derived stores + `setTheme`/`initTheme`/
+`reconcileTheme`/`setFollowSystem`; a data-driven **picker** in `ProfilePage.svelte` (grouped Light/
+Dark, labelled Warm/Cool, colour swatches) that restyles live + persists via `updateProfile({theme})`.
+**No-flash boot**: an inline `<head>` script in `index.html` sets `data-theme` + a cached surface
+background before the module loads; `main.ts` calls `initTheme()` before mount; priority is
+localStorage cache → server `theme` (reconciled in `App.svelte` after `/auth/me`) → default. **Live
+restyle (no reload)**: the ECharts pages re-run `setOption` on `$activeVizTheme`; the Cytoscape
+network re-applies its stylesheet + re-derives node colours in place (`restyle()`, no rebuild/
+relayout). **Follow system** shipped (device-local, `prefers-color-scheme` + `matchMedia` listener,
+picks the light/dark member of the current temperature pair). Verified: full backend suite **866
+passed**; migration parity green; ruff clean; `make frontend-check` green (**149 tests**, 1 skip;
+build OK). Handoff: `docs/agent_handoffs/2026-07-03-theming-p3-picker-persistence-live-restyle.md`.
+Next: P4 (custom/hand-edited themes).
+
 ## Theming P2 — author + validate the 4 themes (2026-07-03)
 
 Authored the four Catppuccin-based themes (`docs/THEMING_DESIGN.md`) as hand-editable YAML —
