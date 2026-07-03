@@ -7,6 +7,33 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P5b — citation-graph depth (§8.9) + UMAP opt-in (2026-07-03)
+
+The final workplan phase. **Part 1 — §8.9 citation-graph depth** (additive on the existing Cytoscape
+graph, all modes preserved): `build_citation_graph` grew a `compute_metrics` gate (off for the viz
+callers that only need edges/degree) that attaches per-node **weighted degree, PageRank** (pure-python
+power iteration, weighted by mention count) **and exact Brandes betweenness** over the final
+node/edge set. The Brandes impl moved into `citation_graph.py` and `citation_summary.py` now imports
+it (one shared implementation). All three metrics ship on every node, so the frontend `size_by`
+dropdown (degree/PageRank/betweenness) re-sizes the live graph **without a refetch or relayout**. A
+`color_by` param (`none`/`shelf`/`tag`/`topic`/`status`) attaches one SEE-clamped categorical
+`color_group` per local node (shelf coloring uses only non-private shelves so a private shelf name
+never leaks); the frontend refetches on change and **re-colors in place** via a topology-signature
+check (relayout only on a real topology change). A `warning` marker reuses the D31.4
+`FileWorkLink.warning_state` + open-`DuplicateCandidate` signals → a red ring on flagged nodes; edge
+width encodes mention count; an accessible (Okabe–Ito) legend maps color groups. New
+**`GET /works/{id}/citation-neighborhood`** (`hops` 1–3, default 1; `node_mode`, `color_by`) returns
+the local N-hop neighborhood of one focus paper as the same graph payload, SEE-clamped (404 unless
+the caller may see the focus). **Part 2 — UMAP opt-in:** `embedding_cluster` gained a `layout` param
+(`pca` default | `umap`); `umap-learn` is imported behind an `importlib` guard and degrades to PCA
+with a note when absent, so the base api image (no umap) always renders. The layout cache is keyed by
+`(scope, model, layout)`. `umap-learn` lives only in the opt-in **ml-extraction AI image**
+(`backend/Dockerfile`), never in the base requirements/lock. Frontend gets a PCA/UMAP toggle that
+surfaces the fallback hint. Full backend suite **852 passed** (+17); frontend **124 passed / 1
+skipped** (+1, cytoscape stays a lazy chunk); ruff clean; `backend/openapi.json` regenerated (graph
+`color_by` + node depth fields, neighborhood endpoint, viz `layout`). See
+`docs/agent_handoffs/2026-07-03-track-c-p5b-graph-depth-umap.md`.
+
 ## Track C P5a — three more visualization views (2026-07-03)
 
 Three more providers on the P2 viz seam (register-a-provider + register-a-renderer, no plumbing
