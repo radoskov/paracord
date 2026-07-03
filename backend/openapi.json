@@ -1534,6 +1534,91 @@
         "title": "CitationGraphResponse",
         "type": "object"
       },
+      "CitationSummaryResponse": {
+        "properties": {
+          "bridge_method": {
+            "title": "Bridge Method",
+            "type": "string"
+          },
+          "bridge_papers": {
+            "items": {
+              "$ref": "#/components/schemas/RankedWorkModel"
+            },
+            "title": "Bridge Papers",
+            "type": "array"
+          },
+          "chronological": {
+            "items": {
+              "$ref": "#/components/schemas/YearCountModel"
+            },
+            "title": "Chronological",
+            "type": "array"
+          },
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "frequently_cited_missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingWorkModel"
+            },
+            "title": "Frequently Cited Missing",
+            "type": "array"
+          },
+          "isolated_papers": {
+            "items": {
+              "$ref": "#/components/schemas/RankedWorkModel"
+            },
+            "title": "Isolated Papers",
+            "type": "array"
+          },
+          "most_cited_external": {
+            "items": {
+              "$ref": "#/components/schemas/RankedWorkModel"
+            },
+            "title": "Most Cited External",
+            "type": "array"
+          },
+          "most_cited_local": {
+            "items": {
+              "$ref": "#/components/schemas/RankedWorkModel"
+            },
+            "title": "Most Cited Local",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "scope_work_count": {
+            "title": "Scope Work Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_work_count",
+          "most_cited_local",
+          "most_cited_external",
+          "frequently_cited_missing",
+          "bridge_papers",
+          "isolated_papers",
+          "chronological",
+          "bridge_method",
+          "computed_at",
+          "version",
+          "notes"
+        ],
+        "title": "CitationSummaryResponse",
+        "type": "object"
+      },
       "ConfirmFieldRequest": {
         "properties": {
           "confirmed": {
@@ -3178,6 +3263,68 @@
         "title": "MetadataAssertionRead",
         "type": "object"
       },
+      "MissingWorkModel": {
+        "properties": {
+          "cited_by_count": {
+            "title": "Cited By Count",
+            "type": "integer"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "mention_count": {
+            "title": "Mention Count",
+            "type": "integer"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "cited_by_count",
+          "mention_count"
+        ],
+        "title": "MissingWorkModel",
+        "type": "object"
+      },
       "ModelRef": {
         "properties": {
           "model": {
@@ -3624,6 +3771,52 @@
           }
         },
         "title": "RackUpdate",
+        "type": "object"
+      },
+      "RankedWorkModel": {
+        "properties": {
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "work_id",
+          "title",
+          "score"
+        ],
+        "title": "RankedWorkModel",
         "type": "object"
       },
       "ReferenceRead": {
@@ -6569,6 +6762,30 @@
           }
         },
         "title": "WorkUpdate",
+        "type": "object"
+      },
+      "YearCountModel": {
+        "properties": {
+          "work_count": {
+            "title": "Work Count",
+            "type": "integer"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "work_count"
+        ],
+        "title": "YearCountModel",
         "type": "object"
       }
     }
@@ -10788,6 +11005,124 @@
         "summary": "Update Me",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/citations/summary": {
+      "get": {
+        "description": "Compute the scoped citation summary (§8.11) for the given scope.\n\nAccess control: a shelf/rack scope requires SEE on that container (404 otherwise); the summary's\nworks/references are clamped to the caller's visible works. Cached + versioned by a scope\nsignature (see :func:`app.services.citation_summary.citation_summary`).",
+        "operationId": "get_citation_summary_api_v1_citations_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "default": "library",
+              "enum": [
+                "library",
+                "shelf",
+                "rack",
+                "search_result",
+                "selected_papers",
+                "import_batch",
+                "saved_filter"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 15,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitationSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Citation Summary",
+        "tags": [
+          "citations"
         ]
       }
     },
