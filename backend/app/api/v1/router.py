@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     shelves,
     sources,
     tags,
+    visualization,
     web_find_allowed_hosts,
     works,
 )
@@ -92,6 +93,10 @@ api_router.include_router(
 )
 api_router.include_router(
     graph.router, prefix="/graphs", tags=["graph"], dependencies=auth_required
+)
+# D38 visualization module (Track C): provider-registry-backed view payloads (temporal_map in P2).
+api_router.include_router(
+    visualization.router, prefix="/viz", tags=["visualization"], dependencies=auth_required
 )
 api_router.include_router(
     exports.router,

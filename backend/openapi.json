@@ -5465,6 +5465,219 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VizAxisModel": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "VizAxisModel",
+        "type": "object"
+      },
+      "VizEdgeModel": {
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "weight"
+        ],
+        "title": "VizEdgeModel",
+        "type": "object"
+      },
+      "VizNodeModel": {
+        "properties": {
+          "color_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Group"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          },
+          "shape": {
+            "title": "Shape",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X"
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y"
+          }
+        },
+        "required": [
+          "id",
+          "shape",
+          "label",
+          "meta"
+        ],
+        "title": "VizNodeModel",
+        "type": "object"
+      },
+      "VizPayloadResponse": {
+        "properties": {
+          "axes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/VizAxisModel"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axes"
+          },
+          "axis_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VizAxisModel"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axis Options"
+          },
+          "edges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VizEdgeModel"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edges"
+          },
+          "legend": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legend"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/VizNodeModel"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "notes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "view_type": {
+            "title": "View Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "view_type",
+          "nodes"
+        ],
+        "title": "VizPayloadResponse",
+        "type": "object"
+      },
+      "VizViewTypesResponse": {
+        "properties": {
+          "view_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "View Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "view_types"
+        ],
+        "title": "VizViewTypesResponse",
+        "type": "object"
+      },
       "WebCandidateRead": {
         "properties": {
           "authors": {
@@ -14145,6 +14358,303 @@
         "summary": "Add Tag Link",
         "tags": [
           "tags"
+        ]
+      }
+    },
+    "/api/v1/viz/": {
+      "get": {
+        "description": "List the registered visualization view types (for the view-type selector).",
+        "operationId": "list_view_types_api_v1_viz__get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VizViewTypesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List View Types",
+        "tags": [
+          "visualization"
+        ]
+      }
+    },
+    "/api/v1/viz/{view_type}": {
+      "get": {
+        "description": "Build a visualization payload for ``view_type`` over the given scope.\n\nAccess control: a shelf/rack scope requires SEE on that container (404 otherwise), and the\npayload's nodes/edges are clamped to the caller's visible works.",
+        "operationId": "get_visualization_api_v1_viz__view_type__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "view_type",
+            "required": true,
+            "schema": {
+              "title": "View Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "default": "library",
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "x_axis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X Axis"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y_axis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Y Axis"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Size By"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Color By"
+            }
+          },
+          {
+            "in": "query",
+            "name": "focus_work_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Focus Work Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_edges",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Edges",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "embedding_model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Embedding Model"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Current Year"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_nodes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Nodes"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VizPayloadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Visualization",
+        "tags": [
+          "visualization"
         ]
       }
     },
