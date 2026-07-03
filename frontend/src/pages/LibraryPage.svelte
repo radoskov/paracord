@@ -933,7 +933,7 @@
 
   .chip {
     background: #fff;
-    border: 1px solid var(--pg-border);
+    border: 1px solid var(--border-normal);
     border-radius: 999px;
     color: #44515f;
     font-size: 0.78rem;

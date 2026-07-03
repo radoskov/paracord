@@ -313,9 +313,9 @@
     width: 100%;
     text-align: left;
     background: #fff;
-    border: 1px solid var(--pg-border, #cbd5e1);
+    border: 1px solid var(--border-normal, #cbd5e1);
     border-radius: 6px;
-    color: var(--pg-text, #1f2a36);
+    color: var(--ink-strong, #1f2a36);
     padding: 0.6rem 0.7rem;
     cursor: pointer;
   }

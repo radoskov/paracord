@@ -1296,9 +1296,9 @@
 
   .admin-tab {
     background: #fff;
-    border: 1px solid var(--pg-border, #cbd5e1);
+    border: 1px solid var(--border-normal, #cbd5e1);
     border-radius: 6px;
-    color: var(--pg-secondary-text, #21303d);
+    color: var(--accent-secondary, #21303d);
     font-weight: 600;
   }
 
@@ -1383,17 +1383,17 @@
      primary's white text (which previously rendered white-on-white here). */
   button {
     padding: 0.4rem 0.75rem;
-    border: 1px solid var(--pg-border, #cbd5e1);
+    border: 1px solid var(--border-normal, #cbd5e1);
     border-radius: 0.375rem;
-    background: var(--pg-secondary-bg, #ffffff);
-    color: var(--pg-secondary-text, #21303d);
+    background: var(--surface-overlay, #ffffff);
+    color: var(--accent-secondary, #21303d);
     font-size: 0.85rem;
     cursor: pointer;
     white-space: nowrap;
   }
 
   button:hover:not(:disabled) {
-    background: var(--pg-secondary-hover, #eef2f6);
+    background: var(--surface-hover, #eef2f6);
   }
 
   button:disabled {
