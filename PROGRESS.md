@@ -7,6 +7,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P5a — three more visualization views (2026-07-03)
+
+Three more providers on the P2 viz seam (register-a-provider + register-a-renderer, no plumbing
+change), all SEE-filtered and reusing the existing citation-graph resolution / P3 embedding source /
+shared ECharts theme. **co_citation** — a node-link network over the scope with an `edge_context`
+param: `coupling` (bibliographic coupling — two papers linked when they cite the same works, weight =
+shared references, from the scope's `include_external` graph) or `co_citation` (two papers linked
+when a third cites both, weight = shared citers, from the visible-library `local_only` graph; only
+in-library citers are knowable, noted). Node size = degree, color reuses the shared status/work-type
+helper. Rendered as an **ECharts `graph` (force) series** — chosen over a second Cytoscape path to
+keep every view flowing through the one ECharts renderer registry the P2 scaffold established (node
+`name` = work id, so the existing click-to-open handler works unchanged). **topic_river** — per-year
+topic shares (reusing the embedding k-means clustering + TF-IDF labels from P3), an ECharts stacked
+area / streamgraph; each year's shares sum to 1. **similarity_heatmap** — pairwise cosine matrix for
+≤50 papers (top-N by recency past the cap, noted), reusing the P3 dense-vector source (hash-BOW
+fallback), an ECharts heatmap, symmetric with a 1.0 diagonal. **VizPayload gained two backward-
+compatible typed carriers** for non-scatter views (existing views leave them `None`): `series`
+(`{years, topics:[{label, values}]}`) and `matrix` (`{labels, ids, values}`) — P5b/future charts
+reuse these instead of overloading `notes`/`legend`. Full backend suite **835 passed** (+14);
+frontend **123 passed / 1 skipped** (+17, echarts stays a lazy chunk); ruff clean; `backend/openapi.json`
+regenerated (`edge_context` param + `series`/`matrix` on `VizPayloadResponse`). See
+`docs/agent_handoffs/2026-07-03-track-c-p5a-more-viz-views.md`.
+
 ## Track C P4 — citation summaries (§8.11) (2026-07-03)
 
 The README-headline analytics feature. A new `backend/app/services/citation_summary.py` computes six
