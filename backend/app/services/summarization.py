@@ -10,6 +10,7 @@ it, so the result is always honest about provenance and no hard dependency is in
 Every summary is persisted with provenance (``model_name`` + ``prompt_version``).
 """
 
+import hashlib
 import logging
 import math
 import re
@@ -189,6 +190,7 @@ def summarize_work(
     summary_type: str = "extractive",
     max_sentences: int = 5,
     model_name: str | None = None,
+    created_by_user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
 ) -> Summary:
     """Create (replacing any prior summary of the same type) a provenance-tagged summary.
@@ -253,6 +255,7 @@ def summarize_work(
             Summary.summary_type == summary_type,
         )
     )
+    fallback = provider_used != provider_requested
     summary = Summary(
         entity_type="work",
         entity_id=work.id,
@@ -260,16 +263,22 @@ def summarize_work(
         text=text,
         model_name=stored_model,
         prompt_version=prompt_version,
+        provider_requested=provider_requested,
+        provider_used=provider_used,
+        fallback=fallback,
+        source_sections=source_sections,
+        content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        created_by_user_id=created_by_user_id,
+        params={
+            "summary_type": summary_type,
+            "max_sentences": max_sentences,
+            "model_name": model_name,
+        },
     )
     db.add(summary)
     db.flush()
-    # Transient (non-persisted) provenance for the API response.
-    summary.source_sections = source_sections
-    summary.provider_requested = provider_requested
-    summary.provider_used = provider_used
-    # A summary is "degraded" only when it actually fell back from a requested LLM to extractive.
-    summary.fallback = provider_used != provider_requested
-    summary.fallback_reason = fallback_reason if summary.fallback else None
+    # A ``fallback_reason`` is transient (not a column): the UI shows it only on a fresh degrade.
+    summary.fallback_reason = fallback_reason if fallback else None
     return summary
 
 
@@ -330,6 +339,7 @@ def summarize_scope(
     summary_type: str = "extractive",
     max_sentences: int = 8,
     model_name: str | None = None,
+    created_by_user_id: uuid.UUID | None = None,
     visible_ids: set[uuid.UUID] | None = None,
     settings: Settings | None = None,
 ) -> tuple[Summary, int]:
@@ -385,6 +395,7 @@ def summarize_scope(
             Summary.summary_type == summary_type,
         )
     )
+    fallback = provider_used != provider_requested
     summary = Summary(
         entity_type=scope_type,
         entity_id=entity_id,
@@ -392,12 +403,21 @@ def summarize_scope(
         text=text,
         model_name=stored_model,
         prompt_version=prompt_version,
+        provider_requested=provider_requested,
+        provider_used=provider_used,
+        fallback=fallback,
+        content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        created_by_user_id=created_by_user_id,
+        params={
+            "scope_type": scope_type,
+            "scope_id": str(scope_id) if scope_id is not None else None,
+            "summary_type": summary_type,
+            "max_sentences": max_sentences,
+            "model_name": model_name,
+        },
     )
     db.add(summary)
     db.flush()
-    # Transient provenance (mirrors summarize_work) for the API response.
-    summary.provider_requested = provider_requested
-    summary.provider_used = provider_used
-    summary.fallback = provider_used != provider_requested
-    summary.fallback_reason = fallback_reason if summary.fallback else None
+    # A ``fallback_reason`` is transient (not a column): shown only on a fresh degrade.
+    summary.fallback_reason = fallback_reason if fallback else None
     return summary, len(abstracts)

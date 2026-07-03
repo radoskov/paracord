@@ -75,6 +75,7 @@ def create_scope_summary(
             summary_type=payload.summary_type,
             max_sentences=max(3, min(payload.max_sentences, 20)),
             model_name=payload.model_name,
+            created_by_user_id=actor.id,
             visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:

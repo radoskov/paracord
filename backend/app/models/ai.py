@@ -4,7 +4,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -22,6 +32,16 @@ class Summary(Base):
     text: Mapped[str] = mapped_column(Text)
     model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Provenance (§8.14.2, D31.2): what was requested vs what actually produced the summary, whether
+    # it degraded to the extractive fallback, the source-section labels that fed it, a content hash
+    # of the stored text, and who/what parameters generated it.
+    provider_requested: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    source_sections: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

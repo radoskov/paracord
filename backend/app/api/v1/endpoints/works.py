@@ -1026,9 +1026,18 @@ class SummaryRead(BaseModel):
     provider_used: str | None = None
     fallback: bool = False
     fallback_reason: str | None = None
+    content_hash: str | None = None
+    created_by_user_id: uuid.UUID | None = None
+    params: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("source_sections", mode="before")
+    @classmethod
+    def _sections_never_null(cls, value: object) -> object:
+        # Legacy rows (pre-provenance migration) store NULL; present them as an empty list.
+        return value or []
 
 
 class ReferenceRead(BaseModel):
@@ -1487,6 +1496,7 @@ def create_summary(
             summary_type=payload.summary_type,
             max_sentences=payload.max_sentences,
             model_name=payload.model_name,
+            created_by_user_id=actor.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

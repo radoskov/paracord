@@ -179,6 +179,53 @@ def test_summarize_work_without_text_raises(db_session) -> None:
         summarize_work(db_session, work, summary_type="extractive")
 
 
+def test_summarize_work_persists_provenance_columns(db_session) -> None:
+    """D31.2 — provenance is stored on the row, not just returned transiently."""
+    work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three. Four.")
+    db_session.add(work)
+    db_session.commit()
+
+    actor_id = uuid.uuid4()
+    summarize_work(
+        db_session, work, summary_type="extractive", created_by_user_id=actor_id
+    )
+    db_session.commit()
+
+    # Reload from the DB (expire everything) so we read persisted columns, not in-memory attrs.
+    db_session.expire_all()
+    stored = db_session.scalars(select(Summary).where(Summary.entity_id == work.id)).one()
+    assert stored.provider_requested == "extractive"
+    assert stored.provider_used == "extractive"
+    assert stored.fallback is False
+    assert stored.source_sections == []
+    assert stored.content_hash and len(stored.content_hash) == 64
+    assert stored.created_by_user_id == actor_id
+    assert stored.params["summary_type"] == "extractive"
+
+
+def test_summarize_scope_persists_provenance_columns(db_session) -> None:
+    shelf = Shelf(name="Prov scope")
+    db_session.add(shelf)
+    db_session.flush()
+    work = Work(canonical_title="w", normalized_title="w", abstract="Alpha. Beta. Gamma. Delta.")
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.commit()
+
+    actor_id = uuid.uuid4()
+    summarize_scope(
+        db_session, scope_type="shelf", scope_id=shelf.id, created_by_user_id=actor_id
+    )
+    db_session.commit()
+
+    db_session.expire_all()
+    stored = db_session.scalars(select(Summary).where(Summary.entity_type == "shelf")).one()
+    assert stored.content_hash and len(stored.content_hash) == 64
+    assert stored.created_by_user_id == actor_id
+    assert stored.params["scope_type"] == "shelf"
+
+
 # --- API surface ------------------------------------------------------------
 
 
@@ -208,6 +255,10 @@ def test_summary_api_returns_provenance(client, auth_headers, db) -> None:
     assert body["model_name"] == "tier0-abstract"
     assert body["prompt_version"] == "v1"
     assert body["text"] == "A real abstract sentence."
+    # D31.2 provenance surfaced in the read schema.
+    assert body["content_hash"] and len(body["content_hash"]) == 64
+    assert body["created_by_user_id"]
+    assert body["params"]["summary_type"] == "abstract"
 
 
 def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:
