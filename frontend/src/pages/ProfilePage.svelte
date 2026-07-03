@@ -1,9 +1,51 @@
 <script lang="ts">
   import { ApiClient, type CurrentUser } from '../api/client';
   import { currentUser } from '../lib/session';
+  import {
+    activeThemeId,
+    followSystem,
+    setFollowSystem,
+    setTheme,
+    themeOptions,
+    type ThemeOption,
+  } from '../lib/theme/store';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // --- Appearance (theme picker, P3) ---
+  // Data-driven from the bundled themes so a new theme YAML appears here automatically. Grouped by
+  // mode (Light / Dark) and labelled by temperature (Warm / Cool).
+  const lightThemes: ThemeOption[] = themeOptions.filter((t) => t.mode === 'light');
+  const darkThemes: ThemeOption[] = themeOptions.filter((t) => t.mode === 'dark');
+  let themeMsg = '';
+  let themeErr = '';
+
+  // Selecting a theme restyles the whole running app immediately (GUI + open charts/network),
+  // caches it locally for no-flash boot, and persists it to the server profile.
+  async function selectTheme(id: string): Promise<void> {
+    themeMsg = '';
+    themeErr = '';
+    setFollowSystem(false);
+    setTheme(id);
+    try {
+      const updated = await client.updateProfile({ theme: id });
+      currentUser.set(updated);
+      themeMsg = 'Theme saved.';
+    } catch (error) {
+      themeErr = errorMessage(error);
+    }
+  }
+
+  function toggleFollowSystem(event: Event): void {
+    themeMsg = '';
+    themeErr = '';
+    setFollowSystem((event.target as HTMLInputElement).checked);
+  }
+
+  function capitalize(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
 
   // Editable fields are seeded from the store and kept local until saved.
   let displayName = '';
@@ -192,6 +234,50 @@
       {/if}
     </section>
 
+    <section class="card appearance">
+      <div class="head">
+        <h2>Appearance</h2>
+      </div>
+      <p class="muted">Pick a theme. The whole app — including open charts and the citation network — restyles instantly, and your choice is remembered on this device and your account.</p>
+
+      <label class="follow">
+        <input type="checkbox" checked={$followSystem} on:change={toggleFollowSystem} />
+        Follow system appearance
+        <span class="muted">(use the light or dark variant of the selected temperature based on your OS)</span>
+      </label>
+
+      {#each [{ label: 'Light', themes: lightThemes }, { label: 'Dark', themes: darkThemes }] as group}
+        <fieldset class="theme-group">
+          <legend>{group.label}</legend>
+          <div class="theme-grid">
+            {#each group.themes as opt (opt.id)}
+              <button
+                type="button"
+                class="theme-option"
+                class:selected={$activeThemeId === opt.id}
+                aria-pressed={$activeThemeId === opt.id}
+                title={`Use the ${opt.name} theme`}
+                on:click={() => selectTheme(opt.id)}
+              >
+                <span class="swatch" style={`background:${opt.swatch.surface}`}>
+                  <span class="dot primary" style={`background:${opt.swatch.primary}`}></span>
+                  {#each opt.swatch.accents as accent}
+                    <span class="dot" style={`background:${accent}`}></span>
+                  {/each}
+                </span>
+                <span class="theme-meta">
+                  <strong>{opt.name}</strong>
+                  <span class="muted">{capitalize(opt.temperature)}</span>
+                </span>
+              </button>
+            {/each}
+          </div>
+        </fieldset>
+      {/each}
+      {#if themeMsg}<p class="muted">{themeMsg}</p>{/if}
+      {#if themeErr}<p class="danger">{themeErr}</p>{/if}
+    </section>
+
     <section class="card roles">
       <h2>Roles &amp; access</h2>
       <div class="role-card">
@@ -225,6 +311,10 @@
     grid-column: 1;
     grid-row: 2;
   }
+  .appearance {
+    grid-column: 1;
+    grid-row: 3;
+  }
   .roles {
     grid-column: 2;
     grid-row: 1;
@@ -235,10 +325,92 @@
     }
     .account,
     .pw,
+    .appearance,
     .roles {
       grid-column: 1;
       grid-row: auto;
     }
+  }
+  .follow {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+    gap: 0.4rem;
+    margin: 0.6rem 0 0.4rem;
+  }
+  .follow input {
+    width: auto;
+  }
+  .follow .muted {
+    font-weight: 400;
+  }
+  .theme-group {
+    border: none;
+    margin: 0.4rem 0 0;
+    padding: 0;
+  }
+  .theme-group legend {
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0;
+    text-transform: uppercase;
+  }
+  .theme-grid {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    margin: 0.4rem 0 0.6rem;
+  }
+  .theme-option {
+    align-items: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-normal);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+  }
+  .theme-option:hover {
+    background: var(--surface-hover);
+  }
+  .theme-option.selected {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+  }
+  .swatch {
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex: 0 0 auto;
+    gap: 3px;
+    height: 2rem;
+    justify-content: center;
+    padding: 0 5px;
+    width: 3.2rem;
+  }
+  .dot {
+    border-radius: 999px;
+    height: 0.55rem;
+    width: 0.55rem;
+  }
+  .dot.primary {
+    height: 0.7rem;
+    width: 0.7rem;
+  }
+  .theme-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+  }
+  .theme-meta .muted {
+    font-size: 0.78rem;
   }
   .head {
     align-items: center;
