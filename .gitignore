@@ -73,3 +73,6 @@ drop-cl.sh
 
 # Archived audit/discussion doc originals (zip; digest lives in docs/ARCHIVED_AUDIT_LOG.md)
 docs/archive/
+
+# Stale root-owned build dir renamed aside during the 2026-07-03 non-root migration (userns-remap; needs host root to delete)
+frontend/dist.stale-root/
