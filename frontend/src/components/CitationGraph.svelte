@@ -42,6 +42,27 @@
     wasVisible = visible;
   }
 
+  // Resize (and re-lay-out) the graph whenever its container's box changes — initial flex/tab
+  // layout, window resize, tab show/hide. Cytoscape lays nodes out within the container size at
+  // layout time, so a graph built while the container was tiny/hidden clusters on the left; a bare
+  // resize() only grows the canvas, so we also relayout (debounced) to spread nodes to the new
+  // width. Disconnected on destroy.
+  let resizeObserver: ResizeObserver | null = null;
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+  $: if (cyContainer && typeof ResizeObserver !== 'undefined') observeContainer(cyContainer);
+  function observeContainer(el: HTMLElement): void {
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = new ResizeObserver(() => {
+      if (!cy) return;
+      cy.resize();
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (cy) relayout();
+      }, 150);
+    });
+    resizeObserver.observe(el);
+  }
+
   // Graph type: citation (default) or topic (embedding similarity, #6).
   let graphType: 'citation' | 'topic' = 'citation';
   let nodeMode: GraphNodeMode = 'local_only';
@@ -412,6 +433,8 @@
   }
 
   onDestroy(() => {
+    if (resizeObserver) resizeObserver.disconnect();
+    if (resizeTimer) clearTimeout(resizeTimer);
     if (cy) cy.destroy();
   });
 </script>

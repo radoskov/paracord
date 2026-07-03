@@ -124,7 +124,21 @@
     wasVisible = visible;
   }
 
+  // Resize the chart whenever its container's box changes (initial layout, window resize, tab
+  // show/hide, theme reflow) so ECharts fills the container width instead of the tiny width it may
+  // have measured at init time.
+  let resizeObserver: ResizeObserver | null = null;
+  $: if (chartContainer && typeof ResizeObserver !== 'undefined') observeContainer(chartContainer);
+  function observeContainer(el: HTMLElement): void {
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = new ResizeObserver(() => {
+      if (chart) chart.resize();
+    });
+    resizeObserver.observe(el);
+  }
+
   onDestroy(() => {
+    if (resizeObserver) resizeObserver.disconnect();
     if (chart) chart.dispose();
   });
 </script>
