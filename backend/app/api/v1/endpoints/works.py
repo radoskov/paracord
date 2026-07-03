@@ -19,7 +19,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.ai import Embedding, Summary
 from app.models.annotation import Annotation
-from app.models.citation import CitationMention, Reference
+from app.models.chunk import WorkChunk
+from app.models.citation import CitationMention, RawTeiDocument, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
@@ -420,6 +421,71 @@ def build_works_query(
             .exists()
         )
         stmt = stmt.where(edge)
+    if parsed.abstract:  # abstract:<text> — match within the abstract column
+        stmt = stmt.where(Work.abstract.ilike(f"%{parsed.abstract}%"))
+    if parsed.summary:  # summary:<text> — match within a stored summary's text
+        stmt = stmt.where(
+            select(Summary.id)
+            .where(
+                Summary.entity_type == "work",
+                Summary.entity_id == Work.id,
+                Summary.text.ilike(f"%{parsed.summary}%"),
+            )
+            .exists()
+        )
+    if parsed.fulltext:  # fulltext:<text> — match within the work's extracted body chunks
+        stmt = stmt.where(
+            select(WorkChunk.id)
+            .where(WorkChunk.work_id == Work.id, WorkChunk.text.ilike(f"%{parsed.fulltext}%"))
+            .exists()
+        )
+    if parsed.file_name:  # file:<name> — match a linked file's original_filename
+        stmt = stmt.where(
+            select(FileWorkLink.id)
+            .join(File, File.id == FileWorkLink.file_id)
+            .where(
+                FileWorkLink.work_id == Work.id,
+                File.original_filename.ilike(f"%{parsed.file_name}%"),
+            )
+            .exists()
+        )
+    if parsed.duplicate is not None:
+        # duplicate:<yes|no> — the work is entity A or B of an OPEN duplicate candidate.
+        open_dup = (
+            select(DuplicateCandidate.id)
+            .where(
+                DuplicateCandidate.status == "open",
+                or_(
+                    and_(
+                        DuplicateCandidate.entity_a_type == "work",
+                        DuplicateCandidate.entity_a_id == Work.id,
+                    ),
+                    and_(
+                        DuplicateCandidate.entity_b_type == "work",
+                        DuplicateCandidate.entity_b_id == Work.id,
+                    ),
+                ),
+            )
+            .exists()
+        )
+        stmt = stmt.where(open_dup if parsed.duplicate else ~open_dup)
+    if parsed.version is not None:
+        # version:<yes|no> — the work is part of a version group (a shared version_group_id or a
+        # WorkVersion row records a concrete version of it).
+        in_group = or_(
+            Work.version_group_id.is_not(None),
+            select(WorkVersion.id).where(WorkVersion.work_id == Work.id).exists(),
+        )
+        stmt = stmt.where(in_group if parsed.version else ~in_group)
+    if parsed.warning:
+        # warning:<text|*> — a linked file carries a review warning (FileWorkLink.warning_state).
+        # "*"/"any" matches any non-"none" state; a literal matches a warning_state substring.
+        link = select(FileWorkLink.id).where(FileWorkLink.work_id == Work.id)
+        if parsed.warning in ("*", "any", "true", "yes"):
+            link = link.where(FileWorkLink.warning_state != "none")
+        else:
+            link = link.where(FileWorkLink.warning_state.ilike(f"%{parsed.warning}%"))
+        stmt = stmt.where(link.exists())
     # Operator-derived has:* unless the caller passed explicit query params (those win).
     if has_pdf is None:
         has_pdf = parsed.has_pdf
@@ -456,6 +522,17 @@ def build_works_query(
         )
     if parsed.has_abstract:  # has:abstract — a non-empty abstract column
         stmt = stmt.where(Work.abstract.is_not(None), Work.abstract != "")
+    if parsed.has_grobid:  # has:grobid — a GROBID TEI document was extracted for the work
+        stmt = stmt.where(
+            select(RawTeiDocument.id).where(RawTeiDocument.work_id == Work.id).exists()
+        )
+    if parsed.has_ocr:  # has:ocr — a linked file gained an OCR text layer (text_layer_quality)
+        stmt = stmt.where(
+            select(FileWorkLink.id)
+            .join(File, File.id == FileWorkLink.file_id)
+            .where(FileWorkLink.work_id == Work.id, File.text_layer_quality == "ocr_added")
+            .exists()
+        )
     for field in (missing or "").split(","):
         name = field.strip()
         column = _MISSING_FIELDS.get(name)
@@ -536,8 +613,9 @@ def list_works(
 
     ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
     ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
-    ``has:pdf|references|notes|annotations|summary|abstract``); the leftover free text matches
-    title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
+    ``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:`` ``warning:``
+    ``has:pdf|references|notes|annotations|summary|abstract|grobid|ocr``); the leftover free text
+    matches title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
     precedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE
     filter (only see-able shelves/racks contribute; they never widen visibility).
 

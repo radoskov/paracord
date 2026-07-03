@@ -2,10 +2,11 @@
 
 Turns a free-text query that may contain field operators — ``author:`` ``year:>=2020`` ``venue:``
 ``tag:`` ``type:`` ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:``
-``cited_by_local:`` ``has:pdf`` ``has:references`` ``has:notes`` ``has:annotations``
-``has:summary`` ``has:abstract`` — into a structured filter plus the leftover free text. Quoted
-phrases (``author:"jane doe"``) are supported. Unknown ``key:value`` tokens fall back to free text,
-so a stray colon never breaks a search.
+``cited_by_local:`` ``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:``
+``warning:`` ``has:pdf`` ``has:references`` ``has:notes`` ``has:annotations`` ``has:summary``
+``has:abstract`` ``has:grobid`` ``has:ocr`` — into a structured filter plus the leftover free
+text. Quoted phrases (``author:"jane doe"``) are supported. Unknown ``key:value`` tokens fall back
+to free text, so a stray colon never breaks a search.
 
 The parser is a SAFE allowlist: only keys in :data:`_KNOWN` become structured filters and their
 values are carried as plain strings — ``list_works`` binds them through the ORM (never string
@@ -34,7 +35,19 @@ _KNOWN = {
     "rack",
     "cites",
     "cited_by_local",
+    "abstract",
+    "summary",
+    "fulltext",
+    "file",
+    "duplicate",
+    "version",
+    "warning",
 }
+
+# Values that read as "yes/any" for the boolean review-state operators (``duplicate:``/``version:``);
+# anything else that is not an explicit negative is treated as an affirmative presence filter.
+_TRUE = {"true", "yes", "y", "1", "open", "any", "*"}
+_FALSE = {"false", "no", "n", "0", "none"}
 
 
 @dataclass
@@ -52,6 +65,10 @@ class ParsedQuery:
     rack: str | None = None
     cites: str | None = None
     cited_by_local: str | None = None
+    abstract: str | None = None  # abstract:<text> — match within the abstract column
+    summary: str | None = None  # summary:<text> — match within a stored summary's text
+    fulltext: str | None = None  # fulltext:<text> — match within extracted body chunks
+    file_name: str | None = None  # file:<name> — match a linked file's original_filename
     year_min: int | None = None
     year_max: int | None = None
     has_pdf: bool | None = None
@@ -59,6 +76,13 @@ class ParsedQuery:
     has_annotations: bool | None = None
     has_summary: bool | None = None
     has_abstract: bool | None = None
+    has_grobid: bool | None = None  # has:grobid — the work has GROBID TEI
+    has_ocr: bool | None = None  # has:ocr — a linked file gained an OCR text layer
+    duplicate: bool | None = None  # duplicate:<yes|no> — has an open duplicate candidate
+    version: bool | None = None  # version:<yes|no> — is part of a version group
+    # warning:<text|*> — review-warning filter. "*"/"any" matches any warning; a literal matches a
+    # ``warning_state`` substring. Stored as the raw token; the builder interprets it.
+    warning: str | None = None
     flags: list[str] = field(default_factory=list)  # unrecognized has:* values, for transparency
 
 
@@ -91,8 +115,17 @@ def _apply_has(parsed: ParsedQuery, value: str) -> None:
         parsed.has_summary = True
     elif v == "abstract":
         parsed.has_abstract = True
+    elif v in ("grobid", "tei"):
+        parsed.has_grobid = True
+    elif v == "ocr":
+        parsed.has_ocr = True
     else:
         parsed.flags.append(value)
+
+
+def _as_bool(value: str) -> bool:
+    """Interpret a review-state operator value: explicit negatives are False, else True."""
+    return value.lower() not in _FALSE
 
 
 def parse_search_query(q: str | None) -> ParsedQuery:
@@ -135,6 +168,20 @@ def parse_search_query(q: str | None) -> ParsedQuery:
             parsed.cites = value
         elif key_l == "cited_by_local":
             parsed.cited_by_local = value
+        elif key_l == "abstract":
+            parsed.abstract = value
+        elif key_l == "summary":
+            parsed.summary = value
+        elif key_l == "fulltext":
+            parsed.fulltext = value
+        elif key_l == "file":
+            parsed.file_name = value
+        elif key_l == "duplicate":
+            parsed.duplicate = _as_bool(value)
+        elif key_l == "version":
+            parsed.version = _as_bool(value)
+        elif key_l == "warning":
+            parsed.warning = value
         elif key_l == "year":
             _apply_year(parsed, value)
         elif key_l == "has":

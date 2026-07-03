@@ -64,6 +64,33 @@ def test_existing_has_values_preserved():
     assert parse_search_query("has:mystery").flags == ["mystery"]
 
 
+def test_parses_field_scoped_text_operators():
+    p = parse_search_query(
+        'abstract:transformer summary:"key finding" fulltext:backprop file:paper.pdf'
+    )
+    assert p.abstract == "transformer"
+    assert p.summary == "key finding"
+    assert p.fulltext == "backprop"
+    assert p.file_name == "paper.pdf"
+    assert p.text == ""
+
+
+def test_parses_extraction_state_has_values():
+    assert parse_search_query("has:grobid").has_grobid is True
+    assert parse_search_query("has:tei").has_grobid is True
+    assert parse_search_query("has:ocr").has_ocr is True
+
+
+def test_parses_review_state_operators():
+    assert parse_search_query("duplicate:yes").duplicate is True
+    assert parse_search_query("duplicate:no").duplicate is False
+    assert parse_search_query("duplicate:open").duplicate is True
+    assert parse_search_query("version:any").version is True
+    assert parse_search_query("version:no").version is False
+    assert parse_search_query("warning:*").warning == "*"
+    assert parse_search_query("warning:multiple").warning == "multiple"
+
+
 # --- endpoint integration ---------------------------------------------------
 
 
@@ -219,3 +246,131 @@ def test_list_works_cites_and_cited_by_local(client, auth_headers, db):
     assert _titles(client.get("/api/v1/works?q=cited_by_local:Citing", headers=h)) == {
         "Foundational method"
     }
+
+
+def test_list_works_abstract_and_summary_operators(client, auth_headers, db):
+    h = auth_headers("owner")
+    abs_work = _make(
+        client, h, canonical_title="Abstract carrier", abstract="uses diffusion models"
+    )
+    sum_work = _make(client, h, canonical_title="Summary carrier")
+    _make(client, h, canonical_title="Bare thing")
+    db.add(
+        Summary(
+            entity_type="work",
+            entity_id=uuid.UUID(sum_work["id"]),
+            summary_type="extractive",
+            text="a study of reinforcement learning agents",
+        )
+    )
+    db.commit()
+
+    assert _titles(client.get("/api/v1/works?q=abstract:diffusion", headers=h)) == {
+        abs_work["canonical_title"]
+    }
+    assert _titles(client.get("/api/v1/works?q=summary:reinforcement", headers=h)) == {
+        sum_work["canonical_title"]
+    }
+
+
+def test_list_works_fulltext_and_file_operators(client, auth_headers, db):
+    from app.models.chunk import WorkChunk
+    from app.models.file import File, FileWorkLink
+
+    h = auth_headers("owner")
+    chunk_work = _make(client, h, canonical_title="Body text carrier")
+    file_work = _make(client, h, canonical_title="File carrier")
+    _make(client, h, canonical_title="Empty carrier")
+
+    db.add(
+        WorkChunk(
+            work_id=uuid.UUID(chunk_work["id"]),
+            section="Methods",
+            position=0,
+            text="we train a convolutional network end to end",
+        )
+    )
+    file = File(sha256="a" * 64, size_bytes=10, original_filename="landmark-study.pdf")
+    db.add(file)
+    db.flush()
+    db.add(FileWorkLink(file_id=file.id, work_id=uuid.UUID(file_work["id"])))
+    db.commit()
+
+    assert _titles(client.get("/api/v1/works?q=fulltext:convolutional", headers=h)) == {
+        chunk_work["canonical_title"]
+    }
+    assert _titles(client.get("/api/v1/works?q=file:landmark", headers=h)) == {
+        file_work["canonical_title"]
+    }
+
+
+def test_list_works_extraction_state_operators(client, auth_headers, db):
+    from app.models.citation import RawTeiDocument
+    from app.models.file import File, FileWorkLink
+
+    h = auth_headers("owner")
+    tei_work = _make(client, h, canonical_title="TEI carrier")
+    ocr_work = _make(client, h, canonical_title="OCR carrier")
+    _make(client, h, canonical_title="Plain carrier")
+
+    tei_file = File(sha256="b" * 64, size_bytes=10, original_filename="tei.pdf")
+    ocr_file = File(
+        sha256="c" * 64, size_bytes=10, original_filename="scan.pdf", text_layer_quality="ocr_added"
+    )
+    db.add_all([tei_file, ocr_file])
+    db.flush()
+    db.add(RawTeiDocument(file_id=tei_file.id, work_id=uuid.UUID(tei_work["id"]), tei_xml="<TEI/>"))
+    db.add(FileWorkLink(file_id=ocr_file.id, work_id=uuid.UUID(ocr_work["id"])))
+    db.commit()
+
+    assert _titles(client.get("/api/v1/works?q=has:grobid", headers=h)) == {
+        tei_work["canonical_title"]
+    }
+    assert _titles(client.get("/api/v1/works?q=has:ocr", headers=h)) == {
+        ocr_work["canonical_title"]
+    }
+
+
+def test_list_works_review_state_operators(client, auth_headers, db):
+    from app.models.duplicate import DuplicateCandidate
+    from app.models.file import File, FileWorkLink
+
+    h = auth_headers("owner")
+    dup_a = _make(client, h, canonical_title="Dup A")
+    dup_b = _make(client, h, canonical_title="Dup B")
+    versioned = _make(client, h, canonical_title="Versioned work")
+    warned = _make(client, h, canonical_title="Warned work")
+    _make(client, h, canonical_title="Clean work")
+
+    db.add(
+        DuplicateCandidate(
+            candidate_type="fuzzy_title",
+            entity_a_type="work",
+            entity_a_id=uuid.UUID(dup_a["id"]),
+            entity_b_type="work",
+            entity_b_id=uuid.UUID(dup_b["id"]),
+            score=0.9,
+            status="open",
+        )
+    )
+    # A shared version_group_id marks the work as part of a version group.
+    from app.models.work import Work
+
+    vw = db.get(Work, uuid.UUID(versioned["id"]))
+    vw.version_group_id = vw.id
+    warn_file = File(sha256="d" * 64, size_bytes=10, original_filename="w.pdf")
+    db.add(warn_file)
+    db.flush()
+    db.add(
+        FileWorkLink(
+            file_id=warn_file.id,
+            work_id=uuid.UUID(warned["id"]),
+            warning_state="file_contains_multiple_works",
+        )
+    )
+    db.commit()
+
+    assert _titles(client.get("/api/v1/works?q=duplicate:yes", headers=h)) == {"Dup A", "Dup B"}
+    assert _titles(client.get("/api/v1/works?q=version:yes", headers=h)) == {"Versioned work"}
+    assert _titles(client.get("/api/v1/works?q=warning:*", headers=h)) == {"Warned work"}
+    assert _titles(client.get("/api/v1/works?q=warning:multiple", headers=h)) == {"Warned work"}
