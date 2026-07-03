@@ -23,6 +23,7 @@
   let allShelves: Shelf[] = [];
   let newRackName = '';
   let newRackAccess: AccessLevel = 'open';
+  let renameName = '';
   let pickShelfId = '';
   let loading = false;
   let message = '';
@@ -59,10 +60,23 @@
   async function select(rack: Rack): Promise<void> {
     selected = rack;
     selectedRackId.set(rack.id);
+    renameName = rack.name;
     pickShelfId = '';
     await run(async () => {
       rackShelves = await client.listRackShelves(rack.id);
     });
+  }
+
+  async function renameRack(): Promise<void> {
+    if (!selected) return;
+    const name = renameName.trim();
+    if (!name || name === selected.name) return;
+    const rack = selected;
+    await run(async () => {
+      const updated = await client.updateRack(rack.id, { name });
+      racks = racks.map((r) => (r.id === updated.id ? updated : r));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Rack renamed');
   }
 
   async function createRack(): Promise<void> {
@@ -217,6 +231,14 @@
         </div>
       </div>
 
+      <form on:submit|preventDefault={renameRack} class="rename">
+        <input bind:value={renameName} aria-label="Rename rack" placeholder="Rack name"
+          disabled={loading || !$canManageStructure} />
+        <button type="submit" class="secondary"
+          disabled={loading || !$canManageStructure || !renameName.trim() || renameName.trim() === selected.name}
+          title={$canManageStructure ? 'Rename this rack' : INSUFFICIENT_ROLE}>Rename</button>
+      </form>
+
       <div class="add-shelf">
         <h3>Add a shelf to this rack</h3>
         <div class="row">
@@ -365,6 +387,17 @@
 
   .head h2 {
     margin: 0;
+  }
+
+  .rename {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-top: 0.6rem;
+  }
+
+  .rename input {
+    min-width: 0;
   }
 
   .add-shelf {

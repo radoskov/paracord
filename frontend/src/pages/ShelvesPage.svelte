@@ -23,6 +23,7 @@
   let allWorks: Work[] = [];
   let newShelfName = '';
   let newShelfAccess: AccessLevel = 'open';
+  let renameName = '';
   let pickWorkId = '';
   let workFilter = '';
   let loading = false;
@@ -70,10 +71,23 @@
   async function select(shelf: Shelf): Promise<void> {
     selected = shelf;
     selectedShelfId.set(shelf.id);
+    renameName = shelf.name;
     pickWorkId = '';
     await run(async () => {
       shelfWorks = await client.listShelfWorks(shelf.id);
     });
+  }
+
+  async function renameShelf(): Promise<void> {
+    if (!selected) return;
+    const name = renameName.trim();
+    if (!name || name === selected.name) return;
+    const shelf = selected;
+    await run(async () => {
+      const updated = await client.updateShelf(shelf.id, { name });
+      shelves = shelves.map((s) => (s.id === updated.id ? updated : s));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Shelf renamed');
   }
 
   async function createShelf(): Promise<void> {
@@ -218,6 +232,14 @@
             title={$canManageStructure ? 'Delete this shelf; papers only here move to the default shelf' : INSUFFICIENT_ROLE}>Delete shelf</button>
         </div>
       </div>
+
+      <form on:submit|preventDefault={renameShelf} class="rename">
+        <input bind:value={renameName} aria-label="Rename shelf" placeholder="Shelf name"
+          disabled={loading || !$canManageStructure} />
+        <button type="submit" class="secondary"
+          disabled={loading || !$canManageStructure || !renameName.trim() || renameName.trim() === selected.name}
+          title={$canManageStructure ? 'Rename this shelf' : INSUFFICIENT_ROLE}>Rename</button>
+      </form>
 
       <div class="add-work">
         <h3>Add a paper to this shelf</h3>
@@ -365,6 +387,17 @@
 
   .head h2 {
     margin: 0;
+  }
+
+  .rename {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-top: 0.6rem;
+  }
+
+  .rename input {
+    min-width: 0;
   }
 
   .add-work {
