@@ -9,7 +9,10 @@ call, not a plumbing change.
 
     {view_type, nodes:[{id, x, y, size, color_group, shape, label, meta}],
      edges:[{source, target, weight}]?, axes:{x:{key,label}, y:{key,label}}?,
-     legend?, notes, axis_options?}
+     legend?, notes, axis_options?, series?, matrix?}
+
+``series`` and ``matrix`` (P5a) are the typed carriers for non-scatter chart views (topic river /
+similarity heatmap) — see :class:`VizPayload`. Scatter/network views leave them ``None``.
 
 Access control is delegated to the existing machinery: the caller passes ``actor`` and every scope
 is clamped to ``access.visible_work_ids`` (a reader never sees a hidden paper), and scope resolution
@@ -30,6 +33,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import combinations
 
 import numpy as np
 from sqlalchemy.orm import Session
@@ -123,6 +127,15 @@ class VizPayload:
     # Available axis options for both dropdowns; ``None`` for non-axis views. Server-driven so P3+
     # can add an axis without a frontend change.
     axis_options: list[dict[str, str]] | None = None
+    # P5a typed additions for non-scatter chart views (backward-compatible; every existing view
+    # leaves them ``None``). ``series`` carries stacked time-series data for the topic river as
+    # ``{"years": list[int], "topics": [{"label": str, "values": list[float]}]}`` (one value per
+    # year, aligned to ``years``). ``matrix`` carries a labelled square matrix for the similarity
+    # heatmap as ``{"labels": list[str], "ids": list[str], "values": list[list[float]]}`` (row/column
+    # order matches ``labels``/``ids``). Future chart views (P5b+) reuse these two fields rather than
+    # smuggling data through ``notes``/``legend``.
+    series: dict | None = None
+    matrix: dict | None = None
 
 
 VizProvider = Callable[[Session, User, VizScope, dict], VizPayload]
@@ -659,8 +672,320 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
     )
 
 
+# Co-citation edge contexts (§2d). ``coupling`` = bibliographic coupling (two works linked when they
+# cite the same works; weight = shared references). ``co_citation`` = classic co-citation (two works
+# linked when a third work cites both; weight = shared citers). Default is coupling.
+CO_CITATION_CONTEXTS = ("coupling", "co_citation")
+DEFAULT_EDGE_CONTEXT = "coupling"
+
+
+def _coupling_edge_weights(edges: list[VizEdge], scope_ids: set[str]) -> dict[tuple[str, str], int]:
+    """Bibliographic-coupling weights: shared cited works per scope-work pair.
+
+    ``edges`` are the resolved citation edges (``source`` cites ``target``) of the scope's own works
+    in ``include_external`` mode, so a shared target may be an external (not-in-library) work — that
+    is exactly the coupling signal. The weight of ``(a, b)`` is ``|cited(a) ∩ cited(b)|``.
+    """
+    cited: dict[str, set[str]] = defaultdict(set)
+    for edge in edges:
+        if edge.source in scope_ids:
+            cited[edge.source].add(edge.target)
+    weights: dict[tuple[str, str], int] = {}
+    ordered = sorted(scope_ids)
+    for a, b in combinations(ordered, 2):
+        shared = cited[a] & cited[b]
+        if shared:
+            weights[(a, b)] = len(shared)
+    return weights
+
+
+def _co_citation_edge_weights(
+    edges: list[VizEdge], scope_ids: set[str]
+) -> dict[tuple[str, str], int]:
+    """Co-citation weights: shared citers per scope-work pair.
+
+    ``edges`` are the resolved local citation edges of the whole visible library (any in-library work
+    citing any in-library work). For each citer, its scope-work targets are pooled and every pair of
+    them gains one shared citer. The weight of ``(a, b)`` is the number of works that cite both. Only
+    in-library citers are knowable (an external citing paper has no stored references), which bounds
+    co-citation to library-internal co-citations — noted on the payload.
+    """
+    citer_targets: dict[str, set[str]] = defaultdict(set)
+    for edge in edges:
+        if edge.target in scope_ids:
+            citer_targets[edge.source].add(edge.target)
+    weights: dict[tuple[str, str], int] = defaultdict(int)
+    for targets in citer_targets.values():
+        for a, b in combinations(sorted(targets), 2):
+            weights[(a, b)] += 1
+    return dict(weights)
+
+
+@register_viz("co_citation")
+def co_citation(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
+    """Co-citation / bibliographic-coupling network among the SEE-filtered scope works (§2d).
+
+    ``params['edge_context']`` selects the edge semantics: ``coupling`` (default) links works that
+    cite the same works (weight = shared references), ``co_citation`` links works cited together
+    (weight = shared citers). Both are computed from the resolved citation edges — resolution is
+    reused from ``build_citation_graph``, never re-implemented. Nodes are the scope works; ``size`` is
+    the co-citation/coupling degree (distinct linked neighbours) and ``color_group`` reuses the shared
+    status/work-type helper. This is a node-link view with no fixed coordinates, so ``x``/``y`` are
+    ``None`` and the frontend lays it out with an ECharts ``graph`` (force) series — consistent with
+    the P2 choice to render every view through ECharts rather than a second (Cytoscape) path.
+    """
+    edge_context = params.get("edge_context") or DEFAULT_EDGE_CONTEXT
+    if edge_context not in CO_CITATION_CONTEXTS:
+        raise ValueError(f"Unknown edge context: {edge_context}")
+    color_by = params.get("color_by") or DEFAULT_COLOR_BY
+    cap = int(params.get("max_nodes") or MAX_NODES)
+
+    visible = access.visible_work_ids(db, actor)
+    scope_works = _scope_works(
+        db,
+        scope_type=scope.type,
+        scope_id=scope.id,
+        work_ids=scope.work_ids,
+        visible_ids=visible,
+    )
+    works = _ordered_works(list(scope_works.values()))
+    total = len(works)
+    notes: list[str] = []
+    if total > cap:
+        works = works[:cap]
+        notes.append(
+            f"Showing {cap} of {total} papers (node cap {cap}); refine the scope to see the rest."
+        )
+    if not works:
+        notes.append("No papers in this scope.")
+        return VizPayload(view_type="co_citation", nodes=[], edges=[], notes=notes)
+
+    work_ids = [w.id for w in works]
+    scope_id_strs = {str(wid) for wid in work_ids}
+    if edge_context == "coupling":
+        graph = build_citation_graph(
+            db,
+            scope_type="selected_papers",
+            work_ids=work_ids,
+            node_mode="include_external",
+            visible_ids=visible,
+        )
+        graph_edges = [
+            VizEdge(source=e.source, target=e.target, weight=float(e.weight)) for e in graph.edges
+        ]
+        weights = _coupling_edge_weights(graph_edges, scope_id_strs)
+    else:
+        # Co-citation needs citers, which may sit outside the scope: resolve the whole visible
+        # library once, then keep only edges landing on a scope work.
+        graph = build_citation_graph(
+            db,
+            scope_type="library",
+            node_mode="local_only",
+            visible_ids=visible,
+        )
+        graph_edges = [
+            VizEdge(source=e.source, target=e.target, weight=float(e.weight)) for e in graph.edges
+        ]
+        weights = _co_citation_edge_weights(graph_edges, scope_id_strs)
+        notes.append(
+            "Co-citation counts only in-library citers (external citing papers are unknown)."
+        )
+
+    edges = [VizEdge(source=a, target=b, weight=float(w)) for (a, b), w in weights.items()]
+    degree: dict[str, int] = defaultdict(int)
+    for edge in edges:
+        degree[edge.source] += 1
+        degree[edge.target] += 1
+
+    nodes: list[VizNode] = []
+    for work in works:
+        node_id = str(work.id)
+        nodes.append(
+            VizNode(
+                id=node_id,
+                x=None,
+                y=None,
+                size=float(degree.get(node_id, 0)),
+                color_group=_color_group(work, color_by),
+                shape="in_library",
+                label=work.canonical_title or f"Untitled work ({node_id[:8]})",
+                meta={
+                    "title": work.canonical_title,
+                    "year": work.year,
+                    "degree": degree.get(node_id, 0),
+                    "reading_status": work.reading_status,
+                    "work_type": work.work_type,
+                    "doi": work.doi,
+                },
+            )
+        )
+
+    legend: dict | None = None
+    if color_by != "none":
+        groups = sorted({n.color_group for n in nodes if n.color_group is not None})
+        legend = {"color_by": color_by, "groups": groups}
+
+    return VizPayload(
+        view_type="co_citation",
+        nodes=nodes,
+        edges=edges,
+        legend=legend,
+        notes=notes,
+        axis_options=None,
+    )
+
+
+@register_viz("topic_river")
+def topic_river(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
+    """Topic-prevalence stream over publication years (§2d).
+
+    For the SEE-filtered scope, each placed paper is assigned an embedding k-means topic (the same
+    clustering + TF-IDF labelling P3's embedding-cluster map uses), then per publication year the
+    share of papers in each topic is computed. The result is carried in :attr:`VizPayload.series` as
+    ``{"years": [...], "topics": [{"label", "values"}]}`` with one share per year (each year's shares
+    sum to 1). The frontend renders it as a stacked-area / streamgraph. Papers with no dense vector
+    are skipped (reported) and papers with no publication year are excluded from the stream.
+    """
+    cap = int(params.get("max_nodes") or MAX_NODES)
+    embedding_model = params.get("embedding_model")
+
+    visible = access.visible_work_ids(db, actor)
+    scope_works = _scope_works(
+        db,
+        scope_type=scope.type,
+        scope_id=scope.id,
+        work_ids=scope.work_ids,
+        visible_ids=visible,
+    )
+    works = _ordered_works(list(scope_works.values()))
+    total = len(works)
+    notes: list[str] = []
+    if total > cap:
+        works = _sample_works(works, cap)
+        notes.append(
+            f"Sampled {cap} of {total} papers (node cap {cap}); refine the scope to see all."
+        )
+    if not works:
+        notes.append("No papers in this scope.")
+        return VizPayload(view_type="topic_river", nodes=[], series=None, notes=notes)
+
+    layout = _embedding_layout(db, works, embedding_model)
+    if layout.note:
+        notes.append(layout.note)
+    if layout.empty:
+        return VizPayload(view_type="topic_river", nodes=[], series=None, notes=notes)
+
+    labels = _cluster_labels(layout.kept, layout.assignments)
+    counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    no_year = 0
+    for work, cid in zip(layout.kept, layout.assignments, strict=True):
+        if work.year is None:
+            no_year += 1
+            continue
+        counts[work.year][cid] += 1
+    if not counts:
+        notes.append("No papers with a publication year to chart.")
+        return VizPayload(view_type="topic_river", nodes=[], series=None, notes=notes)
+    if no_year:
+        notes.append(
+            f"{no_year} papers have no publication year and were excluded from the stream."
+        )
+
+    years = sorted(counts)
+    topic_ids = sorted(labels)
+    topics_series: list[dict] = []
+    for cid in topic_ids:
+        values: list[float] = []
+        for year in years:
+            year_total = sum(counts[year].values())
+            share = counts[year].get(cid, 0) / year_total if year_total else 0.0
+            values.append(round(share, 4))
+        topics_series.append({"label": labels[cid], "values": values})
+
+    legend = {"color_by": "cluster", "groups": [labels[cid] for cid in topic_ids]}
+    return VizPayload(
+        view_type="topic_river",
+        nodes=[],
+        series={"years": years, "topics": topics_series},
+        legend=legend,
+        notes=notes,
+        axis_options=None,
+    )
+
+
+# Similarity-heatmap selection cap (§2d asks for ~≤50): a dense pairwise matrix, so the row/column
+# count is deliberately small. A larger scope is trimmed to the most recent papers, reported in a note.
+HEATMAP_CAP = 50
+
+
+def _cosine_matrix(matrix: np.ndarray) -> np.ndarray:
+    """Row-wise cosine-similarity matrix (symmetric, 1.0 diagonal for non-zero rows)."""
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    safe = np.where(norms == 0.0, 1.0, norms)
+    normed = matrix / safe
+    sim = normed @ normed.T
+    return np.clip(sim, -1.0, 1.0)
+
+
+@register_viz("similarity_heatmap")
+def similarity_heatmap(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
+    """Pairwise cosine-similarity heatmap for a small SEE-filtered selection (§2d).
+
+    Reuses P3's dense-vector source (``_paper_dense_vectors`` via ``_scope_dense_matrix``, with the
+    hash-BOW baseline fallback) and computes the symmetric cosine matrix (1.0 diagonal). The scope is
+    capped at :data:`HEATMAP_CAP` (~50) since the payload is dense; a larger scope is trimmed to the
+    most recent papers (publication year desc, stable within a year) and the trim is reported. The
+    matrix is carried in :attr:`VizPayload.matrix` as ``{"labels", "ids", "values"}`` for the ECharts
+    heatmap.
+    """
+    cap = min(int(params.get("max_nodes") or HEATMAP_CAP), HEATMAP_CAP)
+    embedding_model = params.get("embedding_model")
+
+    visible = access.visible_work_ids(db, actor)
+    scope_works = _scope_works(
+        db,
+        scope_type=scope.type,
+        scope_id=scope.id,
+        work_ids=scope.work_ids,
+        visible_ids=visible,
+    )
+    works = _ordered_works(list(scope_works.values()))
+    total = len(works)
+    notes: list[str] = []
+    if total > cap:
+        # Most-recent-first, keeping the title order within a year (stable sort on a descending key);
+        # papers with no year sort last.
+        works = sorted(works, key=lambda w: -(w.year if w.year is not None else -(10**9)))[:cap]
+        notes.append(
+            f"Showing the {cap} most recent of {total} papers (heatmap cap {cap}); refine the scope."
+        )
+    if not works:
+        notes.append("No papers in this scope.")
+        return VizPayload(view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes)
+
+    matrix, kept, _model_label, note = _scope_dense_matrix(db, works, embedding_model)
+    if note:
+        notes.append(note)
+    if matrix is None or not kept:
+        return VizPayload(view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes)
+
+    sim = _cosine_matrix(matrix)
+    labels = [w.canonical_title or f"Untitled work ({str(w.id)[:8]})" for w in kept]
+    ids = [str(w.id) for w in kept]
+    values = [[round(float(sim[i][j]), 4) for j in range(len(kept))] for i in range(len(kept))]
+    return VizPayload(
+        view_type="similarity_heatmap",
+        nodes=[],
+        matrix={"labels": labels, "ids": ids, "values": values},
+        notes=notes,
+        axis_options=None,
+    )
+
+
 __all__ = [
     "MAX_NODES",
+    "HEATMAP_CAP",
+    "CO_CITATION_CONTEXTS",
     "AXIS_LABELS",
     "EMBEDDING_AXES",
     "VizScope",
@@ -672,4 +997,7 @@ __all__ = [
     "get_viz",
     "temporal_map",
     "embedding_cluster",
+    "co_citation",
+    "topic_river",
+    "similarity_heatmap",
 ]

@@ -5828,6 +5828,18 @@
             ],
             "title": "Legend"
           },
+          "matrix": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matrix"
+          },
           "nodes": {
             "items": {
               "$ref": "#/components/schemas/VizNodeModel"
@@ -5842,6 +5854,18 @@
             },
             "title": "Notes",
             "type": "array"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series"
           },
           "view_type": {
             "title": "View Type",
@@ -14869,6 +14893,22 @@
                 }
               ],
               "title": "Color By"
+            }
+          },
+          {
+            "in": "query",
+            "name": "edge_context",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Edge Context"
             }
           },
           {

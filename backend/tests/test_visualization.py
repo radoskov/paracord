@@ -592,3 +592,271 @@ def test_endpoint_private_shelf_scope_404_for_reader(client, db, auth_headers) -
         headers=auth_headers("reader"),
     )
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------------------------------
+# P5a — co-citation / coupling network, topic river, similarity heatmap.
+# --------------------------------------------------------------------------------------------------
+def _edge_map(payload) -> dict:
+    return {tuple(sorted((e.source, e.target))): e.weight for e in payload.edges}
+
+
+def test_registry_has_p5a_views() -> None:
+    types = available_view_types()
+    assert {"co_citation", "topic_river", "similarity_heatmap"} <= set(types)
+
+
+def test_co_citation_coupling_links_works_sharing_a_reference(db_session) -> None:
+    actor = _owner(db_session)
+    a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2020)
+    b = Work(canonical_title="B", normalized_title="b", doi="10.1/b", year=2019)
+    c = Work(canonical_title="C", normalized_title="c", doi="10.1/c", year=2018)
+    db_session.add_all([a, b, c])
+    db_session.flush()
+    # A and B both cite the same external work -> bibliographic coupling (weight = 1 shared ref).
+    db_session.add_all(
+        [
+            Reference(citing_work_id=a.id, doi="10.9/shared", title="Shared classic"),
+            Reference(citing_work_id=b.id, doi="10.9/shared", title="Shared classic"),
+            Reference(citing_work_id=c.id, doi="10.9/other", title="Unrelated"),
+        ]
+    )
+    db_session.commit()
+
+    payload = get_viz(
+        db_session, actor, "co_citation", VizScope(type="library"), {"edge_context": "coupling"}
+    )
+    edges = _edge_map(payload)
+    assert edges == {tuple(sorted((str(a.id), str(b.id)))): 1.0}
+    # size == coupling degree: A and B have one neighbour each, C is isolated.
+    assert _node_by_id(payload, a.id).size == 1.0
+    assert _node_by_id(payload, b.id).size == 1.0
+    assert _node_by_id(payload, c.id).size == 0.0
+    # Node-link view: no fixed coordinates.
+    assert _node_by_id(payload, a.id).x is None
+
+
+def test_co_citation_links_works_cited_together(db_session) -> None:
+    actor = _owner(db_session)
+    a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2020)
+    b = Work(canonical_title="B", normalized_title="b", doi="10.1/b", year=2019)
+    citer = Work(canonical_title="Citer", normalized_title="citer", doi="10.1/citer", year=2021)
+    db_session.add_all([a, b, citer])
+    db_session.flush()
+    # One paper cites both A and B -> A and B are co-cited (weight = 1 shared citer).
+    db_session.add_all(
+        [
+            Reference(citing_work_id=citer.id, doi="10.1/a", title="A"),
+            Reference(citing_work_id=citer.id, doi="10.1/b", title="B"),
+        ]
+    )
+    db_session.commit()
+
+    payload = get_viz(
+        db_session, actor, "co_citation", VizScope(type="library"), {"edge_context": "co_citation"}
+    )
+    edges = _edge_map(payload)
+    assert edges == {tuple(sorted((str(a.id), str(b.id)))): 1.0}
+    assert any("in-library citers" in note for note in payload.notes)
+
+
+def test_co_citation_unknown_edge_context_raises(db_session) -> None:
+    actor = _owner(db_session)
+    db_session.add(Work(canonical_title="X", normalized_title="x", year=2020))
+    db_session.commit()
+    with pytest.raises(ValueError, match="Unknown edge context"):
+        get_viz(
+            db_session, actor, "co_citation", VizScope(type="library"), {"edge_context": "bogus"}
+        )
+
+
+def test_co_citation_see_filter_hides_private_work(db_session) -> None:
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    hidden = Work(canonical_title="Hidden", normalized_title="hidden", year=2015)
+    loose = Work(canonical_title="Loose", normalized_title="loose", year=2016)
+    db_session.add_all([hidden, loose])
+    private_shelf = Shelf(name="Private", access_level="private")
+    db_session.add(private_shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=private_shelf.id, work_id=hidden.id))
+    db_session.commit()
+
+    payload = get_viz(db_session, reader, "co_citation", VizScope(type="library"), {})
+    ids = {n.id for n in payload.nodes}
+    assert str(hidden.id) not in ids
+    assert str(loose.id) in ids
+
+
+def test_topic_river_shares_sum_to_one_per_year(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    works = [
+        Work(canonical_title="A", normalized_title="a", year=2020),
+        Work(canonical_title="B", normalized_title="b", year=2020),
+        Work(canonical_title="C", normalized_title="c", year=2021),
+    ]
+    db_session.add_all(works)
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "topic_river", VizScope(type="library"), {})
+    series = payload.series
+    assert series is not None
+    assert series["years"] == [2020, 2021]
+    assert payload.nodes == []
+    # Each year's topic shares sum to 1 (a topic is a partition of that year's papers).
+    for idx in range(len(series["years"])):
+        col_sum = sum(topic["values"][idx] for topic in series["topics"])
+        assert col_sum == pytest.approx(1.0, abs=1e-3)
+    # Every topic row aligns to the year axis.
+    for topic in series["topics"]:
+        assert len(topic["values"]) == len(series["years"])
+
+
+def test_topic_river_excludes_papers_without_year(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    dated = Work(canonical_title="Dated", normalized_title="dated", year=2020)
+    undated = Work(canonical_title="Undated", normalized_title="undated")
+    db_session.add_all([dated, undated])
+    db_session.commit()
+    _patch_dense_vectors(monkeypatch, {"Dated": [1.0, 0.0], "Undated": [0.0, 1.0]})
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "topic_river", VizScope(type="library"), {})
+    assert payload.series["years"] == [2020]
+    assert any("no publication year" in note for note in payload.notes)
+
+
+def test_topic_river_see_filter_hides_private_work(db_session) -> None:
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    hidden = Work(canonical_title="Hidden", normalized_title="hidden", year=2015)
+    loose = Work(canonical_title="Loose", normalized_title="loose", year=2016)
+    db_session.add_all([hidden, loose])
+    private_shelf = Shelf(name="Private", access_level="private")
+    db_session.add(private_shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=private_shelf.id, work_id=hidden.id))
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    # Baseline embedder places both papers if visible; the reader only sees the loose one, so its
+    # year is the only one in the stream (the hidden 2015 paper never contributes).
+    payload = get_viz(db_session, reader, "topic_river", VizScope(type="library"), {})
+    assert payload.series is not None
+    assert payload.series["years"] == [2016]
+
+
+def test_similarity_heatmap_symmetric_unit_diagonal(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    works = [
+        Work(canonical_title="A", normalized_title="a", year=2020),
+        Work(canonical_title="B", normalized_title="b", year=2019),
+    ]
+    db_session.add_all(works)
+    db_session.commit()
+    _patch_dense_vectors(monkeypatch, {"A": [1.0, 0.0], "B": [1.0, 1.0]})
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "similarity_heatmap", VizScope(type="library"), {})
+    matrix = payload.matrix
+    assert matrix is not None
+    assert matrix["labels"] == ["A", "B"]
+    values = matrix["values"]
+    n = len(matrix["labels"])
+    for i in range(n):
+        assert values[i][i] == pytest.approx(1.0)
+        for j in range(n):
+            assert values[i][j] == pytest.approx(values[j][i])
+    # cos([1,0], [1,1]) = 1/sqrt(2).
+    assert values[0][1] == pytest.approx(0.7071, abs=1e-3)
+
+
+def test_similarity_heatmap_caps_selection_by_recency(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    works = [
+        Work(canonical_title=f"W{i:02d}", normalized_title=f"w{i:03d}", year=2000 + i)
+        for i in range(4)
+    ]
+    db_session.add_all(works)
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {w.canonical_title: [float(i), float(4 - i)] for i, w in enumerate(works)}
+    )
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(
+        db_session, actor, "similarity_heatmap", VizScope(type="library"), {"max_nodes": 2}
+    )
+    assert payload.matrix is not None
+    # The two most recent papers (2003, 2002) are kept, most-recent-first.
+    assert payload.matrix["labels"] == ["W03", "W02"]
+    assert any("most recent" in note and "cap" in note for note in payload.notes)
+
+
+def test_similarity_heatmap_cap_constant() -> None:
+    assert viz.HEATMAP_CAP == 50
+
+
+def test_similarity_heatmap_see_filter_hides_private_work(db_session) -> None:
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    hidden = Work(canonical_title="Hidden", normalized_title="hidden", year=2015)
+    loose = Work(canonical_title="Loose", normalized_title="loose", year=2016)
+    db_session.add_all([hidden, loose])
+    private_shelf = Shelf(name="Private", access_level="private")
+    db_session.add(private_shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=private_shelf.id, work_id=hidden.id))
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, reader, "similarity_heatmap", VizScope(type="library"), {})
+    assert payload.matrix is not None
+    assert str(hidden.id) not in payload.matrix["ids"]
+    assert str(loose.id) in payload.matrix["ids"]
+
+
+def test_endpoint_builds_p5a_views(client, db, auth_headers) -> None:
+    headers = auth_headers("owner")
+    a = Work(canonical_title="Alpha", normalized_title="alpha", doi="10.2/a", year=2020)
+    b = Work(canonical_title="Beta", normalized_title="beta", doi="10.2/b", year=2019)
+    db.add_all([a, b])
+    db.flush()
+    db.add_all(
+        [
+            Reference(citing_work_id=a.id, doi="10.9/s", title="S"),
+            Reference(citing_work_id=b.id, doi="10.9/s", title="S"),
+        ]
+    )
+    db.commit()
+
+    listed = client.get("/api/v1/viz/", headers=headers).json()["view_types"]
+    assert {"co_citation", "topic_river", "similarity_heatmap"} <= set(listed)
+
+    coc = client.get("/api/v1/viz/co_citation", headers=headers)
+    assert coc.status_code == 200
+    assert coc.json()["view_type"] == "co_citation"
+    assert len(coc.json()["edges"]) == 1
+
+    river = client.get("/api/v1/viz/topic_river", headers=headers)
+    assert river.status_code == 200
+    assert river.json()["series"] is not None
+
+    heat = client.get("/api/v1/viz/similarity_heatmap", headers=headers)
+    assert heat.status_code == 200
+    assert heat.json()["matrix"] is not None
+
+
+def test_endpoint_bad_edge_context_400(client, db, auth_headers) -> None:
+    db.add(Work(canonical_title="Z", normalized_title="z", year=2020))
+    db.commit()
+    response = client.get(
+        "/api/v1/viz/co_citation",
+        params={"edge_context": "nope"},
+        headers=auth_headers("owner"),
+    )
+    assert response.status_code == 400

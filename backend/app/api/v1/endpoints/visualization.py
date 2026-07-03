@@ -69,6 +69,10 @@ class VizPayloadResponse(BaseModel):
     legend: dict | None = None
     notes: list[str] = []
     axis_options: list[VizAxisModel] | None = None
+    # P5a: stacked time-series (topic river) / labelled matrix (similarity heatmap). See
+    # app.services.visualization.VizPayload for the shapes.
+    series: dict | None = None
+    matrix: dict | None = None
 
 
 class VizViewTypesResponse(BaseModel):
@@ -91,6 +95,7 @@ def get_visualization(
     y_axis: str | None = Query(None),
     size_by: str | None = Query(None),
     color_by: str | None = Query(None),
+    edge_context: str | None = Query(None),
     focus_work_id: uuid.UUID | None = Query(None),
     include_edges: bool = Query(False),
     embedding_model: str | None = Query(None),
@@ -128,6 +133,7 @@ def get_visualization(
         "y_axis": y_axis,
         "size_by": size_by,
         "color_by": color_by,
+        "edge_context": edge_context,
         "focus_work_id": focus_work_id,
         "include_edges": include_edges,
         "embedding_model": embedding_model,
@@ -166,4 +172,6 @@ def get_visualization(
             if payload.axis_options is not None
             else None
         ),
+        series=payload.series,
+        matrix=payload.matrix,
     )
