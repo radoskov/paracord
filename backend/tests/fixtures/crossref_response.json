@@ -11,6 +11,7 @@
     ],
     "issued": {"date-parts": [[2016, 6]]},
     "container-title": ["2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)"],
+    "is-referenced-by-count": 189234,
     "abstract": "<jats:p>Deeper neural networks are more difficult to train.</jats:p>"
   }
 }

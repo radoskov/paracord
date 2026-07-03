@@ -4,6 +4,7 @@
   "abstract": "The dominant sequence transduction models are based on recurrent or convolutional neural networks.",
   "year": 2017,
   "venue": "Neural Information Processing Systems",
+  "citationCount": 105678,
   "authors": [
     { "name": "Ashish Vaswani" },
     { "name": "Noam Shazeer" }

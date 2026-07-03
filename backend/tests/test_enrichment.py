@@ -61,6 +61,7 @@ def test_parse_crossref() -> None:
     assert meta.venue.startswith("2016 IEEE")
     assert meta.authors[0] == "Kaiming He"
     assert meta.abstract == "Deeper neural networks are more difficult to train."
+    assert meta.citation_count == 189234  # is-referenced-by-count
 
 
 def test_parse_crossref_empty() -> None:
@@ -76,6 +77,7 @@ def test_parse_openalex_rebuilds_inverted_abstract() -> None:
     assert meta.venue.startswith("2016 IEEE")
     assert meta.authors == ["Kaiming He", "Xiangyu Zhang"]
     assert meta.abstract == "Deeper neural networks are harder to train."  # rebuilt in order
+    assert meta.citation_count == 201457  # cited_by_count
 
 
 def test_parse_openalex_empty() -> None:
@@ -90,10 +92,21 @@ def test_parse_semantic_scholar() -> None:
     assert meta.year == 2017
     assert meta.venue == "Neural Information Processing Systems"
     assert meta.authors == ["Ashish Vaswani", "Noam Shazeer"]
+    assert meta.citation_count == 105678  # citationCount
 
 
 def test_parse_semantic_scholar_empty() -> None:
     assert parse_semantic_scholar({}) is None
+
+
+def test_parsers_leave_citation_count_none_when_absent() -> None:
+    # A source that omits its count field must yield None (not a crash / not 0), so a NULL snapshot.
+    assert parse_crossref({"message": {"DOI": "10.1/x"}}).citation_count is None
+    assert (
+        parse_openalex({"id": "https://openalex.org/W1", "display_name": "x"}).citation_count
+        is None
+    )
+    assert parse_semantic_scholar({"title": "x"}).citation_count is None
 
 
 # --- enrich_work ------------------------------------------------------------
@@ -305,3 +318,58 @@ def test_enrich_work_reports_no_failures_on_clean_run(db_session) -> None:
         arxiv_fetcher=lambda _id: parse_arxiv_atom(ARXIV_XML),
     )
     assert result["failed"] == []
+
+
+# --- citation-count snapshot (Track C P1) -----------------------------------
+
+
+def test_enrich_work_snapshots_citation_count_by_source_priority(db_session) -> None:
+    # Both OpenAlex and Crossref report a count; OpenAlex outranks Crossref in the priority order.
+    work = Work(canonical_title="x", normalized_title="x", doi="10.1109/cvpr.2016.90")
+    db_session.add(work)
+    db_session.commit()
+    settings = Settings(
+        enrichment_enabled=True,
+        enrichment_arxiv=False,
+        enrichment_crossref=True,
+        enrichment_openalex=True,
+    )
+    enrich_work(
+        db_session,
+        work,
+        settings=settings,
+        crossref_fetcher=lambda _doi, mailto=None: parse_crossref(CROSSREF_JSON),
+        openalex_fetcher=lambda _doi, mailto=None: parse_openalex(OPENALEX_JSON),
+    )
+    db_session.commit()
+
+    assert work.citation_count == 201457  # OpenAlex value, not Crossref's 189234
+    assert work.citation_count_source == "openalex"
+    assert work.citation_count_fetched_at is not None
+
+
+def test_enrich_work_falls_back_to_lower_priority_count(db_session) -> None:
+    # Only Crossref runs → its count is used even though OpenAlex outranks it in general.
+    work = Work(canonical_title="x", normalized_title="x", doi="10.1109/cvpr.2016.90")
+    db_session.add(work)
+    db_session.commit()
+    enrich_work(
+        db_session,
+        work,
+        settings=_settings(),
+        crossref_fetcher=lambda _doi, mailto=None: parse_crossref(CROSSREF_JSON),
+    )
+    db_session.commit()
+
+    assert work.citation_count == 189234
+    assert work.citation_count_source == "crossref"
+
+
+def test_enrich_work_leaves_citation_count_null_without_identifier(db_session) -> None:
+    work = Work(canonical_title="x", normalized_title="x")
+    db_session.add(work)
+    db_session.commit()
+    enrich_work(db_session, work, settings=_settings())
+    assert work.citation_count is None
+    assert work.citation_count_source is None
+    assert work.citation_count_fetched_at is None

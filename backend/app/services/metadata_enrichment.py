@@ -30,7 +30,7 @@ ARXIV_API = "https://export.arxiv.org/api/query"
 CROSSREF_API = "https://api.crossref.org/works"
 OPENALEX_API = "https://api.openalex.org/works"
 SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper"
-SEMANTIC_SCHOLAR_FIELDS = "title,abstract,year,venue,authors,externalIds"
+SEMANTIC_SCHOLAR_FIELDS = "title,abstract,year,venue,authors,externalIds,citationCount"
 ATOM_NS = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
 _ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$", re.IGNORECASE)
@@ -51,6 +51,21 @@ class ExternalMetadata:
     doi: str | None = None
     year: int | None = None
     venue: str | None = None
+    # External citation count (Track C P1). None when the source did not report one.
+    citation_count: int | None = None
+
+
+# Priority of sources for the cached citation-count snapshot: the highest-listed source that
+# returned a count wins. OpenAlex first (most comprehensive, actively maintained), then Semantic
+# Scholar, then Crossref (``is-referenced-by-count`` lags and undercounts).
+CITATION_COUNT_PRIORITY = ("openalex", "semanticscholar", "crossref")
+
+
+def _as_int(value: object) -> int | None:
+    """Coerce an external count to a non-negative int, or None if it isn't one."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
 
 
 def should_replace_canonical_field(source: str, field_name: str, user_locked: bool) -> bool:
@@ -114,6 +129,7 @@ def parse_crossref(payload: dict) -> ExternalMetadata | None:
         doi=message.get("DOI"),
         year=year,
         venue=_clean((message.get("container-title") or [None])[0]),
+        citation_count=_as_int(message.get("is-referenced-by-count")),
     )
 
 
@@ -140,6 +156,7 @@ def parse_openalex(payload: dict) -> ExternalMetadata | None:
         doi=doi,
         year=work.get("publication_year"),
         venue=_clean(venue),
+        citation_count=_as_int(work.get("cited_by_count")),
     )
 
 
@@ -168,6 +185,7 @@ def parse_semantic_scholar(payload: dict) -> ExternalMetadata | None:
         doi=(paper.get("externalIds") or {}).get("DOI"),
         year=paper.get("year"),
         venue=_clean(paper.get("venue")),
+        citation_count=_as_int(paper.get("citationCount")),
     )
 
 
@@ -387,11 +405,14 @@ def enrich_work(
 
     sources: list[str] = []
     promoted: list[str] = []
+    counts: dict[str, int] = {}
     for meta in metas:
         if meta is None:
             continue
         promoted += _store_external(db, work, meta)
         sources.append(meta.source)
+        if meta.citation_count is not None:
+            counts[meta.source] = meta.citation_count
         record_event(
             db,
             "metadata.enrichment_called",
@@ -400,6 +421,15 @@ def enrich_work(
             entity_id=str(work.id),
             details={"source": meta.source, "identifier": work.doi or work.arxiv_id},
         )
+    # Refresh the cached citation-count snapshot from the highest-priority source that reported one
+    # (newer wins — this run overwrites any prior snapshot). Papers whose sources returned no count
+    # keep their existing value untouched.
+    for source in CITATION_COUNT_PRIORITY:
+        if source in counts:
+            work.citation_count = counts[source]
+            work.citation_count_source = source
+            work.citation_count_fetched_at = datetime.now(UTC)
+            break
     if sources:
         work.updated_at = datetime.now(UTC)
     return {"sources": sources, "promoted": promoted, "failed": failed}
