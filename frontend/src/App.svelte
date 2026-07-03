@@ -520,6 +520,9 @@
     background: var(--surface-overlay);
     border: 1px solid var(--border-normal);
     border-radius: var(--radius-sm);
+    /* Set the text ink explicitly: native form controls default to (near-)black, which is
+       unreadable on the dark surface in the dark themes. --ink-strong reads on every theme. */
+    color: var(--ink-strong);
     font: inherit;
     min-height: 2.3rem;
     padding: 0.4rem 0.55rem;
