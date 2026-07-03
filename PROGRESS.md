@@ -7,6 +7,32 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P2 — viz scaffold + temporal citation map (2026-07-03)
+
+The architectural foundation for the D38 visualization module (P3-P5 build on this) plus the first
+view. **Extensible seam:** `backend/app/services/visualization.py` is a provider registry —
+`@register_viz("...")` + `get_viz(db, actor, view_type, scope, params) -> VizPayload`; adding a view
+later is one server-side provider + one frontend renderer, no plumbing. `VizPayload` is normalized
+(`view_type`, `nodes[{id,x,y,size,color_group,shape,label,meta}]`, `edges?`, `axes{x,y}`, `legend?`,
+`notes`, `axis_options`). Scope + visibility are **reused** (`access.visible_work_ids` clamp +
+`citation_graph._scope_works` resolver — a reader never gets a hidden paper); node cap `MAX_NODES=500`
+with a truncation note. **`temporal_map` provider:** both axes independently selectable from a shared
+set — `year`, `citation_count` (NULL→muted), `local_degree` (incoming-edge count reusing
+`build_citation_graph`, always-on default Y), `citation_velocity`, `similarity_to_focus` (cosine via
+`_paper_dense_vectors`), `topic_similarity_to_focus` (topic-term Jaccard); similarity axes return a
+per-node `None` + note when no focus / no embedding model / no topics. Encodings: `size`
+(local_degree/citation_count/none), `color_group` (status/work_type/none), `shape` reserved
+(`in_library`), optional citation-edge overlay. **Endpoint:** `GET /api/v1/viz/{view_type}`
+(+`GET /api/v1/viz/` list), auth + SEE-guard + saved_filter resolution like the graph endpoint;
+`openapi.json` regenerated. **Frontend:** lazy ECharts (`echarts@^5.5.1`, separate 1 MB chunk — main
+bundle stays ~357 kB), a `src/lib/viz/` view registry + shared Seaborn-like theme + temporal-scatter
+renderer (pure `buildOption`, jsdom-testable), and a new **Visualizations** tab
+(`VisualizationsPage.svelte`) with view/scope selectors, both axis dropdowns, size/color/focus
+controls, edge toggle, click-to-open-paper, and `data-testid`s. FULL backend suite green (797 passed,
++19 viz tests); `ruff check/format` clean; frontend green (98 passed/1 skipped incl. 8 new + build). Both
+similarity axes shipped (embedding infra reused cleanly); topic/shelf/tag coloring deferred to P3+.
+See `docs/agent_handoffs/2026-07-03-track-c-p2-viz-scaffold-temporal-map.md`.
+
 ## Track C P1 — citation counts (D38 visualization prerequisite) (2026-07-03)
 
 First slice of the D38 visualization module: fetch, store, expose and display an external citation
