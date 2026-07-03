@@ -3,6 +3,12 @@
   import { get } from 'svelte/store';
 
   import type { Annotation, CitationContext, PdfCoordinateBox } from '../api/client';
+  import {
+    readStoredReadingMode,
+    readingModeFilter,
+    writeReadingMode,
+    type ReadingMode,
+  } from '../lib/reader/readingMode';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
 
   export let fileId: string;
@@ -79,6 +85,22 @@
       // localStorage may be unavailable (private mode) — keep the in-memory choice.
     }
   }
+
+  // --- reading mode (page-canvas easing) ----------------------------------
+  // Opt-in easing applied to the rendered page canvas ONLY (see `--page-filter` below), so the
+  // text-selection layer and the highlight / citation / annotation overlays stay true.
+  let readingMode: ReadingMode = readStoredReadingMode();
+  const READING_MODE_OPTIONS: { value: ReadingMode; label: string; title: string }[] = [
+    { value: 'original', label: 'Original', title: 'Render the page true-to-original' },
+    { value: 'dim', label: 'Dim', title: 'Warm, gently dimmed cream page — easier on the eyes' },
+    { value: 'dark', label: 'Dark', title: 'Dark page, light text (smart invert)' },
+  ];
+  function setReadingMode(mode: ReadingMode): void {
+    if (mode === readingMode) return;
+    readingMode = mode;
+    writeReadingMode(mode);
+  }
+  $: pageFilter = readingModeFilter(readingMode);
 
   // --- search -------------------------------------------------------------
   // Separator joining adjacent text items when building a page's full-text string. A single
@@ -781,6 +803,20 @@
             Scroll
           </button>
         </div>
+        <div class="mode" role="group" aria-label="Page reading mode" data-testid="reading-mode">
+          <span class="mode-label">Page:</span>
+          {#each READING_MODE_OPTIONS as opt (opt.value)}
+            <button
+              type="button"
+              class:active={readingMode === opt.value}
+              on:click={() => setReadingMode(opt.value)}
+              data-testid={`reading-mode-${opt.value}`}
+              title={opt.title}
+            >
+              {opt.label}
+            </button>
+          {/each}
+        </div>
         <form class="search" on:submit|preventDefault={runSearch}>
           <input
             bind:value={searchQuery}
@@ -851,6 +887,7 @@
           class="page-wrap"
           class:panning
           class:pannable={spaceHeld}
+          style={`--page-filter:${pageFilter}`}
           bind:this={pageWrapEl}
           tabindex="-1"
           on:pointerdown={onPanPointerDown}
@@ -1109,6 +1146,12 @@
     gap: 0.35rem;
   }
 
+  .mode-label {
+    color: var(--ink-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
   .search {
     flex: 1;
     min-width: 12rem;
@@ -1179,8 +1222,11 @@
     position: relative;
   }
 
+  /* Reading-mode easing targets the page canvas ONLY, so the sibling text-selection layer and the
+     highlight / citation / annotation overlays keep their true colours. */
   .canvas-stage canvas {
     display: block;
+    filter: var(--page-filter, none);
   }
 
   /* PDF.js text layer — transparent selectable text aligned over the canvas. */
