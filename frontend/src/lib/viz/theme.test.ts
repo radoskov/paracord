@@ -1,62 +1,40 @@
 import { describe, expect, it } from 'vitest';
 
-import { colorForGroup, resolveTheme, type VizTheme } from './theme';
+import { bundledThemes } from '../theme/themes.generated';
+import { colorForGroup, resolveTheme, resolveThemeById } from './theme';
 
-// Theming P1: `resolveTheme` now derives from the YAML-compiled theme objects instead of
-// a hardcoded palette. These baselines are the EXACT pre-refactor constants that used to
-// live in theme.ts — resolveTheme must still return them byte-for-byte for both modes.
+// Theming P2: VizTheme is derived from each theme's `graph` block. These tests check the
+// mapping is complete for every bundled theme and that resolveThemeById selects the
+// ACTIVE theme (the id the chart pages read from <html data-theme>).
 
-const FONT_FAMILY =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-
-const CATEGORICAL = [
-  '#4c72b0',
-  '#dd8452',
-  '#55a868',
-  '#c44e52',
-  '#8172b3',
-  '#937860',
-  '#da8bc3',
-  '#8c8c8c',
-  '#ccb974',
-  '#64b5cd',
-];
-
-const OLD_LIGHT: VizTheme = {
-  mode: 'light',
-  background: '#ffffff',
-  text: '#21303d',
-  axisLine: '#bcc7d2',
-  splitLine: '#eef2f6',
-  tooltipBg: '#1f2a36',
-  tooltipText: '#ffffff',
-  fontFamily: FONT_FAMILY,
-  categorical: CATEGORICAL,
-};
-
-const OLD_DARK: VizTheme = {
-  mode: 'dark',
-  background: '#141a21',
-  text: '#e6edf3',
-  axisLine: '#3a4650',
-  splitLine: '#232c35',
-  tooltipBg: '#e6edf3',
-  tooltipText: '#141a21',
-  fontFamily: FONT_FAMILY,
-  categorical: CATEGORICAL,
-};
-
-describe('resolveTheme', () => {
-  it('returns the pre-refactor light theme byte-for-byte', () => {
-    expect(resolveTheme('light')).toEqual(OLD_LIGHT);
+describe('resolveThemeById', () => {
+  it('maps every bundled theme graph block onto a complete VizTheme', () => {
+    for (const theme of bundledThemes) {
+      const viz = resolveThemeById(theme.id);
+      expect(viz.mode).toBe(theme.mode);
+      expect(viz.background).toBe(theme.graph.surface);
+      expect(viz.text).toBe(theme.graph.text);
+      expect(viz.categorical).toEqual(theme.graph.categorical);
+      expect(viz.sequential).toEqual(theme.graph.sequential);
+      expect(viz.diverging).toEqual(theme.graph.diverging);
+      expect(viz.nodeDefault).toBe(theme.graph.node_default);
+      expect(viz.edge).toBe(theme.graph.edge);
+      expect(viz.grid).toBe(theme.graph.grid);
+      expect(viz.warningRing).toBe(theme.graph.warning_ring);
+    }
   });
 
-  it('returns the pre-refactor dark theme byte-for-byte', () => {
-    expect(resolveTheme('dark')).toEqual(OLD_DARK);
+  it('falls back to the first bundled theme for an unknown/null id', () => {
+    expect(resolveThemeById(null).background).toBe(bundledThemes[0].graph.surface);
+    expect(resolveThemeById('nope').background).toBe(bundledThemes[0].graph.surface);
   });
+});
 
-  it('defaults to light', () => {
-    expect(resolveTheme()).toEqual(OLD_LIGHT);
+describe('resolveTheme (by mode)', () => {
+  it('returns a theme of the requested mode', () => {
+    expect(resolveTheme('light').mode).toBe('light');
+    expect(resolveTheme('dark').mode).toBe('dark');
+    expect(resolveTheme().mode).toBe('light');
   });
 });
 
@@ -64,12 +42,12 @@ describe('colorForGroup', () => {
   const theme = resolveTheme('light');
 
   it('maps a null group to the first categorical color', () => {
-    expect(colorForGroup(theme, null, [])).toBe(CATEGORICAL[0]);
+    expect(colorForGroup(theme, null, [])).toBe(theme.categorical[0]);
   });
 
   it('maps groups by ordered index and cycles', () => {
     const groups = ['a', 'b', 'c'];
-    expect(colorForGroup(theme, 'b', groups)).toBe(CATEGORICAL[1]);
-    expect(colorForGroup(theme, 'missing', groups)).toBe(CATEGORICAL[0]);
+    expect(colorForGroup(theme, 'b', groups)).toBe(theme.categorical[1]);
+    expect(colorForGroup(theme, 'missing', groups)).toBe(theme.categorical[0]);
   });
 });

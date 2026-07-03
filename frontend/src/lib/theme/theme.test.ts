@@ -2,81 +2,148 @@ import { describe, expect, it } from 'vitest';
 
 import { renderThemeCss, tokenEntries } from './css';
 import { applyTheme, getTheme, themeForMode } from './index';
+import { validateCategorical } from './paletteCheck';
 import { bundledThemes } from './themes.generated';
 
-// Theming P1 guarantees NO visual change. These tests pin the ported `default` theme's
-// emitted token VALUES to the exact colours the app used before tokenisation, so any
-// future edit that shifts the look fails here.
+// Theming P2: four validated Catppuccin-derived themes. These tests assert every theme
+// is STRUCTURALLY complete (no undefined/empty role token, the `--muted` alias present)
+// and that each theme's `graph.categorical` data palette passes the CVD validator on its
+// own surface — so switching themes recolours the whole app and never ships an
+// unreadable graph palette.
 
-// The `--pg-*` ad-hoc vars + hardcoded colours the P1 refactor replaced, keyed by the
-// role token that now supplies each value. Values are the pre-refactor literals.
-const OLD_VALUES: Record<string, string> = {
-  '--surface-base': '#eef1f4', //         was --pg-bg / body background
-  '--surface-raised': '#fbfcfd', //       was --pg-surface / .card background
-  '--surface-overlay': '#ffffff', //      was --pg-secondary-bg / input `white`
-  '--surface-sunken': '#f4f6f9', //       .empty / chip background
-  '--surface-hover': '#eef2f6', //        was --pg-secondary-hover
-  '--ink-strong': '#1f2a36', //           was --pg-text
-  '--ink-normal': '#203142', //           body colour
-  '--ink-muted': '#64717f', //            was --pg-muted / .muted
-  '--ink-inverse': '#ffffff', //          was --pg-on-primary
-  '--border-normal': '#cbd5e1', //        was --pg-border
-  '--border-strong': '#d8dee6', //        .card / header border
-  '--border-focus': '#2563eb',
-  '--accent-primary': '#2d3e50', //       was --pg-primary
-  '--accent-primary-strong': '#1f2a36', //was --pg-primary-hover
-  '--accent-secondary': '#21303d', //     was --pg-secondary-text
-  '--accent-link': '#2563eb',
-  '--status-success': '#166534',
-  '--status-warning': '#b45309',
-  '--status-danger': '#b3261e', //        was --pg-danger / .danger
-  '--status-info': '#1d4ed8',
-  '--radius-sm': '6px', //                button / input radius
-  '--radius-md': '8px', //                .card radius
-  '--font-family':
-    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-};
+const EXPECTED_TOKENS = [
+  '--surface-base',
+  '--surface-raised',
+  '--surface-overlay',
+  '--surface-sunken',
+  '--surface-hover',
+  '--ink-strong',
+  '--ink-normal',
+  '--ink-muted',
+  '--ink-inverse',
+  '--border-normal',
+  '--border-strong',
+  '--border-focus',
+  '--accent-primary',
+  '--accent-primary-strong',
+  '--accent-secondary',
+  '--accent-link',
+  '--accent-note',
+  '--accent-note-bg',
+  '--accent-note-border',
+  '--status-success',
+  '--status-success-bg',
+  '--status-success-border',
+  '--status-warning',
+  '--status-warning-bg',
+  '--status-warning-border',
+  '--status-danger',
+  '--status-danger-bg',
+  '--status-danger-border',
+  '--status-info',
+  '--status-info-bg',
+  '--status-info-border',
+  '--radius-sm',
+  '--radius-md',
+  '--font-family',
+];
 
-describe('default theme tokens', () => {
-  const theme = getTheme('default');
+const EXPECTED_IDS = ['latte-warm', 'latte-cool', 'mocha-warm', 'mocha-cool'];
 
-  it('is bundled', () => {
-    expect(theme).toBeDefined();
-    expect(theme?.mode).toBe('light');
+describe('bundled themes', () => {
+  it('bundles the four P2 themes (2 light + 2 dark)', () => {
+    const ids = bundledThemes.map((t) => t.id).sort();
+    expect(ids).toEqual([...EXPECTED_IDS].sort());
+    expect(bundledThemes.filter((t) => t.mode === 'light').map((t) => t.id).sort()).toEqual([
+      'latte-cool',
+      'latte-warm',
+    ]);
+    expect(bundledThemes.filter((t) => t.mode === 'dark').map((t) => t.id).sort()).toEqual([
+      'mocha-cool',
+      'mocha-warm',
+    ]);
   });
 
-  it('emits exactly the pre-refactor token values (no visual change)', () => {
-    const map = Object.fromEntries(tokenEntries(theme!.tokens));
-    expect(map).toEqual(OLD_VALUES);
+  it('every theme defines the full role-token set, all non-empty', () => {
+    const HEX_OR_UNIT = /^(#|var\(|-?[\d.]|Inter)/;
+    for (const theme of bundledThemes) {
+      const map = Object.fromEntries(tokenEntries(theme.tokens));
+      for (const name of EXPECTED_TOKENS) {
+        expect(map[name], `${theme.id} ${name}`).toBeDefined();
+        expect(String(map[name]).trim().length, `${theme.id} ${name} non-empty`).toBeGreaterThan(0);
+        expect(String(map[name]), `${theme.id} ${name} looks like a value`).toMatch(HEX_OR_UNIT);
+      }
+    }
   });
 
-  it('scopes the token block to [data-theme="default"]', () => {
-    const css = renderThemeCss(theme!);
-    expect(css.startsWith('[data-theme="default"] {')).toBe(true);
-    expect(css).toContain('--surface-base: #eef1f4;');
-    expect(css).toContain('--accent-primary: #2d3e50;');
+  it('emits the --muted alias (→ --ink-muted) for every theme', () => {
+    for (const theme of bundledThemes) {
+      const css = renderThemeCss(theme);
+      expect(css, theme.id).toContain(`--muted: ${theme.tokens.ink.muted};`);
+      expect(css.startsWith(`[data-theme="${theme.id}"] {`)).toBe(true);
+    }
   });
 
-  it('applyTheme sets data-theme and injects the token style element', () => {
-    applyTheme('default');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('default');
-    const style = document.getElementById('paracord-theme-tokens');
-    expect(style?.textContent).toContain('--surface-base: #eef1f4;');
+  it('every theme carries a complete graph block (network + ramps)', () => {
+    for (const g of bundledThemes.map((t) => t.graph)) {
+      expect(g.categorical.length).toBeGreaterThanOrEqual(8);
+      expect(g.sequential.length).toBeGreaterThanOrEqual(3);
+      for (const v of [
+        g.surface,
+        g.text,
+        g.node_default,
+        g.edge,
+        g.grid,
+        g.warning_ring,
+        g.diverging.low,
+        g.diverging.mid,
+        g.diverging.high,
+      ]) {
+        expect(v).toMatch(/^#/);
+      }
+    }
   });
+});
+
+describe('categorical data-palette validation', () => {
+  // Records each theme's validator verdict; a regression that pushes a palette below the
+  // 8–12 CVD floor (or out of the lightness/chroma bands) fails here.
+  for (const theme of bundledThemes) {
+    it(`${theme.id} categorical palette passes on its surface`, () => {
+      const report = validateCategorical(theme.graph.categorical, {
+        mode: theme.mode,
+        surface: theme.graph.surface,
+      });
+      expect(report.offBand, `${theme.id} lightness band`).toEqual([]);
+      expect(report.lowChroma, `${theme.id} chroma floor`).toEqual([]);
+      expect(report.cvdState, `${theme.id} CVD ${report.worstCvd.toFixed(1)}`).not.toBe('fail');
+      expect(report.worstCvd).toBeGreaterThanOrEqual(8);
+      expect(report.ok).toBe(true);
+    });
+  }
 });
 
 describe('theme registry', () => {
   it('resolves a light and a dark theme by mode', () => {
-    expect(themeForMode('light').id).toBe('default');
-    expect(themeForMode('dark').id).toBe('default-dark');
+    expect(themeForMode('light').mode).toBe('light');
+    expect(themeForMode('dark').mode).toBe('dark');
   });
 
-  it('every bundled theme has the full role-token set', () => {
-    for (const t of bundledThemes) {
-      const names = tokenEntries(t.tokens).map(([n]) => n);
-      expect(names).toContain('--surface-base');
-      expect(names).toContain('--ink-strong');
-      expect(names).toContain('--status-danger');
-    }
+  it('looks themes up by id', () => {
+    expect(getTheme('mocha-warm')?.name).toBe('Mocha (warm)');
+    expect(getTheme('nope')).toBeUndefined();
+  });
+
+  it('applyTheme sets data-theme and injects the token style element', () => {
+    applyTheme('latte-warm');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('latte-warm');
+    const style = document.getElementById('paracord-theme-tokens');
+    expect(style?.textContent).toContain('--surface-base:');
+    expect(style?.textContent).toContain('--muted:');
+  });
+
+  it('falls back to the default theme for an unknown id', () => {
+    const theme = applyTheme('does-not-exist');
+    expect(theme.id).toBe('latte-warm');
   });
 });
