@@ -244,7 +244,7 @@
       <p class="muted">Pick a theme. The whole app — including open charts and the citation network — restyles instantly, and your choice is remembered on this device and your account.</p>
 
       <label class="follow">
-        <input type="checkbox" checked={$followSystem} on:change={toggleFollowSystem} />
+        <input type="checkbox" data-testid="follow-system" checked={$followSystem} on:change={toggleFollowSystem} />
         Follow system appearance
         <span class="muted">(use the light or dark variant of the selected temperature based on your OS)</span>
       </label>
@@ -257,6 +257,7 @@
               <button
                 type="button"
                 class="theme-option"
+                data-testid={`theme-option-${opt.id}`}
                 class:selected={$activeThemeId === opt.id}
                 aria-pressed={$activeThemeId === opt.id}
                 title={`Use the ${opt.name} theme`}
