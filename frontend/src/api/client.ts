@@ -236,6 +236,19 @@ export interface VizEdge {
   weight: number;
 }
 
+// P5a stacked time-series (topic river): one share per year, aligned to `years`.
+export interface VizSeries {
+  years: number[];
+  topics: { label: string; values: number[] }[];
+}
+
+// P5a labelled square matrix (similarity heatmap): row/column order matches `labels`/`ids`.
+export interface VizMatrix {
+  labels: string[];
+  ids: string[];
+  values: number[][];
+}
+
 export interface VizPayload {
   view_type: string;
   nodes: VizNode[];
@@ -244,6 +257,9 @@ export interface VizPayload {
   legend: { color_by: string; groups: string[] } | null;
   notes: string[];
   axis_options: VizAxis[] | null;
+  // P5a chart carriers; null for scatter/network views. See backend VizPayload.
+  series: VizSeries | null;
+  matrix: VizMatrix | null;
 }
 
 export interface VizParams {
@@ -254,6 +270,7 @@ export interface VizParams {
   yAxis?: string;
   sizeBy?: string;
   colorBy?: string;
+  edgeContext?: string;
   focusWorkId?: string | null;
   includeEdges?: boolean;
   embeddingModel?: string;
@@ -2095,6 +2112,7 @@ export class ApiClient {
     if (params.yAxis) query.set('y_axis', params.yAxis);
     if (params.sizeBy) query.set('size_by', params.sizeBy);
     if (params.colorBy) query.set('color_by', params.colorBy);
+    if (params.edgeContext) query.set('edge_context', params.edgeContext);
     if (params.focusWorkId) query.set('focus_work_id', params.focusWorkId);
     if (params.includeEdges) query.set('include_edges', 'true');
     if (params.embeddingModel) query.set('embedding_model', params.embeddingModel);

@@ -12,6 +12,9 @@
   // Importing a renderer registers it in the registry (side-effect imports).
   import '../lib/viz/temporalMap';
   import '../lib/viz/embeddingCluster';
+  import '../lib/viz/coCitation';
+  import '../lib/viz/topicRiver';
+  import '../lib/viz/similarityHeatmap';
   import { resolveTheme } from '../lib/viz/theme';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -33,8 +36,14 @@
   let yAxis = 'local_degree';
   let sizeBy = 'local_degree';
   let colorBy = 'status';
+  let edgeContext = 'coupling';
   let includeEdges = false;
   let focusWorkId = '';
+
+  const EDGE_CONTEXT_OPTIONS = [
+    ['coupling', 'Bibliographic coupling (shared references)'],
+    ['co_citation', 'Co-citation (cited together)'],
+  ];
 
   let payload: VizPayload | null = null;
   let busy = false;
@@ -68,8 +77,14 @@
   // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
   // the axis / color / edge controls do not apply — only the size encoding and node cap do.
   $: isCluster = viewType === 'embedding_cluster';
+  // The temporal map is the only view with swappable axes / size / color / focus / edge overlay.
+  $: isTemporal = viewType === 'temporal_map';
+  // Co-citation is a node-link network (color + edge-context controls, no axes/size).
+  $: isNetwork = viewType === 'co_citation';
+  // Topic river / similarity heatmap are chart views with no per-view controls.
+  $: isChart = viewType === 'topic_river' || viewType === 'similarity_heatmap';
 
-  $: needsFocus = !isCluster && (xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus'));
+  $: needsFocus = isTemporal && (xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus'));
 
   $: scopeReady =
     scopeType === 'library'
@@ -114,6 +129,7 @@
         yAxis,
         sizeBy,
         colorBy,
+        edgeContext,
         focusWorkId: focusWorkId || null,
         includeEdges,
       });
@@ -165,7 +181,15 @@
     }
   }
 
-  $: if (payload && chartContainer) void render();
+  // A payload has something to draw if it has nodes (scatter/network) or a chart carrier
+  // (topic river's series / similarity heatmap's matrix).
+  $: hasData =
+    !!payload &&
+    (payload.nodes.length > 0 ||
+      (payload.series?.years.length ?? 0) > 0 ||
+      (payload.matrix?.labels.length ?? 0) > 0);
+
+  $: if (payload && hasData && chartContainer) void render();
 
   let wasVisible = true;
   $: {
@@ -231,7 +255,7 @@
     </div>
 
     <div class="controls">
-      {#if !isCluster}
+      {#if isTemporal}
         <label>X axis
           <select bind:value={xAxis} on:change={reloadIfLoaded} data-testid="viz-x-axis" title="Value on the X axis">
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
@@ -242,17 +266,33 @@
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
           </select>
         </label>
-      {:else}
+      {:else if isCluster}
         <span class="hintline" data-testid="viz-cluster-hint">
           Papers are placed by embedding proximity (PCA); color shows the topic cluster.
         </span>
+      {:else if isNetwork}
+        <label>Edge
+          <select bind:value={edgeContext} on:change={reloadIfLoaded} data-testid="viz-edge-context" title="How two papers are linked">
+            {#each EDGE_CONTEXT_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
+          </select>
+        </label>
+      {:else if viewType === 'topic_river'}
+        <span class="hintline" data-testid="viz-chart-hint">
+          Share of papers in each topic across publication years (topics from embedding clusters).
+        </span>
+      {:else if viewType === 'similarity_heatmap'}
+        <span class="hintline" data-testid="viz-chart-hint">
+          Pairwise cosine similarity for up to 50 papers (most recent kept for larger scopes).
+        </span>
       {/if}
-      <label>Size
-        <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="Point size encoding">
-          {#each SIZE_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
-        </select>
-      </label>
-      {#if !isCluster}
+      {#if isTemporal || isCluster}
+        <label>Size
+          <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="Point size encoding">
+            {#each SIZE_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
+          </select>
+        </label>
+      {/if}
+      {#if isTemporal || isNetwork}
         <label>Color
           <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="Point color encoding">
             {#each COLOR_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
@@ -267,7 +307,7 @@
           </select>
         </label>
       {/if}
-      {#if !isCluster}
+      {#if isTemporal}
         <label class="toggle" title="Overlay citation links among the papers">
           <input type="checkbox" bind:checked={includeEdges} on:change={reloadIfLoaded} data-testid="viz-include-edges" />
           Citation edges
@@ -294,7 +334,7 @@
           {#each payload.notes as note (note)}<li>{note}</li>{/each}
         </ul>
       {/if}
-      {#if payload.nodes.length === 0}
+      {#if !hasData}
         <p class="empty">No papers to plot in this scope.</p>
       {:else}
         <div class="chart" bind:this={chartContainer} data-testid="viz-chart"></div>
