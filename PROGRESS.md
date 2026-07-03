@@ -7,6 +7,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming P1 — YAML→token pipeline + refactor (no visual change) (2026-07-03)
+
+Built the substrate for the 4-theme system (`docs/THEMING_DESIGN.md`) with **zero visual change**.
+Themes are now authored as hand-editable YAML under `frontend/themes/` (`default.yaml` ports the
+current light look; `default-dark.yaml` preserves the pre-existing dark chart palette) and compiled
+by `frontend/scripts/build-themes.mjs` (`npm run themes:build`, uses the `yaml` dep) into the
+committed `frontend/src/lib/theme/themes.generated.ts`. The app/build/tests import that `.ts`, so
+`npm ci`/`vite build`/vitest need no YAML at runtime — least-magic path chosen over a runtime YAML
+import/Vite plugin. `lib/theme` emits role tokens (`--surface-*`, `--ink-*`, `--border-*`,
+`--accent-*`, `--status-*`, `--radius-*`, `--font-family`) as a `[data-theme="<id>"]` CSS block;
+`main.ts` injects the `default` theme and sets `<html data-theme="default">` before mount. The
+ad-hoc `--pg-*` vars (App.svelte + Search/Library/Admin pages) were replaced by role tokens with
+byte-identical values, and `lib/viz/theme.ts` now derives `VizTheme` from the theme objects' `graph`
+section instead of a hardcoded palette. Byte-identical appearance is pinned by tests: the emitted
+token→value map equals the pre-refactor literals, and `resolveTheme('light'|'dark')` equals the old
+`VizTheme` constants. `make frontend-check` green (135 tests pass, build OK). The ~130 remaining
+per-component hardcoded status/neutral colours are deferred (they can't collapse into the role set
+without a value shift — P2 territory). Next: P2 (author + validate the 4 cozy themes).
+
 ## Everyday rename/reassign workflows — shelves, racks, tags, applied tags (2026-07-03)
 
 Closed the user-facing gaps the E2E pass surfaced. **Shelf/rack rename** already had backend PATCH
