@@ -11,7 +11,7 @@
     type Shelf,
   } from '../api/client';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
-  import { resolveThemeById } from '../lib/viz/theme';
+  import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -106,12 +106,7 @@
         init: (el: HTMLElement) => typeof chart;
       };
       if (!chart) chart = echarts.init(chartContainer);
-      const theme = resolveThemeById(
-        typeof document !== 'undefined'
-          ? document.documentElement.getAttribute('data-theme')
-          : null,
-      );
-      chart.setOption(buildChronologicalOption(summary, theme), true);
+      chart.setOption(buildChronologicalOption(summary, $activeVizTheme), true);
       chartError = false;
     } catch {
       chartError = true;
@@ -119,6 +114,9 @@
   }
 
   $: if (summary && chartContainer) void render();
+
+  // Live restyle: re-run setOption with the new VizTheme when the theme switches (no rebuild).
+  $: if ($activeVizTheme && chart && summary) void render();
 
   let wasVisible = true;
   $: {

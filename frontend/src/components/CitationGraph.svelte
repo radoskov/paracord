@@ -8,7 +8,8 @@
     GraphSizeBy,
     TopicGraphResponse,
   } from '../api/client';
-  import { resolveThemeById } from '../lib/viz/theme';
+  import { resolveThemeById, type VizTheme } from '../lib/viz/theme';
+  import { activeThemeId } from '../lib/theme/store';
 
   export let label = '';
   export let disabled = false;
@@ -51,9 +52,10 @@
   let colorBy: GraphColorBy = 'none';
   // Network colours come from the ACTIVE theme's validated `graph` block (categorical palette,
   // node/edge/label/grid/warning-ring) so the network is legible + on-theme under every theme.
-  // Read once at build time; P3 wires live re-styling on theme change (viz pages already read
-  // data-theme). Groups map to the categorical palette by first-seen order; the legend shows it.
-  function activeViz() {
+  // Groups map to the categorical palette by first-seen order; the legend shows it. P3 wires live
+  // re-styling: `restyle()` re-reads the palette and re-applies the stylesheet on the live instance
+  // (no rebuild, no relayout) when the theme switches.
+  function activeViz(): VizTheme {
     return resolveThemeById(
       typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null,
     );
@@ -188,6 +190,65 @@
     return deg;
   }
 
+  // The Cytoscape stylesheet, derived from the active theme's `graph` block. Shared by the initial
+  // build and the live `restyle()` so a theme switch repaints the running graph without a rebuild.
+  function buildStyle(v: VizTheme, maxWeight: number): unknown[] {
+    return [
+      {
+        selector: 'node',
+        style: {
+          label: 'data(label)',
+          'font-size': 9,
+          'text-wrap': 'ellipsis',
+          'text-max-width': '120px',
+          color: v.text,
+          'background-color': 'data(color)',
+          width: 28,
+          height: 28,
+        },
+      },
+      {
+        selector: 'node[kind = "external"]',
+        style: { 'background-color': v.nodeDefault, shape: 'diamond' },
+      },
+      {
+        // Warning badge (§8.9): a ring (theme danger colour) around nodes with a review warning
+        // (multiwork / duplicate / unresolved) so problem papers stand out at a glance.
+        selector: 'node[warn = 1]',
+        style: { 'border-width': 3, 'border-color': v.warningRing, 'border-opacity': 0.95 },
+      },
+      {
+        selector: 'edge',
+        style: {
+          width: `mapData(weight, 1, ${maxWeight}, 1, 8)`,
+          'line-color': v.edge,
+          'target-arrow-color': v.edge,
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+        },
+      },
+    ];
+  }
+
+  // Live restyle on theme change (P3): re-read the theme, re-derive each node's categorical colour,
+  // and swap the stylesheet on the live instance. No rebuild, no relayout — positions are kept.
+  function restyle(): void {
+    if (!cy) return;
+    viz = activeViz();
+    const maxWeight = Math.max(1, ...rEdges.map((e) => e.weight));
+    cy.batch(() => {
+      for (const node of rNodes) {
+        const el = cy.getElementById(node.id);
+        if (el.length) el.data('color', colorFor(node.colorGroup));
+      }
+    });
+    cy.style(buildStyle(viz, maxWeight)).update();
+  }
+
+  // Reading $activeThemeId makes this reactive; applyTheme has already updated data-theme by the
+  // time the store publishes, so `activeViz()` inside restyle() resolves the new palette.
+  $: if ($activeThemeId && cy) restyle();
+
   async function renderGraph(): Promise<void> {
     if (!hasGraph || !cyContainer) return;
     viz = activeViz();
@@ -261,41 +322,7 @@
       cy = cytoscape({
         container: cyContainer,
         elements,
-        style: [
-          {
-            selector: 'node',
-            style: {
-              label: 'data(label)',
-              'font-size': 9,
-              'text-wrap': 'ellipsis',
-              'text-max-width': '120px',
-              color: viz.text,
-              'background-color': 'data(color)',
-              width: 28,
-              height: 28,
-            },
-          },
-          {
-            selector: 'node[kind = "external"]',
-            style: { 'background-color': viz.nodeDefault, shape: 'diamond' },
-          },
-          {
-            // Warning badge (§8.9): a ring (theme danger colour) around nodes with a review warning
-            // (multiwork / duplicate / unresolved) so problem papers stand out at a glance.
-            selector: 'node[warn = 1]',
-            style: { 'border-width': 3, 'border-color': viz.warningRing, 'border-opacity': 0.95 },
-          },
-          {
-            selector: 'edge',
-            style: {
-              width: `mapData(weight, 1, ${maxWeight}, 1, 8)`,
-              'line-color': viz.edge,
-              'target-arrow-color': viz.edge,
-              'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
-            },
-          },
-        ],
+        style: buildStyle(viz, maxWeight),
         // Positions come from the explicit relayout() below, which lays out only the visible
         // subset so filtered-out nodes don't leave gaps.
         layout: { name: 'preset' },

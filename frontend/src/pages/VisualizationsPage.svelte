@@ -15,7 +15,7 @@
   import '../lib/viz/coCitation';
   import '../lib/viz/topicRiver';
   import '../lib/viz/similarityHeatmap';
-  import { resolveThemeById } from '../lib/viz/theme';
+  import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -163,12 +163,7 @@
         init: (el: HTMLElement) => typeof chart;
       };
       if (!chart) chart = echarts.init(chartContainer);
-      const theme = resolveThemeById(
-        typeof document !== 'undefined'
-          ? document.documentElement.getAttribute('data-theme')
-          : null,
-      );
-      chart.setOption(renderer.buildOption(payload, theme), true);
+      chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
       chart.off('click');
       chart.on('click', (params: { data?: { name?: string } }) => {
         const workId = params.data?.name;
@@ -192,6 +187,10 @@
       (payload.matrix?.labels.length ?? 0) > 0);
 
   $: if (payload && hasData && chartContainer) void render();
+
+  // Live restyle: re-run setOption with the new VizTheme when the theme switches (no rebuild,
+  // no refetch). Reading $activeVizTheme here makes the block reactive to a theme change.
+  $: if ($activeVizTheme && chart && payload && hasData) void render();
 
   let wasVisible = true;
   $: {

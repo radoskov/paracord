@@ -991,6 +991,8 @@ export interface CurrentUser {
   last_login_at: string | null;
   // Preferred Library page size (D18); null falls back to the server default.
   papers_per_page: number | null;
+  // Preferred GUI theme id (P3); null falls back to the boot default.
+  theme: string | null;
 }
 
 // Runtime app configuration (admin-editable; D18 page-size clamp + D1 overload protection).
@@ -1855,6 +1857,7 @@ export class ApiClient {
     display_name?: string | null;
     email?: string | null;
     papers_per_page?: number | null;
+    theme?: string | null;
   }): Promise<CurrentUser> {
     return this.request<CurrentUser>('/api/v1/auth/me', { method: 'PATCH', body: changes });
   }

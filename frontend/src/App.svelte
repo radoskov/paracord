@@ -18,6 +18,7 @@
   import VisualizationsPage from './pages/VisualizationsPage.svelte';
   import CitationSummaryPage from './pages/CitationSummaryPage.svelte';
   import { currentUser } from './lib/session';
+  import { reconcileTheme } from './lib/theme/store';
   import type { UserRole } from './api/client';
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
@@ -95,7 +96,10 @@
 
   async function loadMe(): Promise<void> {
     try {
-      currentUser.set(await client.getMe());
+      const me = await client.getMe();
+      currentUser.set(me);
+      // Adopt the server-persisted theme when this device has no localStorage choice yet.
+      reconcileTheme(me.theme);
     } catch {
       // onUnauthorized already handled a 401; any other failure also means we can't proceed.
       currentUser.set(null);
