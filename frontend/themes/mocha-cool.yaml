@@ -1,0 +1,76 @@
+# PaRacORD theme — hand-editable source of truth.
+# Compiled by `npm run themes:build` into src/lib/theme/themes.generated.ts.
+#
+# Catppuccin Mocha (dark) with a faint cool surface undertone and a cool-lead
+# accent order (blue / sky / lavender). GUI chrome uses Catppuccin pastels; the
+# `graph` palette is a VALIDATED derivative designed against the dark surface.
+id: mocha-cool
+name: "Mocha (cool)"
+mode: dark
+temperature: cool
+
+palette:
+  base: "#1e1e2e"
+  text: "#cdd6f4"
+  subtext1: "#bac2de"
+  subtext0: "#a6adc8"
+  overlay2: "#9399b2"
+  blue: "#89b4fa"
+  sky: "#89dceb"
+  sapphire: "#74c7ec"
+  lavender: "#b4befe"
+  teal: "#94e2d5"
+  green: "#a6e3a1"
+  yellow: "#f9e2af"
+  mauve: "#cba6f7"
+  red: "#f38ba8"
+
+tokens:
+  surface: {base: "#1c1e30", raised: "#262a3d", overlay: "#2e3348", sunken: "#171826", hover: "#2b3044"}
+  ink: {strong: "#cdd6f4", normal: "#bac2de", muted: "#9399b2", inverse: "#1e1e2e"}
+  border: {normal: "#34384c", strong: "#444a60", focus: "#89b4fa"}
+  accent: {primary: "#89b4fa", primary-strong: "#7aa5f0", secondary: "#bac2de", link: "#89b4fa", note: "#cba6f7", note-bg: "#2a2340", note-border: "#453a66"}
+  status:
+    success: "#a6e3a1"
+    success-bg: "#22311f"
+    success-border: "#3d5c3a"
+    warning: "#f9e2af"
+    warning-bg: "#332b17"
+    warning-border: "#5c4f2a"
+    danger: "#f38ba8"
+    danger-bg: "#3a2029"
+    danger-border: "#5c2f3a"
+    info: "#89dceb"
+    info-bg: "#17303a"
+    info-border: "#2a5560"
+  radius: {sm: "6px", md: "8px"}
+  font: {family: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"}
+
+graph:
+  surface: "#1c1e30"
+  text: "#bac2de"
+  axis_line: "#444a60"
+  split_line: "#2a2f45"
+  grid: "#2a2f45"
+  node_default: "#6c7086"
+  edge: "#585b70"
+  tooltip_bg: "#cdd6f4"
+  tooltip_text: "#1e1e2e"
+  warning_ring: "#f38ba8"
+  font: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  categorical:
+    - "#4a7fd0"
+    - "#cf7020"
+    - "#1a9a9a"
+    - "#e04a68"
+    - "#a55fe0"
+    - "#a88a20"
+    - "#d85fa8"
+    - "#2e9a52"
+  sequential:
+    - "#3a5ea0"
+    - "#4a7fd0"
+    - "#6f9fe6"
+    - "#98bcf0"
+    - "#c2d8f7"
+  diverging: {low: "#4a7fd0", mid: "#444a60", high: "#e04a68"}

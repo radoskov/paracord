@@ -71,7 +71,7 @@ export const similarityHeatmapRenderer: VizRenderer = {
         right: 0,
         bottom: 'center',
         textStyle: { color: theme.text },
-        inRange: { color: [theme.splitLine, theme.categorical[0]] },
+        inRange: { color: theme.sequential },
       },
       series: [
         {

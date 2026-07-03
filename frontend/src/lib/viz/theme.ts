@@ -18,8 +18,17 @@ export interface VizTheme {
   tooltipBg: string;
   tooltipText: string;
   fontFamily: string;
-  // Accessible categorical palette (muted, Seaborn "deep"-like) for color_group encoding.
+  // Validated CVD-safe categorical palette (fixed order) for color_group encoding.
   categorical: string[];
+  // One-hue light→dark ramp for sequential (heatmap / density) encodings.
+  sequential: string[];
+  // Two poles + neutral mid for diverging encodings.
+  diverging: { low: string; mid: string; high: string };
+  // Network (Cytoscape) colours derived from the theme's `graph` block.
+  nodeDefault: string;
+  edge: string;
+  grid: string;
+  warningRing: string;
 }
 
 /** Map a theme's `graph` section onto the chart-facing VizTheme shape. */
@@ -35,6 +44,12 @@ function toVizTheme(theme: Theme): VizTheme {
     tooltipText: g.tooltip_text,
     fontFamily: g.font,
     categorical: g.categorical,
+    sequential: g.sequential,
+    diverging: g.diverging,
+    nodeDefault: g.node_default,
+    edge: g.edge,
+    grid: g.grid,
+    warningRing: g.warning_ring,
   };
 }
 
@@ -42,9 +57,19 @@ function themeForMode(mode: 'light' | 'dark'): Theme {
   return bundledThemes.find((t) => t.mode === mode) ?? bundledThemes[0];
 }
 
-/** Resolve the shared theme for a light/dark mode. */
+/** Resolve the shared theme for a light/dark mode (first bundled theme of that mode). */
 export function resolveTheme(mode: 'light' | 'dark' = 'light'): VizTheme {
   return toVizTheme(themeForMode(mode));
+}
+
+/**
+ * Resolve the VizTheme for the ACTIVE theme id (the `data-theme` on <html>). This is
+ * what the chart pages use so each of the bundled themes' `graph` blocks drives the
+ * charts — falls back to the first bundled theme for an unknown/absent id.
+ */
+export function resolveThemeById(id: string | null): VizTheme {
+  const theme = bundledThemes.find((t) => t.id === id) ?? bundledThemes[0];
+  return toVizTheme(theme);
 }
 
 /** Deterministic color for a color_group value, given the ordered group list from the payload. */

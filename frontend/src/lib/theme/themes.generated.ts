@@ -5,106 +5,51 @@ import type { Theme } from './types';
 
 export const bundledThemes: Theme[] = [
   {
-    "id": "default-dark",
-    "name": "Default (dark)",
-    "mode": "dark",
-    "temperature": "cool",
-    "tokens": {
-      "surface": {
-        "base": "#141a21",
-        "raised": "#1b232c",
-        "overlay": "#1b232c",
-        "sunken": "#141a21",
-        "hover": "#1b232c"
-      },
-      "ink": {
-        "strong": "#e6edf3",
-        "normal": "#e6edf3",
-        "muted": "#a8b3bf",
-        "inverse": "#141a21"
-      },
-      "border": {
-        "normal": "#3a4650",
-        "strong": "#3a4650",
-        "focus": "#64b5cd"
-      },
-      "accent": {
-        "primary": "#4c72b0",
-        "primary-strong": "#64b5cd",
-        "secondary": "#a8b3bf",
-        "link": "#64b5cd"
-      },
-      "status": {
-        "success": "#55a868",
-        "warning": "#ccb974",
-        "danger": "#c44e52",
-        "info": "#64b5cd"
-      },
-      "radius": {
-        "sm": "6px",
-        "md": "8px"
-      },
-      "font": {
-        "family": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
-      }
-    },
-    "graph": {
-      "surface": "#141a21",
-      "text": "#e6edf3",
-      "axis_line": "#3a4650",
-      "split_line": "#232c35",
-      "tooltip_bg": "#e6edf3",
-      "tooltip_text": "#141a21",
-      "font": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
-      "categorical": [
-        "#4c72b0",
-        "#dd8452",
-        "#55a868",
-        "#c44e52",
-        "#8172b3",
-        "#937860",
-        "#da8bc3",
-        "#8c8c8c",
-        "#ccb974",
-        "#64b5cd"
-      ]
-    }
-  },
-  {
-    "id": "default",
-    "name": "Default (light)",
+    "id": "latte-cool",
+    "name": "Latte (cool)",
     "mode": "light",
     "temperature": "cool",
     "tokens": {
       "surface": {
-        "base": "#eef1f4",
-        "raised": "#fbfcfd",
+        "base": "#edf0f5",
+        "raised": "#fafbfd",
         "overlay": "#ffffff",
-        "sunken": "#f4f6f9",
-        "hover": "#eef2f6"
+        "sunken": "#e4e8f0",
+        "hover": "#e7ecf3"
       },
       "ink": {
-        "strong": "#1f2a36",
-        "normal": "#203142",
-        "muted": "#64717f",
+        "strong": "#4c4f69",
+        "normal": "#565971",
+        "muted": "#5f6278",
         "inverse": "#ffffff"
       },
       "border": {
-        "normal": "#cbd5e1",
-        "strong": "#d8dee6",
-        "focus": "#2563eb"
+        "normal": "#cdd3de",
+        "strong": "#bcc4d2",
+        "focus": "#1e66f5"
       },
       "accent": {
-        "primary": "#2d3e50",
-        "primary-strong": "#1f2a36",
-        "secondary": "#21303d",
-        "link": "#2563eb"
+        "primary": "#245a8f",
+        "primary-strong": "#1c4a78",
+        "secondary": "#3a3c52",
+        "link": "#1a5fd0",
+        "note": "#7c34d6",
+        "note-bg": "#ece0fb",
+        "note-border": "#d0b8f2"
       },
       "status": {
-        "success": "#166534",
-        "warning": "#b45309",
-        "danger": "#b3261e",
-        "info": "#1d4ed8"
+        "success": "#2a7130",
+        "success-bg": "#e2f3dc",
+        "success-border": "#b8dfa8",
+        "warning": "#8a5f10",
+        "warning-bg": "#fbeecf",
+        "warning-border": "#f0d69a",
+        "danger": "#c4142f",
+        "danger-bg": "#fbdfe3",
+        "danger-border": "#f0aebb",
+        "info": "#1a5fd0",
+        "info-bg": "#dde8fd",
+        "info-border": "#aec6f7"
       },
       "radius": {
         "sm": "6px",
@@ -115,25 +60,312 @@ export const bundledThemes: Theme[] = [
       }
     },
     "graph": {
-      "surface": "#ffffff",
-      "text": "#21303d",
-      "axis_line": "#bcc7d2",
-      "split_line": "#eef2f6",
-      "tooltip_bg": "#1f2a36",
+      "surface": "#f7f9fc",
+      "text": "#565971",
+      "axis_line": "#bcc4d2",
+      "split_line": "#dfe3ea",
+      "grid": "#dfe3ea",
+      "node_default": "#8c8fa1",
+      "edge": "#bcc4d2",
+      "tooltip_bg": "#4c4f69",
       "tooltip_text": "#ffffff",
+      "warning_ring": "#c4142f",
       "font": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
       "categorical": [
-        "#4c72b0",
-        "#dd8452",
-        "#55a868",
-        "#c44e52",
-        "#8172b3",
-        "#937860",
-        "#da8bc3",
-        "#8c8c8c",
-        "#ccb974",
-        "#64b5cd"
-      ]
+        "#1f6fd6",
+        "#e06b00",
+        "#0a9aa0",
+        "#d23a52",
+        "#8f57d6",
+        "#9a8400",
+        "#cc489a",
+        "#2f8f3e"
+      ],
+      "sequential": [
+        "#7ea6e9",
+        "#5c8fdf",
+        "#3f74d4",
+        "#2857aa",
+        "#163c78"
+      ],
+      "diverging": {
+        "low": "#1a5fd0",
+        "mid": "#dfe3ea",
+        "high": "#c4142f"
+      }
+    }
+  },
+  {
+    "id": "latte-warm",
+    "name": "Latte (warm)",
+    "mode": "light",
+    "temperature": "warm",
+    "tokens": {
+      "surface": {
+        "base": "#f3efe9",
+        "raised": "#fbf8f4",
+        "overlay": "#fffdfb",
+        "sunken": "#ece6de",
+        "hover": "#efe8e0"
+      },
+      "ink": {
+        "strong": "#4c4f69",
+        "normal": "#565971",
+        "muted": "#5f6278",
+        "inverse": "#fffdfb"
+      },
+      "border": {
+        "normal": "#dcd4ca",
+        "strong": "#c9c0b2",
+        "focus": "#1e66f5"
+      },
+      "accent": {
+        "primary": "#a83250",
+        "primary-strong": "#8c2942",
+        "secondary": "#3a3c52",
+        "link": "#1a5fd0",
+        "note": "#7c34d6",
+        "note-bg": "#ece0fb",
+        "note-border": "#d0b8f2"
+      },
+      "status": {
+        "success": "#2a7130",
+        "success-bg": "#e2f3dc",
+        "success-border": "#b8dfa8",
+        "warning": "#8a5f10",
+        "warning-bg": "#fbeecf",
+        "warning-border": "#f0d69a",
+        "danger": "#c4142f",
+        "danger-bg": "#fbdfe3",
+        "danger-border": "#f0aebb",
+        "info": "#1a5fd0",
+        "info-bg": "#dde8fd",
+        "info-border": "#aec6f7"
+      },
+      "radius": {
+        "sm": "6px",
+        "md": "8px"
+      },
+      "font": {
+        "family": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+      }
+    },
+    "graph": {
+      "surface": "#faf7f2",
+      "text": "#565971",
+      "axis_line": "#bcc0cc",
+      "split_line": "#dfe3ea",
+      "grid": "#dfe3ea",
+      "node_default": "#8c8fa1",
+      "edge": "#bcc0cc",
+      "tooltip_bg": "#4c4f69",
+      "tooltip_text": "#fffdfb",
+      "warning_ring": "#c4142f",
+      "font": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+      "categorical": [
+        "#e06b00",
+        "#1f6fd6",
+        "#d23a52",
+        "#0a9aa0",
+        "#9a8400",
+        "#8f57d6",
+        "#cc489a",
+        "#2f8f3e"
+      ],
+      "sequential": [
+        "#df9153",
+        "#cd7a2c",
+        "#b56410",
+        "#8f4f0b",
+        "#6a3a08"
+      ],
+      "diverging": {
+        "low": "#1a5fd0",
+        "mid": "#dfe3ea",
+        "high": "#c4142f"
+      }
+    }
+  },
+  {
+    "id": "mocha-cool",
+    "name": "Mocha (cool)",
+    "mode": "dark",
+    "temperature": "cool",
+    "tokens": {
+      "surface": {
+        "base": "#1c1e30",
+        "raised": "#262a3d",
+        "overlay": "#2e3348",
+        "sunken": "#171826",
+        "hover": "#2b3044"
+      },
+      "ink": {
+        "strong": "#cdd6f4",
+        "normal": "#bac2de",
+        "muted": "#9399b2",
+        "inverse": "#1e1e2e"
+      },
+      "border": {
+        "normal": "#34384c",
+        "strong": "#444a60",
+        "focus": "#89b4fa"
+      },
+      "accent": {
+        "primary": "#89b4fa",
+        "primary-strong": "#7aa5f0",
+        "secondary": "#bac2de",
+        "link": "#89b4fa",
+        "note": "#cba6f7",
+        "note-bg": "#2a2340",
+        "note-border": "#453a66"
+      },
+      "status": {
+        "success": "#a6e3a1",
+        "success-bg": "#22311f",
+        "success-border": "#3d5c3a",
+        "warning": "#f9e2af",
+        "warning-bg": "#332b17",
+        "warning-border": "#5c4f2a",
+        "danger": "#f38ba8",
+        "danger-bg": "#3a2029",
+        "danger-border": "#5c2f3a",
+        "info": "#89dceb",
+        "info-bg": "#17303a",
+        "info-border": "#2a5560"
+      },
+      "radius": {
+        "sm": "6px",
+        "md": "8px"
+      },
+      "font": {
+        "family": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+      }
+    },
+    "graph": {
+      "surface": "#1c1e30",
+      "text": "#bac2de",
+      "axis_line": "#444a60",
+      "split_line": "#2a2f45",
+      "grid": "#2a2f45",
+      "node_default": "#6c7086",
+      "edge": "#585b70",
+      "tooltip_bg": "#cdd6f4",
+      "tooltip_text": "#1e1e2e",
+      "warning_ring": "#f38ba8",
+      "font": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+      "categorical": [
+        "#4a7fd0",
+        "#cf7020",
+        "#1a9a9a",
+        "#e04a68",
+        "#a55fe0",
+        "#a88a20",
+        "#d85fa8",
+        "#2e9a52"
+      ],
+      "sequential": [
+        "#3a5ea0",
+        "#4a7fd0",
+        "#6f9fe6",
+        "#98bcf0",
+        "#c2d8f7"
+      ],
+      "diverging": {
+        "low": "#4a7fd0",
+        "mid": "#444a60",
+        "high": "#e04a68"
+      }
+    }
+  },
+  {
+    "id": "mocha-warm",
+    "name": "Mocha (warm)",
+    "mode": "dark",
+    "temperature": "warm",
+    "tokens": {
+      "surface": {
+        "base": "#211e2a",
+        "raised": "#2a2536",
+        "overlay": "#322c40",
+        "sunken": "#191622",
+        "hover": "#302a3d"
+      },
+      "ink": {
+        "strong": "#cdd6f4",
+        "normal": "#bac2de",
+        "muted": "#9399b2",
+        "inverse": "#1e1e2e"
+      },
+      "border": {
+        "normal": "#3a3547",
+        "strong": "#4a4458",
+        "focus": "#89b4fa"
+      },
+      "accent": {
+        "primary": "#fab387",
+        "primary-strong": "#f5a06a",
+        "secondary": "#bac2de",
+        "link": "#89b4fa",
+        "note": "#cba6f7",
+        "note-bg": "#2a2340",
+        "note-border": "#453a66"
+      },
+      "status": {
+        "success": "#a6e3a1",
+        "success-bg": "#22311f",
+        "success-border": "#3d5c3a",
+        "warning": "#f9e2af",
+        "warning-bg": "#332b17",
+        "warning-border": "#5c4f2a",
+        "danger": "#f38ba8",
+        "danger-bg": "#3a2029",
+        "danger-border": "#5c2f3a",
+        "info": "#89dceb",
+        "info-bg": "#17303a",
+        "info-border": "#2a5560"
+      },
+      "radius": {
+        "sm": "6px",
+        "md": "8px"
+      },
+      "font": {
+        "family": "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+      }
+    },
+    "graph": {
+      "surface": "#211e2a",
+      "text": "#bac2de",
+      "axis_line": "#45475a",
+      "split_line": "#313244",
+      "grid": "#313244",
+      "node_default": "#6c7086",
+      "edge": "#585b70",
+      "tooltip_bg": "#cdd6f4",
+      "tooltip_text": "#1e1e2e",
+      "warning_ring": "#f38ba8",
+      "font": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+      "categorical": [
+        "#cf7020",
+        "#4a7fd0",
+        "#e04a68",
+        "#1a9a9a",
+        "#a88a20",
+        "#a55fe0",
+        "#d85fa8",
+        "#2e9a52"
+      ],
+      "sequential": [
+        "#8a5218",
+        "#cf7020",
+        "#e0934a",
+        "#eeb37e",
+        "#f7d3b0"
+      ],
+      "diverging": {
+        "low": "#4a7fd0",
+        "mid": "#45475a",
+        "high": "#e04a68"
+      }
     }
   }
 ];

@@ -7,10 +7,12 @@ import { bundledThemes } from './themes.generated';
 import type { Theme, ThemeMode } from './types';
 
 export type { Theme, ThemeMode, ThemeTokens, ThemeGraph } from './types';
-export { renderThemeCss, tokenEntries } from './css';
+export { renderThemeCss, tokenEntries, aliasEntries } from './css';
 export { bundledThemes };
 
-export const DEFAULT_THEME_ID = 'default';
+// Boot default (P2): the warm light theme. P3 wires the picker + persistence; until
+// then the app boots to this theme.
+export const DEFAULT_THEME_ID = 'latte-warm';
 
 export function getTheme(id: string): Theme | undefined {
   return bundledThemes.find((t) => t.id === id);

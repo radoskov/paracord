@@ -16,9 +16,17 @@ export function tokenEntries(tokens: ThemeTokens): Array<[string, string]> {
   return entries;
 }
 
-/** A `[data-theme="<id>"] { … }` rule declaring every role token. */
+/**
+ * Convenience aliases layered on top of the role tokens. `--muted` is a shorthand
+ * for `--ink-muted` that legacy component styles reference directly.
+ */
+export function aliasEntries(tokens: ThemeTokens): Array<[string, string]> {
+  return [['--muted', tokens.ink.muted]];
+}
+
+/** A `[data-theme="<id>"] { … }` rule declaring every role token + alias. */
 export function renderThemeCss(theme: Theme): string {
-  const body = tokenEntries(theme.tokens)
+  const body = [...tokenEntries(theme.tokens), ...aliasEntries(theme.tokens)]
     .map(([name, value]) => `  ${name}: ${value};`)
     .join('\n');
   return `[data-theme="${theme.id}"] {\n${body}\n}`;
