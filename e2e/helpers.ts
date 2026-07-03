@@ -112,6 +112,30 @@ export async function apiSetPapersPerPage(
   expect(res.ok(), `set papers_per_page failed: ${res.status()}`).toBeTruthy();
 }
 
+/** Set (or reset, with null) the signed-in user's persisted theme id (Theming P3, via /auth/me). */
+export async function apiSetUserTheme(
+  request: APIRequestContext,
+  token: string,
+  value: string | null,
+): Promise<void> {
+  const res = await request.patch(`${API_URL}/api/v1/auth/me`, {
+    headers: auth(token),
+    data: { theme: value },
+  });
+  expect(res.ok(), `set theme failed: ${res.status()}`).toBeTruthy();
+}
+
+/** Delete an admin-uploaded custom theme by slug (idempotent cleanup; owner/admin only, Theming P4). */
+export async function apiDeleteCustomTheme(
+  request: APIRequestContext,
+  token: string,
+  slug: string,
+): Promise<void> {
+  await request.delete(`${API_URL}/api/v1/admin/themes/${encodeURIComponent(slug)}`, {
+    headers: auth(token),
+  });
+}
+
 /** Wait until the authenticated tab-nav is visible (i.e. we are signed in). */
 export async function expectSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole('link', { name: 'Library' })).toBeVisible({ timeout: 15_000 });
