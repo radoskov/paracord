@@ -175,6 +175,11 @@ class WorkRead(BaseModel):
     # The owning user (Phase H). NULL = system/agent/import "loose" paper. Drives the frontend's
     # contributor own-only edit affordance.
     created_by_user_id: uuid.UUID | None = None
+    # External citation-count snapshot (Track C P1); NULL for papers with no resolvable id. The
+    # source is the connector it came from and ``fetched_at`` is when it was last refreshed.
+    citation_count: int | None = None
+    citation_count_source: str | None = None
+    citation_count_fetched_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     # Library columns (D32): the paper's SEE-filtered shelves and their SEE-filtered racks. Populated
