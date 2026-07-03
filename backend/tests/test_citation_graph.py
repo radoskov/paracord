@@ -623,3 +623,57 @@ def test_endpoint_neighborhood_returns_one_hop_and_requires_auth(client, auth_he
         f"/api/v1/works/{focus.id}0000/citation-neighborhood", headers=auth_headers("owner")
     )
     assert missing.status_code in (404, 422)
+
+
+def test_endpoint_neighborhood_enforces_reader_see_filter(client, auth_headers, db) -> None:
+    """A reader gets 404 for a focus paper they cannot SEE, and never sees a hidden neighbor.
+
+    Endpoint-level companion to the service tests: the works-router auth is exercised through the
+    real reader/owner sessions, and the neighborhood payload is clamped to the reader's visible set.
+    """
+    private = Shelf(name="Private", access_level="private")
+    db.add(private)
+    db.flush()
+
+    # A focus paper that lives only on a private shelf → invisible to a reader.
+    hidden_focus = Work(canonical_title="HFocus", normalized_title="hfocus", doi="10.1/hf")
+    hidden_cited = Work(canonical_title="HCited", normalized_title="hcited", doi="10.1/hc")
+    db.add_all([hidden_focus, hidden_cited])
+    db.flush()
+    db.add_all(
+        [
+            ShelfWork(shelf_id=private.id, work_id=hidden_focus.id),
+            ShelfWork(shelf_id=private.id, work_id=hidden_cited.id),
+        ]
+    )
+    db.add(Reference(citing_work_id=hidden_focus.id, doi="10.1/hc", title="HCited"))
+
+    # A loose (visible) focus that cites the hidden paper by DOI.
+    focus = Work(canonical_title="Focus2", normalized_title="focus2", doi="10.1/f2")
+    db.add(focus)
+    db.flush()
+    db.add(Reference(citing_work_id=focus.id, doi="10.1/hc", title="HCited"))
+    db.commit()
+
+    # The reader cannot SEE the private focus → 404.
+    reader = auth_headers("reader")
+    assert (
+        client.get(
+            f"/api/v1/works/{hidden_focus.id}/citation-neighborhood", headers=reader
+        ).status_code
+        == 404
+    )
+
+    # The reader SEES the loose focus, but the hidden neighbor is clamped out of the payload.
+    resp = client.get(f"/api/v1/works/{focus.id}/citation-neighborhood", headers=reader)
+    assert resp.status_code == 200
+    reader_ids = {n["work_id"] for n in resp.json()["nodes"]}
+    assert str(focus.id) in reader_ids
+    assert str(hidden_cited.id) not in reader_ids
+
+    # The owner, by contrast, resolves the hidden neighbor through the shared reference.
+    owner_resp = client.get(
+        f"/api/v1/works/{focus.id}/citation-neighborhood", headers=auth_headers("owner")
+    )
+    assert owner_resp.status_code == 200
+    assert str(hidden_cited.id) in {n["work_id"] for n in owner_resp.json()["nodes"]}
