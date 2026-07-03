@@ -875,6 +875,40 @@ def list_work_shelves(
     return memberships
 
 
+class WorkTagRead(BaseModel):
+    """A tag applied to a paper (id + name + colour), for the detail view's applied-tags list."""
+
+    id: uuid.UUID
+    name: str
+    color: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{work_id}/tags", response_model=list[WorkTagRead])
+def list_work_tags(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[WorkTagRead]:
+    """Return the tags applied to this paper (SEE-safe: 404 if the caller can't see the paper).
+
+    Tags are global (not access-scoped), but which paper they hang on is — so this is guarded like
+    ``get_work``, hiding a paper's tags from anyone who can't see the paper itself.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    tags = list(
+        db.scalars(
+            select(Tag)
+            .join(TagLink, TagLink.tag_id == Tag.id)
+            .where(TagLink.entity_type == "work", TagLink.entity_id == work_id)
+            .order_by(Tag.name)
+        ).all()
+    )
+    return [WorkTagRead.model_validate(tag) for tag in tags]
+
+
 @router.get("/{work_id}", response_model=WorkRead)
 def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> Work:
     """Return one work, recording a debounced `paper.viewed` audit event (§7.6).

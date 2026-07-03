@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_contributor, require_min_role
@@ -15,6 +15,7 @@ from app.models.organization import Rack, Shelf, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
+from app.services.audit import record_event
 from app.utils.normalization import normalize_title
 
 router = APIRouter()
@@ -52,6 +53,12 @@ def _guard_tag_target(db: Session, actor: User, entity_type: str, entity: object
 
 class TagCreate(BaseModel):
     name: str
+    color: str | None = None
+    description: str | None = None
+
+
+class TagUpdate(BaseModel):
+    name: str | None = None
     color: str | None = None
     description: str | None = None
 
@@ -99,6 +106,81 @@ def create_tag(
     db.commit()
     db.refresh(tag)
     return tag
+
+
+@router.patch("/{tag_id}", response_model=TagRead)
+def update_tag(
+    tag_id: uuid.UUID,
+    payload: TagUpdate,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> Tag:
+    """Rename a tag or edit its colour/description (contributor+, mirrors tag creation).
+
+    Renaming re-derives the normalized name; a rename that would collide with another tag's
+    normalized name is rejected (409) rather than silently merging the two tags.
+    """
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if "name" in updates:
+        new_name = updates["name"]
+        normalized = normalize_title(new_name)
+        clash = db.scalar(select(Tag).where(Tag.normalized_name == normalized, Tag.id != tag_id))
+        if clash is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A tag with that name already exists",
+            )
+        tag.name = new_name
+        tag.normalized_name = normalized
+    if "color" in updates:
+        tag.color = updates["color"]
+    if "description" in updates:
+        tag.description = updates["description"]
+    record_event(
+        db,
+        "tag.modified",
+        actor_user_id=actor.id,
+        entity_type="tag",
+        entity_id=str(tag.id),
+        details={"fields": sorted(updates.keys())},
+    )
+    db.commit()
+    db.refresh(tag)
+    return tag
+
+
+@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tag(
+    tag_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> None:
+    """Delete a tag and every link to it (editor+, since it detaches the tag across all entities).
+
+    The tagged papers/shelves/racks are untouched — only their ``TagLink`` rows for this tag are
+    removed, so they simply lose the tag.
+    """
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    tag_name = tag.name
+    links_removed = (
+        db.scalar(select(func.count()).select_from(TagLink).where(TagLink.tag_id == tag_id)) or 0
+    )
+    db.execute(delete(TagLink).where(TagLink.tag_id == tag_id))
+    db.delete(tag)
+    record_event(
+        db,
+        "tag.deleted",
+        actor_user_id=actor.id,
+        entity_type="tag",
+        entity_id=str(tag_id),
+        details={"name": tag_name, "links_removed": links_removed},
+    )
+    db.commit()
 
 
 @router.post("/{tag_id}/links", status_code=status.HTTP_204_NO_CONTENT)
