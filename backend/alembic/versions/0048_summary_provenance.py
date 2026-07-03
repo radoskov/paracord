@@ -30,7 +30,9 @@ def upgrade() -> None:
     )
     op.add_column("summaries", sa.Column("source_sections", sa.JSON(), nullable=True))
     op.add_column("summaries", sa.Column("content_hash", sa.String(length=64), nullable=True))
-    op.add_column("summaries", sa.Column("created_by_user_id", sa.Uuid(as_uuid=True), nullable=True))
+    op.add_column(
+        "summaries", sa.Column("created_by_user_id", sa.Uuid(as_uuid=True), nullable=True)
+    )
     op.add_column("summaries", sa.Column("params", sa.JSON(), nullable=True))
 
 

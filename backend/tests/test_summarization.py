@@ -186,9 +186,7 @@ def test_summarize_work_persists_provenance_columns(db_session) -> None:
     db_session.commit()
 
     actor_id = uuid.uuid4()
-    summarize_work(
-        db_session, work, summary_type="extractive", created_by_user_id=actor_id
-    )
+    summarize_work(db_session, work, summary_type="extractive", created_by_user_id=actor_id)
     db_session.commit()
 
     # Reload from the DB (expire everything) so we read persisted columns, not in-memory attrs.
@@ -214,9 +212,7 @@ def test_summarize_scope_persists_provenance_columns(db_session) -> None:
     db_session.commit()
 
     actor_id = uuid.uuid4()
-    summarize_scope(
-        db_session, scope_type="shelf", scope_id=shelf.id, created_by_user_id=actor_id
-    )
+    summarize_scope(db_session, scope_type="shelf", scope_id=shelf.id, created_by_user_id=actor_id)
     db_session.commit()
 
     db_session.expire_all()
