@@ -3755,6 +3755,17 @@
               }
             ],
             "title": "Papers Per Page"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
           }
         },
         "title": "ProfileUpdateRequest",

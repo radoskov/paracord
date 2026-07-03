@@ -246,7 +246,7 @@ def delete_user(
     )
 
 
-_PROFILE_FIELDS = {"display_name", "email", "papers_per_page"}
+_PROFILE_FIELDS = {"display_name", "email", "papers_per_page", "theme"}
 
 
 def update_profile(

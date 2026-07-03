@@ -46,6 +46,28 @@ def test_password_change_stamps_password_changed_at(client, db):
     assert user.password_changed_at is not None
 
 
+def test_theme_defaults_null_and_round_trips(client, auth_headers):
+    h = auth_headers("owner")
+    # NULL default: a fresh user has no theme preference.
+    assert client.get("/api/v1/auth/me", headers=h).json()["theme"] is None
+    # A known theme id round-trips through PATCH /auth/me + GET /auth/me.
+    patched = client.patch("/api/v1/auth/me", headers=h, json={"theme": "mocha-cool"})
+    assert patched.status_code == 200
+    assert patched.json()["theme"] == "mocha-cool"
+    assert client.get("/api/v1/auth/me", headers=h).json()["theme"] == "mocha-cool"
+    # Explicit null resets to the boot default.
+    client.patch("/api/v1/auth/me", headers=h, json={"theme": None})
+    assert client.get("/api/v1/auth/me", headers=h).json()["theme"] is None
+
+
+def test_theme_rejects_unknown_id(client, auth_headers):
+    h = auth_headers("owner")
+    r = client.patch("/api/v1/auth/me", headers=h, json={"theme": "solarized-neon"})
+    assert r.status_code == 422
+    # The rejected value must not be persisted.
+    assert client.get("/api/v1/auth/me", headers=h).json()["theme"] is None
+
+
 def test_enrolled_agent_attributed_to_token_owner(client, auth_headers, db):
     owner_headers = auth_headers("owner")
     token = client.post("/api/v1/admin/agents/enroll-token", headers=owner_headers).json()["token"]

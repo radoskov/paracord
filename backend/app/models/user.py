@@ -28,6 +28,9 @@ class User(Base):
     # Preferred Library page size (D18). NULL falls back to ``Settings.default_papers_per_page``;
     # the effective value is additionally clamped by the admin global maximum.
     papers_per_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Preferred GUI theme id (P3). NULL falls back to the boot default (``latte-warm``); the API
+    # validates any set value against the bundled theme ids (see ``app.core.themes``).
+    theme: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
