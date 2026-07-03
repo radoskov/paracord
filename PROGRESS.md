@@ -7,6 +7,28 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D31 spec-conformance — B1–B3 (audit wiring, summary provenance, annotation JSON) (2026-07-03)
+
+Track B first batch (items 1–3 of D31). **B1 — audit-event wiring (§7.6):** emitted the events the
+spec required but never fired — `shelf.created`/`shelf.modified`, `rack.created`/`rack.modified`,
+`paper.metadata_edited` (manual metadata edit via `PATCH /works/{id}`), `annotation.created`, the RQ
+job lifecycle `job.started`/`job.completed`/`job.failed` (via a `_audited_job` wrapper on every real
+job in `workers/jobs.py`), and `backup.created`/`restore.completed` (a small `scripts/record_backup_event.py`
+CLI wired into the Make backup/restore targets). Added an **append-only JSONL file sink** in
+`services/audit.py` (best-effort/fail-open, append mode, path from the new `audit_log_path` setting,
+default `./storage/audit/audit.jsonl` on the storage volume) that mirrors every DB event. Wired the
+existing `/admin/audit-events` pagination into the Events admin view (prev/next + page indicator).
+No existing count-asserting test broke (they all filter by `event_type`). **B2 — summary provenance
+(§8.14.2):** migration `0048_summary_provenance` adds `provider_requested`, `provider_used`,
+`fallback`, `source_sections`, `content_hash`, `created_by_user_id`, `params` to `Summary`; both
+`summarize_work` and `summarize_scope` persist them and the read schema surfaces them. **B3 —
+annotation JSON export (§8.8.7):** added `json` to the export format enum with a documented shape
+(work, page, type, coordinates, selected_text, note, created_at, author). Full backend suite green;
+`make test-migrations` (Postgres parity) green; `ruff check/format` clean; `openapi.json` regenerated.
+Note: there is **no annotation *edit* endpoint** (only create + delete), so `annotation.edited` has
+no wiring site — recorded as a deviation. See
+`docs/agent_handoffs/2026-07-03-d31-b1-b3-audit-summary-annotation.md`.
+
 ## Frontend + Infra audit batch — D16, D17, D29, D2, D5, D24, D4 (2026-07-03)
 
 Seven frontend/infra audit fixes; stack left healthy (api healthy, worker up with 2 RQ children).
