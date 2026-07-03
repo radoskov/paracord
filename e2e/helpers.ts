@@ -151,6 +151,50 @@ export async function apiDeleteShelvesByName(
   }
 }
 
+/** Create a shelf via the API (setup shortcut); returns its id. */
+export async function apiCreateShelf(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+  accessLevel = 'open',
+): Promise<string> {
+  const res = await request.post(`${API_URL}/api/v1/shelves`, {
+    headers: auth(token),
+    data: { name, access_level: accessLevel },
+  });
+  expect(res.ok(), `createShelf failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).id as string;
+}
+
+/** Create a rack via the API (setup shortcut); returns its id. */
+export async function apiCreateRack(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+  accessLevel = 'open',
+): Promise<string> {
+  const res = await request.post(`${API_URL}/api/v1/racks`, {
+    headers: auth(token),
+    data: { name, access_level: accessLevel },
+  });
+  expect(res.ok(), `createRack failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).id as string;
+}
+
+/** File a paper onto a shelf via the API (setup shortcut). */
+export async function apiAddWorkToShelf(
+  request: APIRequestContext,
+  token: string,
+  shelfId: string,
+  workId: string,
+): Promise<void> {
+  const res = await request.post(`${API_URL}/api/v1/shelves/${shelfId}/works`, {
+    headers: auth(token),
+    data: { work_id: workId },
+  });
+  expect(res.ok(), `addWorkToShelf failed: ${res.status()}`).toBeTruthy();
+}
+
 /** Delete every paper whose canonical_title CONTAINS `needle` (for titles derived from a filename). */
 export async function apiDeleteWorksByTitleContains(
   request: APIRequestContext,
