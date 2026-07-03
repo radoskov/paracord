@@ -7,6 +7,23 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Everyday rename/reassign workflows — shelves, racks, tags, applied tags (2026-07-03)
+
+Closed the user-facing gaps the E2E pass surfaced. **Shelf/rack rename** already had backend PATCH
+endpoints emitting `shelf.modified`/`rack.modified` (D31.1) — only the UI was missing, so
+`ShelvesPage`/`RacksPage` gained an inline rename control (librarian-gated, mirrors the existing
+access/archive controls). **Tags** gained the missing mutations: `PATCH /tags/{id}` (contributor+,
+re-derives `normalized_name`, 409 on a rename that would collide with another tag, emits
+`tag.modified`) and `DELETE /tags/{id}` (editor+, deletes the tag and every `TagLink` so the tagged
+papers/shelves/racks just lose the tag, emits `tag.deleted` with a `links_removed` count); the Tags
+page got inline Edit (name/colour/description) and Delete controls. **Applied tags on a paper** are
+now surfaced via `GET /works/{id}/tags` (SEE-guarded like `get_work`); `WorkDetail` lists them as
+coloured chips each with its own remove control (the old blind apply/remove-by-select is gone). New
+backend tests (`test_org_rename_and_tags.py`) cover rename shelf/rack/tag incl. role gates + audit
+events, the tag-delete link cascade, and the SEE-safe applied-tags endpoint; E2E journeys 25–28 add
+rename-shelf, rename-rack, tag rename+delete, and a paper losing a deleted tag. `openapi.json`
+regenerated.
+
 ## Track C P5b — citation-graph depth (§8.9) + UMAP opt-in (2026-07-03)
 
 The final workplan phase. **Part 1 — §8.9 citation-graph depth** (additive on the existing Cytoscape
