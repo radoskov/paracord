@@ -9,8 +9,9 @@
     type VizPayload,
   } from '../api/client';
   import { getRenderer, registeredViewTypes } from '../lib/viz/registry';
-  // Importing the renderer registers it in the registry (side-effect import).
+  // Importing a renderer registers it in the registry (side-effect imports).
   import '../lib/viz/temporalMap';
+  import '../lib/viz/embeddingCluster';
   import { resolveTheme } from '../lib/viz/theme';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -64,7 +65,11 @@
     { key: 'topic_similarity_to_focus', label: 'Topic similarity to focus' },
   ];
 
-  $: needsFocus = xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus');
+  // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
+  // the axis / color / edge controls do not apply — only the size encoding and node cap do.
+  $: isCluster = viewType === 'embedding_cluster';
+
+  $: needsFocus = !isCluster && (xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus'));
 
   $: scopeReady =
     scopeType === 'library'
@@ -226,26 +231,34 @@
     </div>
 
     <div class="controls">
-      <label>X axis
-        <select bind:value={xAxis} on:change={reloadIfLoaded} data-testid="viz-x-axis" title="Value on the X axis">
-          {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
-        </select>
-      </label>
-      <label>Y axis
-        <select bind:value={yAxis} on:change={reloadIfLoaded} data-testid="viz-y-axis" title="Value on the Y axis">
-          {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
-        </select>
-      </label>
+      {#if !isCluster}
+        <label>X axis
+          <select bind:value={xAxis} on:change={reloadIfLoaded} data-testid="viz-x-axis" title="Value on the X axis">
+            {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
+          </select>
+        </label>
+        <label>Y axis
+          <select bind:value={yAxis} on:change={reloadIfLoaded} data-testid="viz-y-axis" title="Value on the Y axis">
+            {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
+          </select>
+        </label>
+      {:else}
+        <span class="hintline" data-testid="viz-cluster-hint">
+          Papers are placed by embedding proximity (PCA); color shows the topic cluster.
+        </span>
+      {/if}
       <label>Size
         <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="Point size encoding">
           {#each SIZE_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
         </select>
       </label>
-      <label>Color
-        <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="Point color encoding">
-          {#each COLOR_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
-        </select>
-      </label>
+      {#if !isCluster}
+        <label>Color
+          <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="Point color encoding">
+            {#each COLOR_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#if needsFocus}
         <label>Focus paper
           <select bind:value={focusWorkId} on:change={reloadIfLoaded} data-testid="viz-focus" title="Reference paper for similarity">
@@ -254,10 +267,12 @@
           </select>
         </label>
       {/if}
-      <label class="toggle" title="Overlay citation links among the papers">
-        <input type="checkbox" bind:checked={includeEdges} on:change={reloadIfLoaded} data-testid="viz-include-edges" />
-        Citation edges
-      </label>
+      {#if !isCluster}
+        <label class="toggle" title="Overlay citation links among the papers">
+          <input type="checkbox" bind:checked={includeEdges} on:change={reloadIfLoaded} data-testid="viz-include-edges" />
+          Citation edges
+        </label>
+      {/if}
       <button type="button" on:click={load} disabled={busy || !scopeReady} data-testid="viz-build">
         {payload ? 'Refresh' : 'Build'}
       </button>
