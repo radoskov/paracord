@@ -7,6 +7,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming P2 — author + validate the 4 themes (2026-07-03)
+
+Authored the four Catppuccin-based themes (`docs/THEMING_DESIGN.md`) as hand-editable YAML —
+`latte-warm`, `latte-cool` (light) and `mocha-warm`, `mocha-cool` (dark), each warm/cool variant
+sharing a hue set but differing in categorical ORDER + a faint surface undertone. P1's provisional
+`default`/`default-dark` stubs are gone; the boot default is now **`latte-warm`**. The token schema
+grew derived tints — `status-{success,warning,danger,info}-bg/-border` (badge/panel backgrounds),
+`accent-note`/`-bg`/`-border` (the purple/indigo AI/semantic/role/tag family) — plus a `--muted`
+alias of `--ink-muted`, and the `graph` block gained `grid`/`node_default`/`edge`/`warning_ring`/
+`sequential`/`diverging`. **~186 hardcoded status/neutral colour literals across 23 Svelte
+components were migrated onto role tokens; a grep confirms 0 `#`-hex colour literals remain**, so
+switching themes recolours the whole GUI. The **Cytoscape network** (`CitationGraph.svelte`) now
+reads node/edge/label/warning-ring colours + the categorical palette from the active theme's `graph`
+block (via `resolveThemeById(data-theme)`), and the **ECharts** pages switched to `resolveThemeById`
+so each theme's graph palette drives the charts. Each theme's `graph.categorical` was **validated
+with `dataviz/scripts/validate_palette.js` against its own surface — all four PASS every check with
+CVD ΔE 26.1 (light) / 16.4 (dark), above the ≥12 target** (raw Catppuccin accents fail; these are
+validated derivatives). Sequential ramps pass the ordinal checks; text tokens meet WCAG AA
+(≥4.74:1) on every surface and marks ≥3:1. A compact validator was ported into the repo
+(`lib/theme/paletteCheck.ts`) and the theme tests run it per theme. `make frontend-check` green (141
+tests pass, build OK; `prebuild` regenerates `themes.generated.ts`). Backend untouched. Handoff:
+`docs/agent_handoffs/2026-07-03-theming-p2-four-themes.md`. Next: P3 (picker + persistence + live
+restyle).
+
 ## Theming P1 — YAML→token pipeline + refactor (no visual change) (2026-07-03)
 
 Built the substrate for the 4-theme system (`docs/THEMING_DESIGN.md`) with **zero visual change**.
