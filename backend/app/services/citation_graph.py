@@ -8,18 +8,28 @@ metadata. ``node_mode="local_only"`` keeps only edges between works inside the s
 """
 
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Literal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.citation import Reference
-from app.models.organization import RackShelf, ShelfWork
+from app.models.duplicate import DuplicateCandidate
+from app.models.file import FileWorkLink
+from app.models.organization import RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.utils.normalization import normalize_doi
+
+# Non-private shelf access levels (mirrors ``access._OPEN_OR_VISIBLE``): only these shelves may
+# surface as a ``color_by=shelf`` group so a private shelf's name never leaks as a node color.
+_NON_PRIVATE_SHELF_LEVELS = ("open", "visible")
+
+# 1-hop neighborhood cap (mirrors the graph node cap): the focus work plus its expanded neighbors are
+# capped so a hub paper can't produce an unbounded neighborhood.
+MAX_NEIGHBORHOOD_NODES = 500
 
 # Flat tuple of scope kinds. ``search_result`` and ``selected_papers`` resolve from an explicit
 # ``work_ids`` list (mirroring export's selection/search); ``import_batch`` resolves from
@@ -30,6 +40,14 @@ ScopeType = Literal[
     "library", "shelf", "rack", "search_result", "selected_papers", "import_batch", "saved_filter"
 ]
 NodeMode = Literal["local_only", "include_external"]
+# Node-size metric (§8.9). All three are computed server-side and shipped on every node (see
+# ``_attach_node_metrics``), so the frontend switches ``size_by`` by re-styling live without a
+# refetch or relayout. ``degree`` is the weighted degree (sum of incident mention counts).
+SizeBy = Literal["degree", "pagerank", "betweenness"]
+# Node-color grouping (§8.9). ``none`` leaves nodes uncolored; the others attach one categorical
+# ``color_group`` per local node from existing library data (SEE-clamped). External nodes are never
+# colored.
+ColorBy = Literal["none", "shelf", "tag", "topic", "status"]
 
 
 @dataclass
@@ -40,6 +58,15 @@ class GraphNode:
     work_id: uuid.UUID | None
     year: int | None
     doi: str | None
+    # §8.9 depth encodings, populated by ``_attach_node_metrics`` when ``compute_metrics`` is set.
+    # ``degree`` is the weighted (mention-count) degree; centrality is over the final node/edge set.
+    degree: int = 0
+    pagerank: float = 0.0
+    betweenness: float = 0.0
+    # Categorical color group per the request's ``color_by`` (``None`` when uncolored/external).
+    color_group: str | None = None
+    # Review-warning marker: the work has a file-link warning state or an open duplicate candidate.
+    warning: bool = False
 
 
 @dataclass
@@ -65,6 +92,8 @@ def build_citation_graph(
     work_ids: list[uuid.UUID] | None = None,
     node_mode: NodeMode = "local_only",
     collapse_versions: bool = False,
+    compute_metrics: bool = False,
+    color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
 ) -> CitationGraph:
     """Build the citation graph for a scope.
@@ -79,6 +108,11 @@ def build_citation_graph(
     When ``collapse_versions`` is set, works sharing a ``version_group_id`` are merged into a single
     representative node in a post-build pass (edges re-aggregated, version-to-version self-loops
     dropped).
+
+    ``compute_metrics`` (§8.9 depth) attaches per-node centrality (weighted ``degree``, ``pagerank``,
+    exact Brandes ``betweenness``) over the final node/edge set plus a ``warning`` marker, and — when
+    ``color_by`` is not ``none`` — a categorical ``color_group``. It is off by default so the
+    per-request viz callers that only need edges/degree don't pay the centrality cost.
     """
     scope_works = _scope_works(
         db,
@@ -155,6 +189,8 @@ def build_citation_graph(
     )
     if collapse_versions:
         graph = _collapse_versions(db, graph, visible_ids=visible_ids)
+    if compute_metrics:
+        _attach_node_metrics(db, graph, color_by=color_by, visible_ids=visible_ids)
     return graph
 
 
@@ -396,3 +432,297 @@ def _summary(
         "external_node_count": sum(1 for node in nodes if node.type == "external"),
         "unresolved_reference_count": unresolved,
     }
+
+
+def _betweenness(adjacency: dict[str, set[str]]) -> dict[str, float]:
+    """Exact Brandes betweenness centrality over an undirected, unweighted graph.
+
+    Standard Brandes accumulation with a BFS from each source; the final scores are halved because
+    every shortest path is counted from both endpoints in an undirected graph. Nodes with no edges
+    score 0. O(V·E), fine at the graph's node cap. Shared with :mod:`app.services.citation_summary`
+    (the bridge-papers block imports this so the Brandes impl lives in one place).
+    """
+    nodes = list(adjacency)
+    centrality: dict[str, float] = dict.fromkeys(nodes, 0.0)
+    for source in nodes:
+        stack: list[str] = []
+        predecessors: dict[str, list[str]] = {v: [] for v in nodes}
+        sigma: dict[str, float] = dict.fromkeys(nodes, 0.0)
+        sigma[source] = 1.0
+        distance: dict[str, int] = dict.fromkeys(nodes, -1)
+        distance[source] = 0
+        queue: deque[str] = deque([source])
+        while queue:
+            v = queue.popleft()
+            stack.append(v)
+            for w in adjacency[v]:
+                if distance[w] < 0:
+                    distance[w] = distance[v] + 1
+                    queue.append(w)
+                if distance[w] == distance[v] + 1:
+                    sigma[w] += sigma[v]
+                    predecessors[w].append(v)
+        delta: dict[str, float] = dict.fromkeys(nodes, 0.0)
+        while stack:
+            w = stack.pop()
+            for v in predecessors[w]:
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+            if w != source:
+                centrality[w] += delta[w]
+    return {v: score / 2.0 for v, score in centrality.items()}
+
+
+def _pagerank(
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+    *,
+    damping: float = 0.85,
+    max_iter: int = 100,
+    tol: float = 1.0e-6,
+) -> dict[str, float]:
+    """Weighted PageRank over the directed citation graph (edge ``A -> B`` = A cites B).
+
+    Pure-python power iteration with edge weights = mention counts and the standard dangling-node
+    redistribution; converges in well under ``max_iter`` at the graph's node cap. Returns a score per
+    node id summing to ~1.
+    """
+    ids = [node.id for node in nodes]
+    n = len(ids)
+    if n == 0:
+        return {}
+    id_set = set(ids)
+    out_links: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    out_weight: dict[str, float] = defaultdict(float)
+    for edge in edges:
+        if edge.source in id_set and edge.target in id_set:
+            out_links[edge.source].append((edge.target, float(edge.weight)))
+            out_weight[edge.source] += float(edge.weight)
+    rank = dict.fromkeys(ids, 1.0 / n)
+    base = (1.0 - damping) / n
+    for _ in range(max_iter):
+        dangling = sum(rank[i] for i in ids if out_weight[i] == 0.0)
+        dangling_share = damping * dangling / n
+        new = {i: base + dangling_share for i in ids}
+        for src, links in out_links.items():
+            total = out_weight[src]
+            share = damping * rank[src]
+            for target, weight in links:
+                new[target] += share * (weight / total)
+        diff = sum(abs(new[i] - rank[i]) for i in ids)
+        rank = new
+        if diff < tol:
+            break
+    return rank
+
+
+def _attach_node_metrics(
+    db: Session, graph: CitationGraph, *, color_by: ColorBy, visible_ids: set[uuid.UUID] | None
+) -> None:
+    """Attach §8.9 depth encodings to ``graph.nodes`` in place (centrality, color group, warning).
+
+    Centrality is computed over the final node/edge set (post-collapse). ``color_group`` and the
+    ``warning`` marker are attached only to local nodes; external nodes stay uncolored/unmarked. All
+    color/warning lookups are restricted to the local work ids already present as nodes, which were
+    SEE-clamped when the graph was built.
+    """
+    degree: dict[str, int] = defaultdict(int)
+    undirected: dict[str, set[str]] = {node.id: set() for node in graph.nodes}
+    for edge in graph.edges:
+        degree[edge.source] += edge.weight
+        degree[edge.target] += edge.weight
+        undirected.setdefault(edge.source, set()).add(edge.target)
+        undirected.setdefault(edge.target, set()).add(edge.source)
+    betweenness = _betweenness(undirected)
+    pagerank = _pagerank(graph.nodes, graph.edges)
+    for node in graph.nodes:
+        node.degree = degree.get(node.id, 0)
+        node.betweenness = round(betweenness.get(node.id, 0.0), 6)
+        node.pagerank = round(pagerank.get(node.id, 0.0), 6)
+
+    local_ids = [node.work_id for node in graph.nodes if node.work_id is not None]
+    if color_by != "none":
+        groups = _color_groups(db, local_ids, color_by)
+        for node in graph.nodes:
+            if node.work_id is not None:
+                node.color_group = groups.get(node.work_id)
+    warned = _warning_work_ids(db, local_ids)
+    for node in graph.nodes:
+        if node.work_id is not None and node.work_id in warned:
+            node.warning = True
+    graph.summary["color_by"] = color_by
+
+
+def _color_groups(
+    db: Session, work_ids: list[uuid.UUID], color_by: ColorBy
+) -> dict[uuid.UUID, str]:
+    """Map each local work id to a categorical color group for ``color_by``.
+
+    ``status``/``topic`` read directly off the work; ``shelf``/``tag`` pick the alphabetically-first
+    membership (a work may be on several — one group per node keeps the legend readable) and default
+    to ``unshelved``/``untagged``. ``shelf`` considers only non-private shelves so a private shelf's
+    name can never surface as a node color.
+    """
+    if not work_ids:
+        return {}
+    if color_by == "status":
+        rows = db.execute(select(Work.id, Work.reading_status).where(Work.id.in_(work_ids))).all()
+        return {work_id: (status or "unread") for work_id, status in rows}
+    if color_by == "topic":
+        rows = db.execute(select(Work.id, Work.topics).where(Work.id.in_(work_ids))).all()
+        return {work_id: (str(topics[0]) if topics else "untopiced") for work_id, topics in rows}
+    if color_by == "shelf":
+        rows = db.execute(
+            select(ShelfWork.work_id, Shelf.name)
+            .join(Shelf, Shelf.id == ShelfWork.shelf_id)
+            .where(
+                ShelfWork.work_id.in_(work_ids),
+                Shelf.access_level.in_(_NON_PRIVATE_SHELF_LEVELS),
+            )
+        ).all()
+        return _first_membership(work_ids, rows, default="unshelved")
+    if color_by == "tag":
+        rows = db.execute(
+            select(TagLink.entity_id, Tag.name)
+            .join(Tag, Tag.id == TagLink.tag_id)
+            .where(TagLink.entity_type == "work", TagLink.entity_id.in_(work_ids))
+        ).all()
+        return _first_membership(work_ids, rows, default="untagged")
+    return {}
+
+
+def _first_membership(
+    work_ids: list[uuid.UUID], rows: list[tuple[uuid.UUID, str]], *, default: str
+) -> dict[uuid.UUID, str]:
+    best: dict[uuid.UUID, str] = {}
+    for work_id, name in rows:
+        if work_id not in best or name < best[work_id]:
+            best[work_id] = name
+    return {work_id: best.get(work_id, default) for work_id in work_ids}
+
+
+def _warning_work_ids(db: Session, work_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """Local work ids carrying a review warning: a file-link warning state, or an open duplicate.
+
+    Reuses the D31.4 ``FileWorkLink.warning_state`` (multiwork/multifile) and the open
+    ``DuplicateCandidate`` signals — the same signals the ``warning:`` / ``duplicate:`` search
+    filters key off — so the graph badge agrees with the library review filters.
+    """
+    if not work_ids:
+        return set()
+    id_set = set(work_ids)
+    warned: set[uuid.UUID] = set(
+        db.scalars(
+            select(FileWorkLink.work_id).where(
+                FileWorkLink.work_id.in_(work_ids),
+                FileWorkLink.warning_state != "none",
+            )
+        ).all()
+    )
+    dup_rows = db.execute(
+        select(DuplicateCandidate.entity_a_id, DuplicateCandidate.entity_b_id).where(
+            DuplicateCandidate.status == "open",
+            or_(
+                and_(
+                    DuplicateCandidate.entity_a_type == "work",
+                    DuplicateCandidate.entity_a_id.in_(work_ids),
+                ),
+                and_(
+                    DuplicateCandidate.entity_b_type == "work",
+                    DuplicateCandidate.entity_b_id.in_(work_ids),
+                ),
+            ),
+        )
+    ).all()
+    for entity_a, entity_b in dup_rows:
+        if entity_a in id_set:
+            warned.add(entity_a)
+        if entity_b in id_set:
+            warned.add(entity_b)
+    return warned
+
+
+def build_citation_neighborhood(
+    db: Session,
+    *,
+    work_id: uuid.UUID,
+    hops: int = 1,
+    node_mode: NodeMode = "local_only",
+    color_by: ColorBy = "none",
+    visible_ids: set[uuid.UUID] | None = None,
+) -> CitationGraph | None:
+    """Build the local citation neighborhood (``hops`` steps) around one focus work (§8.9).
+
+    Expands breadth-first over local citation links in both directions (works the focus cites and
+    works that cite it), capped at :data:`MAX_NEIGHBORHOOD_NODES`, then builds the induced subgraph
+    over the collected works via :func:`build_citation_graph` (reusing all resolution + centrality +
+    color/warning machinery). SEE-clamped throughout: a hidden work is never a seed, a neighbor, or a
+    node. Returns ``None`` when the focus work is missing or not visible (the caller 404s).
+    """
+    if visible_ids is not None and work_id not in visible_ids:
+        return None
+    focus = db.get(Work, work_id)
+    if focus is None:
+        return None
+
+    collected: set[uuid.UUID] = {work_id}
+    frontier: set[uuid.UUID] = {work_id}
+    for _ in range(max(1, hops)):
+        neighbors = _direct_citation_neighbors(db, frontier, visible_ids=visible_ids)
+        fresh = neighbors - collected
+        if not fresh:
+            break
+        collected |= fresh
+        frontier = fresh
+        if len(collected) >= MAX_NEIGHBORHOOD_NODES:
+            break
+
+    ids = list(collected)[:MAX_NEIGHBORHOOD_NODES]
+    graph = build_citation_graph(
+        db,
+        scope_type="selected_papers",
+        work_ids=ids,
+        node_mode=node_mode,
+        compute_metrics=True,
+        color_by=color_by,
+        visible_ids=visible_ids,
+    )
+    graph.summary["focus_work_id"] = str(work_id)
+    graph.summary["hops"] = max(1, hops)
+    return graph
+
+
+def _direct_citation_neighbors(
+    db: Session, frontier: set[uuid.UUID], *, visible_ids: set[uuid.UUID] | None
+) -> set[uuid.UUID]:
+    """Local works one citation link from any work in ``frontier`` (both directions), SEE-clamped."""
+    frontier_works = db.scalars(select(Work).where(Work.id.in_(frontier))).all()
+    neighbors: set[uuid.UUID] = set()
+
+    # Outgoing: references from the frontier works, resolved to local works (anywhere in the library,
+    # via a references-aware index — the same resolution the include-external graph uses).
+    refs = db.scalars(select(Reference).where(Reference.citing_work_id.in_(frontier))).all()
+    index = _local_work_index(
+        db,
+        scope_works={work.id: work for work in frontier_works},
+        references=refs,
+        visible_ids=visible_ids,
+    )
+    for ref in refs:
+        resolved = _resolve_reference(ref, index)
+        if resolved is not None and resolved[0].work_id is not None:
+            neighbors.add(resolved[0].work_id)
+
+    # Incoming: references (from any work) that resolve to a frontier work — by persisted
+    # ``resolved_work_id`` or an exact DOI match on the frontier works' identifiers. The citing work
+    # is a library work; clamp it to the visible set below.
+    dois = [normalize_doi(work.doi) for work in frontier_works if work.doi]
+    conditions = [Reference.resolved_work_id.in_(frontier)]
+    if dois:
+        conditions.append(func.lower(Reference.doi).in_(dois))
+    citer_ids = db.scalars(select(Reference.citing_work_id).where(or_(*conditions))).all()
+    neighbors.update(citer_ids)
+
+    neighbors.discard(None)  # defensive: never carry a NULL citer through
+    if visible_ids is not None:
+        neighbors = {work_id for work_id in neighbors if work_id in visible_ids}
+    return neighbors

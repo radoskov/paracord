@@ -5,10 +5,15 @@ from pathlib import Path
 import pytest
 from app.db.base import Base
 from app.models.citation import Reference
-from app.models.organization import Shelf, ShelfWork
+from app.models.duplicate import DuplicateCandidate
+from app.models.file import File, FileWorkLink
+from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch
 from app.models.work import Work
-from app.services.citation_graph import build_citation_graph
+from app.services.citation_graph import (
+    build_citation_graph,
+    build_citation_neighborhood,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -28,6 +33,11 @@ def db_session(tmp_path: Path):
             Shelf.__table__,
             ShelfWork.__table__,
             ImportBatch.__table__,
+            Tag.__table__,
+            TagLink.__table__,
+            File.__table__,
+            FileWorkLink.__table__,
+            DuplicateCandidate.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -327,3 +337,289 @@ def test_no_collapse_keeps_version_nodes_separate(db_session) -> None:
     assert {str(rep.id), str(alt.id), str(citing.id)} <= {n.id for n in graph.nodes}
     assert graph.edges[0].target == str(alt.id)  # NOT remapped
     assert "collapsed_version_groups" not in graph.summary
+
+
+# ── §8.9 depth: centrality sizing, color-by, warnings, neighborhood (Track C P5b) ────────────────
+
+
+def _hub_and_spokes(db) -> tuple[Work, list[Work]]:
+    """A hub cited by three spokes: hub has the highest in-centrality on the directed graph."""
+    hub = Work(canonical_title="Hub", normalized_title="hub", doi="10.1/hub")
+    spokes = [
+        Work(canonical_title=f"S{i}", normalized_title=f"s{i}", doi=f"10.1/s{i}") for i in range(3)
+    ]
+    _add_works(db, [hub, *spokes])
+    db.add_all(Reference(citing_work_id=s.id, doi="10.1/hub", title="Hub") for s in spokes)
+    db.commit()
+    return hub, spokes
+
+
+def test_compute_metrics_off_by_default_leaves_zero_centrality(db_session) -> None:
+    hub, spokes = _hub_and_spokes(db_session)
+    graph = build_citation_graph(
+        db_session, scope_type="selected_papers", work_ids=[hub.id, *[s.id for s in spokes]]
+    )
+    assert all(node.pagerank == 0.0 and node.betweenness == 0.0 for node in graph.nodes)
+
+
+def test_centrality_ranks_hub_above_spokes(db_session) -> None:
+    hub, spokes = _hub_and_spokes(db_session)
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[hub.id, *[s.id for s in spokes]],
+        compute_metrics=True,
+    )
+    by_id = {node.id: node for node in graph.nodes}
+    hub_node = by_id[str(hub.id)]
+    spoke_nodes = [by_id[str(s.id)] for s in spokes]
+    # The hub is the sink of every citation edge → higher PageRank and degree than any spoke.
+    assert all(hub_node.pagerank > s.pagerank for s in spoke_nodes)
+    assert all(hub_node.degree >= s.degree for s in spoke_nodes)
+    # PageRank forms a distribution summing to ~1 over the nodes.
+    assert abs(sum(node.pagerank for node in graph.nodes) - 1.0) < 1.0e-3
+
+
+def test_betweenness_flags_the_bridge(db_session) -> None:
+    # A - bridge - B (path): the bridge lies on the only shortest path, so it alone scores > 0.
+    left = Work(canonical_title="L", normalized_title="l", doi="10.1/l")
+    bridge = Work(canonical_title="Br", normalized_title="br", doi="10.1/br")
+    right = Work(canonical_title="R", normalized_title="r", doi="10.1/r")
+    _add_works(db_session, [left, bridge, right])
+    db_session.add_all(
+        [
+            Reference(citing_work_id=left.id, doi="10.1/br", title="Br"),
+            Reference(citing_work_id=bridge.id, doi="10.1/r", title="R"),
+        ]
+    )
+    db_session.commit()
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[left.id, bridge.id, right.id],
+        compute_metrics=True,
+    )
+    by_id = {node.id: node for node in graph.nodes}
+    assert by_id[str(bridge.id)].betweenness > 0.0
+    assert by_id[str(left.id)].betweenness == 0.0
+    assert by_id[str(right.id)].betweenness == 0.0
+
+
+def test_edge_weight_is_mention_count(db_session) -> None:
+    citing = Work(canonical_title="C", normalized_title="c", doi="10.1/c")
+    cited = Work(canonical_title="D", normalized_title="d", doi="10.1/d")
+    _add_works(db_session, [citing, cited])
+    db_session.add_all(
+        [
+            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
+            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
+            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
+        ]
+    )
+    db_session.commit()
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[citing.id, cited.id],
+        compute_metrics=True,
+    )
+    assert graph.edges[0].weight == 3
+
+
+def test_color_by_status_and_topic(db_session) -> None:
+    read = Work(canonical_title="A", normalized_title="a", reading_status="read", topics=["nlp"])
+    unread = Work(canonical_title="B", normalized_title="b")  # defaults: unread / no topics
+    _add_works(db_session, [read, unread])
+    db_session.commit()
+
+    by_status = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[read.id, unread.id],
+        compute_metrics=True,
+        color_by="status",
+    )
+    groups = {n.work_id: n.color_group for n in by_status.nodes}
+    assert groups[read.id] == "read"
+    assert groups[unread.id] == "unread"
+    assert by_status.summary["color_by"] == "status"
+
+    by_topic = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[read.id, unread.id],
+        compute_metrics=True,
+        color_by="topic",
+    )
+    topic_groups = {n.work_id: n.color_group for n in by_topic.nodes}
+    assert topic_groups[read.id] == "nlp"
+    assert topic_groups[unread.id] == "untopiced"
+
+
+def test_color_by_shelf_skips_private_shelf(db_session) -> None:
+    work = Work(canonical_title="P", normalized_title="p")
+    db_session.add(work)
+    public = Shelf(name="Public", access_level="open")
+    private = Shelf(name="Secret", access_level="private")
+    db_session.add_all([public, private])
+    db_session.flush()
+    db_session.add_all(
+        [
+            ShelfWork(shelf_id=public.id, work_id=work.id),
+            ShelfWork(shelf_id=private.id, work_id=work.id),
+        ]
+    )
+    db_session.commit()
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="shelf",
+    )
+    # The private shelf's name is never surfaced as a color; the public one is used.
+    assert graph.nodes[0].color_group == "Public"
+
+
+def test_color_by_tag_defaults_untagged(db_session) -> None:
+    tagged = Work(canonical_title="T", normalized_title="t")
+    plain = Work(canonical_title="U", normalized_title="u")
+    db_session.add_all([tagged, plain])
+    tag = Tag(name="method", normalized_name="method")
+    db_session.add(tag)
+    db_session.flush()
+    db_session.add(TagLink(tag_id=tag.id, entity_type="work", entity_id=tagged.id))
+    db_session.commit()
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[tagged.id, plain.id],
+        compute_metrics=True,
+        color_by="tag",
+    )
+    groups = {n.work_id: n.color_group for n in graph.nodes}
+    assert groups[tagged.id] == "method"
+    assert groups[plain.id] == "untagged"
+
+
+def test_warning_badge_from_file_link_and_duplicate(db_session) -> None:
+    warned_file = Work(canonical_title="W", normalized_title="w")
+    dup_a = Work(canonical_title="X", normalized_title="x")
+    dup_b = Work(canonical_title="Y", normalized_title="y")
+    clean = Work(canonical_title="Z", normalized_title="z")
+    _add_works(db_session, [warned_file, dup_a, dup_b, clean])
+    a_file = File(original_filename="a.pdf", sha256="h" * 64, size_bytes=1)
+    db_session.add(a_file)
+    db_session.flush()
+    db_session.add(
+        FileWorkLink(
+            file_id=a_file.id, work_id=warned_file.id, warning_state="work_has_multiple_files"
+        )
+    )
+    db_session.add(
+        DuplicateCandidate(
+            candidate_type="work",
+            entity_a_type="work",
+            entity_a_id=dup_a.id,
+            entity_b_type="work",
+            entity_b_id=dup_b.id,
+            score=0.9,
+            status="open",
+        )
+    )
+    db_session.commit()
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[warned_file.id, dup_a.id, dup_b.id, clean.id],
+        compute_metrics=True,
+    )
+    warned = {n.work_id for n in graph.nodes if n.warning}
+    # File-link warning flags one work; the open-duplicate flags BOTH sides; the control stays clean.
+    assert warned == {warned_file.id, dup_a.id, dup_b.id}
+
+
+def test_neighborhood_returns_one_hop_set(db_session) -> None:
+    focus = Work(canonical_title="Focus", normalized_title="focus", doi="10.1/focus")
+    cites = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
+    citer = Work(canonical_title="Citer", normalized_title="citer", doi="10.1/citer")
+    far = Work(canonical_title="Far", normalized_title="far", doi="10.1/far")
+    _add_works(db_session, [focus, cites, citer, far])
+    db_session.add_all(
+        [
+            Reference(citing_work_id=focus.id, doi="10.1/cited", title="Cited"),  # focus -> cites
+            Reference(citing_work_id=citer.id, doi="10.1/focus", title="Focus"),  # citer -> focus
+            Reference(
+                citing_work_id=far.id, doi="10.1/citer", title="Citer"
+            ),  # far -> citer (2 hop)
+        ]
+    )
+    db_session.commit()
+    graph = build_citation_neighborhood(db_session, work_id=focus.id, hops=1)
+    ids = {n.work_id for n in graph.nodes}
+    assert ids == {focus.id, cites.id, citer.id}  # `far` is two hops away → excluded
+    assert graph.summary["focus_work_id"] == str(focus.id)
+    assert graph.summary["hops"] == 1
+
+
+def test_neighborhood_none_for_hidden_focus(db_session) -> None:
+    focus = Work(canonical_title="Focus", normalized_title="focus")
+    db_session.add(focus)
+    db_session.commit()
+    assert build_citation_neighborhood(db_session, work_id=focus.id, visible_ids=set()) is None
+
+
+# ── Endpoint: §8.9 depth params + neighborhood (uses the in-memory `client` fixture) ─────────────
+
+
+def test_endpoint_citation_graph_ships_depth_fields(client, auth_headers, db) -> None:
+    citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/c")
+    cited = Work(
+        canonical_title="Cited", normalized_title="cited", doi="10.1/d", reading_status="read"
+    )
+    db.add_all([citing, cited])
+    db.flush()
+    db.add(Reference(citing_work_id=citing.id, doi="10.1/d", title="Cited"))
+    db.commit()
+
+    response = client.post(
+        "/api/v1/graphs/citation",
+        headers=auth_headers("owner"),
+        json={"scope": {"type": "library"}, "color_by": "status"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    node = next(n for n in body["nodes"] if n["work_id"] == str(cited.id))
+    # Depth encodings present and populated server-side.
+    assert node["pagerank"] > 0.0
+    assert node["degree"] >= 1
+    assert node["color_group"] == "read"
+    assert node["warning"] is False
+    assert body["summary"]["color_by"] == "status"
+
+
+def test_endpoint_neighborhood_returns_one_hop_and_requires_auth(client, auth_headers, db) -> None:
+    focus = Work(canonical_title="Focus", normalized_title="focus", doi="10.1/focus")
+    cited = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
+    db.add_all([focus, cited])
+    db.flush()
+    db.add(Reference(citing_work_id=focus.id, doi="10.1/cited", title="Cited"))
+    db.commit()
+
+    # Unauthenticated → 401 (auth dependency on the works router).
+    assert client.get(f"/api/v1/works/{focus.id}/citation-neighborhood").status_code == 401
+
+    response = client.get(
+        f"/api/v1/works/{focus.id}/citation-neighborhood", headers=auth_headers("owner")
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert {n["work_id"] for n in body["nodes"]} == {str(focus.id), str(cited.id)}
+    assert body["summary"]["focus_work_id"] == str(focus.id)
+    assert body["summary"]["hops"] == 1
+
+    # A missing focus work → 404.
+    missing = client.get(
+        f"/api/v1/works/{focus.id}0000/citation-neighborhood", headers=auth_headers("owner")
+    )
+    assert missing.status_code in (404, 422)

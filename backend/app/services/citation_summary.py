@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -39,6 +39,7 @@ from app.models.work import Work
 from app.services import access
 from app.services.citation_graph import (
     ScopeType,
+    _betweenness,
     _local_work_index,
     _resolve_reference,
     _scope_works,
@@ -145,43 +146,6 @@ def _missing_key(reference: Reference) -> str | None:
         if title:
             return f"title:{title}"
     return None
-
-
-def _betweenness(adjacency: dict[str, set[str]]) -> dict[str, float]:
-    """Exact Brandes betweenness centrality over an undirected, unweighted graph.
-
-    Standard Brandes accumulation with a BFS from each source; the final scores are halved because
-    every shortest path is counted from both endpoints in an undirected graph. Nodes with no edges
-    score 0. O(V·E), fine at :data:`MAX_NODES`.
-    """
-    nodes = list(adjacency)
-    centrality: dict[str, float] = dict.fromkeys(nodes, 0.0)
-    for source in nodes:
-        stack: list[str] = []
-        predecessors: dict[str, list[str]] = {v: [] for v in nodes}
-        sigma: dict[str, float] = dict.fromkeys(nodes, 0.0)
-        sigma[source] = 1.0
-        distance: dict[str, int] = dict.fromkeys(nodes, -1)
-        distance[source] = 0
-        queue: deque[str] = deque([source])
-        while queue:
-            v = queue.popleft()
-            stack.append(v)
-            for w in adjacency[v]:
-                if distance[w] < 0:
-                    distance[w] = distance[v] + 1
-                    queue.append(w)
-                if distance[w] == distance[v] + 1:
-                    sigma[w] += sigma[v]
-                    predecessors[w].append(v)
-        delta: dict[str, float] = dict.fromkeys(nodes, 0.0)
-        while stack:
-            w = stack.pop()
-            for v in predecessors[w]:
-                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
-            if w != source:
-                centrality[w] += delta[w]
-    return {v: score / 2.0 for v, score in centrality.items()}
 
 
 def citation_summary(

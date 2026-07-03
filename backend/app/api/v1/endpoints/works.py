@@ -30,6 +30,7 @@ from app.models.work import Work, WorkVersion
 from app.services import access
 from app.services.app_config import effective_max_papers_per_page
 from app.services.audit import record_event
+from app.services.citation_graph import build_citation_neighborhood
 from app.services.file_paths import (
     FileLocationError,
     resolve_streamable_pdf_path,
@@ -2102,3 +2103,68 @@ def delete_metadata_assertion(
     db.commit()
     db.refresh(work)
     return work
+
+
+class NeighborhoodNodeRead(BaseModel):
+    # Mirrors app.services.citation_graph.GraphNode (kept local to avoid a works<->graph import
+    # cycle). Same shape as the citation-graph endpoint's node so the frontend reuses one type.
+    id: str
+    label: str
+    type: str
+    work_id: uuid.UUID | None = None
+    year: int | None = None
+    doi: str | None = None
+    degree: int = 0
+    pagerank: float = 0.0
+    betweenness: float = 0.0
+    color_group: str | None = None
+    warning: bool = False
+
+
+class NeighborhoodEdgeRead(BaseModel):
+    source: str
+    target: str
+    weight: int
+    resolution: str
+
+
+class CitationNeighborhoodResponse(BaseModel):
+    nodes: list[NeighborhoodNodeRead]
+    edges: list[NeighborhoodEdgeRead]
+    summary: dict
+
+
+@router.get("/{work_id}/citation-neighborhood", response_model=CitationNeighborhoodResponse)
+def citation_neighborhood(
+    work_id: uuid.UUID,
+    hops: int = Query(1, ge=1, le=3),
+    node_mode: Literal["local_only", "include_external"] = Query("local_only"),
+    color_by: Literal["none", "shelf", "tag", "topic", "status"] = Query("none"),
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> CitationNeighborhoodResponse:
+    """Local citation neighborhood (``hops`` steps, default 1) around one focus paper (§8.9).
+
+    A "focus on this paper" graph payload: the focus work plus the works it cites / that cite it, out
+    to ``hops`` steps, as the same shape the citation-graph endpoint returns (centrality + color +
+    warning encodings included). Access control: 404 unless the caller may see the focus work, and
+    the neighborhood is clamped to the caller's visible works, so a hidden paper never surfaces.
+    """
+    work = db.get(Work, work_id)
+    if work is None or not access.can_see_work(db, actor, work):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    graph = build_citation_neighborhood(
+        db,
+        work_id=work_id,
+        hops=hops,
+        node_mode=node_mode,
+        color_by=color_by,
+        visible_ids=access.visible_work_ids(db, actor),
+    )
+    if graph is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    return CitationNeighborhoodResponse(
+        nodes=[NeighborhoodNodeRead(**vars(node)) for node in graph.nodes],
+        edges=[NeighborhoodEdgeRead(**vars(edge)) for edge in graph.edges],
+        summary=graph.summary,
+    )

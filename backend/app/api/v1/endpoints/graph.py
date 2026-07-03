@@ -47,6 +47,10 @@ class CitationGraphRequest(BaseModel):
     scope: GraphScope
     node_mode: Literal["local_only", "include_external"] = "local_only"
     collapse_versions: bool = False
+    # §8.9 depth: categorical node coloring from existing library data (SEE-clamped; external nodes
+    # are never colored). Node *sizing* (degree/pagerank/betweenness) is a pure client re-style — all
+    # three centrality metrics ship on every node, so the frontend switches size without a refetch.
+    color_by: Literal["none", "shelf", "tag", "topic", "status"] = "none"
 
 
 class GraphNodeRead(BaseModel):
@@ -56,6 +60,12 @@ class GraphNodeRead(BaseModel):
     work_id: uuid.UUID | None = None
     year: int | None = None
     doi: str | None = None
+    # §8.9 depth encodings (see app.services.citation_graph.GraphNode).
+    degree: int = 0
+    pagerank: float = 0.0
+    betweenness: float = 0.0
+    color_group: str | None = None
+    warning: bool = False
 
 
 class GraphEdgeRead(BaseModel):
@@ -105,6 +115,8 @@ def citation_graph(
             work_ids=work_ids,
             node_mode=payload.node_mode,
             collapse_versions=payload.collapse_versions,
+            compute_metrics=True,
+            color_by=payload.color_by,
             visible_ids=access.visible_work_ids(db, actor),
         )
     except ValueError as exc:
