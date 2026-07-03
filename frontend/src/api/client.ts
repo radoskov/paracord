@@ -1846,12 +1846,12 @@ export class ApiClient {
     return this.request(`/api/v1/works/${workId}/extract`, { method: 'POST' });
   }
 
-  async listAuditEvents(limit = 50): Promise<AuditEvent[]> {
+  async listAuditEvents(limit = 50, offset = 0): Promise<{ items: AuditEvent[]; total: number }> {
     // The endpoint returns a paginated envelope { items, total, ... }, not a bare array.
-    const page = await this.request<{ items: AuditEvent[] }>(
-      `/api/v1/admin/audit-events?limit=${limit}`,
+    const page = await this.request<{ items: AuditEvent[]; total: number }>(
+      `/api/v1/admin/audit-events?limit=${limit}&offset=${offset}`,
     );
-    return page.items ?? [];
+    return { items: page.items ?? [], total: page.total ?? 0 };
   }
 
   async listFiles(): Promise<FileRecord[]> {

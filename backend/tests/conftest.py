@@ -98,6 +98,19 @@ def _reindex_runs_inline(monkeypatch):
     monkeypatch.setattr(queue, "enqueue_reindex", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _audit_file_sink_tmp(tmp_path, monkeypatch):
+    """Redirect the append-only audit file sink (D31.1) to a throwaway path per test.
+
+    The sink is on by default, so every ``record_event`` would otherwise append to the repo's
+    ``./storage/audit/audit.jsonl`` during the suite. Point it at ``tmp_path`` so tests never touch
+    the real volume; the dedicated sink test overrides this back to a path it inspects.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "audit_log_path", str(tmp_path / "audit.jsonl"))
+
+
 @pytest.fixture()
 def app(session_factory):
     from app.main import create_app

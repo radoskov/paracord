@@ -170,6 +170,13 @@ class Settings(BaseSettings):
     search_index_dir: str = Field(
         default="./storage/search_index", alias="PARACORD_SEARCH_INDEX_DIR"
     )
+    # Append-only audit-event file sink (D31.1, SPEC §7.6). Every audit event is also written as one
+    # JSON line to this JSONL file on the persisted storage volume — a tamper-evident, DB-independent
+    # record. Best-effort: a write failure never breaks the request nor drops the DB row, and
+    # appends are safe for concurrent writers. An empty value disables the file sink.
+    audit_log_path: str = Field(
+        default="./storage/audit/audit.jsonl", alias="PARACORD_AUDIT_LOG_PATH"
+    )
     # Per-user UI preferences file (YAML). Defaults to the XDG-ish ~/.config path for bare-metal;
     # docker-compose overrides this to /app/storage/preferences.yaml (the persisted library volume),
     # since the container's ~/.config is neither mounted nor persistent.

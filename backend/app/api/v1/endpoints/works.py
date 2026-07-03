@@ -836,6 +836,15 @@ def update_work(
     edited = {_WORK_FIELD_TO_ASSERTION[k] for k in updates if k in _WORK_FIELD_TO_ASSERTION}
     if edited:
         work.confirmed_fields = sorted(set(work.confirmed_fields or []) | edited)
+    if updates:
+        record_event(
+            db,
+            "paper.metadata_edited",
+            actor_user_id=actor.id,
+            entity_type="work",
+            entity_id=str(work.id),
+            details={"fields": sorted(updates.keys())},
+        )
     db.commit()
     db.refresh(work)
     return work
@@ -1408,6 +1417,15 @@ def create_work_annotation(
         created_by_user_id=actor.id,
     )
     db.add(annotation)
+    db.flush()
+    record_event(
+        db,
+        "annotation.created",
+        actor_user_id=actor.id,
+        entity_type="annotation",
+        entity_id=str(annotation.id),
+        details={"work_id": str(work_id), "annotation_type": annotation.annotation_type},
+    )
     db.commit()
     db.refresh(annotation)
     return annotation

@@ -15,6 +15,7 @@ from app.models.organization import Rack, RackShelf, Shelf
 from app.models.user import User
 from app.services import access
 from app.services.access_settings import get_default_access_level
+from app.services.audit import record_event
 from app.services.default_shelf import get_default_shelf_id, hard_delete_shelf
 
 router = APIRouter()
@@ -112,6 +113,15 @@ def create_rack(
         created_by_user_id=actor.id,
     )
     db.add(rack)
+    db.flush()
+    record_event(
+        db,
+        "rack.created",
+        actor_user_id=actor.id,
+        entity_type="rack",
+        entity_id=str(rack.id),
+        details={"name": rack.name, "access_level": rack.access_level},
+    )
     db.commit()
     db.refresh(rack)
     return rack
@@ -133,6 +143,14 @@ def update_rack(
     for key, value in updates.items():
         setattr(rack, key, value)
     rack.updated_at = datetime.now(UTC)
+    record_event(
+        db,
+        "rack.modified",
+        actor_user_id=actor.id,
+        entity_type="rack",
+        entity_id=str(rack.id),
+        details={"fields": sorted(updates.keys())},
+    )
     db.commit()
     db.refresh(rack)
     return rack

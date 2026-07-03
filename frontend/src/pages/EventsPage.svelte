@@ -8,9 +8,15 @@
 
   let events: AuditEvent[] = [];
   let limit = 100;
+  let offset = 0;
+  let total = 0;
   let loading = false;
   let message = '';
   let filter = '';
+
+  // 1-based page derived from offset/limit (mirrors the library pager).
+  $: page = Math.floor(offset / limit) + 1;
+  $: totalPages = Math.max(1, Math.ceil(total / limit));
 
   // Reload whenever the authenticated client is (re)created (fixes blank-on-refresh, like Admin).
   let loadedFor: ApiClient | null = null;
@@ -25,12 +31,29 @@
     loading = true;
     message = '';
     try {
-      events = await client.listAuditEvents(limit);
+      const result = await client.listAuditEvents(limit, offset);
+      events = result.items;
+      total = result.total;
     } catch (error) {
       message = errorMessage(error);
     } finally {
       loading = false;
     }
+  }
+
+  // Reset to the first page when the page size changes, then reload.
+  function changeLimit(): void {
+    offset = 0;
+    void load();
+  }
+
+  // Jump to a 1-based page (clamped locally; the server also clamps offset) and re-fetch.
+  function goToPage(target: number): void {
+    const next = Math.min(Math.max(1, Math.trunc(target) || 1), totalPages);
+    const nextOffset = (next - 1) * limit;
+    if (nextOffset === offset) return;
+    offset = nextOffset;
+    void load();
   }
 
   function formatDate(iso: string): string {
@@ -48,7 +71,7 @@
     <div class="controls">
       <input bind:value={filter} placeholder="Filter by type (e.g. auth, paper, agent)" aria-label="Filter events"
         title="Filter the events list by event type" />
-      <select bind:value={limit} on:change={load} aria-label="How many" title="How many recent events to load">
+      <select bind:value={limit} on:change={changeLimit} aria-label="How many" title="How many recent events to load">
         <option value={50}>50</option>
         <option value={100}>100</option>
         <option value={250}>250</option>
@@ -80,6 +103,26 @@
         </li>
       {/each}
     </ul>
+  {/if}
+
+  {#if totalPages > 1}
+    <div class="pagination" role="navigation" aria-label="Event pages">
+      <button
+        type="button"
+        class="secondary"
+        on:click={() => goToPage(page - 1)}
+        disabled={page <= 1 || loading}
+        title="Previous page"
+      >‹ Prev</button>
+      <span class="muted">{total} events · page {page} of {totalPages}</span>
+      <button
+        type="button"
+        class="secondary"
+        on:click={() => goToPage(page + 1)}
+        disabled={page >= totalPages || loading}
+        title="Next page"
+      >Next ›</button>
+    </div>
   {/if}
 </section>
 
@@ -118,5 +161,13 @@
     display: flex;
     gap: 0.5rem;
     justify-content: space-between;
+  }
+  .pagination {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+    margin-top: 0.8rem;
   }
 </style>

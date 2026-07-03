@@ -4,7 +4,52 @@ Workers should be idempotent: retrying a failed extraction or summary job must n
 canonical records without review.
 """
 
+import functools
+import logging
+from collections.abc import Callable
+from typing import Any
 
+logger = logging.getLogger(__name__)
+
+
+def _record_job_event(event_type: str, job_name: str, *, error: str | None = None) -> None:
+    """Persist a ``job.*`` audit event in its own short-lived session (best-effort, fail-open).
+
+    A separate session keeps the lifecycle events durable even when the job's own transaction rolls
+    back on failure; any error here is swallowed so job execution is never affected."""
+    from app.db.session import SessionLocal
+    from app.services.audit import record_event
+
+    details: dict[str, Any] = {"job": job_name}
+    if error is not None:
+        details["error"] = error[:500]
+    try:
+        with SessionLocal() as db:
+            record_event(db, event_type, entity_type="job", entity_id=job_name, details=details)
+            db.commit()
+    except Exception:  # noqa: BLE001 - job audit is best-effort; never break the job
+        logger.warning("job audit event %s failed for %s", event_type, job_name, exc_info=True)
+
+
+def _audited_job[JobT: Callable[..., Any]](func: JobT) -> JobT:
+    """Emit ``job.started`` / ``job.completed`` / ``job.failed`` audit events around a job (§7.6)."""
+    job_name = func.__name__
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        _record_job_event("job.started", job_name)
+        try:
+            result = func(*args, **kwargs)
+        except Exception as exc:
+            _record_job_event("job.failed", job_name, error=str(exc))
+            raise
+        _record_job_event("job.completed", job_name)
+        return result
+
+    return wrapper  # type: ignore[return-value]
+
+
+@_audited_job
 def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
     """Run GROBID extraction for a PDF file, persist metadata/references, then enrich.
 
@@ -62,6 +107,7 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
         enqueue_enrichment(work_id)
 
 
+@_audited_job
 def enrich_work_job(work_id: str) -> dict | None:
     """Enrich a work from external metadata sources (arXiv/Crossref), then (re)index its embedding.
 
@@ -93,6 +139,7 @@ def enrich_work_job(work_id: str) -> dict | None:
     return result
 
 
+@_audited_job
 def chunk_work_job(work_id: str) -> None:
     """(Re)build a work's passage chunks (HS1). Idempotent; no-op if the work is missing."""
     import uuid
@@ -105,6 +152,7 @@ def chunk_work_job(work_id: str) -> None:
         db.commit()
 
 
+@_audited_job
 def embed_work_job(work_id: str) -> None:
     """(Re)index a work's embedding with the configured provider (keeps search read-only)."""
     import uuid
@@ -127,6 +175,7 @@ def embed_work_job(work_id: str) -> None:
         db.commit()
 
 
+@_audited_job
 def scan_duplicates_job() -> None:
     """Full-library duplicate/version scan over every work and file (off the request path)."""
     from sqlalchemy import select
@@ -144,6 +193,7 @@ def scan_duplicates_job() -> None:
         db.commit()
 
 
+@_audited_job
 def reindex_embeddings_job() -> None:
     """Build embeddings for the active provider over every work missing one (WORKPLAN_NEXT 8F).
 
@@ -170,6 +220,7 @@ def reindex_embeddings_job() -> None:
         db.commit()
 
 
+@_audited_job
 def rebuild_bm25_job() -> None:
     """Rebuild + persist the BM25F+ lexical index off the search read path (D13a).
 
@@ -183,6 +234,7 @@ def rebuild_bm25_job() -> None:
         rebuild_persisted_index(db)
 
 
+@_audited_job
 def pull_model_job(provider: str, model: str) -> None:
     """Download/pull an AI model (Ollama / sentence-transformers). Raises on failure (8C)."""
     from app.db.session import SessionLocal
@@ -194,6 +246,7 @@ def pull_model_job(provider: str, model: str) -> None:
     pull_model(provider, model, ollama_url=ollama_url)
 
 
+@_audited_job
 def topic_work_job(work_id: str) -> None:
     """Run per-paper topic modeling for a work and persist ``work.topics`` (Phase K).
 
@@ -221,6 +274,7 @@ def topic_work_job(work_id: str) -> None:
         db.commit()
 
 
+@_audited_job
 def keywords_work_job(work_id: str) -> None:
     """Re-run keyword extraction for a work over abstract + latest stored TEI body (Phase K).
 

@@ -56,6 +56,8 @@ services:
       # Per-user UI preferences land on the persisted library volume (the container's ~/.config is
       # neither mounted nor persistent), so column choices survive restarts.
       PARACORD_PREFERENCES_PATH: "/app/storage/preferences.yaml"
+      # Append-only audit-event file sink (D31.1) on the persisted library volume.
+      PARACORD_AUDIT_LOG_PATH: "/app/storage/audit/audit.jsonl"
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
+      PARACORD_AUDIT_LOG_PATH: "/app/storage/audit/audit.jsonl"
     depends_on:
       postgres:
         condition: service_healthy

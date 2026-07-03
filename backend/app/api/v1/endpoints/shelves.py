@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.access_settings import get_default_access_level
+from app.services.audit import record_event
 from app.services.default_shelf import (
     get_default_shelf_id,
     hard_delete_shelf,
@@ -140,6 +141,15 @@ def create_shelf(
         created_by_user_id=actor.id,
     )
     db.add(shelf)
+    db.flush()
+    record_event(
+        db,
+        "shelf.created",
+        actor_user_id=actor.id,
+        entity_type="shelf",
+        entity_id=str(shelf.id),
+        details={"name": shelf.name, "access_level": shelf.access_level},
+    )
     db.commit()
     db.refresh(shelf)
     return shelf
@@ -161,6 +171,14 @@ def update_shelf(
     for key, value in updates.items():
         setattr(shelf, key, value)
     shelf.updated_at = datetime.now(UTC)
+    record_event(
+        db,
+        "shelf.modified",
+        actor_user_id=actor.id,
+        entity_type="shelf",
+        entity_id=str(shelf.id),
+        details={"fields": sorted(updates.keys())},
+    )
     db.commit()
     db.refresh(shelf)
     return shelf

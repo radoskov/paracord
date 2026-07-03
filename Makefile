@@ -93,6 +93,7 @@ backup: ## Back up the database + managed library to ./backups (BACKUP_DIR overr
 	$(COMPOSE) run --rm --no-deps -T -v $$(pwd)/$$out:/backup $(API_SERVICE) \
 	  sh -c 'tar czf /backup/library-'$$ts'.tar.gz -C /app storage' 2>/dev/null || \
 	  echo "(library volume archive skipped — start the stack first if you need it)"; \
+	$(COMPOSE) exec -T $(API_SERVICE) python scripts/record_backup_event.py backup.created --artifact "db-$$ts.sql.gz" 2>/dev/null || true; \
 	echo "✅ backup complete in $$out"
 
 .PHONY: restore
@@ -103,6 +104,7 @@ restore: ## Restore the database from a dump: make restore RESTORE=backups/db-YY
 	@$(COMPOSE) stop $(API_SERVICE) worker
 	@gunzip -c $(RESTORE) | $(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U $$POSTGRES_USER -d $$POSTGRES_DB'
 	@$(COMPOSE) start $(API_SERVICE) worker
+	@$(COMPOSE) exec -T $(API_SERVICE) python scripts/record_backup_event.py restore.completed --artifact "$(RESTORE)" 2>/dev/null || true
 	@echo "✅ restore complete"
 
 .PHONY: restore-dry-run
