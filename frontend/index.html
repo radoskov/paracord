@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PaperRacks</title>
+    <script>
+      // No-flash theme boot: apply the cached theme id + surface colour synchronously, before the
+      // app module loads and paints. Keys mirror lib/theme/store.ts. Reconciled with the server
+      // theme once /auth/me returns.
+      (function () {
+        try {
+          var id = localStorage.getItem('paracord-theme');
+          if (id) document.documentElement.setAttribute('data-theme', id);
+          var bg = localStorage.getItem('paracord-theme-bg');
+          if (bg) document.documentElement.style.backgroundColor = bg;
+        } catch (e) {
+          /* localStorage may be unavailable — fall back to the module's default theme. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
