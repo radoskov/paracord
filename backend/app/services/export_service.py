@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.citation import Reference
 from app.models.metadata import MetadataAssertion
 from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
@@ -24,6 +25,8 @@ FORMAT_MEDIA: dict[str, tuple[str, str]] = {
     "html": ("html", "text/html"),
     "text": ("txt", "text/plain"),
     "styled": ("txt", "text/plain"),  # rendered in a named citation style (see `style`)
+    "latex": ("tex", "application/x-tex"),  # \cite commands + a thebibliography block
+    "pandoc": ("md", "text/markdown"),  # Pandoc [@key] citations + a references list
 }
 SUPPORTED_FORMATS = set(FORMAT_MEDIA)
 
@@ -72,6 +75,21 @@ def export_bibliography(
     """
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported export format: {output_format}")
+    if scope_type == "missing_references":
+        # A dedicated target (SPEC §8.13): the unresolved citation references (they have no local
+        # work, so no citation key) rendered as raw reference strings rather than a bibliography.
+        refs = _resolve_unresolved_references(db, scope_id=scope_id, visible_ids=visible_ids)
+        content = _render_missing_references(refs, output_format)
+        if actor_user_id is not None:
+            record_event(
+                db,
+                "paper.exported",
+                actor_user_id=actor_user_id,
+                entity_type=scope_type,
+                entity_id=scope_id,
+                details={"format": output_format, "reference_count": len(refs)},
+            )
+        return content
     works = _resolve_works(
         db,
         scope_type=scope_type,
@@ -177,7 +195,38 @@ def _resolve_works(
             .order_by(Work.year, Work.canonical_title)
         )
         return _filter(list(db.scalars(stmt).all()))
+    if scope_type == "import_batch":
+        # All works created by one import activity (Work.import_batch_id), for a per-batch export.
+        if not scope_id:
+            raise ValueError("scope_id is required for import_batch export")
+        stmt = (
+            select(Work)
+            .where(Work.import_batch_id == uuid.UUID(scope_id))
+            .order_by(Work.year, Work.canonical_title)
+        )
+        return _filter(list(db.scalars(stmt).all()))
     raise ValueError(f"Unsupported export scope: {scope_type}")
+
+
+def _resolve_unresolved_references(
+    db: Session,
+    *,
+    scope_id: str | None = None,
+    visible_ids: set[uuid.UUID] | None = None,
+) -> list[Reference]:
+    """Resolve unresolved citation references (no local ``resolved_work_id``).
+
+    ``scope_id`` (optional) narrows to a single citing work; otherwise every citing work is
+    considered. ``visible_ids`` clamps to references whose *citing* work the caller may see
+    (``None`` = unrestricted). Ordered by citing work then creation for a stable listing.
+    """
+    stmt = select(Reference).where(Reference.resolved_work_id.is_(None))
+    if scope_id:
+        stmt = stmt.where(Reference.citing_work_id == uuid.UUID(scope_id))
+    if visible_ids is not None:
+        stmt = stmt.where(Reference.citing_work_id.in_(visible_ids))
+    stmt = stmt.order_by(Reference.citing_work_id, Reference.created_at)
+    return list(db.scalars(stmt).all())
 
 
 def _split_authors(value: str | None) -> list[str]:
@@ -500,6 +549,85 @@ def _entry_inline(entry: _Entry, *, markdown: bool) -> str:
     return " ".join(parts)
 
 
+def _render_latex(entries: list[_Entry]) -> str:
+    """Emit LaTeX ``\\cite{...}`` commands plus a ``thebibliography`` block (SPEC §8.13).
+
+    The leading ``\\cite`` collects every key (a ready-to-paste multi-cite); each work then gets a
+    ``\\bibitem`` in the ``thebibliography`` environment. Values are LaTeX-escaped.
+    """
+    if not entries:
+        return ""
+    keys = ",".join(entry.key for entry in entries)
+    lines = [f"\\cite{{{keys}}}", "", "\\begin{thebibliography}{99}"]
+    for entry in entries:
+        lines.append(f"\\bibitem{{{entry.key}}} {_latex_reference(entry)}")
+    lines.append("\\end{thebibliography}")
+    return "\n".join(lines) + "\n"
+
+
+def _latex_reference(entry: _Entry) -> str:
+    """One ``\\bibitem`` body: ``Authors. Title. \\emph{Venue}, Year. DOI: x.`` (LaTeX-escaped)."""
+    work = entry.work
+    parts: list[str] = []
+    if entry.authors:
+        parts.append(_escape_latex(", ".join(entry.authors)) + ".")
+    parts.append(_escape_latex(work.canonical_title or "Untitled") + ".")
+    if work.venue:
+        venue = f"\\emph{{{_escape_latex(work.venue)}}}"
+        parts.append(f"{venue}, {work.year}." if work.year else f"{venue}.")
+    elif work.year:
+        parts.append(f"{work.year}.")
+    if work.doi:
+        parts.append(f"DOI: {_escape_latex(work.doi)}.")
+    return " ".join(parts)
+
+
+def _render_pandoc(entries: list[_Entry]) -> str:
+    """Emit Pandoc-Markdown citations ``[@key; @key]`` plus a references list (SPEC §8.13).
+
+    The leading ``[@...]`` is a ready-to-paste combined citation; the ``# References`` list gives
+    each key its rendered reference so the output is self-contained without a separate .bib file.
+    """
+    if not entries:
+        return ""
+    combined = "; ".join(f"@{entry.key}" for entry in entries)
+    lines = [f"[{combined}]", "", "# References", ""]
+    for entry in entries:
+        lines.append(f"- [@{entry.key}]: {_entry_inline(entry, markdown=True)}")
+    return "\n".join(lines) + "\n"
+
+
+def _reference_string(reference: Reference) -> str:
+    """Render one unresolved reference as a human string (raw citation, else composed metadata)."""
+    if reference.raw_citation and reference.raw_citation.strip():
+        return reference.raw_citation.strip()
+    parts: list[str] = []
+    if reference.title:
+        parts.append(reference.title.strip())
+    if reference.year:
+        parts.append(f"({reference.year})")
+    if reference.doi:
+        parts.append(f"DOI: {reference.doi}")
+    if reference.arxiv_id:
+        parts.append(f"arXiv:{reference.arxiv_id}")
+    return " ".join(parts) or "Untitled reference"
+
+
+def _render_missing_references(references: list[Reference], output_format: str) -> str:
+    """Render unresolved-reference strings for the ``missing_references`` target.
+
+    These references have no local work (hence no citation key), so the citation-format families
+    collapse to a plain string listing: a Markdown bullet list for ``markdown``/``pandoc``, a JSON
+    array for ``csl-json``, and one string per line otherwise.
+    """
+    strings = [_reference_string(reference) for reference in references]
+    if output_format in ("markdown", "pandoc"):
+        return "\n".join(["# Unresolved references", "", *(f"- {s}" for s in strings)]) + "\n"
+    if output_format == "csl-json":
+        return json.dumps([{"raw": s} for s in strings], indent=2, ensure_ascii=False)
+    return "\n".join(strings) + ("\n" if strings else "")
+
+
 def _work_to_text(work: Work) -> str:
     parts = [work.canonical_title or "Untitled"]
     if work.year:
@@ -511,6 +639,26 @@ def _work_to_text(work: Work) -> str:
 
 def _escape_bibtex(value: str) -> str:
     return value.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
+# LaTeX special characters → their escaped forms. Backslash is handled first (its replacement
+# introduces backslashes that must not be re-escaped), so this is applied char-by-char.
+_LATEX_SPECIALS = {
+    "\\": "\\textbackslash{}",
+    "&": "\\&",
+    "%": "\\%",
+    "$": "\\$",
+    "#": "\\#",
+    "_": "\\_",
+    "{": "\\{",
+    "}": "\\}",
+    "~": "\\textasciitilde{}",
+    "^": "\\textasciicircum{}",
+}
+
+
+def _escape_latex(value: str) -> str:
+    return "".join(_LATEX_SPECIALS.get(char, char) for char in value)
 
 
 def _escape_html(value: str) -> str:
@@ -527,4 +675,6 @@ _RENDERERS = {
     "markdown": _render_markdown,
     "html": _render_html,
     "text": _render_text,
+    "latex": _render_latex,
+    "pandoc": _render_pandoc,
 }

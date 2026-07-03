@@ -214,7 +214,9 @@ export type ExportScopeType =
   | 'library'
   | 'selection'
   | 'search'
-  | 'saved_filter';
+  | 'saved_filter'
+  | 'import_batch'
+  | 'missing_references';
 export type ExportFormat =
   | 'bibtex'
   | 'biblatex'
@@ -223,7 +225,9 @@ export type ExportFormat =
   | 'markdown'
   | 'html'
   | 'text'
-  | 'styled';
+  | 'styled'
+  | 'latex'
+  | 'pandoc';
 
 export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'bibtex', label: 'BibTeX' },
@@ -234,6 +238,8 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'html', label: 'HTML' },
   { value: 'text', label: 'Plain text' },
   { value: 'styled', label: 'Styled (APA/IEEE/…)' },
+  { value: 'latex', label: 'LaTeX (\\cite)' },
+  { value: 'pandoc', label: 'Pandoc Markdown ([@key])' },
 ];
 
 export interface CitationStyle {
