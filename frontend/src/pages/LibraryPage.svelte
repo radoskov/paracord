@@ -833,8 +833,12 @@
     display: grid;
     gap: 1rem;
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    /* Fill the viewport below the header/hint so each column scrolls on its own. */
-    height: calc(100dvh - 7rem);
+    /* Fill the viewport below the header/hint so each column scrolls on its own. The header wraps
+       to a variable number of rows, so subtract its measured height (--app-header-h, published by
+       App.svelte) plus the tab-hint + content padding (~3rem); fall back to a fixed guess before
+       it is measured. Using the real height keeps the pane's bottom on-screen and stops the tall
+       wrapped header from overlapping content. */
+    height: calc(100dvh - var(--app-header-h, 4rem) - 3rem);
     min-height: 22rem;
   }
 

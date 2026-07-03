@@ -84,6 +84,17 @@
     queueFullMessage = '';
   }
 
+  // The sticky header wraps to several rows (many tabs), so its height varies with viewport width.
+  // Publish the measured height as --app-header-h so pages that fill the viewport below it
+  // (LibraryPage's split-pane) size to the real header instead of a fixed guess that, when the
+  // header wraps taller, pushes their bottom off-screen and forces the header to overlap content.
+  let headerEl: HTMLElement | null = null;
+  let headerResizeObserver: ResizeObserver | null = null;
+  function measureHeader(): void {
+    if (headerEl && typeof document !== 'undefined')
+      document.documentElement.style.setProperty('--app-header-h', `${headerEl.offsetHeight}px`);
+  }
+
   $: client = new ApiClient(apiBaseUrl, token || null, onUnauthorized, onQueueFull);
   $: activeTab = visibleTabs.find((tab) => tab.id === active) ?? visibleTabs[0] ?? TABS[0];
 
@@ -115,9 +126,17 @@
     const onHash = (): void => syncHash();
     window.addEventListener('hashchange', onHash);
     window.addEventListener('keydown', onKeydown);
+    // Track the (wrap-variable) header height into --app-header-h. Guarded so the non-DOM test
+    // environment (no ResizeObserver) still mounts the app; a one-off measure covers that case.
+    measureHeader();
+    if (typeof ResizeObserver !== 'undefined' && headerEl) {
+      headerResizeObserver = new ResizeObserver(() => measureHeader());
+      headerResizeObserver.observe(headerEl);
+    }
     return () => {
       window.removeEventListener('hashchange', onHash);
       window.removeEventListener('keydown', onKeydown);
+      if (headerResizeObserver) headerResizeObserver.disconnect();
     };
   });
 
@@ -195,7 +214,7 @@
       <button type="button" class="queue-toast-close" on:click={dismissQueueFull} title="Dismiss">×</button>
     </div>
   {/if}
-  <header>
+  <header bind:this={headerEl}>
     <div class="header-inner">
       <div class="brand">
         <h1>PaRacORD</h1>
