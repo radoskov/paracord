@@ -11,7 +11,7 @@
     type Shelf,
   } from '../api/client';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
-  import { resolveTheme } from '../lib/viz/theme';
+  import { resolveThemeById } from '../lib/viz/theme';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -106,11 +106,10 @@
         init: (el: HTMLElement) => typeof chart;
       };
       if (!chart) chart = echarts.init(chartContainer);
-      const theme = resolveTheme(
-        typeof document !== 'undefined' &&
-          document.documentElement.getAttribute('data-theme') === 'dark'
-          ? 'dark'
-          : 'light',
+      const theme = resolveThemeById(
+        typeof document !== 'undefined'
+          ? document.documentElement.getAttribute('data-theme')
+          : null,
       );
       chart.setOption(buildChronologicalOption(summary, theme), true);
       chartError = false;
@@ -315,8 +314,8 @@
   }
 
   .card {
-    background: #fff;
-    border: 1px solid #d8dee6;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
     padding: 1rem;
   }
@@ -334,7 +333,7 @@
   .muted,
   .hintline,
   .meta {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.85rem;
   }
 
@@ -351,7 +350,7 @@
   }
 
   label {
-    color: #21303d;
+    color: var(--ink-strong);
     display: flex;
     flex-direction: column;
     font-size: 0.8rem;
@@ -361,7 +360,7 @@
 
   select,
   input {
-    border: 1px solid #bcc7d2;
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     font: inherit;
     font-weight: 400;
@@ -369,10 +368,10 @@
   }
 
   button {
-    background: #203142;
-    border: 1px solid #203142;
+    background: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
     border-radius: 6px;
-    color: #fff;
+    color: var(--ink-inverse);
     cursor: pointer;
     font: inherit;
     font-weight: 700;
@@ -403,7 +402,7 @@
   .link {
     background: none;
     border: none;
-    color: #1d4ed8;
+    color: var(--status-info);
     cursor: pointer;
     font: inherit;
     min-height: 0;
@@ -413,18 +412,18 @@
   }
 
   .missing-title {
-    color: #21303d;
+    color: var(--ink-strong);
   }
 
   .badge {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.78rem;
     margin-left: 0.3rem;
   }
 
   .import {
-    background: #0f766e;
-    border-color: #0f766e;
+    background: var(--status-success);
+    border-color: var(--status-success);
     font-size: 0.75rem;
     margin-left: 0.4rem;
     min-height: 0;
@@ -433,7 +432,7 @@
 
   .selcount {
     align-self: center;
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.9rem;
   }
 
@@ -443,9 +442,9 @@
   }
 
   .notes {
-    background: #fef3c7;
+    background: var(--status-warning-bg);
     border-radius: 6px;
-    color: #78350f;
+    color: var(--status-warning);
     font-size: 0.82rem;
     list-style: none;
     margin: 0 0 0.6rem;
@@ -453,7 +452,7 @@
   }
 
   .empty {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.85rem;
   }
 </style>

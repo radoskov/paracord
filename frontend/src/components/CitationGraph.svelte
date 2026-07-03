@@ -8,6 +8,7 @@
     GraphSizeBy,
     TopicGraphResponse,
   } from '../api/client';
+  import { resolveThemeById } from '../lib/viz/theme';
 
   export let label = '';
   export let disabled = false;
@@ -48,18 +49,16 @@
   // metrics ship on every node); color_by needs server-computed groups, so changing it refetches.
   let sizeBy: GraphSizeBy = 'degree';
   let colorBy: GraphColorBy = 'none';
-  // Accessible categorical palette (Okabe–Ito, colorblind-safe). Groups map to it by first-seen
-  // order; the legend below shows the mapping. External nodes stay grey (never color-grouped).
-  const COLOR_PALETTE = [
-    '#0072b2',
-    '#e69f00',
-    '#009e73',
-    '#cc79a7',
-    '#d55e00',
-    '#56b4e9',
-    '#f0e442',
-    '#999999',
-  ];
+  // Network colours come from the ACTIVE theme's validated `graph` block (categorical palette,
+  // node/edge/label/grid/warning-ring) so the network is legible + on-theme under every theme.
+  // Read once at build time; P3 wires live re-styling on theme change (viz pages already read
+  // data-theme). Groups map to the categorical palette by first-seen order; the legend shows it.
+  function activeViz() {
+    return resolveThemeById(
+      typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') : null,
+    );
+  }
+  let viz = activeViz();
   let renderMode: 'graph' | 'list' = 'graph';
   // fcose (#8) is the preferred force layout; if the extension didn't load we fall back to cose.
   let layout = 'fcose';
@@ -120,9 +119,9 @@
   })();
 
   function colorFor(group: string | null): string {
-    if (!group) return '#3b6ea5';
+    if (!group) return viz.categorical[0];
     const i = colorGroups.indexOf(group);
-    return COLOR_PALETTE[i % COLOR_PALETTE.length];
+    return viz.categorical[i % viz.categorical.length];
   }
 
   function metricOf(n: RNode): number {
@@ -191,6 +190,7 @@
 
   async function renderGraph(): Promise<void> {
     if (!hasGraph || !cyContainer) return;
+    viz = activeViz();
     try {
       // Dynamically imported and called untyped: the lazy chunk keeps cytoscape out of the
       // initial bundle, and per-layout options (e.g. `animate`) aren't in the base type.
@@ -269,7 +269,7 @@
               'font-size': 9,
               'text-wrap': 'ellipsis',
               'text-max-width': '120px',
-              color: '#1f2a36',
+              color: viz.text,
               'background-color': 'data(color)',
               width: 28,
               height: 28,
@@ -277,20 +277,20 @@
           },
           {
             selector: 'node[kind = "external"]',
-            style: { 'background-color': '#b0bccb', shape: 'diamond' },
+            style: { 'background-color': viz.nodeDefault, shape: 'diamond' },
           },
           {
-            // Warning badge (§8.9): a red ring around nodes with a review warning (multiwork /
-            // duplicate / unresolved) so problem papers stand out at a glance.
+            // Warning badge (§8.9): a ring (theme danger colour) around nodes with a review warning
+            // (multiwork / duplicate / unresolved) so problem papers stand out at a glance.
             selector: 'node[warn = 1]',
-            style: { 'border-width': 3, 'border-color': '#d62728', 'border-opacity': 0.95 },
+            style: { 'border-width': 3, 'border-color': viz.warningRing, 'border-opacity': 0.95 },
           },
           {
             selector: 'edge',
             style: {
               width: `mapData(weight, 1, ${maxWeight}, 1, 8)`,
-              'line-color': '#bcc7d2',
-              'target-arrow-color': '#bcc7d2',
+              'line-color': viz.edge,
+              'target-arrow-color': viz.edge,
               'target-arrow-shape': 'triangle',
               'curve-style': 'bezier',
             },
@@ -555,7 +555,7 @@
 
   .toggle {
     align-items: center;
-    color: #21303d;
+    color: var(--ink-strong);
     display: flex;
     font-size: 0.85rem;
     font-weight: 700;
@@ -576,10 +576,10 @@
   }
 
   button {
-    background: white;
-    border: 1px solid #bcc7d2;
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
-    color: #21303d;
+    color: var(--ink-strong);
     cursor: pointer;
     font: inherit;
     font-weight: 700;
@@ -588,12 +588,12 @@
   }
 
   button.active {
-    background: #203142;
-    color: white;
+    background: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   select {
-    border: 1px solid #bcc7d2;
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     font: inherit;
     padding: 0.3rem 0.5rem;
@@ -604,17 +604,17 @@
   }
 
   .cy {
-    background: #fbfcfd;
-    border: 1px solid #d8dee6;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     height: min(60vh, 34rem);
     width: 100%;
   }
 
   .cy-tooltip {
-    background: #1f2a36;
+    background: var(--ink-strong);
     border-radius: 6px;
-    color: #fff;
+    color: var(--surface-base);
     font-size: 0.78rem;
     line-height: 1.35;
     max-width: 20rem;
@@ -625,9 +625,9 @@
   }
 
   .note {
-    background: #fef3c7;
+    background: var(--status-warning-bg);
     border-radius: 6px;
-    color: #78350f;
+    color: var(--status-warning);
     font-size: 0.82rem;
     margin: 0.2rem 0;
     padding: 0.35rem 0.55rem;
@@ -635,7 +635,7 @@
 
   .summary,
   .hint {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.85rem;
   }
 
@@ -650,7 +650,7 @@
 
   .legend li {
     align-items: center;
-    color: #21303d;
+    color: var(--ink-strong);
     display: flex;
     font-size: 0.8rem;
     gap: 0.35rem;
@@ -684,6 +684,6 @@
 
   .arrow,
   small {
-    color: #64717f;
+    color: var(--ink-muted);
   }
 </style>
