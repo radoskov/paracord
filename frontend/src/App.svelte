@@ -297,8 +297,8 @@
   }
 
   :global(body) {
-    background: #eef1f4;
-    color: #203142;
+    background: var(--surface-base);
+    color: var(--ink-normal);
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
       sans-serif;
     margin: 0;
@@ -310,11 +310,11 @@
 
   .queue-toast {
     align-items: center;
-    background: #fef2f2;
-    border: 1px solid #fca5a5;
+    background: var(--status-danger-bg);
+    border: 1px solid var(--status-danger-border);
     border-radius: 8px;
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-    color: #7f1d1d;
+    color: var(--status-danger);
     display: flex;
     font-weight: 600;
     gap: 0.75rem;
@@ -339,8 +339,8 @@
   }
 
   header {
-    background: #fbfcfd;
-    border-bottom: 1px solid #d8dee6;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--border-strong);
     position: sticky;
     top: 0;
     z-index: 30;
@@ -373,7 +373,7 @@
   }
 
   .brand p {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.9rem;
     font-weight: 700;
     margin: 0;
@@ -388,7 +388,7 @@
 
   nav a {
     border-radius: 6px;
-    color: #44515f;
+    color: var(--ink-normal);
     font-size: 0.875rem;
     font-weight: 600;
     padding: 0.35rem 0.7rem;
@@ -396,12 +396,12 @@
   }
 
   nav a:hover {
-    background: #e2e8f0;
+    background: var(--surface-hover);
   }
 
   nav a.active {
-    background: #203142;
-    color: white;
+    background: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   .signout {
@@ -412,8 +412,8 @@
      signed-in name into one clearly-distinct unit, set apart from the section tabs. */
   .user-chip {
     align-items: center;
-    background: #f4f6f9;
-    border: 1px solid #d8dee6;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
     border-radius: 999px;
     display: flex;
     gap: 0.15rem;
@@ -422,7 +422,7 @@
   }
 
   .whoami {
-    color: #44515f;
+    color: var(--ink-normal);
     font-size: 0.85rem;
     font-weight: 600;
     max-width: 12rem;
@@ -433,7 +433,7 @@
   }
 
   .tab-hint {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.9rem;
     margin: 0 auto 1rem;
     max-width: 96rem;
@@ -445,10 +445,10 @@
   }
 
   .session-ended {
-    background: #fef3c7;
-    border: 1px solid #fcd34d;
+    background: var(--status-warning-bg);
+    border: 1px solid var(--status-warning-border);
     border-radius: 0.375rem;
-    color: #92400e;
+    color: var(--status-warning);
     font-size: 0.875rem;
     margin: 0 0 0.75rem;
     padding: 0.5rem 0.75rem;
@@ -522,24 +522,24 @@
      hue (not merely a fainter grey, which reads as real text). Normal input text is unchanged. */
   :global(input::placeholder),
   :global(textarea::placeholder) {
-    color: #9a6b2f;
+    color: var(--status-warning);
     font-style: italic;
     opacity: 1;
   }
   :global(input::-webkit-input-placeholder),
   :global(textarea::-webkit-input-placeholder) {
-    color: #9a6b2f;
+    color: var(--status-warning);
     font-style: italic;
   }
   :global(input::-moz-placeholder),
   :global(textarea::-moz-placeholder) {
-    color: #9a6b2f;
+    color: var(--status-warning);
     font-style: italic;
     opacity: 1;
   }
 
   :global(label) {
-    color: #526070;
+    color: var(--ink-muted);
     display: grid;
     font-size: 0.82rem;
     font-weight: 600;
@@ -547,26 +547,26 @@
   }
 
   :global(.muted) {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.86rem;
   }
 
   :global(.empty) {
-    background: #f4f6f9;
-    border: 1px dashed #cdd6e0;
+    background: var(--surface-sunken);
+    border: 1px dashed var(--border-normal);
     border-radius: 6px;
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.9rem;
     padding: 0.9rem;
     text-align: center;
   }
 
   :global(.danger) {
-    color: #b3261e;
+    color: var(--status-danger);
   }
 
   :global(.hintline) {
-    color: #8a96a3;
+    color: var(--ink-muted);
     font-size: 0.78rem;
     margin: 0.2rem 0 0;
   }

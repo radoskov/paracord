@@ -102,7 +102,7 @@
 
   li {
     align-items: center;
-    border: 1px solid #e1e7ee;
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     display: flex;
     justify-content: space-between;
@@ -121,7 +121,7 @@
   }
 
   .locked {
-    color: #6f7b88;
+    color: var(--ink-muted);
     font-size: 0.72rem;
     text-transform: uppercase;
   }
@@ -137,10 +137,10 @@
   }
 
   .warn {
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
+    background: var(--status-warning-bg);
+    border: 1px solid var(--status-warning-border);
     border-radius: 6px;
-    color: #9a3412;
+    color: var(--status-warning);
     font-size: 0.85rem;
     padding: 0.4rem 0.6rem;
   }

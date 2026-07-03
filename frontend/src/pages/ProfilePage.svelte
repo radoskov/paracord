@@ -260,7 +260,7 @@
     gap: 0.5rem;
   }
   .meta dt {
-    color: #64717f;
+    color: var(--ink-muted);
     flex: 0 0 8rem;
     font-weight: 600;
     margin: 0;
@@ -306,32 +306,32 @@
     top: 1rem;
   }
   .role-owner {
-    background: #fde9d7;
-    color: #9a4a07;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
   .role-admin {
-    background: #ede9fe;
-    color: #5b21b6;
+    background: var(--accent-note-bg);
+    color: var(--accent-note);
   }
   .role-librarian {
-    background: #d1fae5;
-    color: #065f46;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
   .role-editor {
-    background: #dbeafe;
-    color: #1e40af;
+    background: var(--status-info-bg);
+    color: var(--status-info);
   }
   .role-contributor {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
   .role-reader {
-    background: #e2e8f0;
-    color: #44515f;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
   .role-card {
-    background: #f0f7ff;
-    border: 1px solid #93c5fd;
+    background: var(--status-info-bg);
+    border: 1px solid var(--status-info-border);
     border-radius: 0.5rem;
     display: flex;
     flex-direction: column;
@@ -340,11 +340,11 @@
     padding: 0.5rem 0.7rem;
   }
   .you {
-    color: #2563eb;
+    color: var(--accent-link);
     font-size: 0.8rem;
   }
   .hintline {
-    color: #b45309;
+    color: var(--status-warning);
     font-size: 0.8rem;
     margin: 0;
   }

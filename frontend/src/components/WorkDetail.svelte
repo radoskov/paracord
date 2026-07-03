@@ -974,7 +974,7 @@
         <span class="muted">No tags applied yet.</span>
       {:else}
         {#each appliedTags as tag (tag.id)}
-          <span class="tag-chip" style={`--tag-color:${tag.color ?? '#94a3b8'}`}>
+          <span class="tag-chip" style={`--tag-color:${tag.color ?? 'var(--ink-muted)'}`}>
             <span class="dot"></span>
             {tag.name}
             <button type="button" class="chip-remove" on:click={() => removeTag(tag.id)}
@@ -1303,8 +1303,8 @@
     margin: 0.25rem 0;
     padding: 0.4rem 0.6rem;
     border-radius: 0.375rem;
-    background: #fef3c7;
-    color: #78350f;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
     font-size: 0.85rem;
   }
 
@@ -1323,8 +1323,8 @@
 
 
   details {
-    background: #f4f6f9;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     padding: 0.5rem 0.7rem;
   }
@@ -1358,14 +1358,14 @@
   }
 
   .review {
-    background: white;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     padding: 0.5rem;
   }
 
   .review.has-conflict {
-    border-color: #f0b429;
+    border-color: var(--status-warning-border);
   }
 
   .assertion {
@@ -1376,7 +1376,7 @@
   }
 
   .src {
-    background: #e2e8f0;
+    background: var(--surface-sunken);
     border-radius: 0.25rem;
     font-size: 0.72rem;
     padding: 0.05rem 0.35rem;
@@ -1388,15 +1388,15 @@
   }
 
   .canon {
-    color: #14532d;
+    color: var(--status-success);
     font-size: 0.72rem;
     font-weight: 700;
   }
 
   .conflict {
-    background: #fde68a;
+    background: var(--status-warning-bg);
     border-radius: 0.25rem;
-    color: #78350f;
+    color: var(--status-warning);
     font-size: 0.72rem;
     margin-left: 0.4rem;
     padding: 0.05rem 0.35rem;
@@ -1421,8 +1421,8 @@
 
   .tag-chip {
     align-items: center;
-    background: #f1f5f9;
-    border: 1px solid #dbe3ec;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 999px;
     display: inline-flex;
     font-size: 0.8rem;
@@ -1431,7 +1431,7 @@
   }
 
   .tag-chip .dot {
-    background: var(--tag-color, #94a3b8);
+    background: var(--tag-color, var(--ink-muted));
     border-radius: 50%;
     height: 0.7rem;
     width: 0.7rem;
@@ -1440,7 +1440,7 @@
   .chip-remove {
     background: none;
     border: none;
-    color: #64748b;
+    color: var(--ink-muted);
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
@@ -1456,8 +1456,8 @@
   /* Rounded-rect card around each References / In-text-citation / File entry so it is
      unambiguous which Import button / text / hash belongs to which entry. */
   .entry-card {
-    background: #fff;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-normal);
     border-radius: 8px;
     padding: 0.5rem 0.6rem;
   }
@@ -1485,7 +1485,7 @@
   }
 
   .files li.unavailable {
-    background: #fbfbfc;
+    background: var(--surface-overlay);
     border-style: dashed;
   }
 
@@ -1510,38 +1510,38 @@
   }
 
   .fstatus-extracted {
-    background: #bbf7d0;
-    color: #14532d;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   .fstatus-extract_failed {
-    background: #fecaca;
-    color: #7f1d1d;
+    background: var(--status-danger-bg);
+    color: var(--status-danger);
   }
 
   .fstatus-available {
-    background: #e2e8f0;
-    color: #475569;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
 
   .fstatus-extracted_discarded {
-    background: #e2e8f0;
-    color: #475569;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
 
   .funavail {
-    background: #fed7aa;
-    color: #7c2d12;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
 
   .fmain {
-    background: #dbeafe;
-    color: #1e3a8a;
+    background: var(--status-info-bg);
+    color: var(--status-info);
   }
 
   .focr {
-    background: #e2e8f0;
-    color: #475569;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
 
   .quick-read {
@@ -1569,16 +1569,16 @@
   }
 
   .note-count {
-    color: #475569;
+    color: var(--ink-normal);
     font-size: 0.72rem;
     font-weight: 700;
   }
 
   .hash {
-    background: #eef1f4;
-    border: 1px solid #d8dee6;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
     border-radius: 0.25rem;
-    color: #475569;
+    color: var(--ink-normal);
     cursor: pointer;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
@@ -1608,8 +1608,8 @@
   }
 
   .danger-btn {
-    border-color: #f1b0a8;
-    color: #b3261e;
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
   }
 
   .keywords {
@@ -1619,10 +1619,10 @@
   }
 
   .kw {
-    background: #eef1f4;
-    border: 1px solid #d8dee6;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
-    color: #41505f;
+    color: var(--ink-normal);
     cursor: pointer;
     font-size: 0.72rem;
     min-height: auto;
@@ -1630,14 +1630,14 @@
   }
 
   .kw:hover {
-    background: #dbe3ec;
+    background: var(--surface-hover);
   }
 
   /* Topics: same chip shape as keywords but a distinct accent + a labelled divider, so a paper's
      topics read as a separate block from its keywords. */
   .topics {
     align-items: baseline;
-    border-top: 1px dashed #e0d6ef;
+    border-top: 1px dashed var(--accent-note-border);
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
@@ -1646,7 +1646,7 @@
   }
 
   .topics-label {
-    color: #6b4ea3;
+    color: var(--accent-note);
     font-size: 0.66rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -1668,7 +1668,7 @@
   }
 
   .citations-label {
-    color: #6b4ea3;
+    color: var(--accent-note);
     font-size: 0.66rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -1681,15 +1681,15 @@
   }
 
   .citations-meta {
-    color: #7a7186;
+    color: var(--accent-note);
     font-size: 0.72rem;
   }
 
   .topic {
-    background: #f1ecfb;
-    border: 1px solid #d9cdef;
+    background: var(--accent-note-bg);
+    border: 1px solid var(--accent-note-border);
     border-radius: 10px;
-    color: #5a3f8c;
+    color: var(--accent-note);
     cursor: pointer;
     font-size: 0.72rem;
     min-height: auto;
@@ -1697,7 +1697,7 @@
   }
 
   .topic:hover {
-    background: #e6dcf7;
+    background: var(--accent-note-bg);
   }
 
   .lock {
@@ -1710,7 +1710,7 @@
   }
 
   .lock.locked {
-    color: #14532d;
+    color: var(--status-success);
     font-weight: 700;
   }
 
@@ -1736,7 +1736,7 @@
   .related-link {
     background: none;
     border: none;
-    color: #1d4ed8;
+    color: var(--status-info);
     cursor: pointer;
     display: flex;
     gap: 0.4rem;
@@ -1750,16 +1750,16 @@
   }
 
   .related-reason {
-    color: #64748b;
+    color: var(--ink-muted);
     display: block;
     font-size: 0.72rem;
     margin-top: 0.15rem;
   }
 
   .ref-marker {
-    background: #dbeafe;
+    background: var(--status-info-bg);
     border-radius: 0.25rem;
-    color: #1e3a8a;
+    color: var(--status-info);
     flex-shrink: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
@@ -1773,9 +1773,9 @@
   }
 
   .ref-badge {
-    background: #bbf7d0;
+    background: var(--status-success-bg);
     border-radius: 0.25rem;
-    color: #14532d;
+    color: var(--status-success);
     font-size: 0.68rem;
     margin-left: 0.3rem;
     padding: 0.03rem 0.3rem;
@@ -1824,7 +1824,7 @@
   }
 
   .hintline.warn {
-    color: #92400e;
+    color: var(--status-warning);
   }
 
   .candidates {
@@ -1838,7 +1838,7 @@
   .candidate {
     display: flex;
     gap: 0.6rem;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--border-normal);
     border-radius: 8px;
     padding: 0.5rem 0.7rem;
   }
@@ -1859,23 +1859,23 @@
     border-radius: 4px;
     font-size: 0.7rem;
     padding: 0.05rem 0.4rem;
-    background: #eef2ff;
-    color: #3730a3;
+    background: var(--accent-note-bg);
+    color: var(--accent-note);
   }
 
   .badge.oa {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   .badge.score {
-    background: #f1f5f9;
-    color: #475569;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
 
   .badge.platform {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
 
   .cand-title {
@@ -1886,7 +1886,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
-    color: #64748b;
+    color: var(--ink-muted);
     font-size: 0.85rem;
   }
 
@@ -1895,30 +1895,30 @@
   }
 
   .cand-status.ok {
-    color: #166534;
+    color: var(--status-success);
   }
 
   .cand-status.warn {
-    color: #92400e;
+    color: var(--status-warning);
   }
 
   .cand-status.err {
-    color: #b91c1c;
+    color: var(--status-danger);
   }
 
   .link {
     background: none;
     border: none;
-    color: #2563eb;
+    color: var(--accent-link);
     cursor: pointer;
     padding: 0;
     text-decoration: underline;
   }
 
   .searched-paper {
-    background: #eef2ff;
-    border: 1px solid #c7d2fe;
-    border-left: 4px solid #4f46e5;
+    background: var(--accent-note-bg);
+    border: 1px solid var(--accent-note-border);
+    border-left: 4px solid var(--accent-note);
     border-radius: 8px;
     display: grid;
     gap: 0.15rem;
@@ -1926,7 +1926,7 @@
   }
 
   .searched-label {
-    color: #4338ca;
+    color: var(--accent-note);
     font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -1937,14 +1937,14 @@
   }
 
   .searched-authors {
-    color: #334155;
+    color: var(--ink-normal);
     font-size: 0.85rem;
     margin-top: 0.15rem;
     overflow-wrap: anywhere;
   }
 
   .searched-meta {
-    color: #475569;
+    color: var(--ink-normal);
     display: flex;
     flex-wrap: wrap;
     font-size: 0.85rem;
@@ -1961,8 +1961,8 @@
 
   .source-row {
     align-items: center;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     display: flex;
     gap: 0.5rem;
@@ -1979,18 +1979,18 @@
   }
 
   .source-state.ok {
-    color: #166534;
+    color: var(--status-success);
   }
 
   .source-state.err {
-    color: #b91c1c;
+    color: var(--status-danger);
   }
 
   .spinner {
     animation: spin 0.7s linear infinite;
-    border: 2px solid #cbd5e1;
+    border: 2px solid var(--border-normal);
     border-radius: 50%;
-    border-top-color: #4f46e5;
+    border-top-color: var(--accent-note);
     display: inline-block;
     height: 0.85rem;
     width: 0.85rem;
@@ -2005,8 +2005,8 @@
   /* Pinned to the top of the modal's scrolling body so it never scrolls away with the list. */
   .download-bar {
     align-items: center;
-    background: #fbfcfd;
-    border: 1px solid #e2e8f0;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-normal);
     border-radius: 8px;
     display: flex;
     flex-wrap: wrap;
@@ -2027,13 +2027,13 @@
   }
 
   .sel-count {
-    color: #475569;
+    color: var(--ink-normal);
     font-size: 0.85rem;
     font-weight: 600;
   }
 
   .dl-progress {
-    color: #1d4ed8;
+    color: var(--status-info);
     font-size: 0.85rem;
     font-weight: 700;
   }
@@ -2060,7 +2060,7 @@
   }
 
   .loc-rack {
-    color: #64748b;
+    color: var(--ink-muted);
   }
 
   .loc-shelf {

@@ -143,7 +143,7 @@
   }
 
   .status {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.8rem;
     margin: 0;
   }

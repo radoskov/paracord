@@ -254,8 +254,8 @@
     margin: 0.5rem 0 0;
     padding: 0.4rem 0.6rem;
     border-radius: 0.375rem;
-    background: #fef3c7;
-    color: #78350f;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
     font-size: 0.85rem;
   }
 
@@ -263,7 +263,7 @@
     display: inline-flex;
     gap: 0.25rem;
     margin: 0 0 0.5rem;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border-normal);
     border-radius: 0.5rem;
     padding: 0.15rem;
   }
@@ -277,8 +277,8 @@
   }
 
   .mode.active {
-    background: #2563eb;
-    color: #fff;
+    background: var(--accent-link);
+    color: var(--ink-inverse);
   }
 
   .mode input {
@@ -312,16 +312,16 @@
     display: block;
     width: 100%;
     text-align: left;
-    background: #fff;
-    border: 1px solid var(--border-normal, #cbd5e1);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
-    color: var(--ink-strong, #1f2a36);
+    color: var(--ink-strong);
     padding: 0.6rem 0.7rem;
     cursor: pointer;
   }
 
   .result-row:hover {
-    background: #f4f6f9;
+    background: var(--surface-hover);
   }
 
   .result-head {
@@ -334,8 +334,8 @@
   .rel {
     font-size: 0.78rem;
     font-weight: 700;
-    color: #166534;
-    background: #dcfce7;
+    color: var(--status-success);
+    background: var(--status-success-bg);
     border-radius: 0.75rem;
     padding: 0.05rem 0.45rem;
   }
@@ -349,24 +349,24 @@
   }
 
   .badge.both {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   .badge.lex {
-    background: #e0e7ff;
-    color: #3730a3;
+    background: var(--accent-note-bg);
+    color: var(--accent-note);
   }
 
   .badge.sem {
-    background: #fae8ff;
-    color: #86198f;
+    background: var(--accent-note-bg);
+    color: var(--accent-note);
   }
 
   .passage {
     margin: 0.2rem 0 0;
     font-size: 0.85rem;
-    color: #4b5563;
+    color: var(--ink-normal);
   }
 
   .actions {

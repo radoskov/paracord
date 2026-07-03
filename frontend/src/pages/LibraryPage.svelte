@@ -870,8 +870,8 @@
     margin: 0.25rem 0 0;
     padding: 0.4rem 0.6rem;
     border-radius: 0.375rem;
-    background: #fef3c7;
-    color: #78350f;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
     font-size: 0.85rem;
   }
 
@@ -901,8 +901,8 @@
 
   .more-filters {
     align-items: center;
-    background: #f4f6f9;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     display: flex;
     flex-wrap: wrap;
@@ -912,7 +912,7 @@
 
   .inline {
     align-items: center;
-    color: #44515f;
+    color: var(--ink-normal);
     display: flex;
     flex-direction: row;
     gap: 0.35rem;
@@ -926,25 +926,25 @@
   }
 
   .missing-label {
-    color: #526070;
+    color: var(--ink-muted);
     font-size: 0.82rem;
     font-weight: 600;
   }
 
   .chip {
-    background: #fff;
+    background: var(--surface-overlay);
     border: 1px solid var(--border-normal);
     border-radius: 999px;
-    color: #44515f;
+    color: var(--ink-normal);
     font-size: 0.78rem;
     min-height: 1.9rem;
     padding: 0.15rem 0.6rem;
   }
 
   .chip.on {
-    background: #2d3e50;
-    border-color: #2d3e50;
-    color: #fff;
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   .bar {
@@ -974,8 +974,8 @@
 
   .batch {
     align-items: center;
-    background: #eef4ef;
-    border: 1px solid #cfe3d6;
+    background: var(--status-success-bg);
+    border: 1px solid var(--status-success-border);
     border-radius: 6px;
     display: flex;
     flex-wrap: wrap;
@@ -985,14 +985,14 @@
   }
 
   .danger-btn {
-    border-color: #f1b0a8;
-    color: #b3261e;
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
   }
 
   .link {
     background: none;
     border: none;
-    color: #2563eb;
+    color: var(--accent-link);
     cursor: pointer;
     min-height: auto;
     padding: 0;

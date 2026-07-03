@@ -244,13 +244,13 @@
   }
 
   .danger-btn {
-    border-color: #fca5a5;
-    color: #b3261e;
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
   }
 
   .auto {
     align-items: center;
-    color: #44515f;
+    color: var(--ink-normal);
     display: flex;
     flex-direction: row;
     font-weight: 600;
@@ -258,9 +258,9 @@
   }
 
   .warn {
-    background: #fff7ed;
-    border-color: #fdba74;
-    color: #7c2d12;
+    background: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: var(--status-warning);
     text-align: left;
   }
 
@@ -276,21 +276,21 @@
   }
 
   .semaphore-green {
-    background: #f0fdf4;
-    border-color: #86efac;
-    color: #14532d;
+    background: var(--status-success-bg);
+    border-color: var(--status-success-border);
+    color: var(--status-success);
   }
 
   .semaphore-yellow {
-    background: #fff7ed;
-    border-color: #fdba74;
-    color: #7c2d12;
+    background: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: var(--status-warning);
   }
 
   .semaphore-red {
-    background: #fef2f2;
-    border-color: #fca5a5;
-    color: #7f1d1d;
+    background: var(--status-danger-bg);
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
   }
 
   .light {
@@ -302,15 +302,15 @@
   }
 
   .light-green {
-    background: #22c55e;
+    background: var(--status-success);
   }
 
   .light-yellow {
-    background: #eab308;
+    background: var(--status-warning);
   }
 
   .light-red {
-    background: #ef4444;
+    background: var(--status-danger);
   }
 
   .counts {
@@ -321,8 +321,8 @@
   }
 
   .count {
-    background: #f4f6f9;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 8px;
     color: inherit;
     cursor: pointer;
@@ -333,18 +333,18 @@
   }
 
   .count:hover {
-    border-color: #b9c4d0;
+    border-color: var(--border-strong);
   }
 
   .count.active {
-    border-color: #2d3e50;
-    box-shadow: inset 0 0 0 1px #2d3e50;
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
   }
 
   .linkish {
     background: none;
     border: none;
-    color: #2563eb;
+    color: var(--accent-link);
     cursor: pointer;
     min-height: auto;
     padding: 0;
@@ -358,17 +358,17 @@
   }
 
   .count .k {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.78rem;
     text-transform: uppercase;
   }
 
   .count-failed .n {
-    color: #b3261e;
+    color: var(--status-danger);
   }
 
   .count-started .n {
-    color: #1d4ed8;
+    color: var(--status-info);
   }
 
   .jobs {
@@ -381,7 +381,7 @@
   }
 
   .jobs li {
-    border-bottom: 1px solid #eef1f4;
+    border-bottom: 1px solid var(--border-normal);
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
@@ -397,7 +397,7 @@
 
   .paper {
     align-items: baseline;
-    color: #5a6675;
+    color: var(--ink-muted);
     display: flex;
     flex-wrap: wrap;
     font-size: 0.78rem;
@@ -410,16 +410,16 @@
   }
 
   .hash {
-    background: #eef1f5;
+    background: var(--surface-sunken);
     border-radius: 0.25rem;
-    color: #44515f;
+    color: var(--ink-normal);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
     padding: 0.05rem 0.35rem;
   }
 
   .err-details summary {
-    color: #b3261e;
+    color: var(--status-danger);
     cursor: pointer;
     font-size: 0.78rem;
   }
@@ -433,30 +433,30 @@
   }
 
   .badge-queued {
-    background: #e2e8f0;
-    color: #334155;
+    background: var(--surface-sunken);
+    color: var(--ink-normal);
   }
 
   .badge-started {
-    background: #bfdbfe;
-    color: #1e3a5f;
+    background: var(--status-info-bg);
+    color: var(--status-info);
   }
 
   .badge-finished {
-    background: #bbf7d0;
-    color: #14532d;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   .badge-failed {
-    background: #fecaca;
-    color: #7f1d1d;
+    background: var(--status-danger-bg);
+    color: var(--status-danger);
   }
 
   .err {
-    background: #fff5f5;
-    border: 1px solid #f1d0cc;
+    background: var(--status-danger-bg);
+    border: 1px solid var(--status-danger-border);
     border-radius: 4px;
-    color: #7f1d1d;
+    color: var(--status-danger);
     font-size: 0.74rem;
     margin: 0.3rem 0 0;
     max-height: 16rem;

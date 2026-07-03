@@ -268,7 +268,7 @@
   }
 
   .warn {
-    color: #b45309;
+    color: var(--status-warning);
     font-weight: 600;
   }
 
@@ -278,10 +278,10 @@
   }
 
   .warn-msg {
-    background: #fff7ed;
-    border: 1px solid #fdba74;
+    background: var(--status-warning-bg);
+    border: 1px solid var(--status-warning-border);
     border-radius: 6px;
-    color: #7c2d12;
+    color: var(--status-warning);
     font-weight: 600;
     padding: 0.5rem 0.75rem;
   }

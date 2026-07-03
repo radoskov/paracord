@@ -252,8 +252,8 @@
   }
 
   article {
-    background: #f4f6f9;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     padding: 0.75rem;
   }

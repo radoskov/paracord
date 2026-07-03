@@ -69,7 +69,7 @@
 
   .shelf-picker span {
     font-size: 0.85rem;
-    color: var(--muted, #555);
+    color: var(--ink-muted);
   }
 
   .shelf-picker select,
@@ -80,10 +80,10 @@
   .hint {
     margin: 0.3rem 0 0;
     font-size: 0.8rem;
-    color: var(--muted, #777);
+    color: var(--ink-muted);
   }
 
   .warn {
-    color: #b45309;
+    color: var(--status-warning);
   }
 </style>

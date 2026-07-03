@@ -36,7 +36,7 @@
   }
 
   .modal {
-    background: #fbfcfd;
+    background: var(--surface-raised);
     border-radius: 10px;
     box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
     display: flex;
@@ -54,7 +54,7 @@
 
   .modal-head {
     align-items: center;
-    border-bottom: 1px solid #e1e7ee;
+    border-bottom: 1px solid var(--border-normal);
     display: flex;
     flex-shrink: 0;
     justify-content: space-between;

@@ -276,7 +276,7 @@
 
   th,
   td {
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-normal);
     padding: 0.3rem 0.4rem;
     text-align: left;
   }
@@ -295,22 +295,22 @@
     padding: 0.1rem 0.5rem;
     font-size: 0.75rem;
     white-space: nowrap;
-    background: #eef;
+    background: var(--surface-sunken);
   }
 
   .pill.matched {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   .pill.title_only {
-    background: #fef9c3;
-    color: #854d0e;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
 
   .pill.no_match {
-    background: #fee2e2;
-    color: #991b1b;
+    background: var(--status-danger-bg);
+    color: var(--status-danger);
   }
 
   .commit-row {
@@ -335,8 +335,8 @@
   }
 
   .warn {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
 
   .msg {

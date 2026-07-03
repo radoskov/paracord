@@ -133,7 +133,7 @@
                 </div>
               </form>
             {:else}
-              <span class="dot" style={`background:${tag.color ?? '#94a3b8'}`}></span>
+              <span class="dot" style={`background:${tag.color ?? 'var(--ink-muted)'}`}></span>
               <strong>{tag.name}</strong>
               {#if tag.description}<small class="muted">{tag.description}</small>{/if}
               <span class="row-actions">

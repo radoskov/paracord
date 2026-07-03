@@ -153,7 +153,7 @@
     padding: 0;
   }
   .events li {
-    border-bottom: 1px solid #eef1f4;
+    border-bottom: 1px solid var(--border-normal);
     padding: 0.35rem 0;
   }
   .row {

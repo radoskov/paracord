@@ -1030,7 +1030,7 @@
   }
 
   h3 {
-    color: #1f2a36;
+    color: var(--ink-strong);
     font-size: 1rem;
     line-height: 1.2;
     margin: 0;
@@ -1040,7 +1040,7 @@
   span,
   small,
   .empty {
-    color: #667381;
+    color: var(--ink-muted);
   }
 
   span {
@@ -1053,10 +1053,10 @@
   }
 
   button {
-    background: white;
-    border: 1px solid #bcc7d2;
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
-    color: #21303d;
+    color: var(--ink-strong);
     cursor: pointer;
     font: inherit;
     font-weight: 700;
@@ -1072,7 +1072,7 @@
   input,
   select,
   textarea {
-    border: 1px solid #bcc7d2;
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     font: inherit;
     min-height: 2.2rem;
@@ -1085,14 +1085,14 @@
   }
 
   button.active {
-    background: #203142;
-    color: white;
+    background: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   .pdf-toolbar {
     align-items: center;
-    background: #f4f6f9;
-    border: 1px solid #d8dee6;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     display: flex;
     flex-wrap: wrap;
@@ -1120,7 +1120,7 @@
   }
 
   .search-hint {
-    color: #667381;
+    color: var(--ink-muted);
     font-size: 0.74rem;
     margin: -0.3rem 0 0;
   }
@@ -1149,8 +1149,8 @@
   }
 
   .page-wrap {
-    background: #eef2f6;
-    border: 1px solid #d8dee6;
+    background: var(--surface-hover);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     display: flex;
     justify-content: center;
@@ -1259,7 +1259,7 @@
   }
 
   .error {
-    color: #b3261e;
+    color: var(--status-danger);
   }
 
   .coord-note,
@@ -1287,8 +1287,8 @@
 
   .context-list article,
   .annotation-list article {
-    background: #eef2f6;
-    border: 1px solid #d8dee6;
+    background: var(--surface-hover);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     padding: 0.7rem;
   }
@@ -1327,8 +1327,8 @@
   }
 
   .ann-delete {
-    border-color: #e0b4b0;
-    color: #b3261e;
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
     min-height: 1.8rem;
     padding: 0.15rem 0.45rem;
   }

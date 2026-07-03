@@ -350,7 +350,7 @@
   }
 
   .hintline {
-    color: #b45309;
+    color: var(--status-warning);
     font-size: 0.8rem;
     margin: 0;
   }
@@ -375,8 +375,8 @@
   }
 
   .item.active {
-    background: #dfece3;
-    border-color: #8eb39a;
+    background: var(--status-success-bg);
+    border-color: var(--status-success-border);
   }
 
   .head {
@@ -401,8 +401,8 @@
   }
 
   .add-shelf {
-    background: #f4f6f9;
-    border: 1px solid #e1e7ee;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
     border-radius: 6px;
     margin-top: 0.5rem;
     padding: 0.7rem;
@@ -416,9 +416,9 @@
   }
 
   .badge {
-    background: #fde68a;
+    background: var(--status-warning-bg);
     border-radius: 0.25rem;
-    color: #78350f;
+    color: var(--status-warning);
     font-size: 0.7rem;
     padding: 0.05rem 0.35rem;
   }

@@ -170,14 +170,14 @@
 
   th,
   td {
-    border-bottom: 1px solid #d7dde5;
+    border-bottom: 1px solid var(--border-normal);
     padding: 0.66rem 0.7rem;
     text-align: left;
     vertical-align: middle;
   }
 
   th {
-    color: #526070;
+    color: var(--ink-muted);
     font-size: 0.76rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -196,7 +196,7 @@
   }
 
   .sort.active {
-    color: #2d3e50;
+    color: var(--accent-primary);
   }
 
   .indicator {
@@ -210,7 +210,7 @@
 
   tbody tr:hover,
   tbody tr.selected {
-    background: #edf4ef;
+    background: var(--status-success-bg);
   }
 
   strong,
@@ -220,7 +220,7 @@
   }
 
   span {
-    color: #64717f;
+    color: var(--ink-muted);
     font-size: 0.78rem;
     margin-top: 0.18rem;
   }
@@ -238,9 +238,9 @@
   }
 
   .kw {
-    background: #eef2f6;
+    background: var(--surface-sunken);
     border-radius: 999px;
-    color: #44515f;
+    color: var(--ink-normal);
     display: inline-block;
     font-size: 0.72rem;
     margin: 0;
@@ -248,7 +248,7 @@
   }
 
   .empty {
-    color: #6f7b88;
+    color: var(--ink-muted);
     cursor: default;
     text-align: center;
   }
