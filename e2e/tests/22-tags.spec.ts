@@ -1,10 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-import { apiDeleteWorksByTitle, apiLogin, expectSignedIn, uniqueName } from '../helpers';
+import {
+  apiDeleteTagsByName,
+  apiDeleteWorksByTitle,
+  apiLogin,
+  expectSignedIn,
+  uniqueName,
+} from '../helpers';
 
 // Journey 22 — tags: create a tag on the Tags tab, then apply it to a paper and remove it again from
-// the paper's detail panel (where tag application lives). Note: the app has no UI to rename or delete
-// a tag, so the created tag is left behind (its name is unique per run to stay collision-free).
+// the paper's detail panel (where tag application lives). Applied tags are listed as chips, each with
+// its own remove control.
 test('Journey 22 — create a tag, apply it to a paper, then remove it', async ({ page, request }) => {
   const token = await apiLogin(request);
   const tagName = uniqueName('tag');
@@ -32,15 +38,17 @@ test('Journey 22 — create a tag, apply it to a paper, then remove it', async (
       .locator('details')
       .filter({ has: page.locator('summary', { hasText: 'Tags' }) });
     await tagsSection.locator('summary').click();
-    await tagsSection.getByLabel('Tag').selectOption({ label: tagName });
+    await tagsSection.getByLabel('Tag', { exact: true }).selectOption({ label: tagName });
     await tagsSection.getByRole('button', { name: 'Apply' }).click();
     await expect(page.getByText('Tag applied', { exact: true })).toBeVisible();
+    await expect(tagsSection.getByLabel('Applied tags').getByText(tagName)).toBeVisible();
 
-    // --- Remove the tag from the paper ---
-    await tagsSection.getByLabel('Tag').selectOption({ label: tagName });
-    await tagsSection.getByRole('button', { name: 'Remove' }).click();
+    // --- Remove the tag from the paper via its chip's remove control ---
+    await tagsSection.getByRole('button', { name: `Remove tag ${tagName}` }).click();
     await expect(page.getByText('Tag removed', { exact: true })).toBeVisible();
+    await expect(tagsSection.getByLabel('Applied tags').getByText(tagName)).toHaveCount(0);
   } finally {
     await apiDeleteWorksByTitle(request, token, paperTitle);
+    await apiDeleteTagsByName(request, token, tagName);
   }
 });

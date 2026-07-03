@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
 
   import { ApiClient, type Tag } from '../api/client';
+  import { canEdit, isEditor, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -12,6 +13,12 @@
   let newTagDescription = '';
   let loading = false;
   let message = '';
+
+  // Inline edit state: the tag currently being renamed/re-coloured/re-described, if any.
+  let editingId: string | null = null;
+  let editName = '';
+  let editColor = '';
+  let editDescription = '';
 
   onMount(load);
 
@@ -47,6 +54,42 @@
       tags = await client.listTags();
     }, 'Tag created');
   }
+
+  function startEdit(tag: Tag): void {
+    editingId = tag.id;
+    editName = tag.name;
+    editColor = tag.color ?? '';
+    editDescription = tag.description ?? '';
+  }
+
+  function cancelEdit(): void {
+    editingId = null;
+  }
+
+  async function saveEdit(): Promise<void> {
+    if (!editingId || !editName.trim()) return;
+    const id = editingId;
+    await run(async () => {
+      await client.updateTag(id, {
+        name: editName.trim(),
+        color: editColor.trim() || null,
+        description: editDescription.trim() || null,
+      });
+      editingId = null;
+      tags = await client.listTags();
+    }, 'Tag updated');
+  }
+
+  async function removeTag(tag: Tag): Promise<void> {
+    if (!window.confirm(`Delete tag “${tag.name}”? It will be removed from every paper, shelf ` +
+        `and rack it is applied to. This can't be undone.`))
+      return;
+    await run(async () => {
+      await client.deleteTag(tag.id);
+      if (editingId === tag.id) editingId = null;
+      tags = await client.listTags();
+    }, 'Tag deleted');
+  }
 </script>
 
 <section class="layout">
@@ -79,9 +122,29 @@
       <ul class="tag-list">
         {#each tags as tag (tag.id)}
           <li>
-            <span class="dot" style={`background:${tag.color ?? '#94a3b8'}`}></span>
-            <strong>{tag.name}</strong>
-            {#if tag.description}<small class="muted">{tag.description}</small>{/if}
+            {#if editingId === tag.id}
+              <form on:submit|preventDefault={saveEdit} class="edit-tag">
+                <input bind:value={editName} aria-label="Edit tag name" placeholder="Tag name" />
+                <input bind:value={editColor} aria-label="Edit tag colour" placeholder="#color (optional)" />
+                <input bind:value={editDescription} aria-label="Edit tag description" placeholder="Description (optional)" />
+                <div class="edit-actions">
+                  <button type="submit" disabled={!editName.trim() || loading}>Save</button>
+                  <button type="button" class="secondary" on:click={cancelEdit} disabled={loading}>Cancel</button>
+                </div>
+              </form>
+            {:else}
+              <span class="dot" style={`background:${tag.color ?? '#94a3b8'}`}></span>
+              <strong>{tag.name}</strong>
+              {#if tag.description}<small class="muted">{tag.description}</small>{/if}
+              <span class="row-actions">
+                <button type="button" class="secondary small" on:click={() => startEdit(tag)}
+                  disabled={loading || !$canEdit}
+                  title={$canEdit ? 'Rename or edit this tag' : INSUFFICIENT_ROLE}>Edit</button>
+                <button type="button" class="danger small" on:click={() => removeTag(tag)}
+                  disabled={loading || !$isEditor}
+                  title={$isEditor ? 'Delete this tag everywhere it is applied' : INSUFFICIENT_ROLE}>Delete</button>
+              </span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -129,6 +192,33 @@
     align-items: center;
     display: flex;
     gap: 0.5rem;
+  }
+
+  .row-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-left: auto;
+  }
+
+  .small {
+    min-height: 1.8rem;
+    padding: 0.15rem 0.5rem;
+  }
+
+  .edit-tag {
+    display: grid;
+    gap: 0.4rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) minmax(0, 1fr) auto;
+    width: 100%;
+  }
+
+  .edit-tag input {
+    min-width: 0;
+  }
+
+  .edit-actions {
+    display: flex;
+    gap: 0.4rem;
   }
 
   .dot {

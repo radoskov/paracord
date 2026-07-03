@@ -228,6 +228,47 @@ export async function apiArchiveRacksByName(
   }
 }
 
+/** Create a tag via the API (setup shortcut); returns its id. */
+export async function apiCreateTag(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+): Promise<string> {
+  const res = await request.post(`${API_URL}/api/v1/tags`, {
+    headers: auth(token),
+    data: { name },
+  });
+  expect(res.ok(), `createTag failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).id as string;
+}
+
+/** Delete every tag whose name exactly matches `name` (idempotent cleanup; editor+). */
+export async function apiDeleteTagsByName(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+): Promise<void> {
+  const res = await request.get(`${API_URL}/api/v1/tags`, { headers: auth(token) });
+  if (!res.ok()) return;
+  const tags = (await res.json()) as Array<{ id: string; name: string }>;
+  for (const t of tags) {
+    if (t.name === name) {
+      await request.delete(`${API_URL}/api/v1/tags/${t.id}`, { headers: auth(token) });
+    }
+  }
+}
+
+/** Return a paper's applied tags via the API (used to assert tag apply/remove landed). */
+export async function apiListWorkTags(
+  request: APIRequestContext,
+  token: string,
+  workId: string,
+): Promise<Array<{ id: string; name: string; color: string | null }>> {
+  const res = await request.get(`${API_URL}/api/v1/works/${workId}/tags`, { headers: auth(token) });
+  if (!res.ok()) return [];
+  return (await res.json()) as Array<{ id: string; name: string; color: string | null }>;
+}
+
 /** List a work's files via the API (used to poll async GROBID extraction status). */
 export async function apiListWorkFiles(
   request: APIRequestContext,

@@ -35,6 +35,9 @@ export const canManagePapers = derived(currentUser, ($u) => roleAtLeast($u, 'con
 /** True when the signed-in user is a contributor or higher. */
 export const isContributor = derived(currentUser, ($u) => roleAtLeast($u, 'contributor'));
 
+/** True when the signed-in user is an editor or higher (the tag-delete floor). */
+export const isEditor = derived(currentUser, ($u) => roleAtLeast($u, 'editor'));
+
 /** True when the signed-in user is a librarian or higher. */
 export const isLibrarian = derived(currentUser, ($u) => roleAtLeast($u, 'librarian'));
 

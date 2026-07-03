@@ -447,6 +447,13 @@ export interface Tag {
   created_at: string;
 }
 
+// A tag applied to a paper (from GET /works/{id}/tags): just what the chip needs to render.
+export interface AppliedTag {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export interface Source {
   id: string;
   type: string;
@@ -1487,6 +1494,23 @@ export class ApiClient {
 
   async createTag(payload: { name: string; color?: string; description?: string }): Promise<Tag> {
     return this.request<Tag>('/api/v1/tags', { method: 'POST', body: payload });
+  }
+
+  async updateTag(
+    id: string,
+    payload: { name?: string; color?: string | null; description?: string | null },
+  ): Promise<Tag> {
+    return this.request<Tag>(`/api/v1/tags/${id}`, { method: 'PATCH', body: payload });
+  }
+
+  async deleteTag(id: string): Promise<void> {
+    // Removes the tag and every link to it; the tagged papers/shelves/racks just lose the tag.
+    await this.request<void>(`/api/v1/tags/${id}`, { method: 'DELETE' });
+  }
+
+  // The tags applied to one paper (id + name + colour), SEE-gated like the paper itself.
+  async listWorkTags(workId: string): Promise<AppliedTag[]> {
+    return this.request<AppliedTag[]>(`/api/v1/works/${workId}/tags`);
   }
 
   async addTagLink(tagId: string, entityType: string, entityId: string): Promise<void> {
