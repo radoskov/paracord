@@ -39,6 +39,8 @@
   let edgeContext = 'coupling';
   let includeEdges = false;
   let focusWorkId = '';
+  // embedding_cluster projection (P5b): PCA default | UMAP opt-in (needs the AI extra image).
+  let clusterLayout = 'pca';
 
   const EDGE_CONTEXT_OPTIONS = [
     ['coupling', 'Bibliographic coupling (shared references)'],
@@ -132,6 +134,7 @@
         edgeContext,
         focusWorkId: focusWorkId || null,
         includeEdges,
+        layout: isCluster ? clusterLayout : undefined,
       });
     } catch (error) {
       message = errorMessage(error);
@@ -267,8 +270,19 @@
           </select>
         </label>
       {:else if isCluster}
+        <label>Layout
+          <select bind:value={clusterLayout} on:change={reloadIfLoaded} data-testid="viz-cluster-layout"
+            title="2D projection: PCA (built-in) or UMAP (needs the AI extra image)">
+            <option value="pca">PCA (built-in)</option>
+            <option value="umap">UMAP (AI extra)</option>
+          </select>
+        </label>
         <span class="hintline" data-testid="viz-cluster-hint">
-          Papers are placed by embedding proximity (PCA); color shows the topic cluster.
+          {#if clusterLayout === 'umap' && payload && payload.legend?.layout === 'pca'}
+            UMAP needs the opt-in AI extra image; showing PCA.
+          {:else}
+            Papers are placed by embedding proximity; color shows the topic cluster.
+          {/if}
         </span>
       {:else if isNetwork}
         <label>Edge
