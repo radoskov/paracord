@@ -23,7 +23,7 @@ describe('CitationGraph', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
 
-    expect(load).toHaveBeenCalledWith('local_only', false);
+    expect(load).toHaveBeenCalledWith('local_only', false, 'none');
     // Summary renders regardless of render mode.
     expect(screen.getByText(/2 nodes/)).toBeTruthy();
 
@@ -41,6 +41,19 @@ describe('CitationGraph', () => {
     await fireEvent.click(toggle);
     await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
 
-    expect(load).toHaveBeenCalledWith('local_only', true);
+    expect(load).toHaveBeenCalledWith('local_only', true, 'none');
+  });
+
+  it('refetches with the chosen color_by once a graph is built (§8.9 depth)', async () => {
+    const load = vi.fn(async () => GRAPH);
+    render(CitationGraph, { label: '· whole library', load });
+
+    // First build fetches with the default (uncolored) grouping.
+    await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
+    expect(load).toHaveBeenLastCalledWith('local_only', false, 'none');
+
+    // Changing color_by after a graph exists refetches to get the server-computed groups.
+    await fireEvent.change(screen.getByTestId('graph-color-by'), { target: { value: 'status' } });
+    expect(load).toHaveBeenLastCalledWith('local_only', false, 'status');
   });
 });

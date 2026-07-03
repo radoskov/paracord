@@ -88,6 +88,7 @@
   async function loadGraph(
     nodeMode: GraphNodeMode,
     collapseVersions: boolean,
+    colorBy: import('../api/client').GraphColorBy,
   ): Promise<CitationGraphResponse> {
     if (scopeType === 'search_result') {
       // Run the metadata search now and pass the resulting ids as the explicit work set.
@@ -97,6 +98,7 @@
         workIds: works.map((w) => w.id),
         nodeMode,
         collapseVersions,
+        colorBy,
       });
     }
     if (scopeType === 'selected_papers') {
@@ -105,20 +107,22 @@
         workIds: $selectedPaperIds,
         nodeMode,
         collapseVersions,
+        colorBy,
       });
     }
     if (scopeType === 'import_batch') {
-      return client.citationGraph({ scopeType, scopeId: batchId || null, nodeMode, collapseVersions });
+      return client.citationGraph({ scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy });
     }
     if (scopeType === 'saved_filter') {
       // The backend loads the caller's saved filter, resolves + visibility-clamps it to work ids.
-      return client.citationGraph({ scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions });
+      return client.citationGraph({ scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy });
     }
     return client.citationGraph({
       scopeType: scope.scopeType,
       scopeId: scope.scopeId,
       nodeMode,
       collapseVersions,
+      colorBy,
     });
   }
 

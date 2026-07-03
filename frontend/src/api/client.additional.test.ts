@@ -165,6 +165,7 @@ describe('ApiClient request contracts', () => {
       scope: { type: 'selected_papers', id: null, work_ids: ['w1', 'w2'] },
       node_mode: 'local_only',
       collapse_versions: true,
+      color_by: 'none',
     });
   });
 

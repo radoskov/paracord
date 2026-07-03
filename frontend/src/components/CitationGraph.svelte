@@ -1,13 +1,20 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
 
-  import type { CitationGraphResponse, GraphNodeMode, TopicGraphResponse } from '../api/client';
+  import type {
+    CitationGraphResponse,
+    GraphColorBy,
+    GraphNodeMode,
+    GraphSizeBy,
+    TopicGraphResponse,
+  } from '../api/client';
 
   export let label = '';
   export let disabled = false;
   export let load: (
     nodeMode: GraphNodeMode,
     collapseVersions: boolean,
+    colorBy: GraphColorBy,
   ) => Promise<CitationGraphResponse> = async () => ({
     nodes: [],
     edges: [],
@@ -37,6 +44,22 @@
   let graphType: 'citation' | 'topic' = 'citation';
   let nodeMode: GraphNodeMode = 'local_only';
   let collapseVersions = false;
+  // §8.9 depth (Track C P5b). size_by re-styles the live graph client-side (all three centrality
+  // metrics ship on every node); color_by needs server-computed groups, so changing it refetches.
+  let sizeBy: GraphSizeBy = 'degree';
+  let colorBy: GraphColorBy = 'none';
+  // Accessible categorical palette (Okabe–Ito, colorblind-safe). Groups map to it by first-seen
+  // order; the legend below shows the mapping. External nodes stay grey (never color-grouped).
+  const COLOR_PALETTE = [
+    '#0072b2',
+    '#e69f00',
+    '#009e73',
+    '#cc79a7',
+    '#d55e00',
+    '#56b4e9',
+    '#f0e442',
+    '#999999',
+  ];
   let renderMode: 'graph' | 'list' = 'graph';
   // fcose (#8) is the preferred force layout; if the extension didn't load we fall back to cose.
   let layout = 'fcose';
@@ -54,6 +77,8 @@
   let cy: any = null;
   let cyError = false;
   let fcoseRegistered = false;
+  // Topology signature of the currently-rendered graph — a matching refetch re-styles in place.
+  let lastTopoSig = '';
   // Hover tooltip (#8).
   let tooltip = { show: false, x: 0, y: 0, html: '' };
 
@@ -64,7 +89,7 @@
         topicGraph = await loadTopic();
         graph = null;
       } else {
-        graph = await load(nodeMode, collapseVersions);
+        graph = await load(nodeMode, collapseVersions, colorBy);
         topicGraph = null;
       }
     } finally {
@@ -73,18 +98,36 @@
   }
 
   // Unified node/edge shape for rendering, derived from whichever graph is active.
-  type RNode = { id: string; label: string; kind: 'local' | 'external'; workId: string | null; year: number | null; venue: string | null; doi: string | null };
+  type RNode = { id: string; label: string; kind: 'local' | 'external'; workId: string | null; year: number | null; venue: string | null; doi: string | null; degree: number; pagerank: number; betweenness: number; colorGroup: string | null; warning: boolean };
   type REdge = { source: string; target: string; weight: number; resolution?: string };
 
   $: rNodes = (() => {
     if (graphType === 'topic' && topicGraph) {
-      return topicGraph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: 'local', workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi ?? null }));
+      return topicGraph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: 'local', workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi ?? null, degree: 0, pagerank: 0, betweenness: 0, colorGroup: null, warning: false }));
     }
     if (graph) {
-      return graph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: n.type, workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi }));
+      return graph.nodes.map<RNode>((n) => ({ id: n.id, label: n.label, kind: n.type, workId: n.work_id, year: n.year, venue: n.venue ?? null, doi: n.doi, degree: n.degree ?? 0, pagerank: n.pagerank ?? 0, betweenness: n.betweenness ?? 0, colorGroup: n.color_group ?? null, warning: n.warning ?? false }));
     }
     return [] as RNode[];
   })();
+
+  // Distinct color groups (citation graph only), in first-seen order, for the palette + legend.
+  $: colorGroups = (() => {
+    if (graphType !== 'citation' || colorBy === 'none') return [] as string[];
+    const seen: string[] = [];
+    for (const n of rNodes) if (n.colorGroup && !seen.includes(n.colorGroup)) seen.push(n.colorGroup);
+    return seen;
+  })();
+
+  function colorFor(group: string | null): string {
+    if (!group) return '#3b6ea5';
+    const i = colorGroups.indexOf(group);
+    return COLOR_PALETTE[i % COLOR_PALETTE.length];
+  }
+
+  function metricOf(n: RNode): number {
+    return sizeBy === 'pagerank' ? n.pagerank : sizeBy === 'betweenness' ? n.betweenness : n.degree;
+  }
   $: rEdges = (() => {
     if (graphType === 'topic' && topicGraph) return topicGraph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight }));
     if (graph) return graph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight, resolution: e.resolution }));
@@ -163,16 +206,34 @@
           if (layout === 'fcose') layout = 'cose';
         }
       }
+      // Topology signature: node id set + edge count. A color_by refetch keeps the same topology
+      // (only node data changes), so we re-style the live instance in place — no rebuild, no
+      // relayout (D17). Only a real topology change (node_mode / collapse / scope) rebuilds.
+      const sig = `${rNodes.map((n) => n.id).sort().join(',')}|${rEdges.length}`;
+      if (cy && sig === lastTopoSig) {
+        cy.batch(() => {
+          for (const node of rNodes) {
+            const el = cy.getElementById(node.id);
+            if (el.length) {
+              el.data('color', colorFor(node.colorGroup));
+              el.data('warn', node.warning ? 1 : 0);
+            }
+          }
+        });
+        applySizing();
+        applyFilters();
+        return;
+      }
       if (cy) {
         cy.destroy();
         cy = null;
       }
+      lastTopoSig = sig;
       // Build the FULL element set once (edges carry a stable `e{index}` id). The client-side
       // filters (#7/#8) are applied by showing/hiding elements on the live instance (D17), so a
-      // filter toggle no longer rebuilds the graph or re-runs the layout — only a data change or an
-      // explicit re-layout does. Node size still maps degree over the whole edge set.
-      const deg = degrees(rEdges);
-      const maxDeg = Math.max(1, ...Object.values(deg));
+      // filter toggle no longer rebuilds the graph or re-runs the layout. Node size (applySizing) and
+      // color/warning are per-node data so a size_by / color_by change re-styles without a relayout.
+      const maxWeight = Math.max(1, ...rEdges.map((e) => e.weight));
       const elements = [
         ...rNodes.map((node) => ({
           data: {
@@ -183,7 +244,8 @@
             doi: node.doi,
             year: node.year,
             venue: node.venue,
-            deg: deg[node.id] ?? 0,
+            color: colorFor(node.colorGroup),
+            warn: node.warning ? 1 : 0,
           },
         })),
         ...rEdges.map((edge, index) => ({
@@ -208,9 +270,9 @@
               'text-wrap': 'ellipsis',
               'text-max-width': '120px',
               color: '#1f2a36',
-              'background-color': '#3b6ea5',
-              width: `mapData(deg, 0, ${maxDeg}, 16, 56)`,
-              height: `mapData(deg, 0, ${maxDeg}, 16, 56)`,
+              'background-color': 'data(color)',
+              width: 28,
+              height: 28,
             },
           },
           {
@@ -218,9 +280,15 @@
             style: { 'background-color': '#b0bccb', shape: 'diamond' },
           },
           {
+            // Warning badge (§8.9): a red ring around nodes with a review warning (multiwork /
+            // duplicate / unresolved) so problem papers stand out at a glance.
+            selector: 'node[warn = 1]',
+            style: { 'border-width': 3, 'border-color': '#d62728', 'border-opacity': 0.95 },
+          },
+          {
             selector: 'edge',
             style: {
-              width: 'mapData(weight, 1, 5, 1, 5)',
+              width: `mapData(weight, 1, ${maxWeight}, 1, 8)`,
               'line-color': '#bcc7d2',
               'target-arrow-color': '#bcc7d2',
               'target-arrow-shape': 'triangle',
@@ -258,12 +326,38 @@
         tooltip = { ...tooltip, show: false };
       });
       cyError = false;
+      applySizing();
       applyFilters();
       relayout();
     } catch {
       // Cytoscape needs a canvas-capable DOM; fall back to the list renderer.
       cyError = true;
     }
+  }
+
+  // Re-size nodes on the live instance from the chosen size_by metric — no rebuild, no relayout
+  // (D17). Degree falls back to the client-side incident-weight sum (covers the topic graph, whose
+  // nodes carry no server centrality). Betweenness/pagerank only exist on the citation graph.
+  function applySizing(): void {
+    if (!cy) return;
+    const clientDeg = degrees(rEdges);
+    const valueOf = (n: RNode): number => {
+      if (graphType === 'citation' && sizeBy === 'pagerank') return n.pagerank;
+      if (graphType === 'citation' && sizeBy === 'betweenness') return n.betweenness;
+      return n.degree || clientDeg[n.id] || 0;
+    };
+    const byId = new Map(rNodes.map((n) => [n.id, valueOf(n)]));
+    const vals = [...byId.values()];
+    const max = Math.max(0, ...vals);
+    const min = Math.min(0, ...vals);
+    cy.batch(() => {
+      cy.nodes().forEach((node: { id: () => string; style: (k: string, v: number) => void }) => {
+        const v = byId.get(node.id()) ?? 0;
+        const size = max === min ? 28 : 16 + ((v - min) / (max - min)) * 40;
+        node.style('width', size);
+        node.style('height', size);
+      });
+    });
   }
 
   function escapeHtml(s: string): string {
@@ -283,6 +377,12 @@
 
   // A filter toggle just shows/hides elements on the live instance — no rebuild, no re-layout (D17).
   $: if (cy && renderMode === 'graph') applyFilters(hideExternalLeaves, hideSingletons);
+
+  // A size_by change just re-sizes the live nodes — no rebuild, no relayout (D17).
+  $: {
+    sizeBy;
+    if (cy && renderMode === 'graph') applySizing();
+  }
 
   onDestroy(() => {
     if (cy) cy.destroy();
@@ -347,6 +447,23 @@
           Collapse versions
         </label>
       {/if}
+      {#if graphType === 'citation' && renderMode === 'graph'}
+        <select bind:value={sizeBy} disabled={disabled || busy} data-testid="graph-size-by"
+          title="What node size represents">
+          <option value="degree">Size: degree</option>
+          <option value="pagerank">Size: PageRank</option>
+          <option value="betweenness">Size: betweenness</option>
+        </select>
+        <select bind:value={colorBy} on:change={() => { if (graph) void build(); }}
+          disabled={disabled || busy} data-testid="graph-color-by"
+          title="Group node colors by an attribute (rebuilds to fetch groups)">
+          <option value="none">Color: none</option>
+          <option value="status">Color: reading status</option>
+          <option value="shelf">Color: shelf</option>
+          <option value="tag">Color: tag</option>
+          <option value="topic">Color: topic</option>
+        </select>
+      {/if}
       <label class="toggle" title="Hide nodes that have no edges">
         <input type="checkbox" bind:checked={hideSingletons}
           aria-label="Hide nodes with no edges" />
@@ -390,10 +507,17 @@
           <div class="cy-tooltip" style={`left:${tooltip.x + 12}px; top:${tooltip.y + 12}px`}>{@html tooltip.html}</div>
         {/if}
       </div>
+      {#if graphType === 'citation' && colorBy !== 'none' && colorGroups.length > 0}
+        <ul class="legend" data-testid="graph-legend" aria-label="Color legend">
+          {#each colorGroups as group (group)}
+            <li><span class="swatch" style={`background:${colorFor(group)}`}></span>{group}</li>
+          {/each}
+        </ul>
+      {/if}
       {#if cyError}
         <p class="empty">Interactive view unavailable here — switch to List.</p>
       {:else}
-        <p class="hint">Node size ≈ degree · hover for details · click a local node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.</p>
+        <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : 'degree'} · red ring = review warning · hover for details · click a local node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.</p>
       {/if}
     {:else}
       <ul class="edges">
@@ -513,6 +637,30 @@
   .hint {
     color: #64717f;
     font-size: 0.85rem;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    list-style: none;
+    margin: 0.4rem 0 0;
+    padding: 0;
+  }
+
+  .legend li {
+    align-items: center;
+    color: #21303d;
+    display: flex;
+    font-size: 0.8rem;
+    gap: 0.35rem;
+  }
+
+  .swatch {
+    border-radius: 3px;
+    display: inline-block;
+    height: 0.8rem;
+    width: 0.8rem;
   }
 
   .hint {

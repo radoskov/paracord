@@ -159,6 +159,9 @@ export type GraphScopeType =
   | 'import_batch'
   | 'saved_filter';
 export type GraphNodeMode = 'local_only' | 'include_external';
+// §8.9 depth (Track C P5b). Node sizing is a client re-style — all three metrics ship on every node.
+export type GraphSizeBy = 'degree' | 'pagerank' | 'betweenness';
+export type GraphColorBy = 'none' | 'shelf' | 'tag' | 'topic' | 'status';
 
 export interface GraphNode {
   id: string;
@@ -169,6 +172,12 @@ export interface GraphNode {
   doi: string | null;
   // Optional venue for hover tooltips (#8); not always populated by the backend.
   venue?: string | null;
+  // §8.9 depth encodings (present when the graph endpoint computed metrics; default 0/null/false).
+  degree?: number;
+  pagerank?: number;
+  betweenness?: number;
+  color_group?: string | null;
+  warning?: boolean;
 }
 
 export interface GraphEdge {
@@ -254,7 +263,9 @@ export interface VizPayload {
   nodes: VizNode[];
   axes: { x: VizAxis; y: VizAxis } | null;
   edges: VizEdge[] | null;
-  legend: { color_by: string; groups: string[] } | null;
+  // `layout` (embedding_cluster only) is the projection actually used (pca/umap) so the UI can
+  // reflect a UMAP→PCA fallback when umap-learn is absent.
+  legend: { color_by: string; groups: string[]; layout?: string } | null;
   notes: string[];
   axis_options: VizAxis[] | null;
   // P5a chart carriers; null for scatter/network views. See backend VizPayload.
@@ -274,6 +285,8 @@ export interface VizParams {
   focusWorkId?: string | null;
   includeEdges?: boolean;
   embeddingModel?: string;
+  // embedding_cluster projection: 'pca' (default) | 'umap' (opt-in, needs the AI extra image).
+  layout?: string;
   currentYear?: number;
   maxNodes?: number;
 }
@@ -2058,6 +2071,7 @@ export class ApiClient {
     workIds?: string[];
     nodeMode: GraphNodeMode;
     collapseVersions?: boolean;
+    colorBy?: GraphColorBy;
   }): Promise<CitationGraphResponse> {
     return this.request<CitationGraphResponse>('/api/v1/graphs/citation', {
       method: 'POST',
@@ -2069,8 +2083,23 @@ export class ApiClient {
         },
         node_mode: payload.nodeMode,
         collapse_versions: payload.collapseVersions ?? false,
+        color_by: payload.colorBy ?? 'none',
       },
     });
+  }
+
+  /** 1-hop (or N-hop) local citation neighborhood of one focus paper (§8.9, Track C P5b). */
+  async citationNeighborhood(
+    workId: string,
+    params: { hops?: number; nodeMode?: GraphNodeMode; colorBy?: GraphColorBy } = {},
+  ): Promise<CitationGraphResponse> {
+    const query = new URLSearchParams();
+    if (params.hops != null) query.set('hops', String(params.hops));
+    if (params.nodeMode) query.set('node_mode', params.nodeMode);
+    if (params.colorBy) query.set('color_by', params.colorBy);
+    return this.request<CitationGraphResponse>(
+      `/api/v1/works/${encodeURIComponent(workId)}/citation-neighborhood?${query}`,
+    );
   }
 
   /** Topic (embedding-similarity) graph over the same scope family as the citation graph (#6). */
@@ -2116,6 +2145,7 @@ export class ApiClient {
     if (params.focusWorkId) query.set('focus_work_id', params.focusWorkId);
     if (params.includeEdges) query.set('include_edges', 'true');
     if (params.embeddingModel) query.set('embedding_model', params.embeddingModel);
+    if (params.layout) query.set('layout', params.layout);
     if (params.currentYear != null) query.set('current_year', String(params.currentYear));
     if (params.maxNodes != null) query.set('max_nodes', String(params.maxNodes));
     return this.request<VizPayload>(`/api/v1/viz/${encodeURIComponent(viewType)}?${query}`);

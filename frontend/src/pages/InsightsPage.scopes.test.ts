@@ -79,6 +79,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
       workIds: ['w1', 'w2'],
       nodeMode: 'local_only',
       collapseVersions: false,
+      colorBy: 'none',
     });
   });
 
@@ -97,6 +98,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
       workIds: ['s1', 's2', 's3'],
       nodeMode: 'local_only',
       collapseVersions: false,
+      colorBy: 'none',
     });
   });
 
@@ -115,6 +117,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
       scopeId: 'batch-1',
       nodeMode: 'local_only',
       collapseVersions: false,
+      colorBy: 'none',
     });
   });
 
@@ -134,6 +137,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
       scopeId: 'sf-1',
       nodeMode: 'local_only',
       collapseVersions: false,
+      colorBy: 'none',
     });
   });
 
