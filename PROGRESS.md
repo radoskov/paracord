@@ -7,6 +7,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## GUI bug fixes — header overlap, dark-theme metadata text, squashed charts (2026-07-03)
+
+Fixed three owner-reported GUI bugs; frontend-only, committed on `main` (not pushed). **Bug 1**
+(sticky nav overlapped content): the wrapped tab bar makes the header ~126px tall, but
+`LibraryPage`'s split-pane assumed `calc(100dvh - 7rem)`, oversizing the pane so it overflowed the
+viewport and the header covered content on scroll — `App.svelte` now measures the header (guarded
+`ResizeObserver`, not `bind:clientHeight`, so App's jsdom tests don't crash) into `--app-header-h`
+and the pane uses `calc(100dvh - var(--app-header-h,4rem) - 3rem)` (pane bottom = viewport exactly).
+**Bug 2** (black-on-dark metadata text in dark themes): the global `input/select/textarea` rule set
+a dark background but no `color`, so native controls defaulted to near-black — added
+`color: var(--ink-strong)` (offending selector `:global(input),:global(select),:global(textarea)`
+in `App.svelte`); now `#cdd6f4` on the dark surface, AA pass, light themes unaffected. **Bug 3**
+(ECharts/Cytoscape squashed to ~50px): they init before the flex/tab container has its width — added
+a guarded `ResizeObserver` per container calling `chart.resize()` (`VisualizationsPage`,
+`CitationSummaryPage`) / `cy.resize()` + debounced `relayout()` (`CitationGraph`), disconnected on
+destroy; charts now fill their container in light + dark. Also added
+`optimizeDeps.include: ['echarts','cytoscape','cytoscape-fcose']` to `vite.config.ts` (kills the
+first-import 504). Verified: `make frontend-check` green (153 tests, build OK); `check_secrets`
+clean; screenshots re-captured (not committed) in `/home/zednik/paracord-theme-shots/`. Handoff:
+`docs/agent_handoffs/2026-07-03-gui-bugfixes-header-darktext-charts.md`.
+
 ## Theming — Playwright E2E journeys (2026-07-03)
 
 Closed the browser-E2E gap for theming (P3/P4 shipped with vitest + backend tests but no Playwright
