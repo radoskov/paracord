@@ -64,12 +64,22 @@ MAX_NODES = 500
 _METRIC_CACHE_NOTE = "metrics computed per request; add a scope-keyed cache in P3+"
 
 # P3 embedding-cluster layout cache (the scope-keyed cache _METRIC_CACHE_NOTE flagged). Keyed by
-# ``(scope signature, model)`` — the scope signature is the sorted set of placed work ids, so a
-# changed vector set (a paper (re)indexed for the model) yields a new key. The stored ``vector_hash``
-# guards against a same-scope/same-model vector change (values updated in place): a hash mismatch
-# recomputes and overwrites, so the cache self-invalidates instead of serving a stale layout. An
-# in-process dict is enough for a mostly single-user / few-LAN-user deployment.
-_LAYOUT_CACHE: dict[tuple[tuple[str, ...], str | None], tuple[str, np.ndarray, list[int]]] = {}
+# ``(scope signature, model, layout)`` — the scope signature is the sorted set of placed work ids, so
+# a changed vector set (a paper (re)indexed for the model) yields a new key, and PCA vs UMAP (P5b)
+# cache independently. The stored ``vector_hash`` guards against a same-key vector change (values
+# updated in place): a hash mismatch recomputes and overwrites, so the cache self-invalidates instead
+# of serving a stale layout. An in-process dict is enough for a mostly single-user / few-LAN-user
+# deployment. Cached tuple: ``(vector_hash, coords, assignments, effective_layout, layout_note)``.
+_LAYOUT_CACHE: dict[
+    tuple[tuple[str, ...], str | None, str],
+    tuple[str, np.ndarray, list[int], str, str | None],
+] = {}
+
+# Embedding-cluster layout algorithms (§2b). ``pca`` (numpy, instant, no dep) is the default; ``umap``
+# is opt-in and needs ``umap-learn`` from the AI extra image (see backend/Dockerfile ml-extraction).
+# When ``umap`` is requested but the package is absent, the layout falls back to PCA with a note.
+LAYOUT_ALGORITHMS = ("pca", "umap")
+DEFAULT_LAYOUT = "pca"
 
 # Shared axis option set (§2a). Both the X and Y dropdown draw from this; P3+ registers more by
 # adding an entry plus a branch in ``_axis_values``.
@@ -530,6 +540,9 @@ class _EmbeddingLayout:
     assignments: list[int]
     model_label: str | None
     note: str | None
+    # The layout actually used (``pca``/``umap``): a requested ``umap`` degrades to ``pca`` when
+    # ``umap-learn`` is absent, so this can differ from the requested layout.
+    layout: str = DEFAULT_LAYOUT
 
     @property
     def empty(self) -> bool:
@@ -537,9 +550,14 @@ class _EmbeddingLayout:
 
 
 def _embedding_layout(
-    db: Session, works: list[Work], embedding_model: str | None
+    db: Session, works: list[Work], embedding_model: str | None, layout: str = DEFAULT_LAYOUT
 ) -> _EmbeddingLayout:
-    """Source dense vectors, then PCA-project + cluster them, reusing the cache when possible."""
+    """Source dense vectors, then project (PCA/UMAP) + cluster them, reusing the cache when possible.
+
+    ``layout`` selects the 2D projection: ``pca`` (default) or the opt-in ``umap``. A requested
+    ``umap`` falls back to PCA — with a note — when ``umap-learn`` is not installed (it lives in the
+    AI extra image, not the base deps), so the map always renders.
+    """
     matrix, kept, model_label, note = _scope_dense_matrix(db, works, embedding_model)
     if matrix is None:
         return _EmbeddingLayout(None, [], [], model_label, note)
@@ -548,17 +566,70 @@ def _embedding_layout(
     vector_hash = hashlib.md5(  # noqa: S324 - cache fingerprint, not a security control.
         np.ascontiguousarray(matrix, dtype=float).tobytes()
     ).hexdigest()
-    cache_key = (scope_sig, model_label)
+    cache_key = (scope_sig, model_label, layout)
     cached = _LAYOUT_CACHE.get(cache_key)
     if cached is not None and cached[0] == vector_hash:
-        return _EmbeddingLayout(cached[1], kept, cached[2], model_label, note)
+        merged = _join_notes(note, cached[4])
+        return _EmbeddingLayout(cached[1], kept, cached[2], model_label, merged, cached[3])
 
-    coords = _pca_2d(matrix)
+    coords, effective_layout, layout_note = _project_2d(matrix, layout)
     k = max(1, min(DEFAULT_MAX_TOPICS, len(kept)))
     dense_dicts = [{i: float(v) for i, v in enumerate(row)} for row in matrix]
     assignments = _kmeans(dense_dicts, k)
-    _LAYOUT_CACHE[cache_key] = (vector_hash, coords, assignments)
-    return _EmbeddingLayout(coords, kept, assignments, model_label, note)
+    _LAYOUT_CACHE[cache_key] = (vector_hash, coords, assignments, effective_layout, layout_note)
+    return _EmbeddingLayout(
+        coords, kept, assignments, model_label, _join_notes(note, layout_note), effective_layout
+    )
+
+
+def _join_notes(*notes: str | None) -> str | None:
+    parts = [n for n in notes if n]
+    return " ".join(parts) if parts else None
+
+
+def _project_2d(matrix: np.ndarray, layout: str) -> tuple[np.ndarray, str, str | None]:
+    """Project ``matrix`` to 2D by the requested layout; return ``(coords, effective_layout, note)``.
+
+    ``umap`` needs the opt-in ``umap-learn`` package (AI extra image). When it is absent — or the
+    scope is too small for UMAP to be meaningful — the projection degrades to PCA with a note so the
+    caller can surface why.
+    """
+    if layout == "umap":
+        if not _umap_available():
+            return (
+                _pca_2d(matrix),
+                "pca",
+                "UMAP layout needs the opt-in AI extra image (umap-learn not installed); showing "
+                "PCA instead.",
+            )
+        coords = _umap_2d(matrix)
+        if coords is None:
+            return _pca_2d(matrix), "pca", "Too few papers for a UMAP layout; showing PCA instead."
+        return coords, "umap", None
+    return _pca_2d(matrix), "pca", None
+
+
+def _umap_available() -> bool:
+    """Whether ``umap-learn`` is importable (an opt-in AI-extra dependency, guarded)."""
+    import importlib.util
+
+    return importlib.util.find_spec("umap") is not None
+
+
+def _umap_2d(matrix: np.ndarray) -> np.ndarray | None:
+    """UMAP-project ``matrix`` (n×d) to 2D; ``None`` when the scope is too small to be meaningful.
+
+    The import is guarded (opt-in dep) and ``random_state`` is pinned so the layout is reproducible
+    (UMAP's JIT/numba cold-start on the first call is expected). Caller caches the result.
+    """
+    import umap  # noqa: PLC0415 - opt-in AI-extra dependency, imported lazily behind a guard.
+
+    n = matrix.shape[0]
+    if n < 3:
+        return None
+    reducer = umap.UMAP(n_components=2, n_neighbors=min(15, n - 1), min_dist=0.1, random_state=42)
+    coords = reducer.fit_transform(matrix)
+    return np.asarray(coords, dtype=float)
 
 
 def _cluster_labels(kept: list[Work], assignments: list[int]) -> dict[int, str]:
@@ -589,6 +660,9 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
     cap = int(params.get("max_nodes") or MAX_NODES)
     size_by = params.get("size_by") or DEFAULT_SIZE_BY
     embedding_model = params.get("embedding_model")
+    layout = params.get("layout") or DEFAULT_LAYOUT
+    if layout not in LAYOUT_ALGORITHMS:
+        raise ValueError(f"Unknown layout: {layout}")
 
     visible = access.visible_work_ids(db, actor)
     scope_works = _scope_works(
@@ -612,15 +686,15 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
         notes.append("No papers in this scope.")
         return VizPayload(view_type="embedding_cluster", nodes=[], axes=EMBEDDING_AXES, notes=notes)
 
-    layout = _embedding_layout(db, works, embedding_model)
-    if layout.note:
-        notes.append(layout.note)
-    if layout.empty:
+    embedding = _embedding_layout(db, works, embedding_model, layout)
+    if embedding.note:
+        notes.append(embedding.note)
+    if embedding.empty:
         return VizPayload(view_type="embedding_cluster", nodes=[], axes=EMBEDDING_AXES, notes=notes)
 
-    kept = layout.kept
-    coords = layout.coords
-    assignments = layout.assignments
+    kept = embedding.kept
+    coords = embedding.coords
+    assignments = embedding.assignments
     labels = _cluster_labels(kept, assignments)
 
     graph = build_citation_graph(
@@ -661,6 +735,9 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
     legend = {
         "color_by": "cluster",
         "groups": sorted({n.color_group for n in nodes if n.color_group is not None}),
+        # The layout actually used (``pca``/``umap``) so the frontend toggle reflects a UMAP→PCA
+        # fallback rather than claiming UMAP ran.
+        "layout": embedding.layout,
     }
     return VizPayload(
         view_type="embedding_cluster",

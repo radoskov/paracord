@@ -99,6 +99,7 @@ def get_visualization(
     focus_work_id: uuid.UUID | None = Query(None),
     include_edges: bool = Query(False),
     embedding_model: str | None = Query(None),
+    layout: str | None = Query(None),
     current_year: int | None = Query(None),
     max_nodes: int | None = Query(None, ge=1, le=visualization.MAX_NODES),
     db: Session = DB_DEP,
@@ -137,6 +138,7 @@ def get_visualization(
         "focus_work_id": focus_work_id,
         "include_edges": include_edges,
         "embedding_model": embedding_model,
+        "layout": layout,
         "current_year": current_year,
         "max_nodes": max_nodes,
     }

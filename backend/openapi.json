@@ -1485,6 +1485,18 @@
             "title": "Collapse Versions",
             "type": "boolean"
           },
+          "color_by": {
+            "default": "none",
+            "enum": [
+              "none",
+              "shelf",
+              "tag",
+              "topic",
+              "status"
+            ],
+            "title": "Color By",
+            "type": "string"
+          },
           "node_mode": {
             "default": "local_only",
             "enum": [
@@ -1532,6 +1544,36 @@
           "summary"
         ],
         "title": "CitationGraphResponse",
+        "type": "object"
+      },
+      "CitationNeighborhoodResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/NeighborhoodEdgeRead"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/NeighborhoodNodeRead"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "summary"
+        ],
+        "title": "CitationNeighborhoodResponse",
         "type": "object"
       },
       "CitationSummaryResponse": {
@@ -2475,6 +2517,27 @@
       },
       "GraphNodeRead": {
         "properties": {
+          "betweenness": {
+            "default": 0.0,
+            "title": "Betweenness",
+            "type": "number"
+          },
+          "color_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Group"
+          },
+          "degree": {
+            "default": 0,
+            "title": "Degree",
+            "type": "integer"
+          },
           "doi": {
             "anyOf": [
               {
@@ -2494,9 +2557,19 @@
             "title": "Label",
             "type": "string"
           },
+          "pagerank": {
+            "default": 0.0,
+            "title": "Pagerank",
+            "type": "number"
+          },
           "type": {
             "title": "Type",
             "type": "string"
+          },
+          "warning": {
+            "default": false,
+            "title": "Warning",
+            "type": "boolean"
           },
           "work_id": {
             "anyOf": [
@@ -3341,6 +3414,122 @@
           "model"
         ],
         "title": "ModelRef",
+        "type": "object"
+      },
+      "NeighborhoodEdgeRead": {
+        "properties": {
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "weight",
+          "resolution"
+        ],
+        "title": "NeighborhoodEdgeRead",
+        "type": "object"
+      },
+      "NeighborhoodNodeRead": {
+        "properties": {
+          "betweenness": {
+            "default": 0.0,
+            "title": "Betweenness",
+            "type": "number"
+          },
+          "color_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Group"
+          },
+          "degree": {
+            "default": 0,
+            "title": "Degree",
+            "type": "integer"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "pagerank": {
+            "default": 0.0,
+            "title": "Pagerank",
+            "type": "number"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "warning": {
+            "default": false,
+            "title": "Warning",
+            "type": "boolean"
+          },
+          "work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
+        "title": "NeighborhoodNodeRead",
         "type": "object"
       },
       "PaginatedWorks": {
@@ -14956,6 +15145,22 @@
           },
           {
             "in": "query",
+            "name": "layout",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Layout"
+            }
+          },
+          {
+            "in": "query",
             "name": "current_year",
             "required": false,
             "schema": {
@@ -16111,6 +16316,109 @@
           }
         },
         "summary": "Get Work Citation Contexts",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/citation-neighborhood": {
+      "get": {
+        "description": "Local citation neighborhood (``hops`` steps, default 1) around one focus paper (§8.9).\n\nA \"focus on this paper\" graph payload: the focus work plus the works it cites / that cite it, out\nto ``hops`` steps, as the same shape the citation-graph endpoint returns (centrality + color +\nwarning encodings included). Access control: 404 unless the caller may see the focus work, and\nthe neighborhood is clamped to the caller's visible works, so a hidden paper never surfaces.",
+        "operationId": "citation_neighborhood_api_v1_works__work_id__citation_neighborhood_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hops",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 3,
+              "minimum": 1,
+              "title": "Hops",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_mode",
+            "required": false,
+            "schema": {
+              "default": "local_only",
+              "enum": [
+                "local_only",
+                "include_external"
+              ],
+              "title": "Node Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color_by",
+            "required": false,
+            "schema": {
+              "default": "none",
+              "enum": [
+                "none",
+                "shelf",
+                "tag",
+                "topic",
+                "status"
+              ],
+              "title": "Color By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitationNeighborhoodResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Citation Neighborhood",
         "tags": [
           "works"
         ]

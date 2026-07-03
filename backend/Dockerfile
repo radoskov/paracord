@@ -94,6 +94,10 @@ CMD ["sh", "-c", \
 # otherwise degrades to GROBID. Layers on top of `development` so the app + OCR deps are already in.
 FROM development AS ml-extraction
 
+# umap-learn (+ numba/llvmlite) powers the opt-in embedding-cluster UMAP layout (?layout=umap). It is
+# guarded behind an importlib check in app.services.visualization, so the base image degrades to PCA
+# when it is absent — it lives here in the AI extra image, never in the base requirements/lock.
 RUN pip install \
         "nougat-ocr>=0.1.17" \
-        "marker-pdf>=0.2"
+        "marker-pdf>=0.2" \
+        "umap-learn>=0.5"

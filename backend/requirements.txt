@@ -33,3 +33,4 @@ ocrmypdf>=15.0
 # built ONLY via the opt-in ml-extraction image (`make build-ml-extraction`), never installed here:
 #   nougat-ocr>=0.1.17             # extraction_backend=nougat
 #   marker-pdf>=0.2                # extraction_backend=marker
+#   umap-learn>=0.5                # embedding_cluster ?layout=umap (guarded; else falls back to PCA)

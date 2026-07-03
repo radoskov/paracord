@@ -516,6 +516,118 @@ def test_endpoint_embedding_cluster_lists_and_builds(client, db, auth_headers) -
     assert body["axis_options"] is None
 
 
+# --- P5b: UMAP opt-in layout (umap-learn NOT installed in the test image) --------------------------
+
+
+def test_umap_layout_falls_back_to_pca_when_absent(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="A", normalized_title="a", year=2020),
+            Work(canonical_title="B", normalized_title="b", year=2019),
+            Work(canonical_title="C", normalized_title="c", year=2018),
+        ]
+    )
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    # umap-learn is not installed in the test image; be explicit so the test never depends on env.
+    monkeypatch.setattr(viz, "_umap_available", lambda: False)
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(
+        db_session, actor, "embedding_cluster", VizScope(type="library"), {"layout": "umap"}
+    )
+    # Rendered via PCA, and the reason is surfaced honestly.
+    assert payload.legend["layout"] == "pca"
+    assert any("UMAP" in note and "PCA" in note for note in payload.notes)
+    assert all(n.x is not None and n.y is not None for n in payload.nodes)
+
+
+def test_umap_layout_used_when_available(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="A", normalized_title="a", year=2020),
+            Work(canonical_title="B", normalized_title="b", year=2019),
+            Work(canonical_title="C", normalized_title="c", year=2018),
+        ]
+    )
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    # Simulate umap-learn being installed with a deterministic stand-in projection.
+    monkeypatch.setattr(viz, "_umap_available", lambda: True)
+    monkeypatch.setattr(
+        viz, "_umap_2d", lambda matrix: np.arange(matrix.shape[0] * 2, dtype=float).reshape(-1, 2)
+    )
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(
+        db_session, actor, "embedding_cluster", VizScope(type="library"), {"layout": "umap"}
+    )
+    assert payload.legend["layout"] == "umap"
+    assert not any("UMAP" in note for note in payload.notes)
+
+
+def test_layout_cache_keyed_by_layout(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="A", normalized_title="a", year=2020),
+            Work(canonical_title="B", normalized_title="b", year=2019),
+            Work(canonical_title="C", normalized_title="c", year=2018),
+        ]
+    )
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    monkeypatch.setattr(viz, "_umap_available", lambda: True)
+    monkeypatch.setattr(
+        viz, "_umap_2d", lambda matrix: np.arange(matrix.shape[0] * 2, dtype=float).reshape(-1, 2)
+    )
+    viz._LAYOUT_CACHE.clear()
+
+    get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {"layout": "pca"})
+    get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {"layout": "umap"})
+    # PCA and UMAP cache independently — two entries for the same scope/model.
+    assert len(viz._LAYOUT_CACHE) == 2
+
+
+def test_unknown_layout_raises(db_session) -> None:
+    actor = _owner(db_session)
+    db_session.add(Work(canonical_title="A", normalized_title="a", year=2020))
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+    with pytest.raises(ValueError, match="Unknown layout"):
+        get_viz(
+            db_session, actor, "embedding_cluster", VizScope(type="library"), {"layout": "tsne"}
+        )
+
+
+def test_endpoint_umap_layout_degrades_to_pca(client, db, auth_headers) -> None:
+    headers = auth_headers("owner")
+    db.add_all(
+        [
+            Work(canonical_title="Neural machine translation", normalized_title="nmt", year=2016),
+            Work(canonical_title="Convolutional recognition", normalized_title="cnn", year=2015),
+            Work(canonical_title="Graph attention networks", normalized_title="gat", year=2018),
+        ]
+    )
+    db.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    response = client.get("/api/v1/viz/embedding_cluster?layout=umap", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    # umap-learn absent in the test image → server degrades to PCA with a note.
+    assert body["legend"]["layout"] == "pca"
+    assert any("UMAP" in note for note in body["notes"])
+
+
 # --------------------------------------------------------------------------------------------------
 # Endpoint (HTTP/auth) tests — full app against the shared in-memory DB (conftest fixtures).
 # --------------------------------------------------------------------------------------------------
