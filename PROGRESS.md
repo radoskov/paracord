@@ -7,6 +7,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P1 — citation counts (D38 visualization prerequisite) (2026-07-03)
+
+First slice of the D38 visualization module: fetch, store, expose and display an external citation
+count per work. **Model + migration:** three nullable `Work` columns — `citation_count` (Integer),
+`citation_count_source` (String(32)), `citation_count_fetched_at` (timestamptz) — via migration
+`0049_work_citation_count` (chained off the `0048` head). **Fetch/parse
+(`services/metadata_enrichment.py`):** `ExternalMetadata.citation_count` extracted per source
+(Crossref `is-referenced-by-count`, OpenAlex `cited_by_count`, S2 `citationCount`; `citationCount`
+added to the requested S2 fields), coerced by a `_as_int` guard so a missing field is `None` not
+`0`. `enrich_work` snapshots the count from the highest-priority source that reported one —
+**priority OpenAlex → Semantic Scholar → Crossref** (`CITATION_COUNT_PRIORITY`) — overwriting on
+each run (newer wins) and recording source + `fetched_at`. Papers with no resolvable id stay NULL;
+fail-open preserved (reads off the D8 per-source `metas`, so a raising connector never aborts the
+rest and a source that returns no count leaves the prior snapshot untouched). **Expose:** `WorkRead`
+gained the three fields; `openapi.json` regenerated. **Display:** `WorkDetail.svelte` shows
+`Citations <n> via <source> · as of <date>` (locale-formatted) below Topics, with a graceful `—`
+when NULL; the existing per-work Enrich action refreshes it (no new scheduler for P1). Full backend
+suite green (778 passed); `make test-migrations` green (4 passed, parity + no-drift); `ruff
+check/format` clean; `make frontend-check` green (WorkDetail.citations 2/2 + build). Parser +
+`enrich_work` priority/fallback/NULL tests, a WorkRead-exposure API test, and frontend
+render/graceful-dash tests added; fixtures carry realistic counts. See
+`docs/agent_handoffs/2026-07-03-track-c-p1-citation-counts.md`.
+
 ## D31 spec-conformance — D31.4 search operators + D31.5 export formats/targets (2026-07-03)
 
 Track B second batch (items 4–5 of D31). **D31.4 — additional search operators (§14.2):** extended
