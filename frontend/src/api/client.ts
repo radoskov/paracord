@@ -212,6 +212,55 @@ export interface TopicGraphResponse {
   };
 }
 
+// D38 visualization module (Track C P2). Normalized payload every renderer consumes; see
+// backend app.services.visualization.VizPayload.
+export interface VizAxis {
+  key: string;
+  label: string;
+}
+
+export interface VizNode {
+  id: string;
+  x: number | null;
+  y: number | null;
+  size: number | null;
+  color_group: string | null;
+  shape: string;
+  label: string;
+  meta: Record<string, unknown>;
+}
+
+export interface VizEdge {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+export interface VizPayload {
+  view_type: string;
+  nodes: VizNode[];
+  axes: { x: VizAxis; y: VizAxis } | null;
+  edges: VizEdge[] | null;
+  legend: { color_by: string; groups: string[] } | null;
+  notes: string[];
+  axis_options: VizAxis[] | null;
+}
+
+export interface VizParams {
+  scopeType?: GraphScopeType;
+  scopeId?: string | null;
+  workIds?: string[];
+  xAxis?: string;
+  yAxis?: string;
+  sizeBy?: string;
+  colorBy?: string;
+  focusWorkId?: string | null;
+  includeEdges?: boolean;
+  embeddingModel?: string;
+  currentYear?: number;
+  maxNodes?: number;
+}
+
 export type ExportScopeType =
   | 'work'
   | 'shelf'
@@ -1983,6 +2032,29 @@ export class ApiClient {
         ...(payload.minSimilarity != null ? { min_similarity: payload.minSimilarity } : {}),
       },
     });
+  }
+
+  /** Registered visualization view types (D38 P2; for the view-type selector). */
+  async listVizViewTypes(): Promise<string[]> {
+    return (await this.request<{ view_types: string[] }>('/api/v1/viz/')).view_types;
+  }
+
+  /** Build a visualization payload for a view type over the chosen scope (D38 P2). */
+  async visualization(viewType: string, params: VizParams = {}): Promise<VizPayload> {
+    const query = new URLSearchParams();
+    query.set('scope_type', params.scopeType ?? 'library');
+    if (params.scopeId) query.set('scope_id', params.scopeId);
+    for (const id of params.workIds ?? []) query.append('work_ids', id);
+    if (params.xAxis) query.set('x_axis', params.xAxis);
+    if (params.yAxis) query.set('y_axis', params.yAxis);
+    if (params.sizeBy) query.set('size_by', params.sizeBy);
+    if (params.colorBy) query.set('color_by', params.colorBy);
+    if (params.focusWorkId) query.set('focus_work_id', params.focusWorkId);
+    if (params.includeEdges) query.set('include_edges', 'true');
+    if (params.embeddingModel) query.set('embedding_model', params.embeddingModel);
+    if (params.currentYear != null) query.set('current_year', String(params.currentYear));
+    if (params.maxNodes != null) query.set('max_nodes', String(params.maxNodes));
+    return this.request<VizPayload>(`/api/v1/viz/${encodeURIComponent(viewType)}?${query}`);
   }
 
   /** Import batches for the graph's import-batch scope picker (access-filtered, newest first). */

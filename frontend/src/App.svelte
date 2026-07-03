@@ -15,6 +15,7 @@
   import SearchPage from './pages/SearchPage.svelte';
   import ShelvesPage from './pages/ShelvesPage.svelte';
   import TagsPage from './pages/TagsPage.svelte';
+  import VisualizationsPage from './pages/VisualizationsPage.svelte';
   import { currentUser } from './lib/session';
   import type { UserRole } from './api/client';
 
@@ -32,6 +33,7 @@
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
+    { id: 'visualizations', label: 'Visualizations', hint: 'Explore your library visually — the temporal citation map and more.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner', 'admin'] },
     { id: 'ai', label: 'AI & Models', hint: 'Choose the engines for semantic search, summaries and topics, and manage local models.', roles: ['owner', 'admin'] },
     { id: 'events', label: 'Events', hint: 'Browse the audit log of activity across the library.', roles: ['owner', 'admin'] },
@@ -264,6 +266,9 @@
     {/if}
     {#if visited.has('insights')}
       <div hidden={active !== 'insights'}><InsightsPage {client} visible={active === 'insights'} /></div>
+    {/if}
+    {#if visited.has('visualizations')}
+      <div hidden={active !== 'visualizations'}><VisualizationsPage {client} visible={active === 'visualizations'} /></div>
     {/if}
     {#if visited.has('admin')}
       <div hidden={active !== 'admin'}><AdminPage {client} /></div>
