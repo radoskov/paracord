@@ -7,6 +7,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming — Playwright E2E journeys (2026-07-03)
+
+Closed the browser-E2E gap for theming (P3/P4 shipped with vitest + backend tests but no Playwright
+coverage). Four new journeys under `e2e/tests/`, following the existing numbering/helpers/style
+(auto-waiting locators, seed-own-data, idempotent, no arbitrary sleeps): **29** switch theme +
+persist (pick a dark theme, assert `data-theme` flips **and** `--surface-base` actually changes,
+server `/auth/me` + localStorage cache persist across reload, switch back); **30** all four bundled
+themes apply from the picker (assert `data-theme` + a key element stays visible per theme) and the
+Visualizations chart still builds under a dark theme; **31** follow-system via
+`page.emulateMedia({ colorScheme })` — enabling the toggle resolves the light/dark member of the
+current temperature pair (`latte-warm ↔ mocha-warm`) and re-picks on OS flip (the matchMedia change
+listener fires); **32** admin uploads a tiny schema-complete custom theme YAML via the admin Themes
+tab, it appears in the picker, applies live (`data-theme` = slug, `--surface-base` = its value), then
+is deleted. **Frontend touch (testids only, no behavior change)**: `data-testid="theme-option-<id>"`
+on each picker button and `data-testid="follow-system"` on the follow checkbox in
+`ProfilePage.svelte`; two cleanup helpers in `e2e/helpers.ts` (`apiSetUserTheme`,
+`apiDeleteCustomTheme`). Verified: full E2E suite **31 passed / 2 skipped** (the pre-existing GROBID
+journey 9 + arXiv journey 19 external-service skips; no new skips); `make frontend-check` green
+(**153 tests**, 1 skip; build OK); `check_secrets` clean. No backend change. Handoff:
+`docs/agent_handoffs/2026-07-03-theming-e2e-journeys.md`.
+
 ## Theming P4 — custom / hand-edited YAML themes (2026-07-03)
 
 Final theming phase (`docs/THEMING_DESIGN.md` P4): an owner/admin can add a theme from YAML at
