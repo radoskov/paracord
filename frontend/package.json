@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "themes:build": "node scripts/build-themes.mjs"
   },
   "dependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
@@ -22,6 +23,7 @@
     "@testing-library/svelte": "^5.4.2",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "yaml": "^2.5.0"
   }
 }
