@@ -7,6 +7,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## D31 spec-conformance — D31.4 search operators + D31.5 export formats/targets (2026-07-03)
+
+Track B second batch (items 4–5 of D31). **D31.4 — additional search operators (§14.2):** extended
+`services/search_query.py` (known-key set + `ParsedQuery` + parse dispatch) and
+`api/v1/endpoints/works.py` `build_works_query` with the missing operators, all composing on top of
+the SEE-visibility filter: `abstract:<text>` (abstract column), `summary:<text>` (a stored
+`Summary.text`), `fulltext:<text>` (extracted body via `work_chunks.text`), `file:<name>` (a linked
+`File.original_filename`), `has:grobid` (a `RawTeiDocument` for the work; `has:tei` alias),
+`has:ocr` (a linked file with `text_layer_quality == "ocr_added"`), `duplicate:<yes|no>` (an OPEN
+work-type `DuplicateCandidate`), `version:<yes|no>` (`version_group_id` set OR a `WorkVersion` row),
+and `warning:<text|*>` (a `FileWorkLink.warning_state != "none"`; `*`/`any` = any warning, else a
+substring match). All prior operators kept working. **D31.5 — export formats/targets (§8.13):**
+added two renderers in `services/export_service.py` — `latex` (a `\cite{...}` line + a
+`thebibliography` block, LaTeX-escaped) and `pandoc` (a `[@key; ...]` line + a Pandoc-Markdown
+references list) — plus two export targets: `import_batch` (works by `Work.import_batch_id`) and
+`missing_references` (unresolved `Reference` rows with no `resolved_work_id`, rendered as raw
+reference strings). New formats surfaced in the frontend `ExportDialog` via `EXPORT_FORMATS` +
+`ExportFormat`/`ExportScopeType` in `client.ts`. Full backend suite green (773 passed); parser +
+endpoint tests per new operator and golden-output tests for both renderers + both targets added;
+`ruff check/format` clean; `openapi.json` regenerated (new operators are doc-only, but the works
+docstring changed); frontend typecheck + 88 tests green. See
+`docs/agent_handoffs/2026-07-03-d31-4-5-search-operators-export-formats.md`.
+
 ## D31 spec-conformance — B1–B3 (audit wiring, summary provenance, annotation JSON) (2026-07-03)
 
 Track B first batch (items 1–3 of D31). **B1 — audit-event wiring (§7.6):** emitted the events the
