@@ -261,6 +261,52 @@ export interface VizParams {
   maxNodes?: number;
 }
 
+// D38 Track C P4: scoped citation summaries (SPEC §8.11). See backend
+// app.services.citation_summary.CitationSummary.
+export interface RankedWork {
+  work_id: string;
+  title: string;
+  year: number | null;
+  doi: string | null;
+  score: number;
+}
+
+export interface MissingWork {
+  key: string;
+  title: string;
+  doi: string | null;
+  year: number | null;
+  cited_by_count: number;
+  mention_count: number;
+  reference_id: string | null;
+}
+
+export interface YearCount {
+  year: number | null;
+  work_count: number;
+}
+
+export interface CitationSummary {
+  scope_work_count: number;
+  most_cited_local: RankedWork[];
+  most_cited_external: RankedWork[];
+  frequently_cited_missing: MissingWork[];
+  bridge_papers: RankedWork[];
+  isolated_papers: RankedWork[];
+  chronological: YearCount[];
+  bridge_method: string;
+  computed_at: string;
+  version: string;
+  notes: string[];
+}
+
+export interface CitationSummaryParams {
+  scopeType?: GraphScopeType;
+  scopeId?: string | null;
+  workIds?: string[];
+  limit?: number;
+}
+
 export type ExportScopeType =
   | 'work'
   | 'shelf'
@@ -2055,6 +2101,16 @@ export class ApiClient {
     if (params.currentYear != null) query.set('current_year', String(params.currentYear));
     if (params.maxNodes != null) query.set('max_nodes', String(params.maxNodes));
     return this.request<VizPayload>(`/api/v1/viz/${encodeURIComponent(viewType)}?${query}`);
+  }
+
+  /** Scoped citation summary — the §8.11 analytics (D38 P4). Cached + versioned server-side. */
+  async citationSummary(params: CitationSummaryParams = {}): Promise<CitationSummary> {
+    const query = new URLSearchParams();
+    query.set('scope_type', params.scopeType ?? 'library');
+    if (params.scopeId) query.set('scope_id', params.scopeId);
+    for (const id of params.workIds ?? []) query.append('work_ids', id);
+    if (params.limit != null) query.set('limit', String(params.limit));
+    return this.request<CitationSummary>(`/api/v1/citations/summary?${query}`);
   }
 
   /** Import batches for the graph's import-batch scope picker (access-filtered, newest first). */
