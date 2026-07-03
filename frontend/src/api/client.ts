@@ -18,6 +18,11 @@ export interface Work {
   // The user who created this paper (null for system/loose-imported papers). Drives the
   // "can I modify this paper" gate: a contributor may only edit their own papers.
   created_by_user_id: string | null;
+  // External citation-count snapshot (Track C P1); null for papers with no resolvable id. Carries
+  // the source it came from and when it was last fetched, for an "as-of" display.
+  citation_count?: number | null;
+  citation_count_source?: string | null;
+  citation_count_fetched_at?: string | null;
   created_at: string;
   updated_at: string;
   // SEE-filtered shelves/racks for the Library columns (D32); only populated by listWorks.

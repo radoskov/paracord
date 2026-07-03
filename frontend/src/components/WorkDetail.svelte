@@ -745,6 +745,21 @@
     </div>
   {/if}
 
+  <!-- External citation count (Track C P1): a cached snapshot from enrichment. Shows "—" when we
+       have none yet (no resolvable id, or not enriched), with the source + as-of date otherwise. -->
+  <div class="citations" data-testid="citation-count">
+    <span class="citations-label">Citations</span>
+    {#if typeof work.citation_count === 'number'}
+      <span class="citations-value">{work.citation_count.toLocaleString()}</span>
+      <span class="citations-meta">
+        {#if work.citation_count_source}via {work.citation_count_source}{/if}
+        {#if work.citation_count_fetched_at}· as of {new Date(work.citation_count_fetched_at).toLocaleDateString()}{/if}
+      </span>
+    {:else}
+      <span class="citations-value muted" title="No external citation count yet — enrich a paper with a DOI or arXiv id to fetch one.">—</span>
+    {/if}
+  </div>
+
   <details open>
     <summary>Details</summary>
     <form class="fields" on:submit|preventDefault={save}>
@@ -1581,6 +1596,32 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
+  }
+
+  .citations {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+
+  .citations-label {
+    color: #6b4ea3;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .citations-value {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .citations-meta {
+    color: #7a7186;
+    font-size: 0.72rem;
   }
 
   .topic {
