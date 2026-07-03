@@ -9,7 +9,7 @@
 
 import { derived, get, writable } from 'svelte/store';
 
-import { applyTheme, DEFAULT_THEME_ID, getTheme } from './index';
+import { applyTheme, DEFAULT_THEME_ID, getTheme, registerCustomTheme } from './index';
 import { bundledThemes } from './themes.generated';
 import type { Theme, ThemeMode } from './types';
 import { resolveThemeById, type VizTheme } from '../viz/theme';
@@ -41,6 +41,63 @@ export const themeOptions: ThemeOption[] = bundledThemes.map((t) => ({
     accents: t.graph.categorical.slice(0, 4),
   },
 }));
+
+/**
+ * Admin-uploaded custom themes (P4), fetched from `GET /themes` on boot and merged into the picker
+ * alongside the bundled themes. Each item is a ready-to-render `ThemeOption` (the backend already
+ * shapes id/name/mode/temperature + a swatch). Empty until `loadCustomThemes` runs.
+ */
+export const customThemeOptions = writable<ThemeOption[]>([]);
+
+/** Bundled + custom themes for the picker — reactive so a newly-uploaded theme appears live. */
+export const allThemeOptions = derived(customThemeOptions, ($custom) => [
+  ...themeOptions,
+  ...$custom,
+]);
+
+/** Minimal backend surface the theme store needs (satisfied by `ApiClient`; keeps the store testable). */
+export interface ThemeApi {
+  listThemes(): Promise<ThemeOption[]>;
+  getTheme(id: string): Promise<Theme>;
+}
+
+/**
+ * Ensure a theme's full object is registered so it can be applied. Bundled + already-fetched custom
+ * themes are no-ops; an unresolved custom theme is fetched from the backend and registered.
+ */
+export async function ensureThemeLoaded(api: ThemeApi, id: string): Promise<void> {
+  if (getTheme(id)) return;
+  registerCustomTheme(await api.getTheme(id));
+}
+
+/**
+ * Fetch the custom themes for the picker and, when the theme the user actually wants (localStorage
+ * cache → server-persisted) is a custom one, resolve + register + apply it so a custom theme boots
+ * live exactly like a bundled one. Best-effort: a failed fetch leaves the bundled themes intact.
+ */
+export async function loadCustomThemes(
+  api: ThemeApi,
+  persistedThemeId?: string | null,
+): Promise<void> {
+  let list: ThemeOption[];
+  try {
+    list = await api.listThemes();
+  } catch {
+    return;
+  }
+  customThemeOptions.set(list);
+  const wantId = readCachedThemeId() ?? persistedThemeId ?? null;
+  if (wantId && list.some((o) => o.id === wantId)) {
+    try {
+      await ensureThemeLoaded(api, wantId);
+      // Apply if it isn't already the live theme (initTheme may have fallen back to the default
+      // while the custom object was still unresolved).
+      if (get(activeThemeId) !== wantId) setTheme(wantId);
+    } catch {
+      // Leave the fallback theme applied if the resolved object can't be fetched.
+    }
+  }
+}
 
 /** The active theme id — drives `data-theme` and every subscribed viz component's palette. */
 export const activeThemeId = writable<string>(DEFAULT_THEME_ID);

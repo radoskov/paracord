@@ -3,32 +3,35 @@
   import { currentUser } from '../lib/session';
   import {
     activeThemeId,
+    allThemeOptions,
+    ensureThemeLoaded,
     followSystem,
     setFollowSystem,
     setTheme,
-    themeOptions,
     type ThemeOption,
   } from '../lib/theme/store';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
 
-  // --- Appearance (theme picker, P3) ---
-  // Data-driven from the bundled themes so a new theme YAML appears here automatically. Grouped by
-  // mode (Light / Dark) and labelled by temperature (Warm / Cool).
-  const lightThemes: ThemeOption[] = themeOptions.filter((t) => t.mode === 'light');
-  const darkThemes: ThemeOption[] = themeOptions.filter((t) => t.mode === 'dark');
+  // --- Appearance (theme picker, P3 + P4) ---
+  // Data-driven from the bundled themes AND admin-uploaded custom themes (merged reactively), so a
+  // new theme appears here automatically. Grouped by mode (Light / Dark), labelled by temperature.
+  $: lightThemes = $allThemeOptions.filter((t: ThemeOption) => t.mode === 'light');
+  $: darkThemes = $allThemeOptions.filter((t: ThemeOption) => t.mode === 'dark');
   let themeMsg = '';
   let themeErr = '';
 
   // Selecting a theme restyles the whole running app immediately (GUI + open charts/network),
-  // caches it locally for no-flash boot, and persists it to the server profile.
+  // caches it locally for no-flash boot, and persists it to the server profile. A custom theme's
+  // full object is fetched + registered first so it applies live exactly like a bundled one.
   async function selectTheme(id: string): Promise<void> {
     themeMsg = '';
     themeErr = '';
     setFollowSystem(false);
-    setTheme(id);
     try {
+      await ensureThemeLoaded(client, id);
+      setTheme(id);
       const updated = await client.updateProfile({ theme: id });
       currentUser.set(updated);
       themeMsg = 'Theme saved.';

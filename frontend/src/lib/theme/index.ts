@@ -14,8 +14,24 @@ export { bundledThemes };
 // then the app boots to this theme.
 export const DEFAULT_THEME_ID = 'latte-warm';
 
+// Runtime registry of custom (admin-uploaded, P4) themes, resolved from the backend and merged in
+// alongside the compiled bundled themes. Populated by the theme store's `loadCustomThemes`; keyed
+// by theme id so `getTheme`/`applyTheme`/`resolveThemeById` treat a custom theme exactly like a
+// bundled one (renderThemeCss + VizTheme bridge need no special-casing).
+const customThemes = new Map<string, Theme>();
+
+/** Register (or replace) a resolved custom theme so it can be applied like a bundled one. */
+export function registerCustomTheme(theme: Theme): void {
+  customThemes.set(theme.id, theme);
+}
+
+/** All currently-known themes (bundled first, then registered custom ones). */
+export function allThemes(): Theme[] {
+  return [...bundledThemes, ...customThemes.values()];
+}
+
 export function getTheme(id: string): Theme | undefined {
-  return bundledThemes.find((t) => t.id === id);
+  return bundledThemes.find((t) => t.id === id) ?? customThemes.get(id);
 }
 
 /** First bundled theme for a mode (used by the chart theme bridge). */

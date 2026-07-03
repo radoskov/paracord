@@ -18,7 +18,7 @@
   import VisualizationsPage from './pages/VisualizationsPage.svelte';
   import CitationSummaryPage from './pages/CitationSummaryPage.svelte';
   import { currentUser } from './lib/session';
-  import { reconcileTheme } from './lib/theme/store';
+  import { loadCustomThemes, reconcileTheme } from './lib/theme/store';
   import type { UserRole } from './api/client';
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
@@ -100,6 +100,9 @@
       currentUser.set(me);
       // Adopt the server-persisted theme when this device has no localStorage choice yet.
       reconcileTheme(me.theme);
+      // Merge admin-uploaded custom themes into the picker; if the wanted theme (cache/server) is a
+      // custom one, this resolves + applies it live. Best-effort — never blocks the session.
+      void loadCustomThemes(client, me.theme);
     } catch {
       // onUnauthorized already handled a 401; any other failure also means we can't proceed.
       currentUser.set(null);

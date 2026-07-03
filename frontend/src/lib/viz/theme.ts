@@ -6,6 +6,7 @@
 // (`lib/theme`) — the same source that drives the GUI tokens — instead of a hardcoded
 // palette here. `resolveTheme(mode)` returns the bundled theme for that mode's `graph`.
 
+import { getTheme } from '../theme';
 import { bundledThemes } from '../theme/themes.generated';
 import type { Theme } from '../theme/types';
 
@@ -68,7 +69,7 @@ export function resolveTheme(mode: 'light' | 'dark' = 'light'): VizTheme {
  * charts — falls back to the first bundled theme for an unknown/absent id.
  */
 export function resolveThemeById(id: string | null): VizTheme {
-  const theme = bundledThemes.find((t) => t.id === id) ?? bundledThemes[0];
+  const theme = (id ? getTheme(id) : undefined) ?? bundledThemes[0];
   return toVizTheme(theme);
 }
 

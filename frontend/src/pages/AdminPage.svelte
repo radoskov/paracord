@@ -3,6 +3,7 @@
     ApiClient,
     type AccessLevel,
     type AdminUser,
+    type CustomThemeSummary,
     type AgentFileRecord,
     type AgentPrivilege,
     type AgentRecord,
@@ -23,6 +24,8 @@
 
   import Modal from '../components/Modal.svelte';
   import { canManageUsers, currentUser, isOwner } from '../lib/session';
+  import { loadCustomThemes } from '../lib/theme/store';
+  import { errorMessage } from '../lib/ui';
 
   // Static reference shown under the Users widget so an admin/owner can understand each role
   // before assigning it. Kept in sync with ProfilePage's own-role description.
@@ -70,6 +73,7 @@
     { id: 'groups', label: 'Groups' },
     { id: 'findweb', label: 'Find-on-web' },
     { id: 'folders', label: 'Folders', ownerOnly: true },
+    { id: 'themes', label: 'Themes' },
     { id: 'agents', label: 'Agents' },
     { id: 'settings', label: 'Settings' },
   ];
@@ -126,6 +130,15 @@
   // Find-on-web allowed download hosts (owner+admin): merged built-in defaults + DB rows (batch 2 #5).
   let allowedHosts: WebFindAllowedHost[] = [];
   let newAllowedHost = '';
+
+  // Custom themes (Theming P4; owner+admin): upload/replace a hand-edited YAML theme at runtime and
+  // delete existing ones. Uploading merges the theme into everyone's picker (via loadCustomThemes).
+  let customThemes: CustomThemeSummary[] = [];
+  let themeYaml = '';
+  let themeUploadWarnings: string[] = [];
+  let themeUploadMsg = '';
+  let themeUploadErr = '';
+  let uploadingTheme = false;
 
   // Find-on-web download policy (owner-only): restricted | careful | unrestricted (find-on-web v2).
   const DOWNLOAD_POLICIES: { value: WebFindDownloadPolicy; label: string; blurb: string }[] = [
@@ -222,7 +235,48 @@
       if (get(canManageUsers)) {
         applyAppConfig(await client.getAppConfig());
       }
+      // Custom themes (owner+admin) for the Themes tab.
+      if (get(canManageUsers)) customThemes = await client.listThemes();
     });
+  }
+
+  async function uploadThemeYaml(): Promise<void> {
+    const yaml = themeYaml.trim();
+    if (!yaml) return;
+    uploadingTheme = true;
+    themeUploadMsg = '';
+    themeUploadErr = '';
+    themeUploadWarnings = [];
+    try {
+      const result = await client.uploadTheme(yaml);
+      themeUploadWarnings = result.warnings;
+      themeUploadMsg =
+        `Saved theme "${result.name}" (${result.id}).` +
+        (result.warnings.length ? ' Accepted with readability warnings — see below.' : '');
+      themeYaml = '';
+      customThemes = await client.listThemes();
+      // Re-merge into everyone's picker (this session's included) so it appears immediately.
+      void loadCustomThemes(client);
+    } catch (error) {
+      themeUploadErr = errorMessage(error);
+    } finally {
+      uploadingTheme = false;
+    }
+  }
+
+  async function removeCustomTheme(id: string): Promise<void> {
+    if (!confirm(`Delete the custom theme "${id}"? Anyone using it falls back to the default.`)) {
+      return;
+    }
+    themeUploadMsg = '';
+    themeUploadErr = '';
+    try {
+      await client.deleteTheme(id);
+      customThemes = await client.listThemes();
+      void loadCustomThemes(client);
+    } catch (error) {
+      themeUploadErr = errorMessage(error);
+    }
   }
 
   // --- App settings (D18: page-size clamp; D1: overload protection) ---
@@ -1208,6 +1262,77 @@
   </Modal>
 {/if}
 
+{#if activeAdminTab === 'themes' && $canManageUsers}
+  <section class="surface admin-section custom-themes">
+    <h2>Custom themes</h2>
+    <p class="muted">
+      Add a hand-edited theme by pasting its YAML below — no rebuild needed. It joins the four
+      bundled themes in everyone's theme picker (Profile → Appearance). Copy a bundled theme as a
+      starting point and edit the tokens/graph; the schema is described in the theming runbook
+      (<code>docs/runbooks/theming.md</code>). A theme whose graph palette reads poorly is still
+      accepted, with a warning.
+    </p>
+
+    <table class="hosts">
+      <thead>
+        <tr><th>Theme</th><th>Id</th><th>Mode</th><th></th></tr>
+      </thead>
+      <tbody>
+        {#each customThemes as t (t.id)}
+          <tr>
+            <td>
+              <span class="swatch-inline" style={`background:${t.swatch.surface}`}>
+                <span class="dot" style={`background:${t.swatch.primary}`}></span>
+                {#each t.swatch.accents as accent}
+                  <span class="dot" style={`background:${accent}`}></span>
+                {/each}
+              </span>
+              {t.name}
+            </td>
+            <td><code>{t.id}</code></td>
+            <td>{t.mode} · {t.temperature}</td>
+            <td>
+              <button type="button" class="danger" on:click={() => removeCustomTheme(t.id)}
+                title="Delete this custom theme">Remove</button>
+            </td>
+          </tr>
+        {/each}
+        {#if customThemes.length === 0}
+          <tr><td colspan="4" class="muted">No custom themes yet.</td></tr>
+        {/if}
+      </tbody>
+    </table>
+
+    <form class="add-theme" on:submit|preventDefault={uploadThemeYaml}>
+      <label for="theme-yaml">Theme YAML</label>
+      <textarea
+        id="theme-yaml"
+        bind:value={themeYaml}
+        rows="12"
+        spellcheck="false"
+        placeholder={'id: my-theme\nname: "My Theme"\nmode: dark\ntemperature: cool\ntokens:\n  surface: {…}\n  …\ngraph:\n  categorical: ["#…", "#…"]'}
+      ></textarea>
+      <div class="actions">
+        <button type="submit" disabled={uploadingTheme || !themeYaml.trim()}
+          title={themeYaml.trim() ? 'Validate and save this theme' : 'Paste theme YAML first'}>
+          {uploadingTheme ? 'Saving…' : 'Save theme'}
+        </button>
+      </div>
+    </form>
+
+    {#if themeUploadWarnings.length}
+      <div class="theme-warnings" role="status">
+        <strong>Readability warnings (theme still saved):</strong>
+        <ul>
+          {#each themeUploadWarnings as w}<li>{w}</li>{/each}
+        </ul>
+      </div>
+    {/if}
+    {#if themeUploadMsg}<p class="muted">{themeUploadMsg}</p>{/if}
+    {#if themeUploadErr}<p class="danger">{themeUploadErr}</p>{/if}
+  </section>
+{/if}
+
 {#if activeAdminTab === 'settings' && $canManageUsers}
   <div class="admin-columns">
     <section class="surface admin-section">
@@ -1892,5 +2017,46 @@
   .access-inline select {
     flex: 1 1 16rem;
     width: auto;
+  }
+
+  .add-theme {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  .add-theme textarea {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    resize: vertical;
+    width: 100%;
+  }
+  .swatch-inline {
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    gap: 3px;
+    margin-right: 0.4rem;
+    padding: 2px 4px;
+    vertical-align: middle;
+  }
+  .swatch-inline .dot {
+    border-radius: 999px;
+    height: 0.5rem;
+    width: 0.5rem;
+  }
+  .theme-warnings {
+    background: var(--status-warning-bg);
+    border: 1px solid var(--status-warning-border);
+    border-radius: var(--radius-sm);
+    color: var(--ink-normal);
+    font-size: 0.85rem;
+    margin-top: 0.6rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .theme-warnings ul {
+    margin: 0.3rem 0 0;
+    padding-left: 1.1rem;
   }
 </style>

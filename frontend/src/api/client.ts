@@ -1,4 +1,25 @@
+import type { Theme, ThemeMode } from '../lib/theme/types';
+
 export type ReadingStatus = 'unread' | 'skimmed' | 'reading' | 'read' | 'important' | 'revisit';
+
+// Custom themes (Theming P4). A picker-list summary and the admin upload result. The full resolved
+// theme object returned by getTheme() reuses the frontend `Theme` type (same shape as bundled ones).
+export interface CustomThemeSummary {
+  id: string;
+  name: string;
+  mode: ThemeMode;
+  temperature: string;
+  swatch: { surface: string; primary: string; accents: string[] };
+}
+
+export interface ThemeUploadResult {
+  id: string;
+  name: string;
+  mode: string;
+  temperature: string;
+  // Advisory readability warnings; the theme is still accepted/stored when non-empty.
+  warnings: string[];
+}
 
 export interface Work {
   id: string;
@@ -1122,6 +1143,28 @@ export class ApiClient {
 
   async getWork(workId: string): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}`);
+  }
+
+  // --- Custom themes (P4): read for any user; upload/delete owner+admin ---
+  async listThemes(): Promise<CustomThemeSummary[]> {
+    return this.request<CustomThemeSummary[]>('/api/v1/themes');
+  }
+
+  async getTheme(id: string): Promise<Theme> {
+    return this.request<Theme>(`/api/v1/themes/${encodeURIComponent(id)}`);
+  }
+
+  async uploadTheme(yaml: string): Promise<ThemeUploadResult> {
+    return this.request<ThemeUploadResult>('/api/v1/admin/themes', {
+      method: 'POST',
+      body: { yaml },
+    });
+  }
+
+  async deleteTheme(id: string): Promise<void> {
+    await this.request<void>(`/api/v1/admin/themes/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   }
 
   async getPreferences(): Promise<UserPreferences> {
