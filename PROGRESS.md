@@ -7,6 +7,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P3 — embedding-cluster map (PCA-2D) (2026-07-03)
+
+Second visualization view on the P2 seam: an `embedding_cluster` provider
+(`backend/app/services/visualization.py`) places the SEE-filtered scope papers in 2D by embedding
+proximity. **Layout:** server-side **PCA-2D** (numpy SVD, mean-centered, sign-fixed for
+determinism — no new dependency), the default from §2b/D3. **Vectors:** reused from the topic /
+related-works path (`_paper_dense_vectors`) — a real model's stored vectors are never re-embedded on
+the read path; un-indexed papers are skipped and surfaced as an "N papers not indexed — reindex"
+note (D19). With only the hash-BOW baseline active it degrades by embedding each paper's text with
+the baseline provider (dense, PCA-usable) plus an honest note, so the view still renders with the
+default provider. **Coloring:** an embedding k-means `cluster` (reusing the topic modeller's
+`_kmeans` + TF-IDF keyword labeller) → `color_group` = "N. keyword, keyword"; `size` = local degree
+(shared metric helper). **Cache:** the computed layout is cached at the `_METRIC_CACHE_NOTE` site in
+`_LAYOUT_CACHE` keyed by (scope signature, model) with a vector fingerprint that self-invalidates on
+a vector change. Axes are the two fixed PCA components; `axis_options` omitted. **Frontend:**
+`src/lib/viz/embeddingCluster.ts` reuses the P2 ECharts scatter shape (one series per cluster → a
+cluster legend, hover = title + cluster, click → open paper), registered in the viz page (the axis /
+color / edge controls hide for this view). Full backend suite **808 passed** (+11); frontend
+**103 passed / 1 skipped** (+5); ruff clean; `backend/openapi.json` unchanged (view_type is a
+free-form path param). See `docs/agent_handoffs/2026-07-03-track-c-p3-embedding-cluster-map.md`.
+
 ## Track C P2 — viz scaffold + temporal citation map (2026-07-03)
 
 The architectural foundation for the D38 visualization module (P3-P5 build on this) plus the first
