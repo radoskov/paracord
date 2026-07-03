@@ -7,6 +7,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming P4 — custom / hand-edited YAML themes (2026-07-03)
+
+Final theming phase (`docs/THEMING_DESIGN.md` P4): an owner/admin can add a theme from YAML at
+runtime, **no rebuild**, and everyone can pick it. **Storage**: a `custom_themes` DB table (id/slug/
+name/mode/temperature/yaml_source/created_by/created_at) — chosen over a storage-volume directory
+because it backs up with the DB and keeps the canonical YAML in one place (migration
+`0051_custom_themes`). **Backend**: `app/core/theme_schema.py` validates + palette-resolves the YAML
+to the exact frontend `Theme` shape (reject → 400 on malformed YAML, missing required token role, bad
+`id`/`mode`, or a slug colliding with a bundled id; omitted presentational `graph` keys are defaulted
+from tokens); `app/core/palette_check.py` is a Python port of the frontend categorical validator that
+produces **advisory warnings** (never rejects) for a low-readability palette. Endpoints: `POST
+/admin/themes` + `DELETE /admin/themes/{slug}` (owner/admin, audit-evented `theme.uploaded`/
+`theme.deleted`), `GET /themes` (list + swatch) and `GET /themes/{slug}` (resolved object) for any
+authenticated user. Per-user theme validation moved to the service layer so a **custom slug** is a
+valid preference (unknown id now → 400; malformed slug still → 422). **Frontend**: a runtime custom-
+theme registry (`lib/theme/index.ts` `registerCustomTheme`/`getTheme`/`allThemes`) so a custom theme
+applies through the *same* `renderThemeCss`/`VizTheme` path as a bundled one; the store gains
+`customThemeOptions`/`allThemeOptions` + `loadCustomThemes`/`ensureThemeLoaded` (fetched on boot after
+`/auth/me`, merged into the picker, and — when the wanted theme is custom — resolved + applied live);
+an admin **Themes** tab in `AdminPage.svelte` (paste YAML → upload/replace/delete, shows readability
+warnings). A theme is now portable YAML. Verified: full backend suite **877 passed**; migration parity
+green; ruff clean; `backend/openapi.json` regenerated; `make frontend-check` green (**153 tests**, 1
+skip; build OK). Runbook: `docs/runbooks/theming.md`. Handoff:
+`docs/agent_handoffs/2026-07-03-theming-p4-custom-yaml-themes.md`.
+
 ## Theming P3 — theme picker + per-user persistence + live restyle (2026-07-03)
 
 Shipped the switcher (`docs/THEMING_DESIGN.md` P3). **Backend**: `User.theme` (nullable `String(32)`;
