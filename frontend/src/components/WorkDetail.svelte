@@ -5,6 +5,7 @@
     ApiClient,
     type Annotation,
     type AnnotationCreate,
+    type AppliedTag,
     type CitationContext,
     type FieldReview,
     type ReferenceRecord,
@@ -57,6 +58,7 @@
   let annotations: Annotation[] = [];
   let summaries: Summary[] = [];
   let tags: Tag[] = [];
+  let appliedTags: AppliedTag[] = [];
   let applyTagId = '';
   let attachFile: File | null = null;
 
@@ -154,15 +156,17 @@
       reading_status: w.reading_status,
     };
     await run(async () => {
-      [fields, files, contexts, references, annotations, summaries, tags] = await Promise.all([
-        client.listWorkMetadata(w.id),
-        client.listWorkFiles(w.id),
-        client.listCitationContexts(w.id),
-        client.listWorkReferences(w.id),
-        client.listAnnotations(w.id),
-        client.listSummaries(w.id),
-        client.listTags(),
-      ]);
+      [fields, files, contexts, references, annotations, summaries, tags, appliedTags] =
+        await Promise.all([
+          client.listWorkMetadata(w.id),
+          client.listWorkFiles(w.id),
+          client.listCitationContexts(w.id),
+          client.listWorkReferences(w.id),
+          client.listAnnotations(w.id),
+          client.listSummaries(w.id),
+          client.listTags(),
+          client.listWorkTags(w.id),
+        ]);
     });
   }
 
@@ -657,13 +661,15 @@
     if (!applyTagId) return;
     await run(async () => {
       await client.addTagLink(applyTagId, 'work', work.id);
+      appliedTags = await client.listWorkTags(work.id);
     }, 'Tag applied');
   }
 
-  async function removeTag(): Promise<void> {
-    if (!applyTagId) return;
+  async function removeTag(tagId: string): Promise<void> {
+    if (!tagId) return;
     await run(async () => {
-      await client.removeTagLink(applyTagId, 'work', work.id);
+      await client.removeTagLink(tagId, 'work', work.id);
+      appliedTags = await client.listWorkTags(work.id);
     }, 'Tag removed');
   }
 
@@ -963,17 +969,30 @@
 
   <details>
     <summary>Tags</summary>
+    <div class="applied-tags" aria-label="Applied tags">
+      {#if appliedTags.length === 0}
+        <span class="muted">No tags applied yet.</span>
+      {:else}
+        {#each appliedTags as tag (tag.id)}
+          <span class="tag-chip" style={`--tag-color:${tag.color ?? '#94a3b8'}`}>
+            <span class="dot"></span>
+            {tag.name}
+            <button type="button" class="chip-remove" on:click={() => removeTag(tag.id)}
+              disabled={loading || !canModify} aria-label={`Remove tag ${tag.name}`}
+              title={canModify ? `Remove “${tag.name}” from this paper` : INSUFFICIENT_ROLE}>×</button>
+          </span>
+        {/each}
+      {/if}
+    </div>
     <div class="tags">
-      <select bind:value={applyTagId} aria-label="Tag" title="Choose a tag to apply to or remove from this paper">
+      <select bind:value={applyTagId} aria-label="Tag" title="Choose a tag to apply to this paper">
         <option value="">Choose a tag…</option>
         {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
       <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !canModify}
         title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>
-      <button type="button" class="secondary" on:click={removeTag} disabled={!applyTagId || loading || !canModify}
-        title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Remove the chosen tag from this paper' : 'Choose a tag first'}>Remove</button>
     </div>
-    <p class="hintline">Create tags on the Tags tab. (Currently-applied tags aren't listed yet.)</p>
+    <p class="hintline">Create tags on the Tags tab, then apply them here.</p>
   </details>
 
   <details on:toggle={(e) => e.currentTarget.open && !locationsLoaded && loadLocations()}>
@@ -1390,6 +1409,48 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.5rem;
+  }
+
+  .applied-tags {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+
+  .tag-chip {
+    align-items: center;
+    background: #f1f5f9;
+    border: 1px solid #dbe3ec;
+    border-radius: 999px;
+    display: inline-flex;
+    font-size: 0.8rem;
+    gap: 0.35rem;
+    padding: 0.1rem 0.5rem;
+  }
+
+  .tag-chip .dot {
+    background: var(--tag-color, #94a3b8);
+    border-radius: 50%;
+    height: 0.7rem;
+    width: 0.7rem;
+  }
+
+  .chip-remove {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    min-height: auto;
+    padding: 0 0.1rem;
+  }
+
+  .chip-remove:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   /* Rounded-rect card around each References / In-text-citation / File entry so it is

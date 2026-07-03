@@ -35,6 +35,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listAnnotations: vi.fn().mockResolvedValue([]),
     listSummaries: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([]),
+    listWorkTags: vi.fn().mockResolvedValue([]),
     topicWork: vi.fn().mockResolvedValue({ job_id: 'jt', status: 'queued' }),
     keywordsWork: vi.fn().mockResolvedValue({ job_id: 'jk', status: 'queued' }),
     ...overrides,

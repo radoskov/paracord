@@ -35,6 +35,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listAnnotations: vi.fn().mockResolvedValue([]),
     listSummaries: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([]),
+    listWorkTags: vi.fn().mockResolvedValue([]),
     listShelves: vi.fn().mockResolvedValue([]),
     listWorkShelves: vi.fn().mockResolvedValue([]),
     addWorkToShelf: vi.fn().mockResolvedValue(undefined),

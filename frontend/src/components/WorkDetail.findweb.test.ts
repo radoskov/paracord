@@ -86,6 +86,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listAnnotations: vi.fn().mockResolvedValue([]),
     listSummaries: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([]),
+    listWorkTags: vi.fn().mockResolvedValue([]),
     streamFindOnWeb: streamMock(DEFAULT_EVENTS),
     findOnWeb: vi.fn(),
     downloadWebCandidates: vi.fn(),

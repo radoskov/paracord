@@ -35,6 +35,7 @@ function makeClient() {
     listAnnotations: vi.fn().mockResolvedValue([]),
     listSummaries: vi.fn().mockResolvedValue([]),
     listTags: vi.fn().mockResolvedValue([]),
+    listWorkTags: vi.fn().mockResolvedValue([]),
   };
 }
 
