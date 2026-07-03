@@ -64,6 +64,15 @@ class Work(Base):
     version_group_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
+    # External citation count snapshot (Track C P1, visualization prerequisite). A cached impact
+    # figure fetched during enrichment from the source with the highest priority that returned one
+    # (OpenAlex > Semantic Scholar > Crossref); NULL for papers with no resolvable id. Overwritten
+    # on each enrichment (newer wins), with the source it came from and when it was fetched.
+    citation_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    citation_count_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    citation_count_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
