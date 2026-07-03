@@ -4174,6 +4174,51 @@
         "title": "ReorderQueueRequest",
         "type": "object"
       },
+      "ResolvedThemeOut": {
+        "properties": {
+          "graph": {
+            "additionalProperties": true,
+            "title": "Graph",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "temperature": {
+            "title": "Temperature",
+            "type": "string"
+          },
+          "tokens": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Tokens",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "temperature",
+          "tokens",
+          "graph"
+        ],
+        "title": "ResolvedThemeOut",
+        "type": "object"
+      },
       "Role": {
         "description": "Allowed authenticated roles, highest privilege first.\n\nPrivilege ladder (linear): ``owner`` > ``admin`` > ``librarian`` > ``editor`` >\n``contributor`` > ``reader``.\n\n- ``reader``: read accessible content only.\n- ``contributor``: reader + create/edit/delete **own** papers (``Work.created_by_user_id`` ==\n  self); no rack/shelf structural changes.\n- ``editor``: contributor + create/edit/delete **any accessible** paper; still no rack/shelf\n  structural changes.\n- ``librarian``: editor + create/edit/delete racks & shelves and organize papers within them\n  (subject to the rack/shelf grant matrix — \"not even a librarian without a grant\" for\n  visible/private targets).\n- ``admin``: full administration (users/groups/grants/defaults/agents/AI settings/audit log)\n  and bypasses all content ACLs, EXCEPT creating, disabling, deleting or role-changing another\n  ``admin`` or the ``owner``.\n- ``owner``: single, immutable bootstrap account (``make bootstrap-admin``). It can never be\n  disabled, deleted, role-changed, or disable itself, and is the only account that may manage\n  ``admin`` accounts. There is exactly one owner. Bypasses all content ACLs.",
         "enum": [
@@ -5391,6 +5436,113 @@
           "local_file_id"
         ],
         "title": "TeleportRequest",
+        "type": "object"
+      },
+      "ThemeListItem": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "swatch": {
+            "$ref": "#/components/schemas/ThemeSwatch"
+          },
+          "temperature": {
+            "title": "Temperature",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "temperature",
+          "swatch"
+        ],
+        "title": "ThemeListItem",
+        "type": "object"
+      },
+      "ThemeSwatch": {
+        "properties": {
+          "accents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accents",
+            "type": "array"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "string"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface",
+          "primary",
+          "accents"
+        ],
+        "title": "ThemeSwatch",
+        "type": "object"
+      },
+      "ThemeUpload": {
+        "properties": {
+          "yaml": {
+            "title": "Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "yaml"
+        ],
+        "title": "ThemeUpload",
+        "type": "object"
+      },
+      "ThemeUploadResult": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "temperature": {
+            "title": "Temperature",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "temperature",
+          "warnings"
+        ],
+        "title": "ThemeUploadResult",
         "type": "object"
       },
       "TokenResponse": {
@@ -9302,6 +9454,120 @@
         "tags": [
           "admin",
           "import-roots"
+        ]
+      }
+    },
+    "/api/v1/admin/themes": {
+      "post": {
+        "description": "Upload or replace a custom theme from YAML text (owner/admin). See module docstring.",
+        "operationId": "upload_custom_theme_api_v1_admin_themes_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThemeUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeUploadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Custom Theme",
+        "tags": [
+          "admin",
+          "themes"
+        ]
+      }
+    },
+    "/api/v1/admin/themes/{slug}": {
+      "delete": {
+        "description": "Delete a custom theme (owner/admin).",
+        "operationId": "delete_custom_theme_api_v1_admin_themes__slug__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Custom Theme",
+        "tags": [
+          "admin",
+          "themes"
         ]
       }
     },
@@ -15108,6 +15374,119 @@
         "summary": "Add Tag Link",
         "tags": [
           "tags"
+        ]
+      }
+    },
+    "/api/v1/themes": {
+      "get": {
+        "description": "List the custom themes (id/name/mode/temperature + swatch) to merge into the picker.",
+        "operationId": "list_custom_themes_api_v1_themes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ThemeListItem"
+                  },
+                  "title": "Response List Custom Themes Api V1 Themes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Custom Themes",
+        "tags": [
+          "themes"
+        ]
+      }
+    },
+    "/api/v1/themes/{slug}": {
+      "get": {
+        "description": "Return one custom theme resolved to the frontend Theme object (tokens + graph).",
+        "operationId": "get_custom_theme_api_v1_themes__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedThemeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Custom Theme",
+        "tags": [
+          "themes"
         ]
       }
     },

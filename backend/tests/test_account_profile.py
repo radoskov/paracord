@@ -62,8 +62,13 @@ def test_theme_defaults_null_and_round_trips(client, auth_headers):
 
 def test_theme_rejects_unknown_id(client, auth_headers):
     h = auth_headers("owner")
+    # A well-formed but unknown id (neither bundled nor a custom theme) is rejected 400 by the
+    # DB-aware service check (P4 moved membership validation there so custom-theme slugs pass).
     r = client.patch("/api/v1/auth/me", headers=h, json={"theme": "solarized-neon"})
-    assert r.status_code == 422
+    assert r.status_code == 400
+    # A malformed id (bad slug format) is still rejected 422 by the schema validator.
+    r2 = client.patch("/api/v1/auth/me", headers=h, json={"theme": "Bad Theme!"})
+    assert r2.status_code == 422
     # The rejected value must not be persisted.
     assert client.get("/api/v1/auth/me", headers=h).json()["theme"] is None
 

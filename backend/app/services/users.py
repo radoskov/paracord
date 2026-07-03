@@ -249,6 +249,14 @@ def delete_user(
 _PROFILE_FIELDS = {"display_name", "email", "papers_per_page", "theme"}
 
 
+def _is_selectable_theme(db: Session, theme_id: str) -> bool:
+    """Whether ``theme_id`` names a bundled theme or an admin-managed custom theme (P4)."""
+    from app.core.themes import is_known_theme
+    from app.services.custom_themes import get_theme as get_custom_theme
+
+    return is_known_theme(theme_id) or get_custom_theme(db, theme_id) is not None
+
+
 def update_profile(
     db: Session,
     *,
@@ -267,6 +275,8 @@ def update_profile(
             raise ValueError(f"Field {key!r} is not editable")
         cleaned = value.strip() if isinstance(value, str) else value
         cleaned = cleaned or None
+        if key == "theme" and cleaned is not None and not _is_selectable_theme(db, cleaned):
+            raise ValueError(f"Unknown theme id: {cleaned!r}")
         if getattr(user, key) != cleaned:
             setattr(user, key, cleaned)
             applied[key] = cleaned

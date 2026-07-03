@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     shelves,
     sources,
     tags,
+    themes,
     visualization,
     web_find_allowed_hosts,
     works,
@@ -50,6 +51,9 @@ api_router.include_router(
 # Phase H access control: user groups, grants, default grants, access settings. Admin-or-owner,
 # enforced per-endpoint via require_admin.
 api_router.include_router(groups.router, prefix="/admin", tags=["admin", "groups"])
+# Runtime custom themes (Theming P4): write (upload/replace/delete) is owner/admin, enforced
+# per-endpoint via require_admin. The read side is mounted separately at /themes below.
+api_router.include_router(themes.admin_router, prefix="/admin", tags=["admin", "themes"])
 # Agent routes authenticate via the enrollment/agent token, not a user session, so the
 # router is not behind the user-session dependency.
 api_router.include_router(
@@ -112,6 +116,11 @@ api_router.include_router(
 # Per-user UI preferences (any authenticated user manages their own blob).
 api_router.include_router(
     preferences.router, prefix="/preferences", tags=["preferences"], dependencies=auth_required
+)
+# Custom themes read side (Theming P4): any authenticated user may list custom themes for their
+# picker and fetch a resolved theme to apply. Uploads/deletes are the owner/admin admin_router.
+api_router.include_router(
+    themes.router, prefix="/themes", tags=["themes"], dependencies=auth_required
 )
 # Per-user saved library filters (Phase B7; any authenticated user manages their own).
 api_router.include_router(
