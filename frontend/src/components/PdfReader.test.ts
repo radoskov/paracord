@@ -14,6 +14,7 @@ const EDITOR: CurrentUser = {
   created_at: null,
   last_login_at: null,
   papers_per_page: null,
+  theme: null,
 };
 
 const ANNOTATION: Annotation = {
