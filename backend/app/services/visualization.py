@@ -23,6 +23,7 @@ marks where a scope-keyed cache would go for P3+.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import uuid
 from collections import defaultdict
@@ -30,13 +31,24 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
 from app.services.citation_graph import _scope_works, build_citation_graph
-from app.services.topic_modeling import _ordered_works, _paper_dense_vectors
+from app.services.topic_modeling import (
+    DEFAULT_MAX_TOPICS,
+    _centroid,
+    _cluster_keywords,
+    _doc_text,
+    _kmeans,
+    _ordered_works,
+    _paper_dense_vectors,
+    _tfidf,
+    _tokenize,
+)
 
 # Node cap (mirrors the citation/topic graph's ``MAX_NODES=400`` concept). Bounds the per-request
 # compute so a huge scope can't stall the endpoint; the truncation is reported in ``notes``.
@@ -46,6 +58,14 @@ MAX_NODES = 500
 # request today (cheap for a personal library). A scope-keyed cache (scope, embedding-version)
 # belongs here once embedding-cluster / summaries land on the same computed layer.
 _METRIC_CACHE_NOTE = "metrics computed per request; add a scope-keyed cache in P3+"
+
+# P3 embedding-cluster layout cache (the scope-keyed cache _METRIC_CACHE_NOTE flagged). Keyed by
+# ``(scope signature, model)`` — the scope signature is the sorted set of placed work ids, so a
+# changed vector set (a paper (re)indexed for the model) yields a new key. The stored ``vector_hash``
+# guards against a same-scope/same-model vector change (values updated in place): a hash mismatch
+# recomputes and overwrites, so the cache self-invalidates instead of serving a stale layout. An
+# in-process dict is enough for a mostly single-user / few-LAN-user deployment.
+_LAYOUT_CACHE: dict[tuple[tuple[str, ...], str | None], tuple[str, np.ndarray, list[int]]] = {}
 
 # Shared axis option set (§2a). Both the X and Y dropdown draw from this; P3+ registers more by
 # adding an entry plus a branch in ``_axis_values``.
@@ -408,9 +428,241 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
     )
 
 
+# Embedding-cluster fixed axes: the two PCA components. Unlike temporal_map these are not swappable,
+# so the view exposes no ``axis_options``.
+EMBEDDING_AXES: dict[str, dict[str, str]] = {
+    "x": {"key": "component_1", "label": "Component 1"},
+    "y": {"key": "component_2", "label": "Component 2"},
+}
+
+
+def _pca_2d(matrix: np.ndarray) -> np.ndarray:
+    """Project ``matrix`` (n×d) onto its top-2 principal components (mean-centered, via SVD).
+
+    Deterministic: each component's sign is fixed by making its largest-magnitude loading positive
+    (the sklearn ``svd_flip`` convention), so the same input always yields the same coordinates
+    across runs and platforms. Pads to two columns when the data spans fewer than two components.
+    """
+    centered = matrix - matrix.mean(axis=0, keepdims=True)
+    _u, _s, vt = np.linalg.svd(centered, full_matrices=False)
+    if vt.shape[0] == 0:
+        return np.zeros((matrix.shape[0], 2))
+    max_abs = np.argmax(np.abs(vt), axis=1)
+    signs = np.sign(vt[np.arange(vt.shape[0]), max_abs])
+    signs[signs == 0] = 1.0
+    vt = vt * signs[:, np.newaxis]
+    coords = centered @ vt[:2].T
+    if coords.shape[1] < 2:
+        coords = np.hstack([coords, np.zeros((coords.shape[0], 2 - coords.shape[1]))])
+    return coords
+
+
+def _sample_works(works: list[Work], cap: int) -> list[Work]:
+    """Deterministically sample ``cap`` works evenly across the (title-ordered) input."""
+    n = len(works)
+    if n <= cap:
+        return list(works)
+    return [works[(i * n) // cap] for i in range(cap)]
+
+
+def _scope_dense_matrix(
+    db: Session, works: list[Work], embedding_model: str | None
+) -> tuple[np.ndarray | None, list[Work], str | None, str | None]:
+    """Return ``(matrix, kept_works, model_label, note)`` — one dense row per placed paper.
+
+    Prefers stored dense vectors via :func:`_paper_dense_vectors` (the topic / related-works
+    embedding path): a real model's vectors are reused, never re-embedded on the read path, and
+    un-indexed papers are skipped (D19) and surfaced in ``note``. When only the hash-BOW baseline is
+    active it falls back to embedding each paper's text with the resolved baseline provider — those
+    vectors are dense and usable for PCA — so the map still renders, with an honest note. Returns
+    ``(None, [], label, note)`` when there is nothing to place.
+    """
+    vectors, kept, label, skipped = _paper_dense_vectors(db, works, embedding_model)
+    if vectors is not None:
+        matrix = np.array([[vec[i] for i in range(len(vec))] for vec in vectors], dtype=float)
+        note = (
+            f"{skipped} papers not indexed for this model — reindex to include them."
+            if skipped
+            else None
+        )
+        return (matrix if kept else None), kept, label, note
+
+    from app.services.embeddings import resolve_embedding_provider
+
+    provider = resolve_embedding_provider(db=db).provider
+    rows: list[list[float]] = []
+    kept_works: list[Work] = []
+    for work in works:
+        text = _doc_text(work)
+        if not text.strip():
+            continue
+        rows.append([float(x) for x in provider.embed(text)])
+        kept_works.append(work)
+    omitted = len(works) - len(kept_works)
+    if not kept_works:
+        return None, [], provider.model_name, "No papers with text to place in this scope."
+    note = (
+        "Cluster layout uses the built-in baseline embedder; enable a real embedding model and "
+        "reindex for sharper clusters."
+    )
+    if omitted:
+        note = f"{note} {omitted} papers have no text and were omitted."
+    return np.array(rows, dtype=float), kept_works, provider.model_name, note
+
+
+@dataclass
+class _EmbeddingLayout:
+    coords: np.ndarray | None
+    kept: list[Work]
+    assignments: list[int]
+    model_label: str | None
+    note: str | None
+
+    @property
+    def empty(self) -> bool:
+        return self.coords is None
+
+
+def _embedding_layout(
+    db: Session, works: list[Work], embedding_model: str | None
+) -> _EmbeddingLayout:
+    """Source dense vectors, then PCA-project + cluster them, reusing the cache when possible."""
+    matrix, kept, model_label, note = _scope_dense_matrix(db, works, embedding_model)
+    if matrix is None:
+        return _EmbeddingLayout(None, [], [], model_label, note)
+
+    scope_sig = tuple(sorted(str(w.id) for w in kept))
+    vector_hash = hashlib.md5(  # noqa: S324 - cache fingerprint, not a security control.
+        np.ascontiguousarray(matrix, dtype=float).tobytes()
+    ).hexdigest()
+    cache_key = (scope_sig, model_label)
+    cached = _LAYOUT_CACHE.get(cache_key)
+    if cached is not None and cached[0] == vector_hash:
+        return _EmbeddingLayout(cached[1], kept, cached[2], model_label, note)
+
+    coords = _pca_2d(matrix)
+    k = max(1, min(DEFAULT_MAX_TOPICS, len(kept)))
+    dense_dicts = [{i: float(v) for i, v in enumerate(row)} for row in matrix]
+    assignments = _kmeans(dense_dicts, k)
+    _LAYOUT_CACHE[cache_key] = (vector_hash, coords, assignments)
+    return _EmbeddingLayout(coords, kept, assignments, model_label, note)
+
+
+def _cluster_labels(kept: list[Work], assignments: list[int]) -> dict[int, str]:
+    """Human-readable label per cluster id from its top TF-IDF terms (reuses the topic labeller)."""
+    tfidf_vectors = _tfidf([_tokenize(_doc_text(w)) for w in kept])
+    labels: dict[int, str] = {}
+    for cid in sorted(set(assignments)):
+        members = [i for i, c in enumerate(assignments) if c == cid]
+        centroid = _centroid([tfidf_vectors[i] for i in members])
+        keywords = _cluster_keywords(centroid)[:2]
+        labels[cid] = f"{cid + 1}. {', '.join(keywords)}" if keywords else f"Cluster {cid + 1}"
+    return labels
+
+
+@register_viz("embedding_cluster")
+def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
+    """Embedding-cluster map (§2b): place the SEE-filtered scope papers in 2D by embedding proximity.
+
+    The layout is server-side **PCA-2D** (numpy, no new dependency, deterministic) over each paper's
+    stored dense vector — reused from the topic / related-works embedding path, never re-embedded on
+    the read path for a real model (un-indexed papers are skipped and reported, per D19). Points are
+    colored by an embedding k-means ``cluster`` labelled with its top TF-IDF terms (reusing the topic
+    modeller's clustering + labeller). ``size`` reuses the shared metric helper (local degree by
+    default). The computed layout is cached per ``(scope, model, vector fingerprint)`` so repeat
+    views don't recompute. The two axes are the fixed PCA components — there is no swappable axis set,
+    so ``axis_options`` is omitted.
+    """
+    cap = int(params.get("max_nodes") or MAX_NODES)
+    size_by = params.get("size_by") or DEFAULT_SIZE_BY
+    embedding_model = params.get("embedding_model")
+
+    visible = access.visible_work_ids(db, actor)
+    scope_works = _scope_works(
+        db,
+        scope_type=scope.type,
+        scope_id=scope.id,
+        work_ids=scope.work_ids,
+        visible_ids=visible,
+    )
+    works = _ordered_works(list(scope_works.values()))
+    total = len(works)
+    notes: list[str] = []
+
+    if total > cap:
+        works = _sample_works(works, cap)
+        notes.append(
+            f"Sampled {cap} of {total} papers (node cap {cap}); refine the scope to see all."
+        )
+
+    if not works:
+        notes.append("No papers in this scope.")
+        return VizPayload(view_type="embedding_cluster", nodes=[], axes=EMBEDDING_AXES, notes=notes)
+
+    layout = _embedding_layout(db, works, embedding_model)
+    if layout.note:
+        notes.append(layout.note)
+    if layout.empty:
+        return VizPayload(view_type="embedding_cluster", nodes=[], axes=EMBEDDING_AXES, notes=notes)
+
+    kept = layout.kept
+    coords = layout.coords
+    assignments = layout.assignments
+    labels = _cluster_labels(kept, assignments)
+
+    graph = build_citation_graph(
+        db,
+        scope_type="selected_papers",
+        work_ids=[w.id for w in kept],
+        node_mode="local_only",
+        visible_ids=visible,
+    )
+    degree: dict[str, int] = defaultdict(int)
+    for edge in graph.edges:
+        degree[edge.target] += 1
+
+    nodes: list[VizNode] = []
+    for i, work in enumerate(kept):
+        node_id = str(work.id)
+        cluster_label = labels[assignments[i]]
+        nodes.append(
+            VizNode(
+                id=node_id,
+                x=round(float(coords[i][0]), 6),
+                y=round(float(coords[i][1]), 6),
+                size=_size_value(work, size_by, degree),
+                color_group=cluster_label,
+                shape="in_library",
+                label=work.canonical_title or f"Untitled work ({node_id[:8]})",
+                meta={
+                    "title": work.canonical_title,
+                    "year": work.year,
+                    "cluster": cluster_label,
+                    "local_degree": degree.get(node_id, 0),
+                    "citation_count": work.citation_count,
+                    "doi": work.doi,
+                },
+            )
+        )
+
+    legend = {
+        "color_by": "cluster",
+        "groups": sorted({n.color_group for n in nodes if n.color_group is not None}),
+    }
+    return VizPayload(
+        view_type="embedding_cluster",
+        nodes=nodes,
+        axes=EMBEDDING_AXES,
+        legend=legend,
+        notes=notes,
+        axis_options=None,
+    )
+
+
 __all__ = [
     "MAX_NODES",
     "AXIS_LABELS",
+    "EMBEDDING_AXES",
     "VizScope",
     "VizNode",
     "VizEdge",
@@ -419,4 +671,5 @@ __all__ = [
     "available_view_types",
     "get_viz",
     "temporal_map",
+    "embedding_cluster",
 ]

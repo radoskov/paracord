@@ -283,6 +283,240 @@ def test_max_nodes_default_constant() -> None:
 
 
 # --------------------------------------------------------------------------------------------------
+# P3 — embedding-cluster map (PCA-2D).
+# --------------------------------------------------------------------------------------------------
+import numpy as np  # noqa: E402
+from app.services import visualization as viz  # noqa: E402
+from app.services.visualization import _pca_2d  # noqa: E402
+
+
+def test_registry_has_embedding_cluster() -> None:
+    assert "embedding_cluster" in available_view_types()
+
+
+def test_pca_2d_deterministic_and_separates_groups() -> None:
+    # Three clearly-separated 6-D groups: axis-aligned centroids with tiny per-point jitter.
+    base = np.array(
+        [
+            [10.0, 0, 0, 0, 0, 0],
+            [0, 10.0, 0, 0, 0, 0],
+            [0, 0, 10.0, 0, 0, 0],
+        ]
+    )
+    jitter = np.array([[0.01, 0, 0, 0, 0, 0], [0, 0, 0.01, 0, 0, 0], [0, 0, 0, 0, 0, 0]])
+    matrix = np.vstack([base[0] + jitter, base[1] + jitter, base[2] + jitter])
+    coords = _pca_2d(matrix)
+
+    assert coords.shape == (9, 2)
+    # Deterministic: identical input -> identical output (fixed component signs).
+    assert np.array_equal(coords, _pca_2d(matrix))
+
+    groups = [coords[0:3], coords[3:6], coords[6:9]]
+    centroids = [g.mean(axis=0) for g in groups]
+    within = max(
+        np.linalg.norm(g - c, axis=1).max() for g, c in zip(groups, centroids, strict=True)
+    )
+    between = min(
+        np.linalg.norm(centroids[i] - centroids[j]) for i in range(3) for j in range(i + 1, 3)
+    )
+    # Each group is far tighter than the gap between groups -> distinguishable in 2-D.
+    assert between > 10 * within
+
+
+def test_pca_2d_pads_single_component() -> None:
+    # Points along one line span a single component; the second column is padded with zeros.
+    matrix = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+    coords = _pca_2d(matrix)
+    assert coords.shape == (3, 2)
+    assert np.allclose(coords[:, 1], 0.0)
+
+
+def _patch_dense_vectors(monkeypatch, vector_by_title, *, label="st:fake", skipped=0):
+    """Make ``_paper_dense_vectors`` return controlled dense vectors keyed by work title."""
+
+    def _fake(db, works, embedding_model):
+        kept = [w for w in works if w.canonical_title in vector_by_title]
+        vectors = [
+            {i: float(x) for i, x in enumerate(vector_by_title[w.canonical_title])} for w in kept
+        ]
+        return vectors, kept, label, skipped
+
+    monkeypatch.setattr(viz, "_paper_dense_vectors", _fake)
+
+
+def test_embedding_cluster_axes_are_fixed_pca_components(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    works = [
+        Work(canonical_title="A", normalized_title="a", year=2020),
+        Work(canonical_title="B", normalized_title="b", year=2019),
+    ]
+    db_session.add_all(works)
+    db_session.commit()
+    _patch_dense_vectors(monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0]})
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert payload.axes == {
+        "x": {"key": "component_1", "label": "Component 1"},
+        "y": {"key": "component_2", "label": "Component 2"},
+    }
+    # Fixed axes -> no swappable option set.
+    assert payload.axis_options is None
+    assert {n.id for n in payload.nodes} == {str(w.id) for w in works}
+    for node in payload.nodes:
+        assert node.x is not None and node.y is not None
+        assert node.color_group is not None
+    assert payload.legend is not None and payload.legend["color_by"] == "cluster"
+
+
+def test_embedding_cluster_skips_unindexed_with_note(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    indexed = Work(canonical_title="Indexed", normalized_title="indexed", year=2020)
+    absent = Work(canonical_title="Absent", normalized_title="absent", year=2019)
+    db_session.add_all([indexed, absent])
+    db_session.commit()
+    # Only "Indexed" has a stored vector; the other is reported as un-indexed (D19), not placed.
+    _patch_dense_vectors(monkeypatch, {"Indexed": [1.0, 0.0]}, skipped=1)
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert {n.id for n in payload.nodes} == {str(indexed.id)}
+    assert any("not indexed" in note and "reindex" in note for note in payload.notes)
+
+
+def test_embedding_cluster_see_filter_hides_private_work(db_session) -> None:
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    hidden = Work(canonical_title="Hidden", normalized_title="hidden", year=2015)
+    loose = Work(canonical_title="Loose", normalized_title="loose", year=2016)
+    db_session.add_all([hidden, loose])
+    private_shelf = Shelf(name="Private", access_level="private")
+    db_session.add(private_shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=private_shelf.id, work_id=hidden.id))
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    # Baseline embedder fallback (no real model) still places the visible papers.
+    payload = get_viz(db_session, reader, "embedding_cluster", VizScope(type="library"), {})
+    ids = {n.id for n in payload.nodes}
+    assert str(hidden.id) not in ids
+    assert str(loose.id) in ids
+
+
+def test_embedding_cluster_uses_baseline_embedder_with_note(db_session) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="Neural machine translation", normalized_title="nmt", year=2016),
+            Work(
+                canonical_title="Convolutional image recognition", normalized_title="cnn", year=2015
+            ),
+        ]
+    )
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert len(payload.nodes) == 2
+    assert any("baseline embedder" in note for note in payload.notes)
+
+
+def test_embedding_cluster_cache_reuses_layout(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="A", normalized_title="a", year=2020),
+            Work(canonical_title="B", normalized_title="b", year=2019),
+        ]
+    )
+    db_session.commit()
+    _patch_dense_vectors(monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0]})
+    viz._LAYOUT_CACHE.clear()
+
+    first = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert len(viz._LAYOUT_CACHE) == 1
+
+    # A cache hit must not recompute the projection: make PCA blow up, then require the repeat call
+    # to succeed with byte-identical coordinates (served from the cache).
+    def _boom(_matrix):
+        raise AssertionError("PCA recomputed on a cache hit")
+
+    monkeypatch.setattr(viz, "_pca_2d", _boom)
+    second = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert len(viz._LAYOUT_CACHE) == 1
+    coords_first = {n.id: (n.x, n.y) for n in first.nodes}
+    coords_second = {n.id: (n.x, n.y) for n in second.nodes}
+    assert coords_first == coords_second
+
+
+def test_embedding_cluster_cache_invalidates_on_vector_change(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    db_session.add_all(
+        [
+            Work(canonical_title="A", normalized_title="a", year=2020),
+            Work(canonical_title="B", normalized_title="b", year=2019),
+            Work(canonical_title="C", normalized_title="c", year=2018),
+        ]
+    )
+    db_session.commit()
+    viz._LAYOUT_CACHE.clear()
+
+    _patch_dense_vectors(
+        monkeypatch, {"A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    first = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert len(viz._LAYOUT_CACHE) == 1
+
+    # Same scope + model, but the stored vectors changed -> the fingerprint mismatches, so the layout
+    # is recomputed and overwritten (not served stale). Same cache key -> still one entry.
+    _patch_dense_vectors(
+        monkeypatch, {"A": [5.0, 1.0, 0.0], "B": [0.0, 1.0, 0.0], "C": [0.0, 0.0, 1.0]}
+    )
+    second = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    assert len(viz._LAYOUT_CACHE) == 1
+    coords_first = {n.id: (n.x, n.y) for n in first.nodes}
+    coords_second = {n.id: (n.x, n.y) for n in second.nodes}
+    assert coords_first != coords_second
+
+
+def test_embedding_cluster_node_cap_samples_with_note(db_session, monkeypatch) -> None:
+    actor = _owner(db_session)
+    works = [
+        Work(canonical_title=f"W{i:02d}", normalized_title=f"w{i:03d}", year=2000 + i)
+        for i in range(6)
+    ]
+    db_session.add_all(works)
+    db_session.commit()
+    _patch_dense_vectors(
+        monkeypatch, {w.canonical_title: [float(i), float(6 - i)] for i, w in enumerate(works)}
+    )
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(
+        db_session, actor, "embedding_cluster", VizScope(type="library"), {"max_nodes": 3}
+    )
+    assert len(payload.nodes) == 3
+    assert any("Sampled 3 of 6" in note and "node cap" in note for note in payload.notes)
+
+
+def test_endpoint_embedding_cluster_lists_and_builds(client, db, auth_headers) -> None:
+    headers = auth_headers("owner")
+    db.add(Work(canonical_title="Endpoint cluster", normalized_title="epc", year=2015))
+    db.commit()
+
+    listed = client.get("/api/v1/viz/", headers=headers)
+    assert "embedding_cluster" in listed.json()["view_types"]
+
+    response = client.get("/api/v1/viz/embedding_cluster", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["view_type"] == "embedding_cluster"
+    assert body["axes"]["x"]["key"] == "component_1"
+    assert body["axis_options"] is None
+
+
+# --------------------------------------------------------------------------------------------------
 # Endpoint (HTTP/auth) tests — full app against the shared in-memory DB (conftest fixtures).
 # --------------------------------------------------------------------------------------------------
 def test_endpoint_requires_auth(client) -> None:
