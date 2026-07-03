@@ -7,6 +7,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Track C P4 — citation summaries (§8.11) (2026-07-03)
+
+The README-headline analytics feature. A new `backend/app/services/citation_summary.py` computes six
+scoped, SEE-filtered blocks over the same computed layer as the graphs/viz (reusing
+`citation_graph._scope_works` + `access.visible_work_ids`): **most-cited local** (in-library works by
+local in-degree, from `build_citation_graph`'s resolved local edges — never re-resolved),
+**most-cited external** (scope works by `Work.citation_count`, P1), **frequently-cited-but-missing**
+(unresolved references aggregated by normalized DOI/arXiv/title, ranked by citation frequency, each
+carrying a representative `reference_id` for the `POST /works/from-reference` import path),
+**bridge papers** (exact **Brandes betweenness centrality** on the undirected local citation graph,
+method label `brandes_betweenness_undirected`, capped at `MAX_NODES=500`), **isolated papers** (scope
+works with zero local links), and a **chronological distribution** (papers per publication year).
+**Cache:** in-process dict keyed by a scope signature = sorted member work ids + max `updated_at` +
+scope reference count + limit + schema version, returned as `version` with a `computed_at`; any
+change to the scope's works/references changes the signature and recomputes (a persisted cache would
+slot in at the same site). Read-only. The previously-empty `citations.py` router now serves
+`GET /citations/summary` (auth + shelf/rack SEE-guard + saved-filter resolution, mirroring the viz
+endpoint). **Frontend:** a new "Citation summary" tab (`src/pages/CitationSummaryPage.svelte`) surfaces
+the six blocks (clickable works open the paper; missing works show an Import affordance) with a shared
+ECharts year-distribution bar built by the pure, unit-tested `src/lib/viz/citationSummary.ts`;
+`client.citationSummary` + types added. Full backend suite **821 passed** (+13); frontend
+**106 passed / 1 skipped** (+3); ruff clean; `backend/openapi.json` regenerated (new endpoint +
+`CitationSummaryResponse`). See `docs/agent_handoffs/2026-07-03-track-c-p4-citation-summaries.md`.
+
 ## Track C P3 — embedding-cluster map (PCA-2D) (2026-07-03)
 
 Second visualization view on the P2 seam: an `embedding_cluster` provider
