@@ -7,6 +7,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reader "reading mode" — opt-in page-canvas easing (2026-07-04)
+
+Added an opt-in **reading mode** to the PDF reader (`PdfReader.svelte`), frontend-only, committed on
+`main` (not pushed). A segmented toolbar control **"Page: Original / Dim / Dark"** eases the rendered
+page on the eyes without touching the document: **Original** (default, no filter — nothing changes
+for users who don't opt in); **Dim** (`sepia(0.35) brightness(0.93) contrast(0.95)` — warm cream,
+gently dimmed); **Dark** (`invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95)` — dark page,
+light text, hues roughly preserved). The filter is applied to the **page canvas ONLY** via a
+`--page-filter` CSS var on `.page-wrap` consumed by `.canvas-stage canvas`; the text-selection layer
+and the highlight / citation / annotation overlays are DOM *siblings* of the canvas (not descendants),
+so they keep their true colours — verified in Dark mode with a live search highlight staying
+orange/amber (not inverted). Works in both paged and scroll view (all canvases share the var). The
+choice persists per user in `localStorage` under `paracord.reader.readingMode` (mirrors
+`paracord.reader.viewMode`) and restores on open. Mapping/persistence live in a testable helper
+`frontend/src/lib/reader/readingMode.ts`. Verified: `make frontend-check` green (158 tests, 5 new;
+build OK); `check_secrets` clean; 3 mode screenshots re-captured (mocha-cool, not committed) in
+`/home/zednik/paracord-theme-shots/reader_mode-{original,dim,dark}.png`. Handoff:
+`docs/agent_handoffs/2026-07-04-reader-reading-mode.md`.
+
 ## GUI bug fixes — header overlap, dark-theme metadata text, squashed charts (2026-07-03)
 
 Fixed three owner-reported GUI bugs; frontend-only, committed on `main` (not pushed). **Bug 1**
