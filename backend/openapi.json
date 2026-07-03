@@ -14997,7 +14997,7 @@
     },
     "/api/v1/works/{work_id}/annotations/export": {
       "get": {
-        "description": "Export a work's annotations as Markdown or plain text (SPEC §8.17.4).",
+        "description": "Export a work's annotations as Markdown, plain text, or JSON (SPEC §8.8.7, §8.17.4).",
         "operationId": "export_work_annotations_api_v1_works__work_id__annotations_export_get",
         "parameters": [
           {
@@ -15016,7 +15016,7 @@
             "required": false,
             "schema": {
               "default": "markdown",
-              "pattern": "^(markdown|text)$",
+              "pattern": "^(markdown|text|json)$",
               "title": "Format",
               "type": "string"
             }

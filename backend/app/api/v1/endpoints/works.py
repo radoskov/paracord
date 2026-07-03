@@ -1332,11 +1332,13 @@ def search_annotations(
 @router.get("/{work_id}/annotations/export")
 def export_work_annotations(
     work_id: uuid.UUID,
-    output_format: str = Query(default="markdown", pattern="^(markdown|text)$", alias="format"),
+    output_format: str = Query(
+        default="markdown", pattern="^(markdown|text|json)$", alias="format"
+    ),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> dict[str, str]:
-    """Export a work's annotations as Markdown or plain text (SPEC §8.17.4)."""
+    """Export a work's annotations as Markdown, plain text, or JSON (SPEC §8.8.7, §8.17.4)."""
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
@@ -1349,6 +1351,27 @@ def export_work_annotations(
         ).all()
     )
     title = work.canonical_title or "Untitled paper"
+    if output_format == "json":
+        payload = {
+            "work": {"id": str(work_id), "title": title},
+            "annotations": [
+                {
+                    "page": a.page,
+                    "type": a.annotation_type,
+                    "coordinates": a.coordinates,
+                    "selected_text": a.selected_text,
+                    "note": a.content_markdown,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "author": str(a.created_by_user_id) if a.created_by_user_id else None,
+                }
+                for a in rows
+            ],
+        }
+        return {
+            "filename": f"annotations-{work_id}.json",
+            "content_type": "application/json",
+            "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        }
     lines = (
         [f"# Annotations — {title}", ""]
         if output_format == "markdown"

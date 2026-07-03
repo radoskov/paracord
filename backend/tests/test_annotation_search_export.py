@@ -1,5 +1,7 @@
 """Annotation search + export (SPEC §8.8.7 / §8.17.4)."""
 
+import json
+
 
 def _work(client, h, title):
     return client.post("/api/v1/works", headers=h, json={"canonical_title": title}).json()["id"]
@@ -47,6 +49,45 @@ def test_annotation_export_markdown(client, auth_headers):
     assert body["filename"].endswith(".md")
     assert "Annotations — Exportable" in body["content"]
     assert "note body" in body["content"]
+
+
+def test_annotation_export_json(client, auth_headers):
+    h = auth_headers("editor")
+    w = _work(client, h, "JSON Exportable")
+    _annotate(
+        client,
+        h,
+        w,
+        annotation_type="highlight",
+        selected_text="a salient span",
+        content_markdown="a margin note",
+        page=4,
+        coordinates={"x": 1, "y": 2},
+    )
+    r = client.get(f"/api/v1/works/{w}/annotations/export?format=json", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["filename"].endswith(".json")
+    assert body["content_type"] == "application/json"
+    payload = json.loads(body["content"])
+    assert payload["work"]["id"] == w
+    assert payload["work"]["title"] == "JSON Exportable"
+    assert len(payload["annotations"]) == 1
+    entry = payload["annotations"][0]
+    assert entry["page"] == 4
+    assert entry["type"] == "highlight"
+    assert entry["coordinates"] == {"x": 1, "y": 2}
+    assert entry["selected_text"] == "a salient span"
+    assert entry["note"] == "a margin note"
+    assert entry["created_at"]
+    assert entry["author"]  # the editor who created it
+
+
+def test_annotation_export_rejects_unknown_format(client, auth_headers):
+    h = auth_headers("editor")
+    w = _work(client, h, "Bad format")
+    r = client.get(f"/api/v1/works/{w}/annotations/export?format=xml", headers=h)
+    assert r.status_code == 422
 
 
 def test_annotation_delete(client, auth_headers):
