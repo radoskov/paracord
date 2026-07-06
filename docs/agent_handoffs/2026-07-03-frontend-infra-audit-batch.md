@@ -37,7 +37,7 @@ D2, D5, D24, D4 (infra/ops). Stack left healthy for follow-on work.
   filter toggle is gone; explicit re-layout is the existing layout `<select>` (`on:change=relayout`).
 - **D29** — no code change (see findings below).
 - **D2** — `frontend/nginx.conf`: added the four security headers at server scope (with `always`)
-  and re-declared them in the hashed-asset `location` block (an `add_header` there otherwise
+  and redeclared them in the hashed-asset `location` block (an `add_header` there otherwise
   suppresses inherited headers).
 - **D5** — `Makefile` (`init` target) + `.env.example`: `make init` now generates a random 32-char
   `POSTGRES_PASSWORD` (from `/dev/urandom`, `openssl rand` fallback) and substitutes it into the new
