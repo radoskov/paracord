@@ -59,6 +59,34 @@ async def _sync(args: argparse.Namespace) -> None:
     )
 
 
+async def _reconcile(args: argparse.Namespace) -> None:
+    config, client, state = _client_and_state(args)
+    # Delete-on-disk mirrors the GUI's two-dialog gating: --delete-on-disk (tick the box) is only
+    # honoured together with --confirm-delete (the one-shot enable dialog), which arms it here.
+    if args.delete_on_disk and args.confirm_delete:
+        agent_ops.arm_delete_on_disk(state)
+    result = await agent_ops.reconcile(
+        config, state, client, delete_on_disk=args.delete_on_disk, apply=args.apply
+    )
+    if not args.apply:
+        head = f"Dry run: {result['would_un_index']} to un-index"
+        if args.delete_on_disk:
+            head += f", {result['would_delete']} to delete on disk"
+        print(head + ". Re-run with --apply to apply.")
+        for c in result["un_index_candidates"]:
+            print(f"  un-index {c['local_file_id'][:12]}  {c['virtual_path'] or c['real_path']}")
+        if args.delete_on_disk:
+            for c in result["delete_candidates"]:
+                print(f"  delete   {c['real_path']}")
+        if result.get("refused"):
+            print(f"REFUSED: {result['reason']}")
+        return
+    if result.get("refused"):
+        print(f"Refused: {result['reason']}")
+        raise SystemExit(2)
+    print(f"Reconciled: {result['un_indexed']} un-indexed, {result['deleted']} deleted on disk")
+
+
 async def _status(args: argparse.Namespace) -> None:
     config, client, state = _client_and_state(args)
     print(f"Server: {client.server_url}")
@@ -179,6 +207,25 @@ def _remove(args: argparse.Namespace) -> None:
     print(f"Removed {args.path}")
 
 
+def _prune_unwatched(args: argparse.Namespace) -> None:
+    config = load_config(getattr(args, "config", None))
+    state = AgentState(getattr(args, "state", None))
+    if args.dry_run:
+        ids = agent_ops.unwatched_ids(config, state)
+        print(f"{len(ids)} unwatched entr{'y' if len(ids) == 1 else 'ies'} would be pruned.")
+        return
+    pruned = agent_ops.prune_unwatched(config, state)
+    print(
+        f"Pruned {len(pruned)} unwatched entr{'y' if len(pruned) == 1 else 'ies'} from the index."
+    )
+
+
+def _forget(args: argparse.Namespace) -> None:
+    state = AgentState(getattr(args, "state", None))
+    removed = state.forget_many(args.local_file_ids)
+    print(f"Forgot {removed} file(s) from the index (on-disk files untouched).")
+
+
 def _list(args: argparse.Namespace) -> None:
     config = load_config(args.config)
     print(f"Server: {config.server_url}  (agent_id={config.agent_id or 'not enrolled'})")
@@ -275,6 +322,39 @@ def main() -> None:
     )
     _common(sub.add_parser("refresh", help="Force an off-schedule sync"), server=True)
 
+    reconcile = sub.add_parser(
+        "reconcile", help="Reverse sync: un-index files the server no longer has (preview first)"
+    )
+    _common(reconcile, server=True)
+    reconcile.add_argument(
+        "--apply", action="store_true", help="Apply (default is a dry-run preview)"
+    )
+    reconcile.add_argument(
+        "--delete-on-disk",
+        action="store_true",
+        help="Also delete eligible files from disk (guarded; moves to a recoverable trash dir)",
+    )
+    reconcile.add_argument(
+        "--confirm-delete",
+        action="store_true",
+        help="Required with --delete-on-disk to arm the one-shot guarded delete",
+    )
+
+    prune = sub.add_parser(
+        "prune-unwatched", help="Remove unwatched entries from the index (local)"
+    )
+    prune.add_argument("--config", type=Path, default=None)
+    prune.add_argument("--state", type=Path, default=None)
+    prune.add_argument(
+        "--dry-run", action="store_true", help="List what would be pruned; change nothing"
+    )
+
+    forget = sub.add_parser(
+        "forget", help="Forget one or more indexed files (on-disk files untouched)"
+    )
+    forget.add_argument("local_file_ids", nargs="+", help="local_file_id(s) to forget")
+    forget.add_argument("--state", type=Path, default=None)
+
     teleport = sub.add_parser("teleport", help="Push one indexed file now")
     _common(teleport, server=True)
     teleport.add_argument("local_file_id")
@@ -315,12 +395,15 @@ def main() -> None:
         "remove": _remove,
         "list": _list,
         "scan": _scan,
+        "prune-unwatched": _prune_unwatched,
+        "forget": _forget,
     }
     async_handlers = {
         "enroll": _enroll,
         "sync": _sync,
         "status": _status,
         "refresh": _sync,
+        "reconcile": _reconcile,
         "teleport": _teleport,
         "request": _request,
         "start": _start,
