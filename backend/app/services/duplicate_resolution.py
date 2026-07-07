@@ -23,9 +23,12 @@ from app.utils.normalization import normalize_doi, normalize_title
 # Provenance source stamped on the metadata assertions a merge synthesises (the base's kept value
 # and the source's conflicting value), so the metadata-review UI shows them as a resolvable conflict.
 _MERGE_SOURCE = "merge"
-# Work columns consolidated field-by-field on merge (empty base field filled; differing values kept
-# as a conflict). Mirrors ``metadata_enrichment.PROMOTABLE_FIELDS`` / ``works._PROMOTABLE_FIELDS``.
-_MERGE_FIELDS = ("title", "abstract", "year", "venue", "doi")
+# Non-identifier Work columns consolidated field-by-field on merge (empty base field filled;
+# differing values kept as a conflict assertion). The unique-indexed identifiers ``doi`` /
+# ``arxiv_*`` are handled separately by ``_transfer_identifiers`` (a shadow must not keep a value
+# that duplicates the base's, which would violate the ``uq_works_doi`` / ``uq_works_arxiv_base_id``
+# unique index on Postgres).
+_MERGE_FIELDS = ("title", "abstract", "year", "venue")
 
 DuplicateAction = Literal[
     "merge_works",
@@ -217,6 +220,7 @@ def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
             "work_versions": [],
             "metadata_assertions": [],
         },
+        "transferred": {},
         "base_prior_metadata_source": base.canonical_metadata_source,
         "base_main_file_was_null": base.main_file_id is None,
         "base_queue_position_was_null": base.queue_position is None,
@@ -225,6 +229,7 @@ def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
     }
 
     _fill_and_conflict_fields(db, base=base, source=source, record=record)
+    _transfer_identifiers(db, base=base, source=source, record=record)
     _move_owned_entities(db, base=base, source=source, record=record)
     ref_ids, mention_ids = redirect_references(db, source_id=source.id, base_id=base.id)
     record["moved"]["references_in"] = ref_ids
@@ -384,6 +389,23 @@ def unmerge_work(db: Session, *, base_id: uuid.UUID, actor: User) -> Work:
     if record.get("base_queue_position_was_null"):
         base.queue_position = None
 
+    # Hand the unique-indexed identifiers back to the shadow. Release them on the base and flush
+    # FIRST so the base no longer holds the value when the shadow reclaims it (the uq_works_doi /
+    # uq_works_arxiv_base_id index is checked per statement, not deferred).
+    transferred = record.get("transferred", {})
+    if "doi" in transferred:
+        base.doi = None
+    if "arxiv_base_id" in transferred:
+        base.arxiv_id = None
+        base.arxiv_base_id = None
+    if transferred:
+        db.flush()
+    if "doi" in transferred:
+        shadow.doi = transferred["doi"]
+    if "arxiv_base_id" in transferred:
+        shadow.arxiv_id = transferred["arxiv_id"]
+        shadow.arxiv_base_id = transferred["arxiv_base_id"]
+
     shadow.merged_into_id = None
     shadow.merge_record = None
     shadow.work_type = record.get("shadow_prior_work_type") or "unknown"
@@ -418,6 +440,14 @@ def merge_preview(db: Session, *, base: Work, source: Work) -> dict[str, Any]:
                 fill_fields.append(field)
         elif _field_values_differ(field, base_val, src_val):
             conflict_fields.append(field)
+    # doi / arXiv are transferred separately (unique-indexed), not via ``_MERGE_FIELDS``.
+    if source.doi:
+        if not base.doi and "doi" not in locked and not base.user_confirmed:
+            fill_fields.append("doi")
+        elif base.doi and normalize_doi(base.doi) != normalize_doi(source.doi):
+            conflict_fields.append("doi")
+    if source.arxiv_base_id and not base.arxiv_base_id:
+        fill_fields.append("arxiv")
     base_files = set(
         db.scalars(select(FileWorkLink.file_id).where(FileWorkLink.work_id == base.id)).all()
     )
@@ -615,6 +645,56 @@ def _fill_and_conflict_fields(
                 record["added_assertion_ids"].append(str(aid))
             aid = _add_merge_assertion(db, base, field, src_val, canonical=False)
             record["added_assertion_ids"].append(str(aid))
+
+
+def _transfer_identifiers(db: Session, *, base: Work, source: Work, record: dict[str, Any]) -> None:
+    """Consolidate the unique-indexed identifiers (doi / arXiv) from the source into the base.
+
+    Because ``doi`` and ``arxiv_base_id`` carry a unique index, the shadow must not keep a value the
+    base now holds. When the base's identifier is empty it is *moved* from the source (base set,
+    source cleared) — recorded so unmerge can hand it back. When both hold a differing DOI it stays a
+    metadata conflict on the base (no column change, no collision).
+    """
+    locked = set(base.confirmed_fields or [])
+    transferred = record["transferred"]
+    if source.doi:
+        if not base.doi and "doi" not in locked and not base.user_confirmed:
+            # Release on the source and flush FIRST so the base can reclaim the unique value without
+            # tripping uq_works_doi (both rows momentarily holding it otherwise).
+            value = source.doi
+            source.doi = None
+            db.flush()
+            base.doi = value
+            transferred["doi"] = value
+            aid = _add_merge_assertion(db, base, "doi", value, canonical=True)
+            record["added_assertion_ids"].append(str(aid))
+        elif base.doi and normalize_doi(base.doi) != normalize_doi(source.doi):
+            has_assertion = db.scalar(
+                select(MetadataAssertion.id)
+                .where(
+                    MetadataAssertion.entity_type == "work",
+                    MetadataAssertion.entity_id == base.id,
+                    MetadataAssertion.field_name == "doi",
+                )
+                .limit(1)
+            )
+            if has_assertion is None:
+                record["added_assertion_ids"].append(
+                    str(_add_merge_assertion(db, base, "doi", base.doi, canonical=True))
+                )
+            record["added_assertion_ids"].append(
+                str(_add_merge_assertion(db, base, "doi", source.doi, canonical=False))
+            )
+    if source.arxiv_base_id and not base.arxiv_base_id:
+        transferred["arxiv_id"] = source.arxiv_id
+        transferred["arxiv_base_id"] = source.arxiv_base_id
+        new_arxiv_id = base.arxiv_id or source.arxiv_id
+        new_arxiv_base_id = source.arxiv_base_id
+        source.arxiv_id = None
+        source.arxiv_base_id = None
+        db.flush()
+        base.arxiv_id = new_arxiv_id
+        base.arxiv_base_id = new_arxiv_base_id
 
 
 def _move_owned_entities(db: Session, *, base: Work, source: Work, record: dict[str, Any]) -> None:

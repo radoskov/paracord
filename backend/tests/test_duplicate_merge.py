@@ -100,9 +100,39 @@ def test_merge_fills_empty_base_fields_from_source(db_session, owner) -> None:
     assert base.doi == "10.1/x"
     assert base.venue == "NeurIPS"
     assert base.year == 2017
+    # The unique-indexed doi is TRANSFERRED (cleared on the shadow) so it can't collide on Postgres.
+    db_session.refresh(source)
+    assert source.doi is None
     # A canonical provenance assertion is recorded for each filled field.
     filled = {a.field_name for a in _assertions(db_session, base.id) if a.selected_as_canonical}
     assert {"abstract", "doi", "venue", "year"} <= filled
+
+
+def test_merge_transfers_arxiv_identifier_and_unmerge_restores_it(db_session, owner) -> None:
+    base = Work(canonical_title="P", normalized_title="p")
+    source = Work(
+        canonical_title="P",
+        normalized_title="p",
+        arxiv_id="1706.03762v2",
+        arxiv_base_id="1706.03762",
+    )
+    db_session.add_all([base, source])
+    db_session.commit()
+
+    dr.merge_works(db_session, base=base, source=source, actor=owner)
+    db_session.commit()
+    db_session.refresh(base)
+    db_session.refresh(source)
+    assert base.arxiv_base_id == "1706.03762"
+    assert source.arxiv_base_id is None  # transferred off the shadow (uq_works_arxiv_base_id)
+
+    dr.unmerge_work(db_session, base_id=base.id, actor=owner)
+    db_session.commit()
+    db_session.refresh(base)
+    db_session.refresh(source)
+    assert base.arxiv_base_id is None
+    assert source.arxiv_base_id == "1706.03762"
+    assert source.arxiv_id == "1706.03762v2"
 
 
 def test_merge_differing_values_become_conflict_not_overwrite(db_session, owner) -> None:
@@ -286,6 +316,7 @@ def test_unmerge_reverses_the_last_merge_exactly(db_session, owner) -> None:
     assert source.merge_record is None
     # Filled field (doi was empty on base) cleared back; conflict assertion (abstract) removed.
     assert base.doi is None
+    assert source.doi == "10.9/z"  # transferred identifier handed back to the shadow
     assert base.abstract == "Base abstract"
     assert _assertions(db_session, base.id) == []
     # Entities moved back to the source.
