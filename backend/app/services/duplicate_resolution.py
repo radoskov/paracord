@@ -7,14 +7,25 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.annotation import Annotation
+from app.models.citation import CitationMention, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
+from app.models.metadata import MetadataAssertion
 from app.models.organization import ShelfWork, TagLink
 from app.models.user import User
-from app.models.work import Work, WorkVersion
+from app.models.work import Work, WorkLink, WorkVersion
 from app.services.audit import record_event
 from app.services.default_shelf import place_on_default_if_loose
 from app.services.duplicate_detection import split_arxiv_id
+from app.utils.normalization import normalize_doi, normalize_title
+
+# Provenance source stamped on the metadata assertions a merge synthesises (the base's kept value
+# and the source's conflicting value), so the metadata-review UI shows them as a resolvable conflict.
+_MERGE_SOURCE = "merge"
+# Work columns consolidated field-by-field on merge (empty base field filled; differing values kept
+# as a conflict). Mirrors ``metadata_enrichment.PROMOTABLE_FIELDS`` / ``works._PROMOTABLE_FIELDS``.
+_MERGE_FIELDS = ("title", "abstract", "year", "venue", "doi")
 
 DuplicateAction = Literal[
     "merge_works",
@@ -160,16 +171,114 @@ def _merge_work_candidate(
     target_work_id: uuid.UUID | None,
     actor: User,
 ) -> None:
-    target, source = _work_pair(db, candidate, target_work_id=target_work_id)
-    _move_file_links_to_work(db, source_work=source, target_work=target, version=None)
-    _move_shelf_memberships(db, source_work=source, target_work=target)
-    _move_work_tags(db, source_work=source, target_work=target)
-    db.flush()
-    place_on_default_if_loose(db, target.id, actor_id=actor.id)  # no free-floating papers (#1)
+    """Consolidate the source work into the base and hide the source as a reversible shadow."""
+    base, source = _work_pair(db, candidate, target_work_id=target_work_id)
+    merge_works(db, base=base, source=source, actor=actor)
+
+
+def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
+    """Merge ``source`` INTO ``base`` (the surviving canonical paper) in one transaction.
+
+    Fills the base's empty fields from the source (keeping provenance) and, where both hold a
+    differing value, records the source's value as a per-field metadata *conflict* on the base
+    (never silently overwriting, never touching a locked base field). Moves every owned entity
+    (file links, shelf/rack memberships, tags, outgoing references + mentions, annotations,
+    versions, non-field metadata assertions) onto the base, and redirects the source's INCOMING
+    references to the base. The source becomes a hidden shadow (``merged_into_id`` set) carrying a
+    ``merge_record`` that :func:`unmerge_work` uses to reverse exactly this merge.
+
+    Flatten-on-re-merge: if the base already has a reversible shadow, that prior merge is finalized
+    first (kept hidden + redirected, but made permanent) so only the newest merge stays reversible.
+    """
+    if base.id == source.id:
+        raise ValueError("Cannot merge a paper into itself")
+    if base.merged_into_id is not None:
+        raise ValueError("Cannot merge into a paper that is itself a merged shadow")
+    if source.merged_into_id is not None:
+        raise ValueError("Cannot merge a paper that is already a merged shadow")
+
+    _finalize_reversible_shadows(db, base)
+
+    now = datetime.now(UTC)
+    record: dict[str, Any] = {
+        "base_id": str(base.id),
+        "merged_at": now.isoformat(),
+        "filled_fields": [],
+        "added_assertion_ids": [],
+        "moved": {
+            "file_work_links": [],
+            "shelf_works": [],
+            "tag_links": [],
+            "references_out": [],
+            "references_in": [],
+            "mentions_out": [],
+            "mentions_in": [],
+            "annotations": [],
+            "work_versions": [],
+            "metadata_assertions": [],
+        },
+        "base_prior_metadata_source": base.canonical_metadata_source,
+        "base_main_file_was_null": base.main_file_id is None,
+        "base_queue_position_was_null": base.queue_position is None,
+        "shadow_prior_work_type": source.work_type,
+        "shadow_prior_metadata_source": source.canonical_metadata_source,
+    }
+
+    _fill_and_conflict_fields(db, base=base, source=source, record=record)
+    _move_owned_entities(db, base=base, source=source, record=record)
+    ref_ids, mention_ids = redirect_references(db, source_id=source.id, base_id=base.id)
+    record["moved"]["references_in"] = ref_ids
+    record["moved"]["mentions_in"] = mention_ids
+
+    if base.main_file_id is None and source.main_file_id is not None:
+        base.main_file_id = source.main_file_id
+    if base.queue_position is None and source.queue_position is not None:
+        base.queue_position = source.queue_position
+
+    source.merged_into_id = base.id
+    source.merge_record = record
     source.work_type = "merged"
     source.canonical_metadata_source = "merged"
-    source.updated_at = datetime.now(UTC)
-    target.updated_at = datetime.now(UTC)
+    source.updated_at = now
+    base.updated_at = now
+    db.flush()
+    place_on_default_if_loose(db, base.id, actor_id=actor.id)  # no free-floating papers (#1)
+    return base
+
+
+def redirect_references(
+    db: Session, *, source_id: uuid.UUID, base_id: uuid.UUID
+) -> tuple[list[str], list[str]]:
+    """Repoint every reference/mention that resolved to ``source_id`` so it now resolves to the base.
+
+    The shared "link-fixing" primitive: other works that cite the merged-away paper keep citing the
+    surviving base instead. Returns the ids of the redirected references and citation mentions so a
+    caller (merge) can record them for an exact reversal.
+    """
+    ref_ids: list[str] = []
+    for ref in db.scalars(select(Reference).where(Reference.resolved_work_id == source_id)).all():
+        ref.resolved_work_id = base_id
+        ref_ids.append(str(ref.id))
+    mention_ids: list[str] = []
+    for mention in db.scalars(
+        select(CitationMention).where(CitationMention.resolved_cited_work_id == source_id)
+    ).all():
+        mention.resolved_cited_work_id = base_id
+        mention_ids.append(str(mention.id))
+    return ref_ids, mention_ids
+
+
+def _finalize_reversible_shadows(db: Session, base: Work) -> None:
+    """Make any existing reversible shadow of ``base`` permanent (flatten-on-re-merge).
+
+    The shadow stays hidden and its references stay redirected to the base; dropping its
+    ``merge_record`` just means it can no longer be unmerged. Keeps unmerge single-level.
+    """
+    for shadow in db.scalars(
+        select(Work).where(Work.merged_into_id == base.id, Work.merge_record.is_not(None))
+    ).all():
+        shadow.merge_record = None
+        shadow.updated_at = datetime.now(UTC)
 
 
 def _link_work_candidate_as_version(
@@ -178,28 +287,169 @@ def _link_work_candidate_as_version(
     *,
     target_work_id: uuid.UUID | None,
 ) -> None:
-    target, source = _work_pair(db, candidate, target_work_id=target_work_id)
-    arxiv = split_arxiv_id(source.arxiv_id)
-    version = WorkVersion(
-        work_id=target.id,
-        version_label=source.canonical_title or source.arxiv_id or "Linked version",
-        source="duplicate_review",
-        version_type="arxiv" if source.arxiv_id else "unknown",
-        arxiv_version=arxiv["version"],
-        doi=source.doi,
+    """Record a bidirectional "related / same work" link — no file move, no hiding, no deletion."""
+    base, source = _work_pair(db, candidate, target_work_id=target_work_id)
+    link_works(db, base.id, source.id)
+
+
+def link_works(
+    db: Session,
+    work_a_id: uuid.UUID,
+    work_b_id: uuid.UUID,
+    *,
+    link_type: str = "related",
+    actor_id: uuid.UUID | None = None,
+) -> WorkLink:
+    """Create (idempotently) a bidirectional related-works link between two distinct papers.
+
+    Both papers and their own files are kept; the pair is stored order-normalized so the same
+    relationship is never duplicated regardless of which side the user picked as base.
+    """
+    if work_a_id == work_b_id:
+        raise ValueError("Cannot link a paper to itself")
+    work_a = db.get(Work, work_a_id)
+    work_b = db.get(Work, work_b_id)
+    if work_a is None or work_b is None:
+        raise ValueError("Link references a missing paper")
+    if work_a.merged_into_id is not None or work_b.merged_into_id is not None:
+        raise ValueError("Cannot link a merged shadow paper")
+    lo, hi = sorted((work_a_id, work_b_id), key=str)
+    existing = db.scalar(
+        select(WorkLink).where(
+            WorkLink.work_a_id == lo,
+            WorkLink.work_b_id == hi,
+            WorkLink.link_type == link_type,
+        )
     )
-    db.add(version)
+    if existing is not None:
+        return existing
+    link = WorkLink(work_a_id=lo, work_b_id=hi, link_type=link_type, created_by_user_id=actor_id)
+    db.add(link)
     db.flush()
-    _move_file_links_to_work(db, source_work=source, target_work=target, version=version)
-    source.work_type = "version"
-    source.canonical_metadata_source = "linked_as_version"
-    # Phase B6 version grouping: the surviving target is the group representative (its
-    # version_group_id equals its own id); the source joins that group. Idempotent when the target
-    # is already a representative of an existing group.
-    target.version_group_id = target.version_group_id or target.id
-    source.version_group_id = target.version_group_id
-    source.updated_at = datetime.now(UTC)
-    target.updated_at = datetime.now(UTC)
+    return link
+
+
+def linked_work_ids(db: Session, work_id: uuid.UUID) -> list[uuid.UUID]:
+    """Return the ids of the papers bidirectionally linked to ``work_id`` (either side of a link)."""
+    ids: list[uuid.UUID] = []
+    for a, b in db.execute(
+        select(WorkLink.work_a_id, WorkLink.work_b_id).where(
+            (WorkLink.work_a_id == work_id) | (WorkLink.work_b_id == work_id)
+        )
+    ).all():
+        ids.append(b if a == work_id else a)
+    return ids
+
+
+def unmerge_work(db: Session, *, base_id: uuid.UUID, actor: User) -> Work:
+    """Reverse the most recent (reversible) merge into ``base_id`` in one transaction.
+
+    Restores the shadow to a standalone visible paper: moves every recorded entity back, un-redirects
+    the incoming references, nulls the base fields the merge filled, and removes the conflict
+    assertions the merge added — leaving the two separate papers exactly as before that merge.
+    """
+    shadow = db.scalar(
+        select(Work).where(Work.merged_into_id == base_id, Work.merge_record.is_not(None))
+    )
+    if shadow is None:
+        raise ValueError("This paper has no reversible merge to undo")
+    base = db.get(Work, base_id)
+    if base is None:
+        raise ValueError("The base paper no longer exists")
+    record = shadow.merge_record or {}
+    moved = record.get("moved", {})
+
+    _move_ids(db, FileWorkLink, moved.get("file_work_links", []), "work_id", shadow.id)
+    _move_shelf_works_back(db, moved.get("shelf_works", []), base_id=base_id, shadow_id=shadow.id)
+    _move_tag_links_back(db, moved.get("tag_links", []), base_id=base_id, shadow_id=shadow.id)
+    _move_ids(db, Reference, moved.get("references_out", []), "citing_work_id", shadow.id)
+    _move_ids(db, Reference, moved.get("references_in", []), "resolved_work_id", shadow.id)
+    _move_ids(db, CitationMention, moved.get("mentions_out", []), "citing_work_id", shadow.id)
+    _move_ids(
+        db, CitationMention, moved.get("mentions_in", []), "resolved_cited_work_id", shadow.id
+    )
+    _move_ids(db, Annotation, moved.get("annotations", []), "work_id", shadow.id)
+    _move_ids(db, WorkVersion, moved.get("work_versions", []), "work_id", shadow.id)
+    _move_ids(db, MetadataAssertion, moved.get("metadata_assertions", []), "entity_id", shadow.id)
+
+    for assertion_id in record.get("added_assertion_ids", []):
+        assertion = db.get(MetadataAssertion, uuid.UUID(assertion_id))
+        if assertion is not None:
+            db.delete(assertion)
+    for field in record.get("filled_fields", []):
+        _clear_field(base, field)
+    base.canonical_metadata_source = record.get("base_prior_metadata_source")
+    if record.get("base_main_file_was_null"):
+        base.main_file_id = None
+    if record.get("base_queue_position_was_null"):
+        base.queue_position = None
+
+    shadow.merged_into_id = None
+    shadow.merge_record = None
+    shadow.work_type = record.get("shadow_prior_work_type") or "unknown"
+    shadow.canonical_metadata_source = record.get("shadow_prior_metadata_source")
+    now = datetime.now(UTC)
+    shadow.updated_at = now
+    base.updated_at = now
+    db.flush()
+    record_event(
+        db,
+        "duplicate_merge.unmerged",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(base.id),
+        details={"shadow_id": str(shadow.id)},
+    )
+    return shadow
+
+
+def merge_preview(db: Session, *, base: Work, source: Work) -> dict[str, Any]:
+    """Read-only summary of what merging ``source`` into ``base`` would do (for the confirm UI)."""
+    fill_fields: list[str] = []
+    conflict_fields: list[str] = []
+    locked = set(base.confirmed_fields or [])
+    for field in _MERGE_FIELDS:
+        src_val = _get_field(source, field)
+        if _is_empty(src_val):
+            continue
+        base_val = _get_field(base, field)
+        if _is_empty(base_val):
+            if field not in locked and not base.user_confirmed:
+                fill_fields.append(field)
+        elif _field_values_differ(field, base_val, src_val):
+            conflict_fields.append(field)
+    base_files = set(
+        db.scalars(select(FileWorkLink.file_id).where(FileWorkLink.work_id == base.id)).all()
+    )
+    file_count = sum(
+        1
+        for file_id in db.scalars(
+            select(FileWorkLink.file_id).where(FileWorkLink.work_id == source.id)
+        ).all()
+        if file_id not in base_files
+    )
+    incoming = len(
+        db.scalars(select(Reference.id).where(Reference.resolved_work_id == source.id)).all()
+    )
+    return {
+        "base_work_id": base.id,
+        "source_work_id": source.id,
+        "fill_fields": fill_fields,
+        "conflict_fields": conflict_fields,
+        "file_count": file_count,
+        "incoming_reference_count": incoming,
+        "will_flatten": has_reversible_shadow(db, base.id),
+    }
+
+
+def has_reversible_shadow(db: Session, work_id: uuid.UUID) -> bool:
+    """True if ``work_id`` is a base with a reversible (unmergeable) shadow."""
+    return (
+        db.scalar(
+            select(Work.id).where(Work.merged_into_id == work_id, Work.merge_record.is_not(None))
+        )
+        is not None
+    )
 
 
 def _mark_duplicate_file_candidate(db: Session, candidate: DuplicateCandidate) -> None:
@@ -256,66 +506,226 @@ def _target_rank(work: Work) -> tuple[int, int, int]:
     return (confirmed, version_number, completeness)
 
 
-def _move_file_links_to_work(
-    db: Session,
-    *,
-    source_work: Work,
-    target_work: Work,
-    version: WorkVersion | None,
+def _get_field(work: Work, field: str) -> Any:
+    return {
+        "title": work.canonical_title,
+        "abstract": work.abstract,
+        "year": work.year,
+        "venue": work.venue,
+        "doi": work.doi,
+    }[field]
+
+
+def _set_field(work: Work, field: str, value: Any, *, source: str) -> None:
+    if field == "title":
+        work.canonical_title = value
+        work.normalized_title = normalize_title(str(value))
+        work.canonical_metadata_source = source
+    elif field == "abstract":
+        work.abstract = value
+    elif field == "year":
+        work.year = value
+    elif field == "venue":
+        work.venue = value
+    elif field == "doi":
+        work.doi = value
+
+
+def _clear_field(work: Work, field: str) -> None:
+    if field == "title":
+        work.canonical_title = None
+        work.normalized_title = None
+    elif field == "abstract":
+        work.abstract = None
+    elif field == "year":
+        work.year = None
+    elif field == "venue":
+        work.venue = None
+    elif field == "doi":
+        work.doi = None
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _field_values_differ(field: str, base_val: Any, src_val: Any) -> bool:
+    if field == "title":
+        return normalize_title(str(base_val)) != normalize_title(str(src_val))
+    if field == "doi":
+        return normalize_doi(str(base_val)) != normalize_doi(str(src_val))
+    return str(base_val).strip() != str(src_val).strip()
+
+
+def _add_merge_assertion(
+    db: Session, base: Work, field: str, value: Any, *, canonical: bool
+) -> uuid.UUID:
+    assertion = MetadataAssertion(
+        entity_type="work",
+        entity_id=base.id,
+        field_name=field,
+        value=str(value),
+        source=_MERGE_SOURCE,
+        selected_as_canonical=canonical,
+    )
+    db.add(assertion)
+    return assertion.id
+
+
+def _fill_and_conflict_fields(
+    db: Session, *, base: Work, source: Work, record: dict[str, Any]
 ) -> None:
-    for link in list(
-        db.scalars(select(FileWorkLink).where(FileWorkLink.work_id == source_work.id))
-    ):
-        existing = db.scalar(
-            select(FileWorkLink).where(
-                FileWorkLink.file_id == link.file_id,
-                FileWorkLink.work_id == target_work.id,
-            )
-        )
-        if existing is not None:
-            existing.version_id = existing.version_id or (version.id if version else None)
-            existing.warning_state = "work_has_multiple_files"
-            existing.user_confirmed = True
-            db.delete(link)
+    """Fill the base's empty fields from the source; flag differing values as conflicts.
+
+    A locked base field (``confirmed_fields`` / ``user_confirmed``) is never overwritten; the
+    source's value is still surfaced as a conflict assertion so nothing is silently dropped.
+    """
+    locked = set(base.confirmed_fields or [])
+    for field in _MERGE_FIELDS:
+        src_val = _get_field(source, field)
+        if _is_empty(src_val):
             continue
-        link.work_id = target_work.id
-        link.version_id = version.id if version else link.version_id
-        link.warning_state = "work_has_multiple_files"
-        link.user_confirmed = True
-
-
-def _move_shelf_memberships(db: Session, *, source_work: Work, target_work: Work) -> None:
-    for membership in list(
-        db.scalars(select(ShelfWork).where(ShelfWork.work_id == source_work.id))
-    ):
-        existing = db.get(ShelfWork, {"shelf_id": membership.shelf_id, "work_id": target_work.id})
-        if existing is None:
-            membership.work_id = target_work.id
-        else:
-            db.delete(membership)
-
-
-def _move_work_tags(db: Session, *, source_work: Work, target_work: Work) -> None:
-    for tag_link in list(
-        db.scalars(
-            select(TagLink).where(
-                TagLink.entity_type == "work",
-                TagLink.entity_id == source_work.id,
+        base_val = _get_field(base, field)
+        field_locked = field in locked or base.user_confirmed
+        if _is_empty(base_val):
+            if field_locked:
+                aid = _add_merge_assertion(db, base, field, src_val, canonical=False)
+                record["added_assertion_ids"].append(str(aid))
+                continue
+            _set_field(base, field, src_val, source=_MERGE_SOURCE)
+            record["filled_fields"].append(field)
+            aid = _add_merge_assertion(db, base, field, src_val, canonical=True)
+            record["added_assertion_ids"].append(str(aid))
+        elif _field_values_differ(field, base_val, src_val):
+            # Both hold a differing value → a real conflict the user resolves later. Ensure the
+            # base's kept value is represented as an assertion (so the review UI shows ≥2 distinct
+            # values), then add the source's value as a non-canonical conflicting assertion.
+            has_assertion = db.scalar(
+                select(MetadataAssertion.id)
+                .where(
+                    MetadataAssertion.entity_type == "work",
+                    MetadataAssertion.entity_id == base.id,
+                    MetadataAssertion.field_name == field,
+                )
+                .limit(1)
             )
+            if has_assertion is None:
+                aid = _add_merge_assertion(db, base, field, base_val, canonical=True)
+                record["added_assertion_ids"].append(str(aid))
+            aid = _add_merge_assertion(db, base, field, src_val, canonical=False)
+            record["added_assertion_ids"].append(str(aid))
+
+
+def _move_owned_entities(db: Session, *, base: Work, source: Work, record: dict[str, Any]) -> None:
+    moved = record["moved"]
+
+    # File links: repoint to the base, unless the base already links that same file (then leave the
+    # source link in place so nothing is destroyed and unmerge stays exact).
+    base_files = set(
+        db.scalars(select(FileWorkLink.file_id).where(FileWorkLink.work_id == base.id)).all()
+    )
+    for link in db.scalars(select(FileWorkLink).where(FileWorkLink.work_id == source.id)).all():
+        if link.file_id in base_files:
+            continue
+        link.work_id = base.id
+        moved["file_work_links"].append(str(link.id))
+
+    # Shelf memberships (PK shelf_id, work_id): repoint unless the base is already on that shelf.
+    base_shelves = set(
+        db.scalars(select(ShelfWork.shelf_id).where(ShelfWork.work_id == base.id)).all()
+    )
+    for membership in db.scalars(select(ShelfWork).where(ShelfWork.work_id == source.id)).all():
+        if membership.shelf_id in base_shelves:
+            continue
+        membership.work_id = base.id
+        moved["shelf_works"].append(str(membership.shelf_id))
+
+    # Tags (PK tag_id, entity_type, entity_id): repoint unless the base already carries that tag.
+    base_tags = set(
+        db.scalars(
+            select(TagLink.tag_id).where(
+                TagLink.entity_type == "work", TagLink.entity_id == base.id
+            )
+        ).all()
+    )
+    for tag_link in db.scalars(
+        select(TagLink).where(TagLink.entity_type == "work", TagLink.entity_id == source.id)
+    ).all():
+        if tag_link.tag_id in base_tags:
+            continue
+        tag_link.entity_id = base.id
+        moved["tag_links"].append(str(tag_link.tag_id))
+
+    # Outgoing references + citation mentions (the source as the CITING work).
+    for ref in db.scalars(select(Reference).where(Reference.citing_work_id == source.id)).all():
+        ref.citing_work_id = base.id
+        moved["references_out"].append(str(ref.id))
+    for mention in db.scalars(
+        select(CitationMention).where(CitationMention.citing_work_id == source.id)
+    ).all():
+        mention.citing_work_id = base.id
+        moved["mentions_out"].append(str(mention.id))
+
+    # Annotations + versions.
+    for annotation in db.scalars(select(Annotation).where(Annotation.work_id == source.id)).all():
+        annotation.work_id = base.id
+        moved["annotations"].append(str(annotation.id))
+    for version in db.scalars(select(WorkVersion).where(WorkVersion.work_id == source.id)).all():
+        version.work_id = base.id
+        moved["work_versions"].append(str(version.id))
+
+    # Non-field metadata assertions (e.g. authors): move to the base, deduping identical values.
+    # The consolidated fields (title/abstract/…) are handled by ``_fill_and_conflict_fields`` and
+    # deliberately left on the source as its own provenance.
+    base_field_values = {
+        (field_name, value)
+        for field_name, value in db.execute(
+            select(MetadataAssertion.field_name, MetadataAssertion.value).where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == base.id,
+            )
+        ).all()
+    }
+    for assertion in db.scalars(
+        select(MetadataAssertion).where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.entity_id == source.id,
+            MetadataAssertion.field_name.notin_(_MERGE_FIELDS),
         )
-    ):
-        existing = db.get(
+    ).all():
+        if (assertion.field_name, assertion.value) in base_field_values:
+            continue
+        assertion.entity_id = base.id
+        moved["metadata_assertions"].append(str(assertion.id))
+
+
+def _move_ids(db: Session, model: type, ids: list[str], attr: str, new_value: uuid.UUID) -> None:
+    """Set ``attr = new_value`` on each ``model`` row whose id is in ``ids`` (unmerge reversal)."""
+    for row_id in ids:
+        row = db.get(model, uuid.UUID(row_id))
+        if row is not None:
+            setattr(row, attr, new_value)
+
+
+def _move_shelf_works_back(
+    db: Session, shelf_ids: list[str], *, base_id: uuid.UUID, shadow_id: uuid.UUID
+) -> None:
+    for shelf_id in shelf_ids:
+        membership = db.get(ShelfWork, {"shelf_id": uuid.UUID(shelf_id), "work_id": base_id})
+        if membership is not None:
+            membership.work_id = shadow_id
+
+
+def _move_tag_links_back(
+    db: Session, tag_ids: list[str], *, base_id: uuid.UUID, shadow_id: uuid.UUID
+) -> None:
+    for tag_id in tag_ids:
+        tag_link = db.get(
             TagLink,
-            {
-                "tag_id": tag_link.tag_id,
-                "entity_type": "work",
-                "entity_id": target_work.id,
-            },
+            {"tag_id": uuid.UUID(tag_id), "entity_type": "work", "entity_id": base_id},
         )
-        if existing is None:
-            tag_link.entity_id = target_work.id
-        else:
-            db.delete(tag_link)
+        if tag_link is not None:
+            tag_link.entity_id = shadow_id
 
 
 def _resolve(
