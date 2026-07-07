@@ -216,6 +216,21 @@ def test_unwatch_preview_and_prune_now(tmp_path) -> None:
     assert AgentState(state_path).all_files() == []
 
 
+def test_set_auto_prune_persists(tmp_path) -> None:
+    """The forward auto-prune toggle round-trips through config (default OFF)."""
+    import json
+
+    from paperracks_agent.config import AgentConfig, load_config, save_config
+
+    config_path = tmp_path / "agent.yaml"
+    save_config(AgentConfig(), config_path)
+    assert load_config(config_path).auto_prune_unwatched is False
+    app = create_app("tok", config_path=config_path)
+    res = _post(app, "/api/set-auto-prune", {"enabled": True})
+    assert json.loads(res.body)["auto_prune_unwatched"] is True
+    assert load_config(config_path).auto_prune_unwatched is True
+
+
 def test_reconcile_arm_delete_endpoint(tmp_path) -> None:
     """The arm-delete endpoint sets the one-shot flag in agent state (dialog 1 backing)."""
     import json

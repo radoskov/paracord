@@ -72,6 +72,7 @@ def create_app(
             "name": config.name,
             "default_action": config.default_action,
             "default_teleport_policy": config.default_teleport_policy,
+            "auto_prune_unwatched": config.auto_prune_unwatched,
             "folders": [f.model_dump(mode="json") for f in config.folders],
             "files": [f.model_dump(mode="json") for f in config.files],
             "folder_stats": agent_ops.folder_stats(config),
@@ -122,6 +123,16 @@ def create_app(
         config.server_url = body["url"]
         save_config(config, config_path)
         return JSONResponse({"server_url": config.server_url})
+
+    async def api_set_auto_prune(request: Request):
+        """Toggle forward-sync auto-prune of unwatched entries (default OFF; keep-by-default)."""
+        if (deny := guard(request)) is not None:
+            return deny
+        body = await request.json()
+        config = _config()
+        config.auto_prune_unwatched = bool(body.get("enabled"))
+        save_config(config, config_path)
+        return JSONResponse({"ok": True, "auto_prune_unwatched": config.auto_prune_unwatched})
 
     async def api_enroll(request: Request):
         if (deny := guard(request)) is not None:
@@ -454,6 +465,7 @@ def create_app(
         Route("/api/status", api_status),
         Route("/api/browse", api_browse),
         Route("/api/connect", api_connect, methods=["POST"]),
+        Route("/api/set-auto-prune", api_set_auto_prune, methods=["POST"]),
         Route("/api/enroll", api_enroll, methods=["POST"]),
         Route("/api/set-token", api_set_token, methods=["POST"]),
         Route("/api/items", api_add_item, methods=["POST"]),
@@ -592,6 +604,8 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
         <button class="sec" onclick="addByPath()" title="Add the pasted path to the watched list">Add</button>
       </div>
       <div id="items" style="margin-top:.7rem"></div>
+      <label style="display:block;margin-top:.8rem;font-size:.85rem" title="When ON, each ‘Scan &amp; push’ also removes entries that are on disk but outside every watched folder. OFF by default so kept files are never silently dropped.">
+        <input type="checkbox" id="autoPrune" onchange="setAutoPrune(this.checked)"> Auto-prune unwatched entries on “Scan &amp; push” <span class="muted">(off by default)</span></label>
     </div>
   </section>
 
@@ -599,7 +613,7 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
     <div class="card"><h2>Indexed files
         <button class="sec tiny" id="btnScan" onclick="doScan()" title="Forward sync: re-scan the watched folders and push the manifest to the server. Never deletes anything.">Scan &amp; push</button>
         <button class="sec tiny" id="btnReconcile" onclick="openReconcile()" title="Reverse sync: compare the local index with the server and un-index files the server no longer has. Previews first; never touches unwatched files.">Reconcile with server…</button>
-        <button class="sec tiny" id="btnRefresh" onclick="refresh()" title="Reload the indexed-files list from local state + the server">Refresh</button></h2>
+        <button class="sec tiny" id="btnRefresh" onclick="manualRefresh()" title="Reload the indexed-files list from local state + the server">Refresh</button></h2>
       <div id="badges" class="badges"></div>
       <div class="filters">
         <input id="fSearch" placeholder="search filename, hash, title or authors…" oninput="renderFiles()">
@@ -743,6 +757,7 @@ async function refresh(){
     ? `<span class="ok">●</span> connected to ${esc(s.server_url)} — agent <b>${esc(s.me.name)}</b> [${esc(s.me.status)}]; can: ${esc(Object.keys(s.me).filter(k=>k.startsWith('can_')&&s.me[k]).map(k=>k.slice(4)).join(', ')||'—')}`
     : `<span class="bad">●</span> not connected (${esc(s.server_url)}) ${s.error?'— '+esc(s.error):''}`;
   const url=document.getElementById('url');if(document.activeElement!==url)url.value=s.server_url;
+  const ap=document.getElementById('autoPrune');if(ap)ap.checked=!!s.auto_prune_unwatched;
   // managed items
   const items=[...s.folders.map(f=>({...f,kind:'folder'})),...s.files.map(f=>({...f,kind:'file'}))];
   document.getElementById('cFolders').textContent=items.length;
@@ -894,6 +909,14 @@ function copyHash(h){navigator.clipboard.writeText(h).then(()=>toast('Hash copie
 
 // --- server connection / enrollment ---
 function connect(){return api('/api/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:document.getElementById('url').value})});}
+function setAutoPrune(on){act(()=>api('/api/set-auto-prune',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:on})}),on?'Auto-prune ON':'Auto-prune OFF');}
+// Show a spinner on a button + disable it while an async action runs, then restore it (Phase 4).
+async function withBusy(btnId,fn){
+  const btn=document.getElementById(btnId);
+  if(btn){btn.dataset.orig=btn.innerHTML;btn.disabled=true;btn.innerHTML='<span class="spin"></span>'+btn.dataset.orig;}
+  try{return await fn();}
+  finally{if(btn){btn.disabled=false;btn.innerHTML=btn.dataset.orig;}}
+}
 function enroll(){return api('/api/enroll',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:document.getElementById('enrollTok').value,name:document.getElementById('agentName').value})});}
 function setToken(){return api('/api/set-token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:document.getElementById('agentTok').value})});}
 
@@ -994,7 +1017,17 @@ function sync(){return api('/api/sync',{method:'POST'}).then(r=>{
   if(r.removed)bits.push(`removed ${r.removed}`);
   if(r.pruned)bits.push(`pruned ${r.pruned}`);
   return 'Scan & push: '+bits.join(', ');});}
-function doScan(){act(sync);}
+// Scan & push with visible feedback: spinner on the button + a concise completion status.
+async function doScan(){
+  try{const msg=await withBusy('btnScan',sync);toast(msg,'ok');}
+  catch(e){toast(e.message,'bad');}
+  await refresh();
+}
+// Manual Refresh with spinner (the 15 s auto-refresh stays silent).
+async function manualRefresh(){
+  try{await withBusy('btnRefresh',async()=>{await refresh();});toast('Refreshed','ok');}
+  catch(e){toast(e.message,'bad');}
+}
 
 // --- reverse sync: reconcile with the server (Phase 3) ---
 let recArmed=false;         // whether delete-on-disk was armed this session (one-shot server-side)
@@ -1003,7 +1036,8 @@ function openReconcile(){recArmed=false;
   const cb=document.getElementById('recDelete');cb.checked=false;
   document.getElementById('reconcileUnindex').innerHTML='';document.getElementById('reconcileDelete').innerHTML='';
   document.getElementById('reconcileMsg').textContent='Comparing with the server…';
-  document.getElementById('reconcileModal').classList.add('open');reconcilePreview();}
+  document.getElementById('reconcileModal').classList.add('open');
+  withBusy('btnReconcile',reconcilePreview);}
 function closeReconcile(){document.getElementById('reconcileModal').classList.remove('open');}
 // Dialog 1 — enable the guarded delete-on-disk (one-shot; the text spells out the self-disable).
 async function onRecDeleteToggle(){
@@ -1047,9 +1081,10 @@ async function reconcileApply(){
   if(!confirm('Apply reconcile?\n\n'+(p.would_un_index||0)+' to un-index'
     +(del?', '+(p.would_delete||0)+' to delete on disk (moved to trash)':'')))return;
   let r;
-  try{r=await api('/api/reconcile',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apply:true,delete_on_disk:del})});}
+  try{r=await withBusy('recApplyBtn',()=>api('/api/reconcile',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apply:true,delete_on_disk:del})}));}
   catch(e){toast(e.message,'bad');return;}
   if(r.refused)toast(r.reason,'bad');
+  else if(!r.un_indexed&&!r.deleted)toast('Reconciled: nothing to do','ok');
   else toast(`Reconciled: ${r.un_indexed} un-indexed`+(r.deleted?`, ${r.deleted} deleted`:''),'ok');
   recArmed=false;closeReconcile();await refresh();
 }
