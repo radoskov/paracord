@@ -2241,6 +2241,17 @@
           "has_conflict": {
             "title": "Has Conflict",
             "type": "boolean"
+          },
+          "match_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Pct"
           }
         },
         "required": [

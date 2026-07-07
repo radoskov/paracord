@@ -31,6 +31,7 @@ const CONFLICT_FIELD: FieldReview = {
   canonical_value: 'Title A',
   has_conflict: true,
   confirmed: false,
+  match_pct: 87.5,
   assertions: [
     { id: 'a1', field_name: 'title', value: 'Title A', source: 'crossref', confidence: null, selected_as_canonical: true },
     { id: 'a2', field_name: 'title', value: 'Title B', source: 'openalex', confidence: null, selected_as_canonical: false },
@@ -81,6 +82,32 @@ describe('WorkDetail metadata-conflict remove (Phase L, item 8)', () => {
     expect(client.deleteMetadataAssertion).toHaveBeenCalledWith('w1', 'a2');
     // Field list is refreshed after a removal (initial load + post-delete refresh).
     expect(client.listWorkMetadata.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('shows the match % for a conflicting field (P2)', async () => {
+    const client = makeClient();
+    render(WorkDetail, { client: client as never, work: makeWork() });
+
+    await screen.findByText('Title B');
+    expect(screen.getByText('87.5% match')).toBeTruthy();
+  });
+
+  it('does not show a match % when the field has no conflict (P2)', async () => {
+    const noConflict: FieldReview = {
+      field_name: 'venue',
+      canonical_value: 'NeurIPS',
+      has_conflict: false,
+      confirmed: false,
+      match_pct: null,
+      assertions: [
+        { id: 'v1', field_name: 'venue', value: 'NeurIPS', source: 'crossref', confidence: null, selected_as_canonical: true },
+      ],
+    };
+    const client = makeClient({ listWorkMetadata: vi.fn().mockResolvedValue([noConflict]) });
+    render(WorkDetail, { client: client as never, work: makeWork() });
+
+    await screen.findByText('NeurIPS');
+    expect(screen.queryByText(/% match/)).toBeNull();
   });
 
   it('does not call deleteMetadataAssertion when the confirm is dismissed', async () => {

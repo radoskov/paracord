@@ -46,7 +46,7 @@ from app.services.web_find import (
     find_candidates,
     iter_find_candidates,
 )
-from app.utils.normalization import normalize_doi, normalize_title
+from app.utils.normalization import normalize_doi, normalize_title, similarity_pct
 from app.workers.queue import (
     enqueue_embedding,
     enqueue_enrichment,
@@ -1055,6 +1055,10 @@ class FieldReview(BaseModel):
     canonical_value: str | None
     has_conflict: bool
     confirmed: bool = False  # user-locked field (§8.12): enrichment won't overwrite it
+    # 0-100 similarity between the conflicting values (lowest pairwise, after normalizing
+    # whitespace/hyphenation/case) so the UI can show how alike two values are. None when
+    # there is no conflict. Values differing only by formatting score ~100.
+    match_pct: float | None = None
     assertions: list[MetadataAssertionRead]
 
 
@@ -1687,6 +1691,23 @@ def confirm_metadata_field(
     return work
 
 
+def _conflict_match_pct(distinct_values: list[str]) -> float:
+    """Lowest pairwise similarity (0-100) among the distinct conflicting values.
+
+    For the common two-value conflict this is just the similarity between the two values;
+    for more it reports the most divergent pair, so a low number always means "these really
+    differ" rather than "one happens to match".
+    """
+    return round(
+        min(
+            similarity_pct(a, b)
+            for i, a in enumerate(distinct_values)
+            for b in distinct_values[i + 1 :]
+        ),
+        1,
+    )
+
+
 @router.get("/{work_id}/metadata", response_model=list[FieldReview])
 def get_work_metadata(
     work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
@@ -1708,12 +1729,16 @@ def get_work_metadata(
     reviews: list[FieldReview] = []
     for field_name, assertions in sorted(by_field.items()):
         canonical = next((a.value for a in assertions if a.selected_as_canonical), None)
+        distinct = list(dict.fromkeys(a.value for a in assertions))
+        has_conflict = len(distinct) > 1
+        match_pct = _conflict_match_pct(distinct) if has_conflict else None
         reviews.append(
             FieldReview(
                 field_name=field_name,
                 canonical_value=canonical,
-                has_conflict=len({a.value for a in assertions}) > 1,
+                has_conflict=has_conflict,
                 confirmed=field_name in confirmed,
+                match_pct=match_pct,
                 assertions=assertions,
             )
         )

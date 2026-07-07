@@ -945,6 +945,12 @@
                   ? 'Locked — enrichment will not overwrite this field. Click to unlock.'
                   : 'Unlocked — click to lock so enrichment cannot overwrite it.'}
             >{field.confirmed ? '🔒 locked' : '🔓 lock'}</button>
+            {#if field.has_conflict && field.match_pct != null}
+              <span
+                class="match-pct"
+                title="How alike the conflicting values are, ignoring whitespace, line-break hyphenation, and case (100% = identical apart from formatting)."
+              >{field.match_pct}% match</span>
+            {/if}
             {#each field.assertions as a (a.id)}
               <div class="assertion">
                 <span class="src">{a.source}</span>
@@ -1498,6 +1504,17 @@
     border-radius: 0.25rem;
     color: var(--status-warning);
     font-size: 0.72rem;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.35rem;
+  }
+
+  .match-pct {
+    background: var(--surface-muted, rgba(127, 127, 127, 0.12));
+    border-radius: 0.25rem;
+    color: var(--text-muted);
+    cursor: help;
+    font-size: 0.72rem;
+    font-weight: 700;
     margin-left: 0.4rem;
     padding: 0.05rem 0.35rem;
   }

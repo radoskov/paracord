@@ -577,6 +577,8 @@ export interface FieldReview {
   canonical_value: string | null;
   has_conflict: boolean;
   confirmed?: boolean;
+  /** 0-100 similarity between the conflicting values (null when there is no conflict). */
+  match_pct?: number | null;
   assertions: MetadataAssertion[];
 }
 
