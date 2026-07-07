@@ -285,6 +285,25 @@
     });
   }
 
+  // Batch D: papers explicitly LINKED to this one ("related / same work"), plus the Unmerge action.
+  let relatedLinks: Work[] = [];
+  let relatedLinksLoaded = false;
+  async function loadRelatedLinks(): Promise<void> {
+    await run(async () => {
+      relatedLinks = await client.getRelatedLinks(work.id);
+      relatedLinksLoaded = true;
+    });
+  }
+
+  async function unmergePaper(): Promise<void> {
+    if (!window.confirm('Undo the most recent merge into this paper? The merged paper is restored as a separate paper.'))
+      return;
+    await run(async () => {
+      const updated = await client.unmergePaper(work.id);
+      onUpdated(updated);
+    }, 'Merge undone');
+  }
+
   // Organization / "Where is this?" — the shelves (and their racks) this paper sits in. Lazy-loaded
   // on first <details> open (like Related papers). Add/remove are STRUCTURE ops gated on the
   // librarian floor ($canManageStructure) + the per-shelf can_modify flag, NOT canModify.
@@ -820,6 +839,10 @@
     <div class="bar-actions">
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
+      {#if work.has_reversible_shadow}
+        <button type="button" class="secondary small" on:click={unmergePaper} disabled={loading || !canModify}
+          title={canModify ? 'Undo the most recent merge into this paper (restores the merged paper)' : INSUFFICIENT_ROLE}>Unmerge</button>
+      {/if}
       <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading || !canModify}
         title={canModify ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
@@ -1075,6 +1098,27 @@
               <small class="muted">{r.work.year ?? ''}</small>
             </button>
             <small class="related-reason">{r.reason}</small>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </details>
+
+  <details on:toggle={(e) => e.currentTarget.open && !relatedLinksLoaded && loadRelatedLinks()}>
+    <summary>Linked papers</summary>
+    {#if !relatedLinksLoaded}
+      <p class="hintline">Open to see papers you linked to this one (related / same work).</p>
+    {:else if relatedLinks.length === 0}
+      <p class="empty">No linked papers. Use “Link” in Duplicate review to relate two papers.</p>
+    {:else}
+      <ul class="refs">
+        {#each relatedLinks as l (l.id)}
+          <li class="entry-card">
+            <button type="button" class="related-link" on:click={() => onSelectWork(l.id)}
+              title="Open this linked paper">
+              <span class="ref-title">{l.canonical_title ?? 'Untitled'}</span>
+              <small class="muted">{l.year ?? ''}</small>
+            </button>
           </li>
         {/each}
       </ul>

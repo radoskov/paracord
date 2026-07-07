@@ -46,6 +46,11 @@ export interface Work {
   citation_count_fetched_at?: string | null;
   created_at: string;
   updated_at: string;
+  // Duplicate-merge shadow marker (Batch D): non-null on a hidden shadow. `has_reversible_shadow`
+  // is only populated by getWork — true when this paper's most recent merge can be undone (drives
+  // the Unmerge button).
+  merged_into_id?: string | null;
+  has_reversible_shadow?: boolean;
   // SEE-filtered shelves/racks for the Library columns (D32); only populated by listWorks.
   shelves?: WorkRef[];
   racks?: WorkRef[];
@@ -783,6 +788,17 @@ export interface DuplicateSplitSegment {
   label?: string;
 }
 
+// Preview of what merging a work/work candidate into a chosen base would do (Batch D).
+export interface MergePreview {
+  base_work_id: string;
+  source_work_id: string;
+  fill_fields: string[];
+  conflict_fields: string[];
+  file_count: number;
+  incoming_reference_count: number;
+  will_flatten: boolean;
+}
+
 // Sort keys the backend list_works endpoint accepts (SAFE allowlist, mirrored server-side).
 export type WorkSortKey =
   | 'title'
@@ -1493,6 +1509,23 @@ export class ApiClient {
         split_segments: options.splitSegments,
       },
     });
+  }
+
+  // Preview a merge of a work/work candidate into the chosen base (the surviving canonical paper).
+  async getMergePreview(candidateId: string, baseWorkId: string): Promise<MergePreview> {
+    return this.request<MergePreview>(
+      `/api/v1/duplicates/${candidateId}/merge-preview?base_work_id=${baseWorkId}`,
+    );
+  }
+
+  // Undo the most recent merge into a paper, restoring the hidden shadow to a standalone paper.
+  async unmergePaper(workId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/unmerge`, { method: 'POST' });
+  }
+
+  // Papers bidirectionally LINKED to this one (Batch D "Link"; distinct from similarity /related).
+  async getRelatedLinks(workId: string): Promise<Work[]> {
+    return this.request<Work[]>(`/api/v1/works/${workId}/related-links`);
   }
 
   async listShelves(): Promise<Shelf[]> {

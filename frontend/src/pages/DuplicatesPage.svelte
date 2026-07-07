@@ -7,6 +7,7 @@
     type DuplicateCandidateAction,
     type DuplicateCandidateStatus,
     type DuplicateSplitSegment,
+    type MergePreview,
   } from '../api/client';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
@@ -16,6 +17,10 @@
   let candidates: DuplicateCandidate[] = [];
   let statusFilter: DuplicateCandidateStatus | '' = 'open';
   let splitDrafts: Record<string, string> = {};
+  // Per-candidate chosen base (the surviving canonical paper, "merge INTO"); the other work is the
+  // merge-from source. The double-arrow control swaps them. Defaults to the suggested target.
+  let baseIds: Record<string, string> = {};
+  let previews: Record<string, MergePreview | null> = {};
   let loading = false;
   let message = '';
 
@@ -37,7 +42,42 @@
   async function load(): Promise<void> {
     await run(async () => {
       candidates = await client.listDuplicateCandidates(statusFilter);
+      previews = {};
+      for (const c of candidates) {
+        if (canResolveAsWork(c) && c.status === 'open') void loadPreview(c);
+      }
     });
+  }
+
+  function baseId(c: DuplicateCandidate): string {
+    return baseIds[c.id] ?? c.suggested_target_work_id ?? c.entity_a_id;
+  }
+  function sourceId(c: DuplicateCandidate): string {
+    return baseId(c) === c.entity_a_id ? c.entity_b_id : c.entity_a_id;
+  }
+  function entLabel(c: DuplicateCandidate, id: string): string {
+    if (id === c.entity_a_id) return c.entity_a_label ?? `${c.entity_a_type}:${id.slice(0, 8)}`;
+    return c.entity_b_label ?? `${c.entity_b_type}:${id.slice(0, 8)}`;
+  }
+  function swap(c: DuplicateCandidate): void {
+    baseIds = { ...baseIds, [c.id]: sourceId(c) };
+    void loadPreview(c);
+  }
+  async function loadPreview(c: DuplicateCandidate): Promise<void> {
+    previews = { ...previews, [c.id]: undefined as unknown as MergePreview };
+    try {
+      previews = { ...previews, [c.id]: await client.getMergePreview(c.id, baseId(c)) };
+    } catch {
+      previews = { ...previews, [c.id]: null };
+    }
+  }
+  function mergeSummary(p: MergePreview | null | undefined): string {
+    if (p === undefined) return 'Loading preview…';
+    if (p === null) return '';
+    const text =
+      `Merge: fills ${p.fill_fields.length} empty field(s), adds ${p.conflict_fields.length} ` +
+      `conflict(s), moves ${p.file_count} file(s), hides the other as a shadow.`;
+    return p.will_flatten ? `${text} (finalizes a prior merge first)` : text;
   }
 
   // Wait for the queued full-library scan job to leave the queue before reloading candidates: a
@@ -82,9 +122,8 @@
   async function apply(candidate: DuplicateCandidate, action: DuplicateCandidateAction): Promise<void> {
     await run(async () => {
       await client.applyDuplicateCandidateAction(candidate.id, action, {
-        targetWorkId: canResolveAsWork(candidate)
-          ? (candidate.suggested_target_work_id ?? candidate.entity_a_id)
-          : undefined,
+        // Merge/Link honour the user-chosen base (item #1); the swap control picks which survives.
+        targetWorkId: canResolveAsWork(candidate) ? baseId(candidate) : undefined,
       });
       candidates = await client.listDuplicateCandidates(statusFilter);
     }, `Applied ${label(action)}`);
@@ -180,17 +219,36 @@
             <header>
               <div>
                 <strong>{label(c.candidate_type)}</strong>
-                <span class="muted">{entities(c)}</span>
+                {#if !canResolveAsWork(c)}<span class="muted">{entities(c)}</span>{/if}
               </div>
               <b>{Math.round(c.score * 100)}%</b>
             </header>
             <p class="muted">{signals(c)}</p>
+            {#if canResolveAsWork(c)}
+              <div class="pair">
+                <div class="side">
+                  <span class="tag">Base — merge into</span>
+                  <span class="paper" title={entLabel(c, baseId(c))}>{entLabel(c, baseId(c))}</span>
+                </div>
+                <button type="button" class="swap" on:click={() => swap(c)}
+                  disabled={loading || !$canEdit || c.status !== 'open'}
+                  aria-label="Swap which paper survives as the base"
+                  title="Swap: make the other paper the surviving base">⇄</button>
+                <div class="side">
+                  <span class="tag">Merge from</span>
+                  <span class="paper" title={entLabel(c, sourceId(c))}>{entLabel(c, sourceId(c))}</span>
+                </div>
+              </div>
+              {#if c.status === 'open' && mergeSummary(previews[c.id])}
+                <p class="preview">{mergeSummary(previews[c.id])}</p>
+              {/if}
+            {/if}
             <div class="actions">
               {#if canResolveAsWork(c)}
                 <button type="button" on:click={() => apply(c, 'merge_works')} disabled={loading || !$canEdit || c.status !== 'open'}
-                  title={$canEdit ? 'Merge these two papers into one canonical paper' : INSUFFICIENT_ROLE}>Merge</button>
+                  title={$canEdit ? 'Consolidate the merge-from paper into the base; hide it as a shadow' : INSUFFICIENT_ROLE}>Merge</button>
                 <button type="button" class="secondary" on:click={() => apply(c, 'link_as_version')} disabled={loading || !$canEdit || c.status !== 'open'}
-                  title={$canEdit ? 'Keep both but link one as a version of the other' : INSUFFICIENT_ROLE}>Link version</button>
+                  title={$canEdit ? 'Keep both papers and their files; record a related / same-work link' : INSUFFICIENT_ROLE}>Link</button>
               {/if}
               {#if canResolveAsFile(c)}
                 <button type="button" on:click={() => apply(c, 'mark_duplicate_file')} disabled={loading || !$canEdit || c.status !== 'open'}
@@ -269,6 +327,49 @@
     display: grid;
     gap: 0.15rem;
     min-width: 0;
+  }
+
+  .pair {
+    align-items: stretch;
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .side {
+    background: var(--surface-normal, var(--surface-sunken));
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    display: grid;
+    flex: 1;
+    gap: 0.2rem;
+    min-width: 0;
+    padding: 0.4rem 0.55rem;
+  }
+
+  .tag {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+  }
+
+  .paper {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .swap {
+    align-self: center;
+    font-size: 1.1rem;
+    min-height: 2rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  .preview {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin: 0.45rem 0 0;
   }
 
   .actions {
