@@ -166,15 +166,20 @@
       const echarts = (await import('echarts')) as unknown as {
         init: (el: HTMLElement) => typeof chart;
       };
-      if (!chart) chart = echarts.init(chartContainer);
+      if (!chart) {
+        chart = echarts.init(chartContainer);
+        // Delegate clicks on an overlap tooltip's per-paper [open] links (B4). The tooltip is
+        // enterable, so the user can move into it; the links carry the work id.
+        chartContainer?.addEventListener('click', (e) => {
+          const el = (e.target as HTMLElement | null)?.closest?.('[data-viz-open]');
+          const id = el?.getAttribute('data-viz-open');
+          if (id) openPaper(id);
+        });
+      }
       chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
       chart.off('click');
       chart.on('click', (params: { data?: { name?: string } }) => {
-        const workId = params.data?.name;
-        if (workId) {
-          pendingLibraryOpen.set(workId);
-          if (typeof window !== 'undefined') window.location.hash = '#library';
-        }
+        if (params.data?.name) openPaper(params.data.name);
       });
       chartError = false;
     } catch {

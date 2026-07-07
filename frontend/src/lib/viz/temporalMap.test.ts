@@ -154,4 +154,63 @@ describe("temporal_map renderer buildOption", () => {
     expect(scatter[0].name).toBe("Papers");
     expect(option.legend).toBeUndefined();
   });
+
+  it("collapses overlapping papers into one count-badged marker with a members tooltip (B4)", () => {
+    const payload = makePayload({
+      legend: null,
+      nodes: [
+        {
+          id: "a",
+          x: 2020,
+          y: 10,
+          size: 1,
+          color_group: null,
+          shape: "in_library",
+          label: "Paper A",
+          meta: {},
+        },
+        {
+          id: "b",
+          x: 2020,
+          y: 10,
+          size: 2,
+          color_group: null,
+          shape: "in_library",
+          label: "Paper B",
+          meta: {},
+        },
+        {
+          id: "c",
+          x: 2019,
+          y: 5,
+          size: 1,
+          color_group: null,
+          shape: "in_library",
+          label: "Paper C",
+          meta: {},
+        },
+      ] as never,
+    });
+    const option = temporalMapRenderer.buildOption(payload, theme);
+    const data = (
+      option.series as Array<{
+        data: Array<{
+          name: string;
+          members: { id: string }[];
+          label?: { show: boolean; formatter: string };
+        }>;
+      }>
+    )[0].data;
+    // a + b share (2020,10) → one marker; c is separate → 2 markers total.
+    expect(data).toHaveLength(2);
+    const group = data.find((d) => d.members.length === 2)!;
+    expect(group.label?.show).toBe(true);
+    expect(group.label?.formatter).toBe("2");
+    const html = (
+      option.tooltip as { formatter: (p: unknown) => string }
+    ).formatter({ data: group });
+    expect(html).toContain("2 papers here");
+    expect(html).toContain('data-viz-open="a"');
+    expect(html).toContain('data-viz-open="b"');
+  });
 });

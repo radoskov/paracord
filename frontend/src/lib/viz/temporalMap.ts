@@ -49,19 +49,52 @@ function symbolSizer(payload: VizPayload): (size: number | null) => number {
   };
 }
 
-function tooltipFormatter(params: {
-  data?: { node?: VizPayload["nodes"][number] };
-}): string {
-  const node = params.data?.node;
-  if (!node) return "";
+type Node = VizPayload["nodes"][number];
+
+// Group co-located papers (identical x,y) so an overlap becomes ONE count-badged marker instead of
+// indistinguishable stacked dots. Grouping is within a color series (so a marker keeps one colour).
+function groupByCoord(nodes: Node[]): Node[][] {
+  const by = new Map<string, Node[]>();
+  for (const n of nodes) {
+    const key = `${n.x}|${n.y}`;
+    const arr = by.get(key);
+    if (arr) arr.push(n);
+    else by.set(key, [n]);
+  }
+  return [...by.values()];
+}
+
+function singleTooltip(node: Node): string {
   const m = node.meta ?? {};
-  const rows = [
+  return [
     `<strong>${escapeHtml(node.label)}</strong>`,
     m.year != null ? `Year: ${m.year}` : "",
     m.citation_count != null ? `Citations: ${m.citation_count}` : "",
     m.local_degree != null ? `Local degree: ${m.local_degree}` : "",
-  ].filter(Boolean);
-  return rows.join("<br>");
+  ]
+    .filter(Boolean)
+    .join("<br>");
+}
+
+function tooltipFormatter(params: {
+  data?: { node?: Node; members?: Node[] };
+}): string {
+  const members = params.data?.members;
+  // Overlap: list every paper at this spot with an [open] link. The host delegates clicks on
+  // [data-viz-open] to open the paper (the tooltip is enterable so the user can reach the links).
+  if (members && members.length > 1) {
+    const linkStyle =
+      "color:inherit;text-decoration:underline;cursor:pointer;display:block;margin-top:2px";
+    const rows = members
+      .map(
+        (m) =>
+          `<a data-viz-open="${escapeHtml(m.id)}" style="${linkStyle}" title="Open this paper">${escapeHtml(m.label)}</a>`,
+      )
+      .join("");
+    return `<strong>${members.length} papers here</strong>${rows}`;
+  }
+  const node = params.data?.node ?? members?.[0];
+  return node ? singleTooltip(node) : "";
 }
 
 function escapeHtml(s: string): string {
@@ -94,12 +127,29 @@ export const temporalMapRenderer: VizRenderer = {
         type: "scatter",
         name: group ?? "Papers",
         color: colorForGroup(theme, group, groups),
-        data: groupNodes.map((n) => ({
-          value: [n.x, n.y],
-          name: n.id,
-          node: n,
-          symbolSize: sizeFor(n.size),
-        })),
+        // Merge exact overlaps into one marker; a >1 group shows a count badge and its tooltip
+        // lists every paper there. `name` stays the representative id so a plain click still opens
+        // a paper; the tooltip's [open] links reach the others.
+        data: groupByCoord(groupNodes).map((members) => {
+          const rep = members[0];
+          return {
+            value: [rep.x, rep.y],
+            name: rep.id,
+            node: rep,
+            members,
+            symbolSize: Math.max(...members.map((m) => sizeFor(m.size))),
+            label:
+              members.length > 1
+                ? {
+                    show: true,
+                    formatter: String(members.length),
+                    color: theme.tooltipText,
+                    fontSize: 10,
+                    fontWeight: "bold",
+                  }
+                : undefined,
+          };
+        }),
         emphasis: { focus: "series" },
       };
     });
@@ -138,6 +188,8 @@ export const temporalMapRenderer: VizRenderer = {
           : undefined,
       tooltip: {
         trigger: "item",
+        // Enterable so the user can move into an overlap tooltip and click a specific paper's link.
+        enterable: true,
         backgroundColor: theme.tooltipBg,
         borderColor: theme.tooltipBg,
         textStyle: { color: theme.tooltipText },
