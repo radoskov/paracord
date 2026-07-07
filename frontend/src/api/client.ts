@@ -319,6 +319,8 @@ export interface VizParams {
   edgeContext?: string;
   focusWorkId?: string | null;
   includeEdges?: boolean;
+  // B3: suppress the temporal-map citation-edge overlay above this many placed papers.
+  edgeMaxNodes?: number;
   embeddingModel?: string;
   // embedding_cluster projection: 'pca' (default) | 'umap' (opt-in, needs the AI extra image).
   layout?: string;
@@ -2586,6 +2588,8 @@ export class ApiClient {
     if (params.edgeContext) query.set("edge_context", params.edgeContext);
     if (params.focusWorkId) query.set("focus_work_id", params.focusWorkId);
     if (params.includeEdges) query.set("include_edges", "true");
+    if (params.edgeMaxNodes != null)
+      query.set("edge_max_nodes", String(params.edgeMaxNodes));
     if (params.embeddingModel)
       query.set("embedding_model", params.embeddingModel);
     if (params.layout) query.set("layout", params.layout);

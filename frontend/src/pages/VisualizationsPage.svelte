@@ -37,7 +37,10 @@
   let sizeBy = 'local_degree';
   let colorBy = 'status';
   let edgeContext = 'coupling';
-  let includeEdges = false;
+  // B3: citation edges are shown by default (the point of the map is inter-connectedness); above
+  // edgeMaxNodes papers they're suppressed server-side with a note (raise the limit to force them).
+  let includeEdges = true;
+  let edgeMaxNodes = 150;
   let focusWorkId = '';
   // embedding_cluster projection (P5b): PCA default | UMAP opt-in (needs the AI extra image).
   let clusterLayout = 'pca';
@@ -134,6 +137,7 @@
         edgeContext,
         focusWorkId: focusWorkId || null,
         includeEdges,
+        edgeMaxNodes,
         layout: isCluster ? clusterLayout : undefined,
       });
     } catch (error) {
@@ -340,10 +344,22 @@
         </label>
       {/if}
       {#if isTemporal}
-        <label class="toggle" title="Overlay citation links among the papers">
+        <label class="toggle" title="Overlay citation links among the papers (shown by default)">
           <input type="checkbox" bind:checked={includeEdges} on:change={reloadIfLoaded} data-testid="viz-include-edges" />
           Citation edges
         </label>
+        {#if includeEdges}
+          <label title="Above this many papers the citation edges are hidden to keep the map readable; raise it to force them, then Build/Refresh">
+            Edge limit
+            <input
+              type="number"
+              min="1"
+              max="500"
+              bind:value={edgeMaxNodes}
+              data-testid="viz-edge-max-nodes"
+            />
+          </label>
+        {/if}
       {/if}
       <button type="button" on:click={load} disabled={busy || !scopeReady} data-testid="viz-build">
         {payload ? 'Refresh' : 'Build'}

@@ -59,6 +59,11 @@ from app.services.topic_modeling import (
 # compute so a huge scope can't stall the endpoint; the truncation is reported in ``notes``.
 MAX_NODES = 500
 
+# B3: default ceiling above which the temporal map's citation-edge overlay is suppressed (edges are
+# on by default; above this many placed papers they clutter/slow the map). Configurable per request
+# via the ``edge_max_nodes`` param exposed as a control in the graph settings.
+DEFAULT_EDGE_MAX_NODES = 150
+
 # Where a P3+ optimization would live: local-degree and similarity metrics are recomputed per
 # request today (cheap for a personal library). A scope-keyed cache (scope, embedding-version)
 # belongs here once embedding-cluster / summaries land on the same computed layer.
@@ -448,9 +453,19 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
 
     edges: list[VizEdge] | None = None
     if include_edges:
-        edges = [
-            VizEdge(source=e.source, target=e.target, weight=float(e.weight)) for e in graph.edges
-        ]
+        edge_cap = int(params.get("edge_max_nodes") or DEFAULT_EDGE_MAX_NODES)
+        if len(nodes) > edge_cap:
+            # B3: citation edges are on by default, but above a (configurable) paper count they
+            # clutter/slow the map, so suppress them and say so rather than drawing a hairball.
+            notes.append(
+                f"Citation edges hidden — {len(nodes)} papers exceed the {edge_cap}-paper edge "
+                "limit. Raise the edge limit in the settings or narrow the scope to show them."
+            )
+        else:
+            edges = [
+                VizEdge(source=e.source, target=e.target, weight=float(e.weight))
+                for e in graph.edges
+            ]
 
     return VizPayload(
         view_type="temporal_map",

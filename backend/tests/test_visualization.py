@@ -1004,3 +1004,34 @@ def test_endpoint_bad_edge_context_400(client, db, auth_headers) -> None:
         headers=auth_headers("owner"),
     )
     assert response.status_code == 400
+
+
+def test_temporal_map_edges_suppressed_above_edge_limit(db_session) -> None:
+    """B3: the citation-edge overlay is drawn under the edge limit and suppressed (with a note) when
+    the placed papers exceed it — so a large scope stays readable instead of a hairball."""
+    actor = _owner(db_session)
+    a = Work(canonical_title="A", normalized_title="a", year=2020)
+    b = Work(canonical_title="B", normalized_title="b", year=2019)
+    db_session.add_all([a, b])
+    db_session.flush()
+    db_session.add(Reference(citing_work_id=a.id, resolved_work_id=b.id, title="B"))
+    db_session.commit()
+
+    under = get_viz(
+        db_session,
+        actor,
+        "temporal_map",
+        VizScope(type="library"),
+        {"include_edges": True, "edge_max_nodes": 10},
+    )
+    assert under.edges  # the resolved A→B citation edge is drawn
+
+    over = get_viz(
+        db_session,
+        actor,
+        "temporal_map",
+        VizScope(type="library"),
+        {"include_edges": True, "edge_max_nodes": 1},
+    )
+    assert not over.edges  # 2 papers > limit of 1 → suppressed
+    assert any("edge limit" in n.lower() for n in over.notes)
