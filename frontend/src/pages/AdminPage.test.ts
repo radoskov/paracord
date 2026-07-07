@@ -19,6 +19,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     ]),
     listRacks: vi.fn().mockResolvedValue([]),
     listShelves: vi.fn().mockResolvedValue([]),
+    listThemes: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
     getAppConfig: vi.fn().mockResolvedValue({
@@ -64,6 +65,50 @@ describe('AdminPage groups section', () => {
     expect(screen.getByText('personal')).toBeTruthy();
     // The Defaults subsection with its default-access-level control renders too.
     expect(screen.getByLabelText('Default access level')).toBeTruthy();
+  });
+
+  it('loads a bundled theme YAML into the editor as a template', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.listThemes).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Themes' }));
+
+    const picker = screen.getByLabelText('Load existing as template') as HTMLSelectElement;
+    await fireEvent.change(picker, { target: { value: 'mocha-cool' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Load into editor' }));
+
+    const editor = screen.getByLabelText('Theme YAML') as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain('id: mocha-cool'));
+    // Bundled sources are compiled in — no backend round-trip.
+    expect(editor.value).toContain('selected-border');
+  });
+
+  it('fetches a custom theme YAML source when loaded as a template', async () => {
+    const client = makeClient({
+      listThemes: vi.fn().mockResolvedValue([
+        {
+          id: 'my-theme',
+          name: 'My Theme',
+          mode: 'dark',
+          temperature: 'cool',
+          swatch: { surface: '#111', primary: '#89b4fa', accents: ['#89b4fa'] },
+        },
+      ]),
+      getThemeSource: vi.fn().mockResolvedValue({ id: 'my-theme', yaml: 'id: my-theme\nname: "My Theme"\n' }),
+    });
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.listThemes).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Themes' }));
+
+    const picker = screen.getByLabelText('Load existing as template') as HTMLSelectElement;
+    await fireEvent.change(picker, { target: { value: 'my-theme' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Load into editor' }));
+
+    await waitFor(() => expect(client.getThemeSource).toHaveBeenCalledWith('my-theme'));
+    const editor = screen.getByLabelText('Theme YAML') as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain('id: my-theme'));
   });
 
   it('saves the global max papers per page from the Settings tab', async () => {

@@ -25,6 +25,7 @@
   import Modal from '../components/Modal.svelte';
   import { canManageUsers, currentUser, isOwner } from '../lib/session';
   import { loadCustomThemes } from '../lib/theme/store';
+  import { bundledThemes, bundledThemeYaml } from '../lib/theme/themes.generated';
   import { errorMessage } from '../lib/ui';
 
   // Static reference shown under the Users widget so an admin/owner can understand each role
@@ -139,6 +140,9 @@
   let themeUploadMsg = '';
   let themeUploadErr = '';
   let uploadingTheme = false;
+  // "Load existing as template": prefill the editor with a bundled or custom theme's YAML source.
+  let templateId = '';
+  let loadingTemplate = false;
 
   // Find-on-web download policy (owner-only): restricted | careful | unrestricted (find-on-web v2).
   const DOWNLOAD_POLICIES: { value: WebFindDownloadPolicy; label: string; blurb: string }[] = [
@@ -261,6 +265,28 @@
       themeUploadErr = errorMessage(error);
     } finally {
       uploadingTheme = false;
+    }
+  }
+
+  // Prefill the editor with the chosen theme's YAML so an admin can tweak rather than write from
+  // scratch. Bundled sources are compiled into the app; custom ones come from the backend.
+  async function loadTemplate(): Promise<void> {
+    if (!templateId) return;
+    themeUploadErr = '';
+    themeUploadMsg = '';
+    const bundled = bundledThemeYaml[templateId];
+    if (bundled !== undefined) {
+      themeYaml = bundled;
+      return;
+    }
+    loadingTemplate = true;
+    try {
+      const { yaml } = await client.getThemeSource(templateId);
+      themeYaml = yaml;
+    } catch (error) {
+      themeUploadErr = errorMessage(error);
+    } finally {
+      loadingTemplate = false;
     }
   }
 
@@ -1303,6 +1329,29 @@
       </tbody>
     </table>
 
+    <div class="template-load">
+      <label for="theme-template">Load existing as template</label>
+      <div class="template-row">
+        <select id="theme-template" bind:value={templateId} disabled={loadingTemplate}
+          title="Prefill the editor with an existing theme's YAML, then tweak it">
+          <option value="">Choose a theme to copy…</option>
+          <optgroup label="Bundled">
+            {#each bundledThemes as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+          </optgroup>
+          {#if customThemes.length}
+            <optgroup label="Custom">
+              {#each customThemes as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+            </optgroup>
+          {/if}
+        </select>
+        <button type="button" class="secondary" on:click={loadTemplate}
+          disabled={!templateId || loadingTemplate}
+          title={templateId ? 'Load this theme into the editor below' : 'Choose a theme first'}>
+          {loadingTemplate ? 'Loading…' : 'Load into editor'}
+        </button>
+      </div>
+    </div>
+
     <form class="add-theme" on:submit|preventDefault={uploadThemeYaml}>
       <label for="theme-yaml">Theme YAML</label>
       <textarea
@@ -2019,6 +2068,22 @@
     width: auto;
   }
 
+  .template-load {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+  }
+  .template-row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .template-row select {
+    flex: 1 1 16rem;
+    min-width: 0;
+  }
   .add-theme {
     display: flex;
     flex-direction: column;
