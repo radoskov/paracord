@@ -34,7 +34,7 @@
     { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
-    { id: 'insights', label: 'Insights', hint: 'Citation graph, topics, semantic search and scope summaries.' },
+    { id: 'insights', label: 'Insights', hint: 'Citation graph, topics and scope summaries.' },
     { id: 'visualizations', label: 'Visualizations', hint: 'Explore your library visually — the temporal citation map and more.' },
     { id: 'citation-summary', label: 'Citation summary', hint: 'Scoped citation analytics — most-cited, missing, bridge and isolated papers, and a year distribution.' },
     { id: 'admin', label: 'Admin', hint: 'Manage users and agents.', roles: ['owner', 'admin'] },
