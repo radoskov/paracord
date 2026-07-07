@@ -201,22 +201,29 @@ def _store_embedding(
 def reindex_status(db: Session, *, provider: EmbeddingProvider | None = None) -> dict:
     """Report embedding-index coverage for the active model: ``{model_name, indexed, total}``."""
     provider = provider or HashBowProvider()
-    # Two SQL aggregates (E5) — count works that have indexable text, and those embedded for the
-    # active model — rather than materializing every Work row in Python.
-    total = db.scalar(
-        select(func.count())
-        .select_from(Work)
-        .where(
-            or_(
-                func.coalesce(Work.canonical_title, "") != "",
-                func.coalesce(Work.abstract, "") != "",
-            )
-        )
+    # Two SQL aggregates (E5) over the SAME population — the current papers (indexable text, not a
+    # merged shadow) — so ``indexed`` (how many of them have an embedding for the active model) is
+    # always a subset of ``total``. Counting distinct joined works rather than raw Embedding rows is
+    # what prevents stale embeddings (left behind by deleted/merged papers) from pushing the figure
+    # above the total, which produced the nonsensical "7 / 3 papers indexed".
+    current = (
+        or_(
+            func.coalesce(Work.canonical_title, "") != "",
+            func.coalesce(Work.abstract, "") != "",
+        ),
+        Work.merged_into_id.is_(None),
     )
+    total = db.scalar(select(func.count()).select_from(Work).where(*current))
     indexed = db.scalar(
-        select(func.count())
-        .select_from(Embedding)
-        .where(Embedding.entity_type == "work", Embedding.model_name == provider.model_name)
+        select(func.count(func.distinct(Work.id)))
+        .select_from(Work)
+        .join(
+            Embedding,
+            (Embedding.entity_id == Work.id)
+            & (Embedding.entity_type == "work")
+            & (Embedding.model_name == provider.model_name),
+        )
+        .where(*current)
     )
     return {
         "model_name": provider.model_name,

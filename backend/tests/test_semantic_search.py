@@ -7,7 +7,7 @@ from app.db.base import Base
 from app.models.ai import Embedding
 from app.models.work import Work
 from app.services.embeddings import HashBowProvider, cosine_similarity, embed_many, embed_text
-from app.services.semantic_search import ensure_work_embeddings, semantic_search
+from app.services.semantic_search import ensure_work_embeddings, reindex_status, semantic_search
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -345,3 +345,53 @@ def test_cached_provider_memoizes_per_key_and_evicts() -> None:
     rebuilt = cached_provider("ollama", "nomic-embed-text", "http://ollama:11434")
     assert rebuilt is not first
     evict_cached_providers(rebuilt.model_name)
+
+
+def test_reindex_status_counts_current_papers_not_stale_rows(db_session) -> None:
+    """``indexed`` must stay a subset of ``total``: a stale embedding left by a deleted/merged
+    paper, or a merged shadow's own embedding, must never push it above the total (the bug that
+    produced the nonsensical "7 / 3 papers indexed")."""
+    import uuid as _uuid
+
+    provider = HashBowProvider()
+    a = Work(canonical_title="Alpha", normalized_title="alpha", year=2020)
+    b = Work(canonical_title="Beta", normalized_title="beta", year=2021)
+    db_session.add_all([a, b])
+    db_session.commit()
+    ensure_work_embeddings(db_session)  # embeds both current papers for the active model
+    db_session.commit()
+
+    # A stale embedding whose work no longer exists (deleted/merged) — a raw-row count would inflate.
+    db_session.add(
+        Embedding(
+            entity_type="work",
+            entity_id=_uuid.uuid4(),
+            model_name=provider.model_name,
+            dim=2,
+            vector=[0.1, 0.2],
+        )
+    )
+    # A merged shadow with text + its own embedding is not a current paper.
+    shadow = Work(
+        canonical_title="Gamma dup",
+        normalized_title="gamma dup",
+        year=2019,
+        merged_into_id=a.id,
+    )
+    db_session.add(shadow)
+    db_session.commit()
+    db_session.add(
+        Embedding(
+            entity_type="work",
+            entity_id=shadow.id,
+            model_name=provider.model_name,
+            dim=2,
+            vector=[0.3, 0.4],
+        )
+    )
+    db_session.commit()
+
+    status = reindex_status(db_session, provider=provider)
+    assert status["total"] == 2  # Alpha + Beta; the merged shadow is excluded
+    assert status["indexed"] == 2  # both embedded; the stale row and shadow row are not counted
+    assert status["indexed"] <= status["total"]
