@@ -7,6 +7,32 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reader Batch R — Dim/Dark tuning + reference-box overhaul (2026-07-07)
+
+Batch R of `docs/WORKPLAN_2026-07-06.md`; frontend-only, committed on `main` (not pushed). **R1 —
+Dim** is now a warmer, lighter cream: `readingMode.ts` `DIM_FILTER =
+'sepia(0.5) saturate(1.12) brightness(0.98) contrast(0.96)'` (was `sepia(0.35) brightness(0.93)
+contrast(0.95)`) — higher sepia + faint saturate for warmth, brightness near 1 so it barely dims (a
+white page lands ≈ #faf9f2). **R2 — Dark** now reads as a *yellowish dark grey* (not near-black):
+`DARK_FILTER = 'invert(0.82) hue-rotate(180deg) sepia(0.28) brightness(1.02)'`. Key trick: CSS
+`invert(a)` maps white→`1-a`, so a **partial** `invert(0.82)` lands white on a warm dark grey
+(≈ #333128, in the requested #2a2632–#332f3a band) and lifts black to warm-light AA-readable text;
+hue-rotate keeps colours, sepia warms the field. Achieved with a CSS filter alone — no canvas backing
+colour needed (a backing behind an opaque painted canvas wouldn't show). **R3 — reference anchor
+boxes**: extracted the overlay geometry into a tested pure helper
+`frontend/src/lib/reader/overlayBoxes.ts` (`overlayBoxStyle(box, scale)` +
+`citationBoxesForPage`/`annotationBoxesForPage`), driven by the **same** `scale` the canvas renders
+at so boxes track zoom/resize/re-render; `PdfReader.svelte` now draws citation + annotation overlays
+**per page in BOTH paged and scroll views** (scroll mode previously drew none — each `.scroll-page`
+canvas now gets its own sibling overlays). The R1/R2 filter still targets `.canvas-stage canvas` only,
+so overlays stay untinted; click/jump behaviour unchanged. Verified: `make frontend-check` green (165
+tests, 7 new in `overlayBoxes.test.ts`, `readingMode.test.ts` updated for the new strings; build OK);
+`check_secrets` clean; re-captured (not committed) `reader_mode-{dim,dark}.png` in
+`/home/zednik/paracord-theme-shots/`. **Deviation:** no `reader_refbox-{paged,scroll}.png` — no paper
+in the stack has citation `pdf_coordinates` (so no real overlay boxes exist) and DB seeding was out of
+scope; R3 is covered by the geometry unit tests + the shared annotation-overlay path. Handoff:
+`docs/agent_handoffs/2026-07-07-reader-batch-r.md`.
+
 ## Reader "reading mode" — opt-in page-canvas easing (2026-07-04)
 
 Added an opt-in **reading mode** to the PDF reader (`PdfReader.svelte`), frontend-only, committed on
