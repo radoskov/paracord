@@ -216,7 +216,10 @@
         {client}
         work={detailWork}
         onUpdated={(w) => (detailWork = w)}
-        onDeleted={() => (detailWork = null)}
+        onDeleted={(id) => {
+          results = results.filter((r) => r.work_id !== id);
+          detailWork = null;
+        }}
         onClose={() => (detailWork = null)}
       />
     {/key}

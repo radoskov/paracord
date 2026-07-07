@@ -43,6 +43,7 @@
   let page = 1;
   let totalPages = 1;
   let totalWorks = 0;
+  let perPage = 0;
   let shelves: Shelf[] = [];
   let racks: Rack[] = [];
   let tags: Tag[] = [];
@@ -360,6 +361,9 @@
         page = result.page;
         totalPages = result.pages;
         totalWorks = result.total;
+        // Remember the effective page size so in-place row removals (delete) can keep the
+        // "{n} papers" counter and page count consistent without a full refetch.
+        perPage = result.pages > 0 ? Math.ceil(result.total / result.pages) : result.items.length;
       }
       // Drop selections that fell out of the result set.
       const present = new Set(works.map((w) => w.id));
@@ -543,6 +547,8 @@
 
   function onDeleted(workId: string): void {
     works = works.filter((w) => w.id !== workId);
+    totalWorks = Math.max(0, totalWorks - 1);
+    if (perPage > 0) totalPages = Math.max(1, Math.ceil(totalWorks / perPage));
     selectWork(null);
     message = 'Paper deleted';
   }
