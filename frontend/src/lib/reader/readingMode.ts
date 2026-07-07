@@ -8,13 +8,25 @@ export const READING_MODE_KEY = 'paracord.reader.readingMode';
 
 const READING_MODES: readonly ReadingMode[] = ['original', 'dim', 'dark'];
 
+// Tunable filter constants (see below for how they compose into each mode's CSS `filter`).
+//
+// DIM — a soft, warm cream page, barely dimmed. Higher `sepia` + a touch of `saturate` push the
+// warmth (yellow) up; `brightness` sits close to 1 so the page reads light. A blank white page
+// lands around a warm cream ≈ #faf9f2.
+const DIM_FILTER = 'sepia(0.5) saturate(1.12) brightness(0.98) contrast(0.96)';
+// DARK — a yellowish dark-grey "paper", not near-black, to match the warm dark theme surface
+// (mocha-warm base ≈ #211e2a). A full `invert(1)` maps white→black; instead we invert *partially*
+// (`invert(0.82)`) so white lands on a dark grey (CSS invert(a) maps white→1-a ≈ 0.18) and black
+// lifts to a warm-light text (≈0.82). `hue-rotate(180deg)` keeps colours roughly correct through
+// the invert, `sepia` warms the grey, and a small `brightness` lift nudges the field toward the
+// target ≈ #332f2d (a warm dark grey in the #2a2632–#332f3a range). Text stays clearly AA-readable.
+const DARK_FILTER = 'invert(0.82) hue-rotate(180deg) sepia(0.28) brightness(1.02)';
+
 // CSS `filter` string per mode. `original` is a no-op so the document renders true-to-original.
-// `dim` warms the page toward a soft cream and takes the edge off the brightness. `dark` is a
-// smart invert (white↔black flip) with a 180° hue rotation so hues stay roughly correct.
 const READING_MODE_FILTERS: Record<ReadingMode, string> = {
   original: 'none',
-  dim: 'sepia(0.35) brightness(0.93) contrast(0.95)',
-  dark: 'invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95)',
+  dim: DIM_FILTER,
+  dark: DARK_FILTER,
 };
 
 export function readingModeFilter(mode: ReadingMode): string {

@@ -13,9 +13,12 @@ describe('readingMode', () => {
 
   it('maps each mode to the expected CSS filter string', () => {
     expect(readingModeFilter('original')).toBe('none');
-    expect(readingModeFilter('dim')).toBe('sepia(0.35) brightness(0.93) contrast(0.95)');
+    // Dim is a warm, barely-dimmed cream (higher sepia + faint saturate, brightness near 1).
+    expect(readingModeFilter('dim')).toBe('sepia(0.5) saturate(1.12) brightness(0.98) contrast(0.96)');
+    // Dark is a PARTIAL invert (white→warm dark grey, not black) so the page reads like the warm
+    // dark theme surface, with the hue-rotate keeping colours and a sepia warming the field.
     expect(readingModeFilter('dark')).toBe(
-      'invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95)',
+      'invert(0.82) hue-rotate(180deg) sepia(0.28) brightness(1.02)',
     );
   });
 
