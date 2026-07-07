@@ -374,9 +374,13 @@
     width: 100%;
   }
 
-  .item.active {
-    background: var(--status-success-bg);
-    border-color: var(--status-success-border);
+  /* Accent-tinted selected state, kept on :hover too (higher specificity than the global
+     button.secondary:hover) so the current rack stays obviously highlighted, not lost to hover. */
+  .item.active,
+  .item.active:hover {
+    background: var(--surface-selected);
+    border-color: var(--surface-selected-border);
+    color: var(--surface-selected-text);
   }
 
   .head {
