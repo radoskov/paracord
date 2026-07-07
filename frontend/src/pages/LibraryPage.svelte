@@ -82,6 +82,27 @@
   let loading = false;
   let message = '';
 
+  // "Jump to open paper" (L3): scroll the open paper's row into view + briefly flash it. `flashWorkId`
+  // drives PaperTable's flash animation; `listScrollEl` is the scroll container we query the row in.
+  let flashWorkId: string | null = null;
+  let listScrollEl: HTMLElement | null = null;
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function jumpToSelected(): void {
+    if (!selected || !listScrollEl) return;
+    const row = listScrollEl.querySelector<HTMLElement>(`[data-work-id="${selected.id}"]`);
+    if (!row) {
+      // The open paper was opened from another tab / lives on a different page, so its row isn't in
+      // the current result set. Point the user at how to bring it into view rather than jumping.
+      message = 'The open paper isn’t on this page — clear filters or change page to find it.';
+      return;
+    }
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    flashWorkId = selected.id;
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => (flashWorkId = null), 1600);
+  }
+
   // Column preferences (which columns show, in what order) + current sort. localStorage is applied
   // synchronously on mount (no flash); the backend prefs file is the durable source we reconcile to.
   let columnPrefs: ColumnPrefs = loadColumnPrefs();
@@ -171,6 +192,7 @@
   onDestroy(unsubscribePendingOpen);
   onDestroy(() => {
     if (savePrefsTimer) clearTimeout(savePrefsTimer);
+    if (flashTimer) clearTimeout(flashTimer);
   });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
@@ -658,6 +680,8 @@
             : ''}</span
         >
         <span class="bar-actions">
+          <button type="button" class="secondary" on:click={jumpToSelected} disabled={!selected}
+            title={selected ? 'Scroll the open paper’s row into view' : 'Open a paper to jump to its row'}>Jump to open</button>
           <button type="button" class="secondary" on:click={() => (showColumns = true)}
             title="Choose which columns show and their order">Columns</button>
           <button type="button" class="secondary" on:click={() => (showNew = true)} disabled={!$canEdit}
@@ -700,7 +724,7 @@
       {/if}
     </div>
 
-    <div class="card list-scroll">
+    <div class="card list-scroll" bind:this={listScrollEl}>
       {#if works.length === 0}
         <p class="empty">
           No papers match. Import PDFs or add by arXiv/DOI on the <strong>Import</strong> tab, or use
@@ -717,6 +741,7 @@
           selectedWorkId={selected?.id ?? null}
           onSelect={selectWork}
           onStatusChange={updateStatus}
+          {flashWorkId}
           selectable
           {selectedIds}
           {allSelected}

@@ -7,6 +7,9 @@
   export let works: Work[] = [];
   export let selectedWorkId: string | null = null;
   export let compact = false;
+  // The row for this work id briefly pulses (the "jump to open paper" affordance, L3). Rows carry a
+  // `data-work-id` so callers can scroll a specific row into view.
+  export let flashWorkId: string | null = null;
 
   // Ordered, visible columns to render. Defaults to the registry's default-visible set so callers
   // that don't pass `columns` get the standard library table.
@@ -93,7 +96,9 @@
     {:else}
       {#each works as work (work.id)}
         <tr
+          data-work-id={work.id}
           class:selected={work.id === selectedWorkId}
+          class:flash={work.id === flashWorkId}
           on:click={() => onSelect(work)}
           tabindex="0"
           on:keydown={(event) => event.key === 'Enter' && onSelect(work)}
@@ -211,6 +216,29 @@
   tbody tr:hover,
   tbody tr.selected {
     background: var(--status-success-bg);
+  }
+
+  tbody tr.flash {
+    animation: row-flash 1.5s ease-out;
+  }
+
+  @keyframes row-flash {
+    0%,
+    40% {
+      background: var(--accent-primary);
+      color: var(--ink-inverse);
+    }
+    100% {
+      background: transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    tbody tr.flash {
+      animation: none;
+      outline: 2px solid var(--accent-primary);
+      outline-offset: -2px;
+    }
   }
 
   strong,
