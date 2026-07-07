@@ -1,0 +1,176 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { CitationSummary } from '../api/client';
+import CitationSummaryPage from './CitationSummaryPage.svelte';
+
+function baseSummary(over: Partial<CitationSummary> = {}): CitationSummary {
+  return {
+    scope_work_count: 3,
+    coverage_held: 312,
+    coverage_total: 503,
+    coverage_pct: 62,
+    most_cited_local: [
+      { work_id: 'w1', title: 'A local hub', year: 2020, doi: '10.1/hub', score: 4 },
+    ],
+    most_cited_external: [],
+    frequently_cited_missing: [
+      {
+        key: 'doi:10.9/missing',
+        title: 'Attention Is All You Need',
+        doi: '10.9/missing',
+        year: 2017,
+        cited_by_count: 9,
+        mention_count: 12,
+        reference_id: 'ref-1',
+        arxiv_id: '1706.03762',
+      },
+    ],
+    bridge_papers: [],
+    isolated_papers: [],
+    chronological: [],
+    bridge_method: 'brandes_betweenness_undirected',
+    computed_at: '2026-07-07T00:00:00Z',
+    version: 'sig',
+    notes: [],
+  };
+}
+
+function makeClient(over: Record<string, unknown> = {}) {
+  return {
+    listShelves: vi.fn().mockResolvedValue([]),
+    listRacks: vi.fn().mockResolvedValue([]),
+    citationSummary: vi.fn().mockResolvedValue(baseSummary()),
+    getWorklist: vi.fn().mockResolvedValue({}),
+    externalPreview: vi.fn(),
+    setWorklistDecision: vi.fn(),
+    clearWorklistDecision: vi.fn(),
+    exportMissingWorks: vi.fn(),
+    // Never-resolving so the WorkDetail modal never mounts; we only assert the call wiring (C2).
+    getWork: vi.fn().mockReturnValue(new Promise(() => {})),
+    importReferenceAsWork: vi.fn(),
+    ...over,
+  };
+}
+
+async function summarize(): Promise<void> {
+  await fireEvent.click(screen.getByTestId('summary-build'));
+}
+
+describe('CitationSummaryPage enrichments (Track C)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn().mockReturnValue('blob:x'),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+
+  it('shows the library-coverage headline (C3c)', async () => {
+    const client = makeClient();
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await waitFor(() => expect(screen.getByTestId('summary-coverage')).toBeTruthy());
+    const coverage = screen.getByTestId('summary-coverage');
+    expect(coverage.textContent).toContain('62%');
+    expect(coverage.textContent).toContain('312 / 503');
+  });
+
+  it('opens an internal item directly in the paper view via the icon button (C2)', async () => {
+    const client = makeClient();
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await waitFor(() => expect(screen.getAllByTestId('open-paper-view').length).toBeGreaterThan(0));
+    await fireEvent.click(screen.getAllByTestId('open-paper-view')[0]);
+    expect(client.getWork).toHaveBeenCalledWith('w1');
+  });
+
+  it('fetches and renders an external preview on demand (C1)', async () => {
+    const client = makeClient({
+      externalPreview: vi.fn().mockResolvedValue({
+        available: true,
+        title: 'Attention Is All You Need',
+        authors: ['Vaswani'],
+        year: 2017,
+        venue: 'NeurIPS',
+        abstract: 'The dominant sequence transduction models...',
+        doi: '10.9/missing',
+        arxiv_id: '1706.03762',
+        sources: ['crossref'],
+        message: null,
+      }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await waitFor(() => expect(screen.getByTestId('summary-preview-toggle')).toBeTruthy());
+    await fireEvent.click(screen.getByTestId('summary-preview-toggle'));
+    expect(client.externalPreview).toHaveBeenCalledWith({
+      doi: '10.9/missing',
+      arxiv: '1706.03762',
+      referenceId: 'ref-1',
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/dominant sequence transduction/)).toBeTruthy(),
+    );
+    expect(screen.getByText('NeurIPS', { exact: false })).toBeTruthy();
+  });
+
+  it('shows a graceful message when no preview is available (C1)', async () => {
+    const client = makeClient({
+      externalPreview: vi
+        .fn()
+        .mockResolvedValue({ available: false, message: 'No preview available.', authors: [], sources: [] }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await fireEvent.click(await screen.findByTestId('summary-preview-toggle'));
+    await waitFor(() => expect(screen.getByText('No preview available.')).toBeTruthy());
+  });
+
+  it('marks a missing work ignored and moves it to the collapsible (C3a)', async () => {
+    const client = makeClient({
+      setWorklistDecision: vi.fn().mockResolvedValue({ 'doi:10.9/missing': 'ignore' }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await fireEvent.click(await screen.findByTestId('summary-ignore'));
+    expect(client.setWorklistDecision).toHaveBeenCalledWith('doi:10.9/missing', 'ignore');
+    await waitFor(() => expect(screen.getByTestId('summary-ignored')).toBeTruthy());
+    expect(screen.getByTestId('summary-ignored').textContent).toContain('Ignored (1)');
+  });
+
+  it('restores decisions from the server on load (persist across visits) (C3a)', async () => {
+    const client = makeClient({
+      getWorklist: vi.fn().mockResolvedValue({ 'doi:10.9/missing': 'ignore' }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    // The remembered ignore keeps the item out of the active list and inside the collapsible.
+    await waitFor(() => expect(screen.getByTestId('summary-ignored')).toBeTruthy());
+    expect(screen.queryByTestId('summary-queue')).toBeNull();
+  });
+
+  it('exports the missing list as BibTeX and CSV (C3b)', async () => {
+    const client = makeClient({
+      exportMissingWorks: vi
+        .fn()
+        .mockResolvedValue({ filename: 'cited-but-missing.bib', content_type: 'application/x-bibtex', content: '@misc{}' }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+    await fireEvent.click(await screen.findByTestId('summary-export-bibtex'));
+    expect(client.exportMissingWorks).toHaveBeenCalledWith(
+      expect.objectContaining({ format: 'bibtex' }),
+    );
+    await fireEvent.click(screen.getByTestId('summary-export-csv'));
+    expect(client.exportMissingWorks).toHaveBeenCalledWith(
+      expect.objectContaining({ format: 'csv' }),
+    );
+  });
+});
