@@ -498,14 +498,45 @@ def invalidate_cache() -> None:
         _CACHE["index"] = None
 
 
-def cache_info() -> dict:
-    """Report whether the lexical index is warm in this process and its size (no build triggered)."""
+def cache_info(db: Session | None = None) -> dict:
+    """Report whether the lexical index is warm in this process and its size.
+
+    Without ``db`` this is a pure peek at the in-memory cache (no build). **With** ``db`` it refreshes
+    against the current corpus via :func:`get_index` (self-healing: SQLite rebuilds synchronously, so
+    ``docs`` is accurate; Postgres serves the last-known index and enqueues a background rebuild), and
+    reports ``stale`` — whether the served index predates the current corpus (so the UI can show
+    "rebuilding…"). This is what fixes the confusing "warm — 1 papers" when papers were added after
+    the index was last built."""
+    if db is not None:
+        try:
+            index = get_index(db)
+            stale = bool(
+                index is not None and index.signature and index.signature != corpus_signature(db)
+            )
+            return {
+                "loaded": index is not None,
+                "docs": len(index.work_ids) if index is not None else None,
+                "stale": stale,
+            }
+        except Exception as exc:  # noqa: BLE001 - status must never fail; fall back to the peek
+            logger.warning("Could not refresh lexical index for status (%s).", exc)
     with _LOCK:
         index = _CACHE["index"]
         return {
             "loaded": index is not None,
             "docs": len(index.work_ids) if index is not None else None,
+            "stale": None,
         }
+
+
+def force_rebuild(db: Session, *, config: Bm25fConfig | None = None) -> Bm25fIndex:
+    """Synchronous rebuild that also refreshes this process's in-memory cache (manual Rebuild). Used
+    when no worker queue is available so the AI & Models "Rebuild index" button still takes effect."""
+    index = rebuild_persisted_index(db, config=config)
+    with _LOCK:
+        _CACHE["key"] = (id(db.get_bind()), index.signature)
+        _CACHE["index"] = index
+    return index
 
 
 def lexical_search_papers(

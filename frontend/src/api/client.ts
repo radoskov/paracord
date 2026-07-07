@@ -983,7 +983,11 @@ export interface AiStatus {
     indexed: number;
     total: number;
   };
-  lexical_index?: { loaded: boolean; docs: number | null };
+  lexical_index?: {
+    loaded: boolean;
+    docs: number | null;
+    stale?: boolean | null;
+  };
   ollama_reachable: boolean;
   bertopic_installed: boolean;
   sentence_transformers_installed: boolean;
@@ -2120,6 +2124,13 @@ export class ApiClient {
 
   async reindexEmbeddings(): Promise<{ job_id: string; status: string }> {
     return this.request("/api/v1/admin/ai/reindex", { method: "POST" });
+  }
+
+  async rebuildLexicalIndex(): Promise<{
+    job_id: string | null;
+    status: string;
+  }> {
+    return this.request("/api/v1/admin/ai/lexical-rebuild", { method: "POST" });
   }
 
   async getReindexStatus(): Promise<{

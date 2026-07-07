@@ -251,3 +251,27 @@ def test_lexical_mode_api_uses_bm25f(client, auth_headers, db) -> None:
     assert body["items"][0]["title"] == "Quantum entanglement networks"
     assert body["embedding_provider_used"] is None
     assert body["degraded"] is False
+
+
+def test_cache_info_reflects_current_corpus_after_papers_added(db_session) -> None:
+    """cache_info(db) self-heals: after papers are added the reported doc count reflects the current
+    corpus (SQLite rebuilds synchronously), not a stale earlier build (fixes 'warm — 1 papers')."""
+    from app.services.bm25_index import cache_info
+
+    db_session.add(
+        Work(canonical_title="alpha term", normalized_title="alpha term", abstract="alpha body")
+    )
+    db_session.commit()
+    get_index(db_session)  # warm with a single paper
+    assert cache_info(db_session)["docs"] == 1
+
+    db_session.add_all(
+        [
+            Work(canonical_title="beta term", normalized_title="beta term", abstract="beta body"),
+            Work(canonical_title="gamma term", normalized_title="gamma term", abstract="gam body"),
+        ]
+    )
+    db_session.commit()
+    info = cache_info(db_session)
+    assert info["docs"] == 3  # accurate for the current corpus, not stuck at 1
+    assert info["stale"] is False  # SQLite rebuilt synchronously, so nothing is stale

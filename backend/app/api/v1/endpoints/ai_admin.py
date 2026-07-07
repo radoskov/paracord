@@ -212,6 +212,24 @@ def reindex_endpoint(db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
     return {"job_id": job_id, "status": "queued"}
 
 
+@router.post("/ai/lexical-rebuild", status_code=status.HTTP_202_ACCEPTED)
+def rebuild_lexical_index_endpoint(db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
+    """Manually rebuild the lexical (BM25F+) index. Enqueues a background rebuild when a worker queue
+    is available; otherwise (SQLite dev / Redis down) rebuilds synchronously so the button still
+    takes effect. The index also self-rebuilds when the corpus changes — this is the explicit knob."""
+    from app.services.bm25_index import force_rebuild  # noqa: PLC0415
+    from app.workers.queue import enqueue_bm25_rebuild  # noqa: PLC0415 (keep Redis import lazy)
+
+    job_id = enqueue_bm25_rebuild()
+    if job_id is None:
+        force_rebuild(db)
+    record_event(
+        db, "ai.lexical_rebuild_requested", actor_user_id=owner.id, entity_type="ai_config"
+    )
+    db.commit()
+    return {"status": "queued" if job_id else "rebuilt", "job_id": job_id}
+
+
 @router.get("/ai/reindex/status")
 def reindex_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Embedding-index coverage for the active model (indexed / total)."""
@@ -261,7 +279,7 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
         "reindex": reindex_status(db, provider=get_embedding_provider(db=db)),
         # Hybrid search (HS6): chunk-level ANN coverage for the active model + lexical index warmth.
         "chunk_embeddings": chunk_embedding_status(db, provider=get_embedding_provider(db=db)),
-        "lexical_index": lexical_cache_info(),
+        "lexical_index": lexical_cache_info(db),
         "ollama_reachable": providers["ollama_reachable"],
         "bertopic_installed": providers["bertopic_installed"],
         "sentence_transformers_installed": providers["sentence_transformers_installed"],

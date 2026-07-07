@@ -242,6 +242,17 @@
     });
   }
 
+  async function doRebuildLexical(): Promise<void> {
+    await run(async () => {
+      const r = await client.rebuildLexicalIndex();
+      message =
+        r.status === 'queued'
+          ? `Lexical index rebuild queued (job ${(r.job_id ?? '').slice(0, 8)}).`
+          : 'Lexical index rebuilt.';
+      status = await client.getAiStatus();
+    });
+  }
+
   function fmtSize(bytes: number | null): string {
     if (!bytes) return '';
     const gb = bytes / 1e9;
@@ -597,8 +608,13 @@
       <p class="muted small">
         Lexical (BM25F+) index: {status.lexical_index.loaded
           ? `warm — ${status.lexical_index.docs} papers`
-          : 'not yet warmed (builds on first search / library open)'}.
+          : 'not yet warmed (builds on first search / library open)'}{status.lexical_index.stale
+          ? ' · rebuilding to include recent changes…'
+          : ''}.
+        It rebuilds automatically when the library changes; use Rebuild to force it now.
       </p>
+      <button type="button" class="secondary" on:click={doRebuildLexical} disabled={busy}
+        title="Rebuild the lexical (keyword) search index now — normally it refreshes itself when papers change">Rebuild index</button>
     {/if}
     <button type="button" class="secondary" on:click={doReindex} disabled={busy}
       title="Rebuild embeddings for every paper with the current embedding model">Reindex embeddings</button>

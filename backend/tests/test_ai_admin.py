@@ -309,3 +309,15 @@ def test_ollama_host_classification():
     assert not _ollama_host_is_local("ollama.example.org")
     assert not _ollama_host_is_local("169.254.169.254")
     assert not _ollama_host_is_local("192.168.1.5")
+
+
+def test_lexical_rebuild_endpoint_owner_only(client, auth_headers):
+    """B5: the manual lexical-index rebuild is admin-only and (no worker queue in tests) rebuilds
+    synchronously, returning 202."""
+    assert (
+        client.post("/api/v1/admin/ai/lexical-rebuild", headers=auth_headers("editor")).status_code
+        == 403
+    )
+    r = client.post("/api/v1/admin/ai/lexical-rebuild", headers=auth_headers("owner"))
+    assert r.status_code == 202
+    assert r.json()["status"] in ("rebuilt", "queued")
