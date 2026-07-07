@@ -4501,13 +4501,19 @@
             "type": "string"
           },
           "summary_type": {
-            "default": "extractive",
-            "enum": [
-              "extractive",
-              "local_llm"
+            "anyOf": [
+              {
+                "enum": [
+                  "extractive",
+                  "local_llm"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Summary Type",
-            "type": "string"
+            "title": "Summary Type"
           }
         },
         "required": [

@@ -880,6 +880,13 @@ export interface ScopeSummaryResponse {
   model_name: string | null;
   prompt_version: string | null;
   work_count: number;
+  // Provider provenance (#10 / L4): what was requested vs used, and why it fell back. `provider_used`
+  // is 'extractive' whenever the summary is the extractive fallback (no model configured, or the
+  // model was unavailable), which the Insights UI surfaces as a hint.
+  provider_requested?: string | null;
+  provider_used?: string | null;
+  fallback?: boolean;
+  fallback_reason?: string | null;
 }
 
 export interface AiConfig {

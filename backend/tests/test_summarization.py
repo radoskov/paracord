@@ -460,3 +460,68 @@ def test_scope_summary_api_accepts_local_llm(client, auth_headers, db) -> None:
     body = r.json()
     assert body["summary_type"] == "local_llm"
     assert body["provider_requested"] == "local_llm"
+
+
+# --- L4: the scope summary honors the admin AI config's provider/model ---
+
+
+def test_scope_summary_api_uses_configured_provider(client, auth_headers, db, monkeypatch) -> None:
+    """With the admin AI config set to local_llm + a model, the endpoint (given no explicit
+    summary_type) resolves to the model-based provider and uses it — no extractive fallback."""
+    import app.services.summarization as summ
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.ai_config import update_ai_config
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "llama3"})
+    db.commit()
+    monkeypatch.setattr(
+        summ, "_ollama_summarize", lambda text, *, model, base_url: f"LLM summary via {model}"
+    )
+
+    shelf = Shelf(name="cfg provider")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="P", normalized_title="p", abstract="One. Two. Three. Four.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    r = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id)},  # no summary_type → resolve config
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["summary_type"] == "local_llm"
+    assert body["provider_used"] == "local_llm"
+    assert body["fallback"] is False
+    assert body["model_name"] == "llama3"
+    assert "LLM summary via llama3" in body["text"]
+
+
+def test_scope_summary_api_defaults_to_extractive_without_model(client, auth_headers, db) -> None:
+    """With no AI summary model configured (CI default), the endpoint resolves to the extractive
+    engine and reports it honestly so the UI can show the "set a model" hint (L4)."""
+    from app.models.organization import Shelf, ShelfWork
+
+    shelf = Shelf(name="no model")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="P", normalized_title="p", abstract="One. Two. Three. Four.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    r = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id)},  # no summary_type
+    )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["summary_type"] == "extractive"
+    assert body["provider_used"] == "extractive"
+    assert body["fallback"] is False

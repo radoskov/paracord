@@ -32,8 +32,10 @@ class ScopeSummaryRequest(BaseModel):
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
     # 'local_llm' uses the configured Ollama model over the scope's abstracts, degrading to the
-    # extractive engine when the LLM is disabled/unreachable (#10).
-    summary_type: Literal["extractive", "local_llm"] = "extractive"
+    # extractive engine when the LLM is disabled/unreachable (#10). Left unset (None), the endpoint
+    # resolves it from the admin AI config: the configured summary provider/model is used when set,
+    # otherwise it falls back to the extractive engine (L4).
+    summary_type: Literal["extractive", "local_llm"] | None = None
     max_sentences: int = 8
     model_name: str | None = None
 
@@ -67,12 +69,20 @@ def create_scope_summary(
         db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    # Honor the admin AI config when the caller didn't pin a type: use the configured model-based
+    # provider if one is set, else the extractive engine (L4). Same resolution per-work summaries use.
+    summary_type = payload.summary_type
+    if summary_type is None:
+        from app.services.ai_config import get_ai_config
+
+        ai_cfg = get_ai_config(db)
+        summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
     try:
         summary, work_count = summarize_scope(
             db,
             scope_type=payload.scope_type,
             scope_id=payload.scope_id,
-            summary_type=payload.summary_type,
+            summary_type=summary_type,
             max_sentences=max(3, min(payload.max_sentences, 20)),
             model_name=payload.model_name,
             created_by_user_id=actor.id,

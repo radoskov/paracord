@@ -298,13 +298,22 @@
       <div class="head">
         <h2>Scope summary</h2>
         <button type="button" on:click={summarise} disabled={loading || !scopeReady || !isClassicScope}
-          title={isClassicScope ? (scopeReady ? 'Generate an extractive summary across the scope’s abstracts' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarise</button>
+          title={isClassicScope ? (scopeReady ? 'Summarise the scope’s abstracts (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarise</button>
       </div>
       {#if !summary}
         <p class="empty">No summary yet — click “Summarise”.</p>
       {:else}
         <p class="summary-text">{summary.text}</p>
         <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}</p>
+        {#if summary.provider_used !== 'local_llm'}
+          <p class="extractive-hint" role="status">
+            {#if summary.fallback && summary.fallback_reason}
+              Extractive summary — the configured AI model was unavailable ({summary.fallback_reason}).
+            {:else}
+              Extractive summary — set an AI summary model in Admin → AI to enable model-based summaries.
+            {/if}
+          </p>
+        {/if}
       {/if}
     </div>
   </div>
@@ -318,6 +327,15 @@
 
   .msg {
     margin: 0;
+  }
+
+  .extractive-hint {
+    margin: 0.5rem 0 0;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.375rem;
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+    font-size: 0.85rem;
   }
 
   .grid {
