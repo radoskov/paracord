@@ -78,6 +78,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # Grace period so a cold start that runs `alembic upgrade head` first isn't marked unhealthy
+      # before the server is listening.
+      start_period: 30s
 
   # RQ background worker — runs GROBID extraction (and later summaries/topics) jobs.
   worker:
@@ -96,6 +99,11 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      # Gate the worker on the api being healthy: the api entrypoint runs `alembic upgrade head`, so
+      # waiting for it guarantees the schema is at head before the worker queries any table on a cold
+      # start (both containers share this backend image and its migration-on-start entrypoint).
+      api:
         condition: service_healthy
     volumes:
       - ./backend:/app/backend
