@@ -257,6 +257,28 @@ def test_summary_api_returns_provenance(client, auth_headers, db) -> None:
     assert body["params"]["summary_type"] == "abstract"
 
 
+def test_summary_api_auto_uses_configured_provider(client, auth_headers, db) -> None:
+    """B8: summary_type='auto' resolves to the configured provider. With no local LLM enabled
+    (the test default), that is the deterministic extractive engine — the paper-view Summarise
+    action never needs to know the AI config."""
+    work = Work(
+        canonical_title="t",
+        normalized_title="t",
+        abstract="One. Two. Three. Four. Five. Six.",
+    )
+    db.add(work)
+    db.commit()
+    created = client.post(
+        f"/api/v1/works/{work.id}/summaries",
+        headers=auth_headers("editor"),
+        json={"summary_type": "auto"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["summary_type"] == "extractive"  # resolved from 'auto'
+    assert body["text"]
+
+
 def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:
     """A local_llm summary that degraded to extractive reports the fallback in the response so the
     paper view can show 'Summarized with the extractive fallback (LLM unavailable)' (Phase B2)."""

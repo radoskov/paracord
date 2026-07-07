@@ -1696,11 +1696,20 @@ def create_summary(
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     _guard_modify_work(db, actor, work)
+    summary_type = payload.summary_type
+    if summary_type == "auto":
+        # Mirror the scope-summary resolution (ai.py): use the configured provider — the local LLM
+        # when selected, otherwise the deterministic extractive engine — so the paper-view
+        # "Summarise" action does the right thing without the caller knowing the AI config.
+        from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+        ai_cfg = get_ai_config(db)
+        summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
     try:
         summary = summarize_work(
             db,
             work,
-            summary_type=payload.summary_type,
+            summary_type=summary_type,
             max_sentences=payload.max_sentences,
             model_name=payload.model_name,
             created_by_user_id=actor.id,

@@ -1,6 +1,7 @@
-import type { Theme, ThemeMode } from '../lib/theme/types';
+import type { Theme, ThemeMode } from "../lib/theme/types";
 
-export type ReadingStatus = 'unread' | 'skimmed' | 'reading' | 'read' | 'important' | 'revisit';
+export type ReadingStatus =
+  "unread" | "skimmed" | "reading" | "read" | "important" | "revisit";
 
 // Custom themes (Theming P4). A picker-list summary and the admin upload result. The full resolved
 // theme object returned by getTheme() reuses the frontend `Theme` type (same shape as bundled ones).
@@ -98,7 +99,7 @@ export interface SemanticSearchResponse {
 }
 
 // Unified hybrid search (HS5): lexical (BM25F+), semantic (dense), or hybrid (RRF fusion).
-export type SearchMode = 'lexical' | 'semantic' | 'hybrid';
+export type SearchMode = "lexical" | "semantic" | "hybrid";
 
 export interface HybridSearchItem {
   work_id: string;
@@ -143,7 +144,9 @@ export interface EmbeddingModelsResponse {
   multimode_available: boolean;
 }
 
-export type SummaryType = 'abstract' | 'extractive';
+// 'auto' lets the server pick the configured provider (local LLM if selected, else extractive);
+// 'abstract'/'extractive' force a specific engine.
+export type SummaryType = "auto" | "abstract" | "extractive";
 
 export interface Summary {
   id: string;
@@ -177,22 +180,22 @@ export interface TopicModelResponse {
 }
 
 export type GraphScopeType =
-  | 'library'
-  | 'shelf'
-  | 'rack'
-  | 'search_result'
-  | 'selected_papers'
-  | 'import_batch'
-  | 'saved_filter';
-export type GraphNodeMode = 'local_only' | 'include_external';
+  | "library"
+  | "shelf"
+  | "rack"
+  | "search_result"
+  | "selected_papers"
+  | "import_batch"
+  | "saved_filter";
+export type GraphNodeMode = "local_only" | "include_external";
 // §8.9 depth (Track C P5b). Node sizing is a client re-style — all three metrics ship on every node.
-export type GraphSizeBy = 'degree' | 'pagerank' | 'betweenness';
-export type GraphColorBy = 'none' | 'shelf' | 'tag' | 'topic' | 'status';
+export type GraphSizeBy = "degree" | "pagerank" | "betweenness";
+export type GraphColorBy = "none" | "shelf" | "tag" | "topic" | "status";
 
 export interface GraphNode {
   id: string;
   label: string;
-  type: 'local' | 'external';
+  type: "local" | "external";
   work_id: string | null;
   year: number | null;
   doi: string | null;
@@ -354,7 +357,7 @@ export interface ExternalPreview {
 }
 
 // A missing work's import/ignore decision (Track C C3a).
-export type MissingDecision = 'import' | 'ignore';
+export type MissingDecision = "import" | "ignore";
 
 export interface YearCount {
   year: number | null;
@@ -387,38 +390,38 @@ export interface CitationSummaryParams {
 }
 
 export type ExportScopeType =
-  | 'work'
-  | 'shelf'
-  | 'rack'
-  | 'library'
-  | 'selection'
-  | 'search'
-  | 'saved_filter'
-  | 'import_batch'
-  | 'missing_references';
+  | "work"
+  | "shelf"
+  | "rack"
+  | "library"
+  | "selection"
+  | "search"
+  | "saved_filter"
+  | "import_batch"
+  | "missing_references";
 export type ExportFormat =
-  | 'bibtex'
-  | 'biblatex'
-  | 'ris'
-  | 'csl-json'
-  | 'markdown'
-  | 'html'
-  | 'text'
-  | 'styled'
-  | 'latex'
-  | 'pandoc';
+  | "bibtex"
+  | "biblatex"
+  | "ris"
+  | "csl-json"
+  | "markdown"
+  | "html"
+  | "text"
+  | "styled"
+  | "latex"
+  | "pandoc";
 
 export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
-  { value: 'bibtex', label: 'BibTeX' },
-  { value: 'biblatex', label: 'BibLaTeX' },
-  { value: 'ris', label: 'RIS' },
-  { value: 'csl-json', label: 'CSL JSON' },
-  { value: 'markdown', label: 'Markdown' },
-  { value: 'html', label: 'HTML' },
-  { value: 'text', label: 'Plain text' },
-  { value: 'styled', label: 'Styled (APA/IEEE/…)' },
-  { value: 'latex', label: 'LaTeX (\\cite)' },
-  { value: 'pandoc', label: 'Pandoc Markdown ([@key])' },
+  { value: "bibtex", label: "BibTeX" },
+  { value: "biblatex", label: "BibLaTeX" },
+  { value: "ris", label: "RIS" },
+  { value: "csl-json", label: "CSL JSON" },
+  { value: "markdown", label: "Markdown" },
+  { value: "html", label: "HTML" },
+  { value: "text", label: "Plain text" },
+  { value: "styled", label: "Styled (APA/IEEE/…)" },
+  { value: "latex", label: "LaTeX (\\cite)" },
+  { value: "pandoc", label: "Pandoc Markdown ([@key])" },
 ];
 
 export interface CitationStyle {
@@ -429,13 +432,13 @@ export interface CitationStyle {
 // Fallback list used before the dynamic list loads (or if the styles endpoint is unavailable).
 // The backend (GET /api/v1/exports/styles) is the source of truth; keep these in rough sync.
 export const CITATION_STYLES: CitationStyle[] = [
-  { value: 'apa', label: 'APA (7th edition)' },
-  { value: 'ieee', label: 'IEEE' },
-  { value: 'chicago', label: 'Chicago (author-date)' },
-  { value: 'mla', label: 'MLA (9th edition)' },
-  { value: 'harvard', label: 'Harvard (Cite Them Right)' },
-  { value: 'vancouver', label: 'Vancouver' },
-  { value: 'nature', label: 'Nature' },
+  { value: "apa", label: "APA (7th edition)" },
+  { value: "ieee", label: "IEEE" },
+  { value: "chicago", label: "Chicago (author-date)" },
+  { value: "mla", label: "MLA (9th edition)" },
+  { value: "harvard", label: "Harvard (Cite Them Right)" },
+  { value: "vancouver", label: "Vancouver" },
+  { value: "nature", label: "Nature" },
 ];
 
 export interface ExportResponse {
@@ -445,7 +448,7 @@ export interface ExportResponse {
 }
 
 // Access level governing who may see / modify a rack or shelf (and, transitively, papers).
-export type AccessLevel = 'open' | 'visible' | 'private';
+export type AccessLevel = "open" | "visible" | "private";
 
 export interface Shelf {
   id: string;
@@ -518,7 +521,7 @@ export interface Source {
 export interface ServerImportRoot {
   alias: string;
   path: string;
-  source: 'yaml' | 'db';
+  source: "yaml" | "db";
   removable: boolean;
   id: string | null;
   exists: boolean;
@@ -527,7 +530,7 @@ export interface ServerImportRoot {
 // A merged find-on-web allowed download host: built-in default (locked) or DB-managed (removable).
 export interface WebFindAllowedHost {
   host: string;
-  source: 'default' | 'db';
+  source: "default" | "db";
   removable: boolean;
   id: string | null;
 }
@@ -660,12 +663,12 @@ export interface WebFindDownloadItem {
 }
 
 export type WebFindDownloadStatus =
-  | 'attached'
-  | 'deduped'
-  | 'manual_upload_needed'
-  | 'error'
-  | 'blocked'
-  | 'needs_confirmation';
+  | "attached"
+  | "deduped"
+  | "manual_upload_needed"
+  | "error"
+  | "blocked"
+  | "needs_confirmation";
 
 export interface WebFindDownloadResult {
   candidate_id: string;
@@ -682,14 +685,14 @@ export interface WebFindDownloadResponse {
 
 // Streaming search NDJSON events (POST .../find-on-web/stream). One object per line.
 export interface WebFindSourceEvent {
-  type: 'source';
+  type: "source";
   source: string;
-  status: 'querying' | 'done' | 'failed';
+  status: "querying" | "done" | "failed";
   count?: number;
 }
 
 export interface WebFindResultEvent {
-  type: 'result';
+  type: "result";
   candidates: WebCandidate[];
   degraded_sources: string[];
   queried_sources: string[];
@@ -698,7 +701,7 @@ export interface WebFindResultEvent {
 export type WebFindStreamEvent = WebFindSourceEvent | WebFindResultEvent;
 
 // Find-on-web download policy (owner-only).
-export type WebFindDownloadPolicy = 'restricted' | 'careful' | 'unrestricted';
+export type WebFindDownloadPolicy = "restricted" | "careful" | "unrestricted";
 
 export interface WebFindDownloadPolicyResponse {
   policy: WebFindDownloadPolicy;
@@ -742,14 +745,15 @@ export interface AnnotationCreate {
   content_markdown?: string | null;
 }
 
-export type DuplicateCandidateStatus = 'open' | 'accepted' | 'rejected' | 'ignored';
+export type DuplicateCandidateStatus =
+  "open" | "accepted" | "rejected" | "ignored";
 export type DuplicateCandidateAction =
-  | 'merge_works'
-  | 'link_as_version'
-  | 'mark_duplicate_file'
-  | 'split_file'
-  | 'keep_separate'
-  | 'ignore';
+  | "merge_works"
+  | "link_as_version"
+  | "mark_duplicate_file"
+  | "split_file"
+  | "keep_separate"
+  | "ignore";
 
 export interface DuplicateCandidate {
   id: string;
@@ -801,12 +805,7 @@ export interface MergePreview {
 
 // Sort keys the backend list_works endpoint accepts (SAFE allowlist, mirrored server-side).
 export type WorkSortKey =
-  | 'title'
-  | 'year'
-  | 'venue'
-  | 'added_at'
-  | 'updated_at'
-  | 'reading_status';
+  "title" | "year" | "venue" | "added_at" | "updated_at" | "reading_status";
 
 export interface WorkQuery {
   q?: string;
@@ -818,7 +817,7 @@ export interface WorkQuery {
   hasReferences?: boolean;
   missing?: string[];
   sort?: WorkSortKey;
-  order?: 'asc' | 'desc';
+  order?: "asc" | "desc";
   // Server-controlled pagination (D18). `perPage` overrides the user's saved preference.
   page?: number;
   perPage?: number;
@@ -838,7 +837,7 @@ export interface SavedFilterParams {
 export interface SavedFilter {
   id: string;
   name: string;
-  search_mode: 'metadata' | 'semantic';
+  search_mode: "metadata" | "semantic";
   query_text: string | null;
   params: SavedFilterParams;
   created_at: string;
@@ -847,7 +846,7 @@ export interface SavedFilter {
 
 export interface SavedFilterCreate {
   name: string;
-  search_mode?: 'metadata' | 'semantic';
+  search_mode?: "metadata" | "semantic";
   query_text?: string | null;
   params?: SavedFilterParams;
 }
@@ -858,7 +857,7 @@ export type SavedFilterUpdate = Partial<SavedFilterCreate>;
 export interface LibraryColumnPrefs {
   order: string[];
   visible: string[];
-  sort: { key: string; order: 'asc' | 'desc' };
+  sort: { key: string; order: "asc" | "desc" };
 }
 
 export interface UserPreferences {
@@ -873,8 +872,8 @@ export interface IdentifierImportResponse {
 }
 
 // Batch citation import (Phase J item 5).
-export type EngineKind = 'lookup' | 'grobid';
-export type BatchMatchStatus = 'matched' | 'title_only' | 'no_match';
+export type EngineKind = "lookup" | "grobid";
+export type BatchMatchStatus = "matched" | "title_only" | "no_match";
 
 export interface DraftCandidate {
   title: string | null;
@@ -978,7 +977,12 @@ export interface AiStatus {
   providers: AiProviders;
   reindex: { model_name: string; indexed: number; total: number };
   // Hybrid search (HS6): chunk-level ANN coverage for the active model + lexical index warmth.
-  chunk_embeddings?: { model_name: string; column: string | null; indexed: number; total: number };
+  chunk_embeddings?: {
+    model_name: string;
+    column: string | null;
+    indexed: number;
+    total: number;
+  };
   lexical_index?: { loaded: boolean; docs: number | null };
   ollama_reachable: boolean;
   bertopic_installed: boolean;
@@ -1000,12 +1004,7 @@ export interface AiModel {
 
 // Privilege ladder, highest first: owner > admin > librarian > editor > contributor > reader.
 export type UserRole =
-  | 'owner'
-  | 'admin'
-  | 'librarian'
-  | 'editor'
-  | 'contributor'
-  | 'reader';
+  "owner" | "admin" | "librarian" | "editor" | "contributor" | "reader";
 
 // --- Access control: groups, grants, default grants and access settings (admin-or-owner) ---
 export interface Group {
@@ -1024,7 +1023,7 @@ export interface GroupMember {
   display_name: string | null;
 }
 
-export type GrantTargetType = 'rack' | 'shelf';
+export type GrantTargetType = "rack" | "shelf";
 
 export interface Grant {
   id: string;
@@ -1094,12 +1093,12 @@ export interface AgentRecord {
 }
 
 export type AgentPrivilege =
-  | 'can_index'
-  | 'can_extract'
-  | 'can_teleport'
-  | 'can_be_requested'
-  | 'processing_visibility'
-  | 'server_status_visibility';
+  | "can_index"
+  | "can_extract"
+  | "can_teleport"
+  | "can_be_requested"
+  | "processing_visibility"
+  | "server_status_visibility";
 
 export interface AuditEvent {
   id: string;
@@ -1166,33 +1165,43 @@ export class ApiClient {
   ) {}
 
   withToken(token: string | null): ApiClient {
-    return new ApiClient(this.baseUrl, token, this.onUnauthorized, this.onQueueFull);
+    return new ApiClient(
+      this.baseUrl,
+      token,
+      this.onUnauthorized,
+      this.onQueueFull,
+    );
   }
 
   async login(username: string, password: string): Promise<string> {
-    const response = await this.request<{ access_token: string }>('/api/v1/auth/login', {
-      method: 'POST',
-      body: { username, password },
-      auth: false,
-    });
+    const response = await this.request<{ access_token: string }>(
+      "/api/v1/auth/login",
+      {
+        method: "POST",
+        body: { username, password },
+        auth: false,
+      },
+    );
     return response.access_token;
   }
 
   async listWorks(query: WorkQuery = {}): Promise<PaginatedWorks> {
     const params = new URLSearchParams();
-    if (query.q) params.set('q', query.q);
-    if (query.readingStatus) params.set('reading_status', query.readingStatus);
-    if (query.shelfId) params.set('shelf_id', query.shelfId);
-    if (query.rackId) params.set('rack_id', query.rackId);
-    if (query.tagId) params.set('tag_id', query.tagId);
-    if (query.hasPdf !== undefined) params.set('has_pdf', String(query.hasPdf));
-    if (query.hasReferences !== undefined) params.set('has_references', String(query.hasReferences));
-    if (query.missing?.length) params.set('missing', query.missing.join(','));
-    if (query.sort) params.set('sort', query.sort);
-    if (query.order) params.set('order', query.order);
-    if (query.page !== undefined) params.set('page', String(query.page));
-    if (query.perPage !== undefined) params.set('per_page', String(query.perPage));
-    const suffix = params.toString() ? `?${params.toString()}` : '';
+    if (query.q) params.set("q", query.q);
+    if (query.readingStatus) params.set("reading_status", query.readingStatus);
+    if (query.shelfId) params.set("shelf_id", query.shelfId);
+    if (query.rackId) params.set("rack_id", query.rackId);
+    if (query.tagId) params.set("tag_id", query.tagId);
+    if (query.hasPdf !== undefined) params.set("has_pdf", String(query.hasPdf));
+    if (query.hasReferences !== undefined)
+      params.set("has_references", String(query.hasReferences));
+    if (query.missing?.length) params.set("missing", query.missing.join(","));
+    if (query.sort) params.set("sort", query.sort);
+    if (query.order) params.set("order", query.order);
+    if (query.page !== undefined) params.set("page", String(query.page));
+    if (query.perPage !== undefined)
+      params.set("per_page", String(query.perPage));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
     return this.request<PaginatedWorks>(`/api/v1/works${suffix}`);
   }
 
@@ -1202,7 +1211,7 @@ export class ApiClient {
 
   // --- Custom themes (P4): read for any user; upload/delete owner+admin ---
   async listThemes(): Promise<CustomThemeSummary[]> {
-    return this.request<CustomThemeSummary[]>('/api/v1/themes');
+    return this.request<CustomThemeSummary[]>("/api/v1/themes");
   }
 
   async getTheme(id: string): Promise<Theme> {
@@ -1217,52 +1226,67 @@ export class ApiClient {
   }
 
   async uploadTheme(yaml: string): Promise<ThemeUploadResult> {
-    return this.request<ThemeUploadResult>('/api/v1/admin/themes', {
-      method: 'POST',
+    return this.request<ThemeUploadResult>("/api/v1/admin/themes", {
+      method: "POST",
       body: { yaml },
     });
   }
 
   async deleteTheme(id: string): Promise<void> {
     await this.request<void>(`/api/v1/admin/themes/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   async getPreferences(): Promise<UserPreferences> {
-    return this.request<UserPreferences>('/api/v1/preferences');
+    return this.request<UserPreferences>("/api/v1/preferences");
   }
 
   async putPreferences(prefs: UserPreferences): Promise<UserPreferences> {
-    return this.request<UserPreferences>('/api/v1/preferences', { method: 'PUT', body: prefs });
+    return this.request<UserPreferences>("/api/v1/preferences", {
+      method: "PUT",
+      body: prefs,
+    });
   }
 
   // --- Saved filters (per-user; usable as a Library filter and as a graph/export scope) ---
   async listSavedFilters(): Promise<SavedFilter[]> {
-    return this.request<SavedFilter[]>('/api/v1/saved-filters');
+    return this.request<SavedFilter[]>("/api/v1/saved-filters");
   }
 
   async createSavedFilter(payload: SavedFilterCreate): Promise<SavedFilter> {
-    return this.request<SavedFilter>('/api/v1/saved-filters', { method: 'POST', body: payload });
+    return this.request<SavedFilter>("/api/v1/saved-filters", {
+      method: "POST",
+      body: payload,
+    });
   }
 
-  async updateSavedFilter(id: string, payload: SavedFilterUpdate): Promise<SavedFilter> {
+  async updateSavedFilter(
+    id: string,
+    payload: SavedFilterUpdate,
+  ): Promise<SavedFilter> {
     return this.request<SavedFilter>(`/api/v1/saved-filters/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: payload,
     });
   }
 
   async deleteSavedFilter(id: string): Promise<void> {
-    await this.request<void>(`/api/v1/saved-filters/${id}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/saved-filters/${id}`, {
+      method: "DELETE",
+    });
   }
 
   async importReferenceAsWork(referenceId: string): Promise<Work> {
-    return this.request<Work>(`/api/v1/works/from-reference/${referenceId}`, { method: 'POST' });
+    return this.request<Work>(`/api/v1/works/from-reference/${referenceId}`, {
+      method: "POST",
+    });
   }
 
   async getRelatedWorks(workId: string, limit = 8): Promise<RelatedWork[]> {
-    return this.request<RelatedWork[]>(`/api/v1/works/${workId}/related?limit=${limit}`);
+    return this.request<RelatedWork[]>(
+      `/api/v1/works/${workId}/related?limit=${limit}`,
+    );
   }
 
   async acceptTopicAsTag(
@@ -1270,8 +1294,8 @@ export class ApiClient {
     topicId: number,
     name: string,
   ): Promise<{ tag_id: string; tagged: number }> {
-    return this.request('/api/v1/ai/topics/accept-as-tag', {
-      method: 'POST',
+    return this.request("/api/v1/ai/topics/accept-as-tag", {
+      method: "POST",
       body: { topic_model_id: topicModelId, topic_id: topicId, name },
     });
   }
@@ -1281,80 +1305,111 @@ export class ApiClient {
     topicId: number,
     name: string,
   ): Promise<{ shelf_id: string; added: number }> {
-    return this.request('/api/v1/ai/topics/create-shelf', {
-      method: 'POST',
+    return this.request("/api/v1/ai/topics/create-shelf", {
+      method: "POST",
       body: { topic_model_id: topicModelId, topic_id: topicId, name },
     });
   }
 
   async getReadingQueue(): Promise<Work[]> {
-    return this.request<Work[]>('/api/v1/works/reading-queue');
+    return this.request<Work[]>("/api/v1/works/reading-queue");
   }
 
   async reorderReadingQueue(workIds: string[]): Promise<Work[]> {
-    return this.request<Work[]>('/api/v1/works/reading-queue/reorder', {
-      method: 'POST',
+    return this.request<Work[]>("/api/v1/works/reading-queue/reorder", {
+      method: "POST",
       body: { work_ids: workIds },
     });
   }
 
   async createWork(payload: Partial<Work>): Promise<Work> {
-    return this.request<Work>('/api/v1/works', { method: 'POST', body: payload });
+    return this.request<Work>("/api/v1/works", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   async updateWork(id: string, payload: Partial<Work>): Promise<Work> {
-    return this.request<Work>(`/api/v1/works/${id}`, { method: 'PATCH', body: payload });
+    return this.request<Work>(`/api/v1/works/${id}`, {
+      method: "PATCH",
+      body: payload,
+    });
   }
 
   async deleteWork(id: string): Promise<void> {
-    await this.request<void>(`/api/v1/works/${id}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/works/${id}`, { method: "DELETE" });
   }
 
   async listWorkMetadata(workId: string): Promise<FieldReview[]> {
     return this.request<FieldReview[]>(`/api/v1/works/${workId}/metadata`);
   }
 
-  async selectMetadataAssertion(workId: string, assertionId: string): Promise<Work> {
+  async selectMetadataAssertion(
+    workId: string,
+    assertionId: string,
+  ): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}/metadata/select`, {
-      method: 'POST',
+      method: "POST",
       body: { assertion_id: assertionId },
     });
   }
 
-  async deleteMetadataAssertion(workId: string, assertionId: string): Promise<Work> {
-    return this.request<Work>(`/api/v1/works/${workId}/metadata/${assertionId}`, {
-      method: 'DELETE',
-    });
+  async deleteMetadataAssertion(
+    workId: string,
+    assertionId: string,
+  ): Promise<Work> {
+    return this.request<Work>(
+      `/api/v1/works/${workId}/metadata/${assertionId}`,
+      {
+        method: "DELETE",
+      },
+    );
   }
 
-  async confirmMetadataField(workId: string, fieldName: string, confirmed: boolean): Promise<Work> {
+  async confirmMetadataField(
+    workId: string,
+    fieldName: string,
+    confirmed: boolean,
+  ): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}/metadata/confirm`, {
-      method: 'POST',
+      method: "POST",
       body: { field_name: fieldName, confirmed },
     });
   }
 
-  async enrichWork(workId: string): Promise<{ job_id: string | null; status: string }> {
-    return this.request(`/api/v1/works/${workId}/enrich`, { method: 'POST' });
+  async enrichWork(
+    workId: string,
+  ): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/enrich`, { method: "POST" });
   }
 
-  async topicWork(workId: string): Promise<{ job_id: string | null; status: string }> {
-    return this.request(`/api/v1/works/${workId}/topics`, { method: 'POST' });
+  async topicWork(
+    workId: string,
+  ): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/topics`, { method: "POST" });
   }
 
-  async keywordsWork(workId: string): Promise<{ job_id: string | null; status: string }> {
-    return this.request(`/api/v1/works/${workId}/keywords`, { method: 'POST' });
+  async keywordsWork(
+    workId: string,
+  ): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/keywords`, { method: "POST" });
   }
 
   async listWorkFiles(workId: string): Promise<WorkFile[]> {
     return this.request<WorkFile[]>(`/api/v1/works/${workId}/files`);
   }
 
-  async findOnWeb(workId: string, sources?: string[]): Promise<WebFindResponse> {
-    return this.request<WebFindResponse>(`/api/v1/works/${workId}/find-on-web`, {
-      method: 'POST',
-      body: sources ? { sources } : {},
-    });
+  async findOnWeb(
+    workId: string,
+    sources?: string[],
+  ): Promise<WebFindResponse> {
+    return this.request<WebFindResponse>(
+      `/api/v1/works/${workId}/find-on-web`,
+      {
+        method: "POST",
+        body: sources ? { sources } : {},
+      },
+    );
   }
 
   // Streaming search: POST the same find-on-web request but read the NDJSON ReadableStream,
@@ -1367,15 +1422,18 @@ export class ApiClient {
     sources?: string[],
   ): Promise<void> {
     const headers: Record<string, string> = {
-      Accept: 'application/x-ndjson',
-      'Content-Type': 'application/json',
+      Accept: "application/x-ndjson",
+      "Content-Type": "application/json",
     };
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
-    const response = await fetch(`${this.baseUrl}/api/v1/works/${workId}/find-on-web/stream`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(sources ? { sources } : {}),
-    });
+    const response = await fetch(
+      `${this.baseUrl}/api/v1/works/${workId}/find-on-web/stream`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(sources ? { sources } : {}),
+      },
+    );
     if (!response.ok) {
       let detail = `Request failed: ${response.status}`;
       try {
@@ -1386,11 +1444,11 @@ export class ApiClient {
       if (response.status === 401 && this.token) this.onUnauthorized?.(detail);
       throw new Error(detail);
     }
-    if (!response.body) throw new Error('Streaming not supported');
+    if (!response.body) throw new Error("Streaming not supported");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
+    let buffer = "";
     const flushLine = (line: string): void => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -1400,11 +1458,11 @@ export class ApiClient {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      let newline = buffer.indexOf('\n');
+      let newline = buffer.indexOf("\n");
       while (newline !== -1) {
         flushLine(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf('\n');
+        newline = buffer.indexOf("\n");
       }
     }
     // Emit any trailing line that arrived without a closing newline.
@@ -1415,26 +1473,34 @@ export class ApiClient {
     workId: string,
     items: WebFindDownloadItem[],
   ): Promise<WebFindDownloadResponse> {
-    return this.request<WebFindDownloadResponse>(`/api/v1/works/${workId}/find-on-web/download`, {
-      method: 'POST',
-      body: { items },
-    });
+    return this.request<WebFindDownloadResponse>(
+      `/api/v1/works/${workId}/find-on-web/download`,
+      {
+        method: "POST",
+        body: { items },
+      },
+    );
   }
 
   async listWorkReferences(workId: string): Promise<ReferenceRecord[]> {
-    return this.request<ReferenceRecord[]>(`/api/v1/works/${workId}/references`);
+    return this.request<ReferenceRecord[]>(
+      `/api/v1/works/${workId}/references`,
+    );
   }
 
   async uploadWorkFile(workId: string, file: File): Promise<WorkFile> {
     const form = new FormData();
-    form.append('file', file);
+    form.append("file", file);
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
-    const response = await fetch(`${this.baseUrl}/api/v1/works/${workId}/files`, {
-      method: 'POST',
-      headers,
-      body: form,
-    });
+    const response = await fetch(
+      `${this.baseUrl}/api/v1/works/${workId}/files`,
+      {
+        method: "POST",
+        headers,
+        body: form,
+      },
+    );
     if (!response.ok) {
       let detail = `Upload failed: ${response.status}`;
       try {
@@ -1448,40 +1514,48 @@ export class ApiClient {
   }
 
   async listCitationContexts(workId: string): Promise<CitationContext[]> {
-    return this.request<CitationContext[]>(`/api/v1/works/${workId}/citation-contexts`);
+    return this.request<CitationContext[]>(
+      `/api/v1/works/${workId}/citation-contexts`,
+    );
   }
 
   async listAnnotations(workId: string): Promise<Annotation[]> {
     return this.request<Annotation[]>(`/api/v1/works/${workId}/annotations`);
   }
 
-  async createAnnotation(workId: string, payload: AnnotationCreate): Promise<Annotation> {
+  async createAnnotation(
+    workId: string,
+    payload: AnnotationCreate,
+  ): Promise<Annotation> {
     return this.request<Annotation>(`/api/v1/works/${workId}/annotations`, {
-      method: 'POST',
+      method: "POST",
       body: payload,
     });
   }
 
   async deleteAnnotation(workId: string, annotationId: string): Promise<void> {
-    await this.request<void>(`/api/v1/works/${workId}/annotations/${annotationId}`, {
-      method: 'DELETE',
-    });
+    await this.request<void>(
+      `/api/v1/works/${workId}/annotations/${annotationId}`,
+      {
+        method: "DELETE",
+      },
+    );
   }
 
   async listDuplicateCandidates(
-    status: DuplicateCandidateStatus | '' = 'open',
+    status: DuplicateCandidateStatus | "" = "open",
   ): Promise<DuplicateCandidate[]> {
     const params = new URLSearchParams();
-    if (status) params.set('status', status);
-    const suffix = params.toString() ? `?${params.toString()}` : '';
+    if (status) params.set("status", status);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
     return this.request<DuplicateCandidate[]>(`/api/v1/duplicates${suffix}`);
   }
 
   async scanDuplicateCandidates(
     payload: { work_id?: string; file_id?: string } = {},
   ): Promise<DuplicateScanResult> {
-    return this.request<DuplicateScanResult>('/api/v1/duplicates/scan', {
-      method: 'POST',
+    return this.request<DuplicateScanResult>("/api/v1/duplicates/scan", {
+      method: "POST",
       body: payload,
     });
   }
@@ -1491,7 +1565,7 @@ export class ApiClient {
     status: DuplicateCandidateStatus,
   ): Promise<DuplicateCandidate> {
     return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: { status },
     });
   }
@@ -1499,10 +1573,13 @@ export class ApiClient {
   async applyDuplicateCandidateAction(
     id: string,
     action: DuplicateCandidateAction,
-    options: { targetWorkId?: string; splitSegments?: DuplicateSplitSegment[] } = {},
+    options: {
+      targetWorkId?: string;
+      splitSegments?: DuplicateSplitSegment[];
+    } = {},
   ): Promise<DuplicateCandidate> {
     return this.request<DuplicateCandidate>(`/api/v1/duplicates/${id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: {
         action,
         target_work_id: options.targetWorkId,
@@ -1512,7 +1589,10 @@ export class ApiClient {
   }
 
   // Preview a merge of a work/work candidate into the chosen base (the surviving canonical paper).
-  async getMergePreview(candidateId: string, baseWorkId: string): Promise<MergePreview> {
+  async getMergePreview(
+    candidateId: string,
+    baseWorkId: string,
+  ): Promise<MergePreview> {
     return this.request<MergePreview>(
       `/api/v1/duplicates/${candidateId}/merge-preview?base_work_id=${baseWorkId}`,
     );
@@ -1520,7 +1600,9 @@ export class ApiClient {
 
   // Undo the most recent merge into a paper, restoring the hidden shadow to a standalone paper.
   async unmergePaper(workId: string): Promise<Work> {
-    return this.request<Work>(`/api/v1/works/${workId}/unmerge`, { method: 'POST' });
+    return this.request<Work>(`/api/v1/works/${workId}/unmerge`, {
+      method: "POST",
+    });
   }
 
   // Papers bidirectionally LINKED to this one (Batch D "Link"; distinct from similarity /related).
@@ -1529,7 +1611,7 @@ export class ApiClient {
   }
 
   async listShelves(): Promise<Shelf[]> {
-    return this.request<Shelf[]>('/api/v1/shelves');
+    return this.request<Shelf[]>("/api/v1/shelves");
   }
 
   async createShelf(payload: {
@@ -1537,16 +1619,22 @@ export class ApiClient {
     description?: string;
     access_level?: AccessLevel;
   }): Promise<Shelf> {
-    return this.request<Shelf>('/api/v1/shelves', { method: 'POST', body: payload });
+    return this.request<Shelf>("/api/v1/shelves", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   async updateShelf(id: string, payload: Partial<Shelf>): Promise<Shelf> {
-    return this.request<Shelf>(`/api/v1/shelves/${id}`, { method: 'PATCH', body: payload });
+    return this.request<Shelf>(`/api/v1/shelves/${id}`, {
+      method: "PATCH",
+      body: payload,
+    });
   }
 
   async deleteShelf(id: string): Promise<void> {
     // Hard delete: papers only on this shelf fall back to the default shelf (backend #1).
-    await this.request<void>(`/api/v1/shelves/${id}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/shelves/${id}`, { method: "DELETE" });
   }
 
   async listShelfWorks(shelfId: string): Promise<Work[]> {
@@ -1556,24 +1644,26 @@ export class ApiClient {
   // "Where is this?": the shelves (with containing racks) a paper belongs to that the caller can
   // SEE, each carrying a per-shelf can_modify flag for gating the Remove button.
   async listWorkShelves(workId: string): Promise<WorkShelfMembership[]> {
-    return this.request<WorkShelfMembership[]>(`/api/v1/works/${workId}/shelves`);
+    return this.request<WorkShelfMembership[]>(
+      `/api/v1/works/${workId}/shelves`,
+    );
   }
 
   async addWorkToShelf(shelfId: string, workId: string): Promise<void> {
     await this.request<void>(`/api/v1/shelves/${shelfId}/works`, {
-      method: 'POST',
+      method: "POST",
       body: { work_id: workId },
     });
   }
 
   async removeWorkFromShelf(shelfId: string, workId: string): Promise<void> {
     await this.request<void>(`/api/v1/shelves/${shelfId}/works/${workId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   async listRacks(): Promise<Rack[]> {
-    return this.request<Rack[]>('/api/v1/racks');
+    return this.request<Rack[]>("/api/v1/racks");
   }
 
   async createRack(payload: {
@@ -1581,18 +1671,26 @@ export class ApiClient {
     description?: string;
     access_level?: AccessLevel;
   }): Promise<Rack> {
-    return this.request<Rack>('/api/v1/racks', { method: 'POST', body: payload });
+    return this.request<Rack>("/api/v1/racks", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   async updateRack(id: string, payload: Partial<Rack>): Promise<Rack> {
-    return this.request<Rack>(`/api/v1/racks/${id}`, { method: 'PATCH', body: payload });
+    return this.request<Rack>(`/api/v1/racks/${id}`, {
+      method: "PATCH",
+      body: payload,
+    });
   }
 
   async deleteRack(id: string, deleteShelves = false): Promise<void> {
     // Hard delete. When deleteShelves is true, associated shelves are also hard-deleted (papers
     // only on them fall back to the default shelf); otherwise the shelves just leave this rack.
-    const suffix = deleteShelves ? '?delete_shelves=true' : '';
-    await this.request<void>(`/api/v1/racks/${id}${suffix}`, { method: 'DELETE' });
+    const suffix = deleteShelves ? "?delete_shelves=true" : "";
+    await this.request<void>(`/api/v1/racks/${id}${suffix}`, {
+      method: "DELETE",
+    });
   }
 
   async listRackShelves(rackId: string): Promise<Shelf[]> {
@@ -1601,35 +1699,46 @@ export class ApiClient {
 
   async addShelfToRack(rackId: string, shelfId: string): Promise<void> {
     await this.request<void>(`/api/v1/racks/${rackId}/shelves`, {
-      method: 'POST',
+      method: "POST",
       body: { shelf_id: shelfId },
     });
   }
 
   async removeShelfFromRack(rackId: string, shelfId: string): Promise<void> {
     await this.request<void>(`/api/v1/racks/${rackId}/shelves/${shelfId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   async listTags(): Promise<Tag[]> {
-    return this.request<Tag[]>('/api/v1/tags');
+    return this.request<Tag[]>("/api/v1/tags");
   }
 
-  async createTag(payload: { name: string; color?: string; description?: string }): Promise<Tag> {
-    return this.request<Tag>('/api/v1/tags', { method: 'POST', body: payload });
+  async createTag(payload: {
+    name: string;
+    color?: string;
+    description?: string;
+  }): Promise<Tag> {
+    return this.request<Tag>("/api/v1/tags", { method: "POST", body: payload });
   }
 
   async updateTag(
     id: string,
-    payload: { name?: string; color?: string | null; description?: string | null },
+    payload: {
+      name?: string;
+      color?: string | null;
+      description?: string | null;
+    },
   ): Promise<Tag> {
-    return this.request<Tag>(`/api/v1/tags/${id}`, { method: 'PATCH', body: payload });
+    return this.request<Tag>(`/api/v1/tags/${id}`, {
+      method: "PATCH",
+      body: payload,
+    });
   }
 
   async deleteTag(id: string): Promise<void> {
     // Removes the tag and every link to it; the tagged papers/shelves/racks just lose the tag.
-    await this.request<void>(`/api/v1/tags/${id}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/tags/${id}`, { method: "DELETE" });
   }
 
   // The tags applied to one paper (id + name + colour), SEE-gated like the paper itself.
@@ -1637,115 +1746,161 @@ export class ApiClient {
     return this.request<AppliedTag[]>(`/api/v1/works/${workId}/tags`);
   }
 
-  async addTagLink(tagId: string, entityType: string, entityId: string): Promise<void> {
+  async addTagLink(
+    tagId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<void> {
     await this.request<void>(`/api/v1/tags/${tagId}/links`, {
-      method: 'POST',
+      method: "POST",
       body: { entity_type: entityType, entity_id: entityId },
     });
   }
 
-  async removeTagLink(tagId: string, entityType: string, entityId: string): Promise<void> {
-    const params = new URLSearchParams({ entity_type: entityType, entity_id: entityId });
-    await this.request<void>(`/api/v1/tags/${tagId}/links?${params.toString()}`, {
-      method: 'DELETE',
+  async removeTagLink(
+    tagId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<void> {
+    const params = new URLSearchParams({
+      entity_type: entityType,
+      entity_id: entityId,
     });
+    await this.request<void>(
+      `/api/v1/tags/${tagId}/links?${params.toString()}`,
+      {
+        method: "DELETE",
+      },
+    );
   }
 
   async listSources(): Promise<Source[]> {
-    return this.request<Source[]>('/api/v1/sources');
+    return this.request<Source[]>("/api/v1/sources");
   }
 
-  async createServerFolderSource(payload: { name: string; path_alias: string }): Promise<Source> {
-    return this.request<Source>('/api/v1/sources/server-folder', {
-      method: 'POST',
+  async createServerFolderSource(payload: {
+    name: string;
+    path_alias: string;
+  }): Promise<Source> {
+    return this.request<Source>("/api/v1/sources/server-folder", {
+      method: "POST",
       body: payload,
     });
   }
 
   // --- Server import roots (owner-only; merged yaml + DB whitelist for the "Server folder" import) ---
   async listServerImportRoots(): Promise<ServerImportRoot[]> {
-    return this.request<ServerImportRoot[]>('/api/v1/admin/import-roots');
+    return this.request<ServerImportRoot[]>("/api/v1/admin/import-roots");
   }
 
-  async addServerImportRoot(payload: { alias: string; path: string }): Promise<ServerImportRoot> {
-    return this.request<ServerImportRoot>('/api/v1/admin/import-roots', {
-      method: 'POST',
+  async addServerImportRoot(payload: {
+    alias: string;
+    path: string;
+  }): Promise<ServerImportRoot> {
+    return this.request<ServerImportRoot>("/api/v1/admin/import-roots", {
+      method: "POST",
       body: payload,
     });
   }
 
   async removeServerImportRoot(rootId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/import-roots/${rootId}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/admin/import-roots/${rootId}`, {
+      method: "DELETE",
+    });
   }
 
   // --- Find-on-web allowed download hosts (admin-or-owner; merged defaults + DB allowlist) ---
   async listWebFindAllowedHosts(): Promise<WebFindAllowedHost[]> {
-    return this.request<WebFindAllowedHost[]>('/api/v1/admin/web-find/allowed-hosts');
+    return this.request<WebFindAllowedHost[]>(
+      "/api/v1/admin/web-find/allowed-hosts",
+    );
   }
 
-  async addWebFindAllowedHost(payload: { host: string }): Promise<WebFindAllowedHost> {
-    return this.request<WebFindAllowedHost>('/api/v1/admin/web-find/allowed-hosts', {
-      method: 'POST',
-      body: payload,
-    });
+  async addWebFindAllowedHost(payload: {
+    host: string;
+  }): Promise<WebFindAllowedHost> {
+    return this.request<WebFindAllowedHost>(
+      "/api/v1/admin/web-find/allowed-hosts",
+      {
+        method: "POST",
+        body: payload,
+      },
+    );
   }
 
   async removeWebFindAllowedHost(hostId: string): Promise<void> {
     await this.request<void>(`/api/v1/admin/web-find/allowed-hosts/${hostId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   // --- Find-on-web download policy (owner-only; restricted | careful | unrestricted) ---
   async getWebFindDownloadPolicy(): Promise<WebFindDownloadPolicyResponse> {
-    return this.request<WebFindDownloadPolicyResponse>('/api/v1/admin/web-find/download-policy');
+    return this.request<WebFindDownloadPolicyResponse>(
+      "/api/v1/admin/web-find/download-policy",
+    );
   }
 
   async setWebFindDownloadPolicy(
     policy: WebFindDownloadPolicy,
   ): Promise<WebFindDownloadPolicyResponse> {
-    return this.request<WebFindDownloadPolicyResponse>('/api/v1/admin/web-find/download-policy', {
-      method: 'PUT',
-      body: { policy },
-    });
+    return this.request<WebFindDownloadPolicyResponse>(
+      "/api/v1/admin/web-find/download-policy",
+      {
+        method: "PUT",
+        body: { policy },
+      },
+    );
   }
 
   async importFolder(sourceId: string): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/folder', {
-      method: 'POST',
+    return this.request<ImportBatch>("/api/v1/imports/folder", {
+      method: "POST",
       body: { source_id: sourceId, recursive: true },
     });
   }
 
-  async importBibtex(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/bibtex', {
-      method: 'POST',
+  async importBibtex(
+    content: string,
+    targetShelfId?: string | null,
+  ): Promise<ImportBatch> {
+    return this.request<ImportBatch>("/api/v1/imports/bibtex", {
+      method: "POST",
       body: { content, target_shelf_id: targetShelfId ?? null },
     });
   }
 
-  async importRis(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/ris', {
-      method: 'POST',
+  async importRis(
+    content: string,
+    targetShelfId?: string | null,
+  ): Promise<ImportBatch> {
+    return this.request<ImportBatch>("/api/v1/imports/ris", {
+      method: "POST",
       body: { content, target_shelf_id: targetShelfId ?? null },
     });
   }
 
-  async importCsl(content: string, targetShelfId?: string | null): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/csl', {
-      method: 'POST',
+  async importCsl(
+    content: string,
+    targetShelfId?: string | null,
+  ): Promise<ImportBatch> {
+    return this.request<ImportBatch>("/api/v1/imports/csl", {
+      method: "POST",
       body: { content, target_shelf_id: targetShelfId ?? null },
     });
   }
 
-  async uploadPdf(file: File, targetShelfId?: string | null): Promise<ImportBatch> {
+  async uploadPdf(
+    file: File,
+    targetShelfId?: string | null,
+  ): Promise<ImportBatch> {
     const form = new FormData();
-    form.append('file', file);
-    if (targetShelfId) form.append('target_shelf_id', targetShelfId);
+    form.append("file", file);
+    if (targetShelfId) form.append("target_shelf_id", targetShelfId);
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     const response = await fetch(`${this.baseUrl}/api/v1/imports/upload`, {
-      method: 'POST',
+      method: "POST",
       headers,
       body: form,
     });
@@ -1754,39 +1909,52 @@ export class ApiClient {
       try {
         const payload = await response.json();
         detail = payload.detail ?? detail;
-      } catch { /* keep status message */ }
+      } catch {
+        /* keep status message */
+      }
       throw new Error(detail);
     }
     return response.json() as Promise<ImportBatch>;
   }
 
   async importByIdentifier(
-    identifierType: 'arxiv' | 'doi',
+    identifierType: "arxiv" | "doi",
     value: string,
     targetShelfId?: string | null,
   ): Promise<IdentifierImportResponse> {
-    return this.request<IdentifierImportResponse>('/api/v1/imports/identifier', {
-      method: 'POST',
-      body: { identifier_type: identifierType, value, target_shelf_id: targetShelfId ?? null },
-    });
+    return this.request<IdentifierImportResponse>(
+      "/api/v1/imports/identifier",
+      {
+        method: "POST",
+        body: {
+          identifier_type: identifierType,
+          value,
+          target_shelf_id: targetShelfId ?? null,
+        },
+      },
+    );
   }
 
   async batchImportPreview(
     lines: string[],
     engine: EngineKind,
   ): Promise<BatchPreviewResponse> {
-    return this.request<BatchPreviewResponse>('/api/v1/imports/batch/preview', {
-      method: 'POST',
+    return this.request<BatchPreviewResponse>("/api/v1/imports/batch/preview", {
+      method: "POST",
       body: { lines, engine },
     });
   }
 
   async batchImportCommit(
     drafts: BatchCommitDraft[],
-    options: { engine: EngineKind; targetShelfId?: string | null; enrich?: boolean },
+    options: {
+      engine: EngineKind;
+      targetShelfId?: string | null;
+      enrich?: boolean;
+    },
   ): Promise<ImportBatch> {
-    return this.request<ImportBatch>('/api/v1/imports/batch/commit', {
-      method: 'POST',
+    return this.request<ImportBatch>("/api/v1/imports/batch/commit", {
+      method: "POST",
       body: {
         drafts,
         engine: options.engine,
@@ -1797,99 +1965,129 @@ export class ApiClient {
   }
 
   async createScopeScope(
-    scopeType: 'library' | 'shelf' | 'rack',
+    scopeType: "library" | "shelf" | "rack",
     scopeId: string | null,
   ): Promise<ScopeSummaryResponse> {
-    return this.request<ScopeSummaryResponse>('/api/v1/ai/summaries', {
-      method: 'POST',
+    return this.request<ScopeSummaryResponse>("/api/v1/ai/summaries", {
+      method: "POST",
       body: { scope_type: scopeType, scope_id: scopeId ?? null },
     });
   }
 
   async listAdminUsers(): Promise<AdminUser[]> {
-    return this.request<AdminUser[]>('/api/v1/admin/users');
+    return this.request<AdminUser[]>("/api/v1/admin/users");
   }
 
-  async createAdminUser(username: string, password: string, role: UserRole): Promise<AdminUser> {
-    return this.request<AdminUser>('/api/v1/admin/users', {
-      method: 'POST',
+  async createAdminUser(
+    username: string,
+    password: string,
+    role: UserRole,
+  ): Promise<AdminUser> {
+    return this.request<AdminUser>("/api/v1/admin/users", {
+      method: "POST",
       body: { username, password, role },
     });
   }
 
   async updateUserRole(userId: string, role: UserRole): Promise<AdminUser> {
     return this.request<AdminUser>(`/api/v1/admin/users/${userId}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: { role },
     });
   }
 
   async disableUser(userId: string): Promise<AdminUser> {
-    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/disable`, { method: 'POST' });
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/disable`, {
+      method: "POST",
+    });
   }
 
   async enableUser(userId: string): Promise<AdminUser> {
-    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/enable`, { method: 'POST' });
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/enable`, {
+      method: "POST",
+    });
   }
 
   async deleteUser(userId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/users/${userId}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/admin/users/${userId}`, {
+      method: "DELETE",
+    });
   }
 
   async listAgents(): Promise<AgentRecord[]> {
-    return this.request<AgentRecord[]>('/api/v1/admin/agents');
+    return this.request<AgentRecord[]>("/api/v1/admin/agents");
   }
 
-  async approveAgent(agentId: string): Promise<{ agent_id: string; status: string; agent_token: string }> {
-    return this.request('/api/v1/admin/agents/' + agentId + '/approve', { method: 'POST' });
+  async approveAgent(
+    agentId: string,
+  ): Promise<{ agent_id: string; status: string; agent_token: string }> {
+    return this.request("/api/v1/admin/agents/" + agentId + "/approve", {
+      method: "POST",
+    });
   }
 
   async issueEnrollToken(): Promise<EnrollTokenOut> {
-    return this.request<EnrollTokenOut>('/api/v1/admin/agents/enroll-token', { method: 'POST' });
+    return this.request<EnrollTokenOut>("/api/v1/admin/agents/enroll-token", {
+      method: "POST",
+    });
   }
 
   async listAgentFiles(agentId: string): Promise<AgentFileRecord[]> {
-    return this.request<AgentFileRecord[]>(`/api/v1/admin/agents/${agentId}/files`);
+    return this.request<AgentFileRecord[]>(
+      `/api/v1/admin/agents/${agentId}/files`,
+    );
   }
 
   async updateAgentPrivileges(
     agentId: string,
     privileges: Partial<Record<AgentPrivilege, boolean>>,
   ): Promise<AgentRecord> {
-    return this.request<AgentRecord>(`/api/v1/admin/agents/${agentId}/privileges`, {
-      method: 'PATCH',
-      body: privileges,
-    });
+    return this.request<AgentRecord>(
+      `/api/v1/admin/agents/${agentId}/privileges`,
+      {
+        method: "PATCH",
+        body: privileges,
+      },
+    );
   }
 
   // --- AI provider config + model management (owner) ---
-  async getAiConfig(): Promise<{ config: AiConfig; allowed: Record<string, string[]> }> {
-    return this.request('/api/v1/admin/ai-config');
+  async getAiConfig(): Promise<{
+    config: AiConfig;
+    allowed: Record<string, string[]>;
+  }> {
+    return this.request("/api/v1/admin/ai-config");
   }
 
   async updateAiConfig(
     changes: Partial<AiConfig>,
   ): Promise<{ config: AiConfig; reindex_job_id: string | null }> {
-    return this.request('/api/v1/admin/ai-config', { method: 'PUT', body: changes });
+    return this.request("/api/v1/admin/ai-config", {
+      method: "PUT",
+      body: changes,
+    });
   }
 
   async getAiProviders(): Promise<AiProviders> {
-    return this.request('/api/v1/admin/ai/providers');
+    return this.request("/api/v1/admin/ai/providers");
   }
 
   // One-shot status for the AI & Models tab: config + provider availability + reindex coverage +
   // capability flags + the active selection per capability.
   async getAiStatus(): Promise<AiStatus> {
-    return this.request('/api/v1/admin/ai/status');
+    return this.request("/api/v1/admin/ai/status");
   }
 
   async listAiModels(): Promise<{ models: AiModel[] }> {
-    return this.request('/api/v1/admin/ai/models');
+    return this.request("/api/v1/admin/ai/models");
   }
 
-  async pullAiModel(provider: string, model: string): Promise<{ job_id: string; status: string }> {
-    return this.request('/api/v1/admin/ai/models/pull', {
-      method: 'POST',
+  async pullAiModel(
+    provider: string,
+    model: string,
+  ): Promise<{ job_id: string; status: string }> {
+    return this.request("/api/v1/admin/ai/models/pull", {
+      method: "POST",
       body: { provider, model },
     });
   }
@@ -1907,72 +2105,88 @@ export class ApiClient {
     canonical: string;
     error: string | null;
   }> {
-    return this.request('/api/v1/admin/ai/models/validate', {
-      method: 'POST',
+    return this.request("/api/v1/admin/ai/models/validate", {
+      method: "POST",
       body: { provider, model },
     });
   }
 
   async deleteAiModel(provider: string, model: string): Promise<unknown> {
-    return this.request('/api/v1/admin/ai/models', { method: 'DELETE', body: { provider, model } });
+    return this.request("/api/v1/admin/ai/models", {
+      method: "DELETE",
+      body: { provider, model },
+    });
   }
 
   async reindexEmbeddings(): Promise<{ job_id: string; status: string }> {
-    return this.request('/api/v1/admin/ai/reindex', { method: 'POST' });
+    return this.request("/api/v1/admin/ai/reindex", { method: "POST" });
   }
 
-  async getReindexStatus(): Promise<{ model_name: string; indexed: number; total: number }> {
-    return this.request('/api/v1/admin/ai/reindex/status');
+  async getReindexStatus(): Promise<{
+    model_name: string;
+    indexed: number;
+    total: number;
+  }> {
+    return this.request("/api/v1/admin/ai/reindex/status");
   }
 
   async renameAgent(agentId: string, name: string): Promise<AgentRecord> {
     return this.request<AgentRecord>(`/api/v1/admin/agents/${agentId}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: { name },
     });
   }
 
   async deleteAgent(agentId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/agents/${agentId}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/admin/agents/${agentId}`, {
+      method: "DELETE",
+    });
   }
 
   async requestTeleport(agentId: string, localFileId: string): Promise<void> {
-    await this.request<void>('/api/v1/imports/teleport', {
-      method: 'POST',
+    await this.request<void>("/api/v1/imports/teleport", {
+      method: "POST",
       body: { agent_id: agentId, local_file_id: localFileId },
     });
   }
 
-  async searchAnnotations(q: string, annotationType?: string): Promise<Annotation[]> {
+  async searchAnnotations(
+    q: string,
+    annotationType?: string,
+  ): Promise<Annotation[]> {
     const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (annotationType) params.set('annotation_type', annotationType);
-    return this.request<Annotation[]>(`/api/v1/works/annotations/search?${params.toString()}`);
+    if (q) params.set("q", q);
+    if (annotationType) params.set("annotation_type", annotationType);
+    return this.request<Annotation[]>(
+      `/api/v1/works/annotations/search?${params.toString()}`,
+    );
   }
 
   async exportAnnotations(
     workId: string,
-    format: 'markdown' | 'text' = 'markdown',
+    format: "markdown" | "text" = "markdown",
   ): Promise<{ filename: string; content_type: string; content: string }> {
-    return this.request(`/api/v1/works/${workId}/annotations/export?format=${format}`);
+    return this.request(
+      `/api/v1/works/${workId}/annotations/export?format=${format}`,
+    );
   }
 
   async changePassword(
     currentPassword: string,
     newPassword: string,
   ): Promise<{ status: string; sessions_revoked: number }> {
-    return this.request('/api/v1/auth/change-password', {
-      method: 'POST',
+    return this.request("/api/v1/auth/change-password", {
+      method: "POST",
       body: { current_password: currentPassword, new_password: newPassword },
     });
   }
 
   async getMe(): Promise<CurrentUser> {
-    return this.request<CurrentUser>('/api/v1/auth/me');
+    return this.request<CurrentUser>("/api/v1/auth/me");
   }
 
   async logout(): Promise<void> {
-    await this.request<void>('/api/v1/auth/logout', { method: 'POST' });
+    await this.request<void>("/api/v1/auth/logout", { method: "POST" });
   }
 
   async updateProfile(changes: {
@@ -1981,16 +2195,19 @@ export class ApiClient {
     papers_per_page?: number | null;
     theme?: string | null;
   }): Promise<CurrentUser> {
-    return this.request<CurrentUser>('/api/v1/auth/me', { method: 'PATCH', body: changes });
+    return this.request<CurrentUser>("/api/v1/auth/me", {
+      method: "PATCH",
+      body: changes,
+    });
   }
 
   async getAppConfig(): Promise<AppConfig> {
-    return this.request<AppConfig>('/api/v1/admin/app-config');
+    return this.request<AppConfig>("/api/v1/admin/app-config");
   }
 
   async updateAppConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
-    return this.request<AppConfig>('/api/v1/admin/app-config', {
-      method: 'PATCH',
+    return this.request<AppConfig>("/api/v1/admin/app-config", {
+      method: "PATCH",
       body: changes,
     });
   }
@@ -2000,39 +2217,52 @@ export class ApiClient {
     newPassword: string,
   ): Promise<{ status: string; sessions_revoked: number }> {
     return this.request(`/api/v1/admin/users/${userId}/reset-password`, {
-      method: 'POST',
+      method: "POST",
       body: { new_password: newPassword },
     });
   }
 
   // --- Access control: groups, members, grants, default grants, access settings (admin-or-owner) ---
   async listGroups(): Promise<Group[]> {
-    return this.request<Group[]>('/api/v1/admin/groups');
+    return this.request<Group[]>("/api/v1/admin/groups");
   }
 
   async createGroup(name: string): Promise<Group> {
-    return this.request<Group>('/api/v1/admin/groups', { method: 'POST', body: { name } });
+    return this.request<Group>("/api/v1/admin/groups", {
+      method: "POST",
+      body: { name },
+    });
   }
 
   async deleteGroup(groupId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/groups/${groupId}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/admin/groups/${groupId}`, {
+      method: "DELETE",
+    });
   }
 
   async listGroupMembers(groupId: string): Promise<GroupMember[]> {
-    return this.request<GroupMember[]>(`/api/v1/admin/groups/${groupId}/members`);
+    return this.request<GroupMember[]>(
+      `/api/v1/admin/groups/${groupId}/members`,
+    );
   }
 
   async addGroupMember(groupId: string, userId: string): Promise<GroupMember> {
-    return this.request<GroupMember>(`/api/v1/admin/groups/${groupId}/members`, {
-      method: 'POST',
-      body: { user_id: userId },
-    });
+    return this.request<GroupMember>(
+      `/api/v1/admin/groups/${groupId}/members`,
+      {
+        method: "POST",
+        body: { user_id: userId },
+      },
+    );
   }
 
   async removeGroupMember(groupId: string, userId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/groups/${groupId}/members/${userId}`, {
-      method: 'DELETE',
-    });
+    await this.request<void>(
+      `/api/v1/admin/groups/${groupId}/members/${userId}`,
+      {
+        method: "DELETE",
+      },
+    );
   }
 
   async listGroupGrants(groupId: string): Promise<Grant[]> {
@@ -2045,42 +2275,46 @@ export class ApiClient {
     targetId: string,
   ): Promise<Grant> {
     return this.request<Grant>(`/api/v1/admin/groups/${groupId}/grants`, {
-      method: 'POST',
+      method: "POST",
       body: { target_type: targetType, target_id: targetId },
     });
   }
 
   async removeGrant(grantId: string): Promise<void> {
-    await this.request<void>(`/api/v1/admin/grants/${grantId}`, { method: 'DELETE' });
+    await this.request<void>(`/api/v1/admin/grants/${grantId}`, {
+      method: "DELETE",
+    });
   }
 
   async listDefaultGrants(): Promise<DefaultGrant[]> {
-    return this.request<DefaultGrant[]>('/api/v1/admin/default-grants');
+    return this.request<DefaultGrant[]>("/api/v1/admin/default-grants");
   }
 
   async addDefaultGrant(
     targetType: GrantTargetType,
     targetId: string,
   ): Promise<DefaultGrant> {
-    return this.request<DefaultGrant>('/api/v1/admin/default-grants', {
-      method: 'POST',
+    return this.request<DefaultGrant>("/api/v1/admin/default-grants", {
+      method: "POST",
       body: { target_type: targetType, target_id: targetId },
     });
   }
 
   async removeDefaultGrant(defaultGrantId: string): Promise<void> {
     await this.request<void>(`/api/v1/admin/default-grants/${defaultGrantId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   async getAccessSettings(): Promise<AccessSettings> {
-    return this.request<AccessSettings>('/api/v1/admin/access-settings');
+    return this.request<AccessSettings>("/api/v1/admin/access-settings");
   }
 
-  async setAccessSettings(defaultAccessLevel: AccessLevel): Promise<AccessSettings> {
-    return this.request<AccessSettings>('/api/v1/admin/access-settings', {
-      method: 'PUT',
+  async setAccessSettings(
+    defaultAccessLevel: AccessLevel,
+  ): Promise<AccessSettings> {
+    return this.request<AccessSettings>("/api/v1/admin/access-settings", {
+      method: "PUT",
       body: { default_access_level: defaultAccessLevel },
     });
   }
@@ -2090,14 +2324,21 @@ export class ApiClient {
   }
 
   async clearJobs(
-    which: 'finished_failed' | 'failed' | 'finished' | 'all' = 'finished_failed',
+    which:
+      "finished_failed" | "failed" | "finished" | "all" = "finished_failed",
   ): Promise<{ available: boolean; cleared: number; error?: string }> {
-    return this.request(`/api/v1/jobs/clear?which=${which}`, { method: 'POST' });
+    return this.request(`/api/v1/jobs/clear?which=${which}`, {
+      method: "POST",
+    });
   }
 
   /** Empty the pending job queue (admin). Running jobs are kept; returns how many were dropped. */
-  async clearQueue(): Promise<{ available: boolean; dropped: number; error?: string }> {
-    return this.request('/api/v1/jobs/clear-queue', { method: 'POST' });
+  async clearQueue(): Promise<{
+    available: boolean;
+    dropped: number;
+    error?: string;
+  }> {
+    return this.request("/api/v1/jobs/clear-queue", { method: "POST" });
   }
 
   /** Recover stuck jobs (admin): requeue jobs stranded as started and clear failed history. */
@@ -2108,34 +2349,43 @@ export class ApiClient {
     note: string;
     error?: string;
   }> {
-    return this.request('/api/v1/jobs/reset-workers', { method: 'POST' });
+    return this.request("/api/v1/jobs/reset-workers", { method: "POST" });
   }
 
   async extractFile(
     fileId: string,
     forceOcr = false,
   ): Promise<{ job_id: string | null; status: string }> {
-    const q = forceOcr ? '?force_ocr=true' : '';
-    return this.request(`/api/v1/files/${fileId}/extract${q}`, { method: 'POST' });
+    const q = forceOcr ? "?force_ocr=true" : "";
+    return this.request(`/api/v1/files/${fileId}/extract${q}`, {
+      method: "POST",
+    });
   }
 
   /** Set which attached file is the paper's main (default-to-open) file. Returns the updated work. */
   async setMainFile(workId: string, fileId: string): Promise<Work> {
-    return this.request<Work>(`/api/v1/works/${workId}/main-file/${fileId}`, { method: 'PUT' });
+    return this.request<Work>(`/api/v1/works/${workId}/main-file/${fileId}`, {
+      method: "PUT",
+    });
   }
 
   /** Detach a file from a paper (204). If it was the main file, the backend clears the pointer. */
   async deleteWorkFile(workId: string, fileId: string): Promise<void> {
-    return this.request(`/api/v1/works/${workId}/files/${fileId}`, { method: 'DELETE' });
+    return this.request(`/api/v1/works/${workId}/files/${fileId}`, {
+      method: "DELETE",
+    });
   }
 
   async extractWork(
     workId: string,
   ): Promise<{ status: string; queued: number; job_ids?: string[] }> {
-    return this.request(`/api/v1/works/${workId}/extract`, { method: 'POST' });
+    return this.request(`/api/v1/works/${workId}/extract`, { method: "POST" });
   }
 
-  async listAuditEvents(limit = 50, offset = 0): Promise<{ items: AuditEvent[]; total: number }> {
+  async listAuditEvents(
+    limit = 50,
+    offset = 0,
+  ): Promise<{ items: AuditEvent[]; total: number }> {
     // The endpoint returns a paginated envelope { items, total, ... }, not a bare array.
     const page = await this.request<{ items: AuditEvent[]; total: number }>(
       `/api/v1/admin/audit-events?limit=${limit}&offset=${offset}`,
@@ -2144,7 +2394,7 @@ export class ApiClient {
   }
 
   async listFiles(): Promise<FileRecord[]> {
-    return this.request<FileRecord[]>('/api/v1/files');
+    return this.request<FileRecord[]>("/api/v1/files");
   }
 
   async getFileBlob(fileId: string): Promise<Blob> {
@@ -2154,24 +2404,26 @@ export class ApiClient {
   // Server-extracted PDF text (native layer, else on-the-fly OCR). The reader uses this as a
   // fallback for search / copy-text when the in-browser pdf.js text layer is empty (scanned PDFs).
   async getFileText(fileId: string): Promise<{ text: string; source: string }> {
-    return this.request<{ text: string; source: string }>(`/api/v1/files/${fileId}/text`);
+    return this.request<{ text: string; source: string }>(
+      `/api/v1/files/${fileId}/text`,
+    );
   }
 
   async semanticSearch(q: string, limit = 10): Promise<SemanticSearchResponse> {
-    return this.request<SemanticSearchResponse>('/api/v1/search/semantic', {
-      method: 'POST',
+    return this.request<SemanticSearchResponse>("/api/v1/search/semantic", {
+      method: "POST",
       body: { q, limit },
     });
   }
 
   async search(
     q: string,
-    mode: SearchMode = 'hybrid',
+    mode: SearchMode = "hybrid",
     limit = 10,
     embeddingModel?: string,
   ): Promise<HybridSearchResponse> {
-    return this.request<HybridSearchResponse>('/api/v1/search', {
-      method: 'POST',
+    return this.request<HybridSearchResponse>("/api/v1/search", {
+      method: "POST",
       body: {
         q,
         mode,
@@ -2184,21 +2436,29 @@ export class ApiClient {
 
   /** Registered embedding models + the model cap (admin-scoped; 403 for reader-only sessions). */
   async listEmbeddingModels(): Promise<EmbeddingModelsResponse> {
-    return this.request<EmbeddingModelsResponse>('/api/v1/admin/ai/embedding-models');
+    return this.request<EmbeddingModelsResponse>(
+      "/api/v1/admin/ai/embedding-models",
+    );
   }
 
   // Warm the BM25F+ lexical index (call on library/insights open) so the first search is hot.
-  async warmSearch(): Promise<{ lexical_indexed_docs: number; status: string }> {
-    return this.request('/api/v1/search/warm', { method: 'POST' });
+  async warmSearch(): Promise<{
+    lexical_indexed_docs: number;
+    status: string;
+  }> {
+    return this.request("/api/v1/search/warm", { method: "POST" });
   }
 
   async listSummaries(workId: string): Promise<Summary[]> {
     return this.request<Summary[]>(`/api/v1/works/${workId}/summaries`);
   }
 
-  async createSummary(workId: string, summaryType: SummaryType): Promise<Summary> {
+  async createSummary(
+    workId: string,
+    summaryType: SummaryType,
+  ): Promise<Summary> {
     return this.request<Summary>(`/api/v1/works/${workId}/summaries`, {
-      method: 'POST',
+      method: "POST",
       body: { summary_type: summaryType },
     });
   }
@@ -2208,8 +2468,8 @@ export class ApiClient {
     scopeId?: string | null;
     maxTopics?: number;
   }): Promise<TopicModelResponse> {
-    return this.request<TopicModelResponse>('/api/v1/ai/topics', {
-      method: 'POST',
+    return this.request<TopicModelResponse>("/api/v1/ai/topics", {
+      method: "POST",
       body: {
         scope_type: payload.scopeType,
         scope_id: payload.scopeId ?? null,
@@ -2226,8 +2486,8 @@ export class ApiClient {
     collapseVersions?: boolean;
     colorBy?: GraphColorBy;
   }): Promise<CitationGraphResponse> {
-    return this.request<CitationGraphResponse>('/api/v1/graphs/citation', {
-      method: 'POST',
+    return this.request<CitationGraphResponse>("/api/v1/graphs/citation", {
+      method: "POST",
       body: {
         scope: {
           type: payload.scopeType,
@@ -2236,7 +2496,7 @@ export class ApiClient {
         },
         node_mode: payload.nodeMode,
         collapse_versions: payload.collapseVersions ?? false,
-        color_by: payload.colorBy ?? 'none',
+        color_by: payload.colorBy ?? "none",
       },
     });
   }
@@ -2244,12 +2504,16 @@ export class ApiClient {
   /** 1-hop (or N-hop) local citation neighborhood of one focus paper (§8.9, Track C P5b). */
   async citationNeighborhood(
     workId: string,
-    params: { hops?: number; nodeMode?: GraphNodeMode; colorBy?: GraphColorBy } = {},
+    params: {
+      hops?: number;
+      nodeMode?: GraphNodeMode;
+      colorBy?: GraphColorBy;
+    } = {},
   ): Promise<CitationGraphResponse> {
     const query = new URLSearchParams();
-    if (params.hops != null) query.set('hops', String(params.hops));
-    if (params.nodeMode) query.set('node_mode', params.nodeMode);
-    if (params.colorBy) query.set('color_by', params.colorBy);
+    if (params.hops != null) query.set("hops", String(params.hops));
+    if (params.nodeMode) query.set("node_mode", params.nodeMode);
+    if (params.colorBy) query.set("color_by", params.colorBy);
     return this.request<CitationGraphResponse>(
       `/api/v1/works/${encodeURIComponent(workId)}/citation-neighborhood?${query}`,
     );
@@ -2264,53 +2528,68 @@ export class ApiClient {
     k?: number;
     minSimilarity?: number;
   }): Promise<TopicGraphResponse> {
-    return this.request<TopicGraphResponse>('/api/v1/graphs/topic', {
-      method: 'POST',
+    return this.request<TopicGraphResponse>("/api/v1/graphs/topic", {
+      method: "POST",
       body: {
         scope: {
           type: payload.scopeType,
           id: payload.scopeId ?? null,
           work_ids: payload.workIds ?? null,
         },
-        ...(payload.embeddingModel ? { embedding_model: payload.embeddingModel } : {}),
+        ...(payload.embeddingModel
+          ? { embedding_model: payload.embeddingModel }
+          : {}),
         ...(payload.k != null ? { k: payload.k } : {}),
-        ...(payload.minSimilarity != null ? { min_similarity: payload.minSimilarity } : {}),
+        ...(payload.minSimilarity != null
+          ? { min_similarity: payload.minSimilarity }
+          : {}),
       },
     });
   }
 
   /** Registered visualization view types (D38 P2; for the view-type selector). */
   async listVizViewTypes(): Promise<string[]> {
-    return (await this.request<{ view_types: string[] }>('/api/v1/viz/')).view_types;
+    return (await this.request<{ view_types: string[] }>("/api/v1/viz/"))
+      .view_types;
   }
 
   /** Build a visualization payload for a view type over the chosen scope (D38 P2). */
-  async visualization(viewType: string, params: VizParams = {}): Promise<VizPayload> {
+  async visualization(
+    viewType: string,
+    params: VizParams = {},
+  ): Promise<VizPayload> {
     const query = new URLSearchParams();
-    query.set('scope_type', params.scopeType ?? 'library');
-    if (params.scopeId) query.set('scope_id', params.scopeId);
-    for (const id of params.workIds ?? []) query.append('work_ids', id);
-    if (params.xAxis) query.set('x_axis', params.xAxis);
-    if (params.yAxis) query.set('y_axis', params.yAxis);
-    if (params.sizeBy) query.set('size_by', params.sizeBy);
-    if (params.colorBy) query.set('color_by', params.colorBy);
-    if (params.edgeContext) query.set('edge_context', params.edgeContext);
-    if (params.focusWorkId) query.set('focus_work_id', params.focusWorkId);
-    if (params.includeEdges) query.set('include_edges', 'true');
-    if (params.embeddingModel) query.set('embedding_model', params.embeddingModel);
-    if (params.layout) query.set('layout', params.layout);
-    if (params.currentYear != null) query.set('current_year', String(params.currentYear));
-    if (params.maxNodes != null) query.set('max_nodes', String(params.maxNodes));
-    return this.request<VizPayload>(`/api/v1/viz/${encodeURIComponent(viewType)}?${query}`);
+    query.set("scope_type", params.scopeType ?? "library");
+    if (params.scopeId) query.set("scope_id", params.scopeId);
+    for (const id of params.workIds ?? []) query.append("work_ids", id);
+    if (params.xAxis) query.set("x_axis", params.xAxis);
+    if (params.yAxis) query.set("y_axis", params.yAxis);
+    if (params.sizeBy) query.set("size_by", params.sizeBy);
+    if (params.colorBy) query.set("color_by", params.colorBy);
+    if (params.edgeContext) query.set("edge_context", params.edgeContext);
+    if (params.focusWorkId) query.set("focus_work_id", params.focusWorkId);
+    if (params.includeEdges) query.set("include_edges", "true");
+    if (params.embeddingModel)
+      query.set("embedding_model", params.embeddingModel);
+    if (params.layout) query.set("layout", params.layout);
+    if (params.currentYear != null)
+      query.set("current_year", String(params.currentYear));
+    if (params.maxNodes != null)
+      query.set("max_nodes", String(params.maxNodes));
+    return this.request<VizPayload>(
+      `/api/v1/viz/${encodeURIComponent(viewType)}?${query}`,
+    );
   }
 
   /** Scoped citation summary — the §8.11 analytics (D38 P4). Cached + versioned server-side. */
-  async citationSummary(params: CitationSummaryParams = {}): Promise<CitationSummary> {
+  async citationSummary(
+    params: CitationSummaryParams = {},
+  ): Promise<CitationSummary> {
     const query = new URLSearchParams();
-    query.set('scope_type', params.scopeType ?? 'library');
-    if (params.scopeId) query.set('scope_id', params.scopeId);
-    for (const id of params.workIds ?? []) query.append('work_ids', id);
-    if (params.limit != null) query.set('limit', String(params.limit));
+    query.set("scope_type", params.scopeType ?? "library");
+    if (params.scopeId) query.set("scope_id", params.scopeId);
+    for (const id of params.workIds ?? []) query.append("work_ids", id);
+    if (params.limit != null) query.set("limit", String(params.limit));
     return this.request<CitationSummary>(`/api/v1/citations/summary?${query}`);
   }
 
@@ -2321,17 +2600,19 @@ export class ApiClient {
     referenceId?: string | null;
   }): Promise<ExternalPreview> {
     const query = new URLSearchParams();
-    if (params.doi) query.set('doi', params.doi);
-    if (params.arxiv) query.set('arxiv', params.arxiv);
-    if (params.referenceId) query.set('reference_id', params.referenceId);
-    return this.request<ExternalPreview>(`/api/v1/citations/external-preview?${query}`);
+    if (params.doi) query.set("doi", params.doi);
+    if (params.arxiv) query.set("arxiv", params.arxiv);
+    if (params.referenceId) query.set("reference_id", params.referenceId);
+    return this.request<ExternalPreview>(
+      `/api/v1/citations/external-preview?${query}`,
+    );
   }
 
   /** The caller's frequently-cited-but-missing import/ignore decisions (Track C C3a). */
   async getWorklist(): Promise<Record<string, MissingDecision>> {
-    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
-      '/api/v1/citations/worklist',
-    );
+    const body = await this.request<{
+      decisions: Record<string, MissingDecision>;
+    }>("/api/v1/citations/worklist");
     return body.decisions;
   }
 
@@ -2340,20 +2621,23 @@ export class ApiClient {
     key: string,
     decision: MissingDecision,
   ): Promise<Record<string, MissingDecision>> {
-    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
-      '/api/v1/citations/worklist',
-      { method: 'PUT', body: { key, decision } },
-    );
+    const body = await this.request<{
+      decisions: Record<string, MissingDecision>;
+    }>("/api/v1/citations/worklist", {
+      method: "PUT",
+      body: { key, decision },
+    });
     return body.decisions;
   }
 
   /** Clear (undo) a missing-work decision; returns the updated map. */
-  async clearWorklistDecision(key: string): Promise<Record<string, MissingDecision>> {
+  async clearWorklistDecision(
+    key: string,
+  ): Promise<Record<string, MissingDecision>> {
     const query = new URLSearchParams({ key });
-    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
-      `/api/v1/citations/worklist?${query}`,
-      { method: 'DELETE' },
-    );
+    const body = await this.request<{
+      decisions: Record<string, MissingDecision>;
+    }>(`/api/v1/citations/worklist?${query}`, { method: "DELETE" });
     return body.decisions;
   }
 
@@ -2362,19 +2646,21 @@ export class ApiClient {
     scopeType?: GraphScopeType;
     scopeId?: string | null;
     workIds?: string[];
-    format: 'bibtex' | 'csv';
+    format: "bibtex" | "csv";
   }): Promise<ExportResponse> {
     const query = new URLSearchParams();
-    query.set('scope_type', params.scopeType ?? 'library');
-    if (params.scopeId) query.set('scope_id', params.scopeId);
-    for (const id of params.workIds ?? []) query.append('work_ids', id);
-    query.set('format', params.format);
-    return this.request<ExportResponse>(`/api/v1/citations/missing-export?${query}`);
+    query.set("scope_type", params.scopeType ?? "library");
+    if (params.scopeId) query.set("scope_id", params.scopeId);
+    for (const id of params.workIds ?? []) query.append("work_ids", id);
+    query.set("format", params.format);
+    return this.request<ExportResponse>(
+      `/api/v1/citations/missing-export?${query}`,
+    );
   }
 
   /** Import batches for the graph's import-batch scope picker (access-filtered, newest first). */
   async listImportBatches(): Promise<ImportBatch[]> {
-    return this.request<ImportBatch[]>('/api/v1/imports/batches');
+    return this.request<ImportBatch[]>("/api/v1/imports/batches");
   }
 
   async exportCitations(payload: {
@@ -2384,26 +2670,32 @@ export class ApiClient {
     format: ExportFormat;
     style?: string;
   }): Promise<ExportResponse> {
-    return this.request<ExportResponse>('/api/v1/exports', { method: 'POST', body: payload });
+    return this.request<ExportResponse>("/api/v1/exports", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   /** Citation styles offered for the `styled` export format (backend is the source of truth). */
   async listCitationStyles(): Promise<CitationStyle[]> {
-    return this.request<CitationStyle[]>('/api/v1/exports/styles');
+    return this.request<CitationStyle[]>("/api/v1/exports/styles");
   }
 
   private async request<T>(
     path: string,
     options: { method?: string; body?: unknown; auth?: boolean } = {},
   ): Promise<T> {
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-    if (options.auth !== false && this.token) headers.Authorization = `Bearer ${this.token}`;
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (options.body !== undefined)
+      headers["Content-Type"] = "application/json";
+    if (options.auth !== false && this.token)
+      headers.Authorization = `Bearer ${this.token}`;
 
     const response = await fetch(`${this.baseUrl}${path}`, {
-      method: options.method ?? 'GET',
+      method: options.method ?? "GET",
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined ? undefined : JSON.stringify(options.body),
     });
 
     if (!response.ok) {
@@ -2439,7 +2731,7 @@ export class ApiClient {
     const response = await fetch(`${this.baseUrl}${path}`, { headers });
     if (!response.ok) {
       if (response.status === 401 && this.token) {
-        let detail = 'Your session has ended. Please sign in again.';
+        let detail = "Your session has ended. Please sign in again.";
         try {
           detail = (await response.json()).detail ?? detail;
         } catch {
