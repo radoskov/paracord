@@ -36,6 +36,7 @@ from datetime import UTC, datetime
 from itertools import combinations
 
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -134,6 +135,10 @@ class VizPayload:
     edges: list[VizEdge] | None = None
     legend: dict | None = None
     notes: list[str] = field(default_factory=list)
+    # B2: structured "some papers aren't indexed" hint — {reindexable: int, needs_text:[{work_id,
+    # title}]} — so the UI can split "reindex to include" from "attach a PDF & extract" and list the
+    # specific papers that need a file. None when everything in scope is indexed.
+    reindex_hint: dict | None = None
     # Available axis options for both dropdowns; ``None`` for non-axis views. Server-driven so P3+
     # can add an axis without a frontend change.
     axis_options: list[dict[str, str]] | None = None
@@ -495,9 +500,34 @@ def _sample_works(works: list[Work], cap: int) -> list[Work]:
     return [works[(i * n) // cap] for i in range(cap)]
 
 
+def _reindex_hint(db: Session, skipped_works: list[Work]) -> dict | None:
+    """Split papers skipped for lacking a model embedding into two actionable buckets (B2): those a
+    **reindex will include** (they have extracted text → chunks) and those that first need a **PDF +
+    extraction** (no chunks — reindex can't produce a vector). Returns
+    ``{"reindexable": int, "needs_text": [{"work_id", "title"}]}`` or None. This is what lets the viz
+    stop telling users to "reindex" a paper whose real problem is a missing PDF."""
+    if not skipped_works:
+        return None
+    from app.models.chunk import WorkChunk  # local import avoids an import cycle
+
+    ids = [w.id for w in skipped_works]
+    with_chunks = {
+        wid
+        for (wid,) in db.execute(
+            select(WorkChunk.work_id).where(WorkChunk.work_id.in_(ids)).distinct()
+        ).all()
+    }
+    needs_text = [
+        {"work_id": str(w.id), "title": w.canonical_title or f"Untitled ({str(w.id)[:8]})"}
+        for w in skipped_works
+        if w.id not in with_chunks
+    ]
+    return {"reindexable": len(skipped_works) - len(needs_text), "needs_text": needs_text}
+
+
 def _scope_dense_matrix(
     db: Session, works: list[Work], embedding_model: str | None
-) -> tuple[np.ndarray | None, list[Work], str | None, str | None]:
+) -> tuple[np.ndarray | None, list[Work], str | None, str | None, dict | None]:
     """Return ``(matrix, kept_works, model_label, note)`` — one dense row per placed paper.
 
     Prefers stored dense vectors via :func:`_paper_dense_vectors` (the topic / related-works
@@ -510,12 +540,11 @@ def _scope_dense_matrix(
     vectors, kept, label, skipped = _paper_dense_vectors(db, works, embedding_model)
     if vectors is not None:
         matrix = np.array([[vec[i] for i in range(len(vec))] for vec in vectors], dtype=float)
-        note = (
-            f"{skipped} papers not indexed for this model — reindex to include them."
-            if skipped
-            else None
-        )
-        return (matrix if kept else None), kept, label, note
+        hint = None
+        if skipped:
+            kept_ids = {w.id for w in kept}
+            hint = _reindex_hint(db, [w for w in works if w.id not in kept_ids])
+        return (matrix if kept else None), kept, label, None, hint
 
     from app.services.embeddings import resolve_embedding_provider
 
@@ -530,14 +559,14 @@ def _scope_dense_matrix(
         kept_works.append(work)
     omitted = len(works) - len(kept_works)
     if not kept_works:
-        return None, [], provider.model_name, "No papers with text to place in this scope."
+        return None, [], provider.model_name, "No papers with text to place in this scope.", None
     note = (
         "Cluster layout uses the built-in baseline embedder; enable a real embedding model and "
         "reindex for sharper clusters."
     )
     if omitted:
         note = f"{note} {omitted} papers have no text and were omitted."
-    return np.array(rows, dtype=float), kept_works, provider.model_name, note
+    return np.array(rows, dtype=float), kept_works, provider.model_name, note, None
 
 
 @dataclass
@@ -550,6 +579,8 @@ class _EmbeddingLayout:
     # The layout actually used (``pca``/``umap``): a requested ``umap`` degrades to ``pca`` when
     # ``umap-learn`` is absent, so this can differ from the requested layout.
     layout: str = DEFAULT_LAYOUT
+    # B2 structured reindex/needs-a-PDF hint (see VizPayload.reindex_hint).
+    reindex_hint: dict | None = None
 
     @property
     def empty(self) -> bool:
@@ -565,9 +596,9 @@ def _embedding_layout(
     ``umap`` falls back to PCA — with a note — when ``umap-learn`` is not installed (it lives in the
     AI extra image, not the base deps), so the map always renders.
     """
-    matrix, kept, model_label, note = _scope_dense_matrix(db, works, embedding_model)
+    matrix, kept, model_label, note, hint = _scope_dense_matrix(db, works, embedding_model)
     if matrix is None:
-        return _EmbeddingLayout(None, [], [], model_label, note)
+        return _EmbeddingLayout(None, [], [], model_label, note, reindex_hint=hint)
 
     scope_sig = tuple(sorted(str(w.id) for w in kept))
     vector_hash = hashlib.md5(  # noqa: S324 - cache fingerprint, not a security control.
@@ -577,7 +608,9 @@ def _embedding_layout(
     cached = _LAYOUT_CACHE.get(cache_key)
     if cached is not None and cached[0] == vector_hash:
         merged = _join_notes(note, cached[4])
-        return _EmbeddingLayout(cached[1], kept, cached[2], model_label, merged, cached[3])
+        return _EmbeddingLayout(
+            cached[1], kept, cached[2], model_label, merged, cached[3], reindex_hint=hint
+        )
 
     coords, effective_layout, layout_note = _project_2d(matrix, layout)
     k = max(1, min(DEFAULT_MAX_TOPICS, len(kept)))
@@ -585,7 +618,13 @@ def _embedding_layout(
     assignments = _kmeans(dense_dicts, k)
     _LAYOUT_CACHE[cache_key] = (vector_hash, coords, assignments, effective_layout, layout_note)
     return _EmbeddingLayout(
-        coords, kept, assignments, model_label, _join_notes(note, layout_note), effective_layout
+        coords,
+        kept,
+        assignments,
+        model_label,
+        _join_notes(note, layout_note),
+        effective_layout,
+        reindex_hint=hint,
     )
 
 
@@ -697,7 +736,13 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
     if embedding.note:
         notes.append(embedding.note)
     if embedding.empty:
-        return VizPayload(view_type="embedding_cluster", nodes=[], axes=EMBEDDING_AXES, notes=notes)
+        return VizPayload(
+            view_type="embedding_cluster",
+            nodes=[],
+            axes=EMBEDDING_AXES,
+            notes=notes,
+            reindex_hint=embedding.reindex_hint,
+        )
 
     kept = embedding.kept
     coords = embedding.coords
@@ -753,6 +798,7 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
         legend=legend,
         notes=notes,
         axis_options=None,
+        reindex_hint=embedding.reindex_hint,
     )
 
 
@@ -1047,11 +1093,13 @@ def similarity_heatmap(db: Session, actor: User, scope: VizScope, params: dict) 
         notes.append("No papers in this scope.")
         return VizPayload(view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes)
 
-    matrix, kept, _model_label, note = _scope_dense_matrix(db, works, embedding_model)
+    matrix, kept, _model_label, note, hint = _scope_dense_matrix(db, works, embedding_model)
     if note:
         notes.append(note)
     if matrix is None or not kept:
-        return VizPayload(view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes)
+        return VizPayload(
+            view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes, reindex_hint=hint
+        )
 
     sim = _cosine_matrix(matrix)
     labels = [w.canonical_title or f"Untitled work ({str(w.id)[:8]})" for w in kept]
@@ -1063,6 +1111,7 @@ def similarity_heatmap(db: Session, actor: User, scope: VizScope, params: dict) 
         matrix={"labels": labels, "ids": ids, "values": values},
         notes=notes,
         axis_options=None,
+        reindex_hint=hint,
     )
 
 

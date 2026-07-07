@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from app.db.base import Base
+from app.models.chunk import WorkChunk
 from app.models.citation import Reference
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.models.source import ImportBatch
@@ -30,6 +31,7 @@ def db_session(tmp_path: Path):
         bind=engine,
         tables=[
             Work.__table__,
+            WorkChunk.__table__,
             Reference.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
@@ -385,7 +387,33 @@ def test_embedding_cluster_skips_unindexed_with_note(db_session, monkeypatch) ->
 
     payload = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
     assert {n.id for n in payload.nodes} == {str(indexed.id)}
-    assert any("not indexed" in note and "reindex" in note for note in payload.notes)
+    # B2: the un-indexed paper has no chunks (no extracted text), so it lands in the "needs a PDF +
+    # extraction" bucket — reindexing alone can't include it — rather than a bare "reindex" note.
+    assert payload.reindex_hint is not None
+    needs = payload.reindex_hint["needs_text"]
+    assert [p["title"] for p in needs] == ["Absent"]
+    assert payload.reindex_hint["reindexable"] == 0
+
+
+def test_reindex_hint_splits_reindexable_from_needs_pdf(db_session, monkeypatch) -> None:
+    """B2: an un-indexed paper WITH extracted chunks is 'reindexable'; one WITHOUT chunks needs a
+    PDF + extraction (listed by title so the user can open + extract it)."""
+    actor = _owner(db_session)
+    indexed = Work(canonical_title="Indexed", normalized_title="indexed", year=2021)
+    has_text = Work(canonical_title="HasText", normalized_title="hastext", year=2020)
+    no_text = Work(canonical_title="NoText", normalized_title="notext", year=2019)
+    db_session.add_all([indexed, has_text, no_text])
+    db_session.commit()
+    db_session.add(WorkChunk(work_id=has_text.id, section="Methods", position=0, text="body text"))
+    db_session.commit()
+    _patch_dense_vectors(monkeypatch, {"Indexed": [1.0, 0.0]}, skipped=2)
+    viz._LAYOUT_CACHE.clear()
+
+    payload = get_viz(db_session, actor, "embedding_cluster", VizScope(type="library"), {})
+    hint = payload.reindex_hint
+    assert hint is not None
+    assert hint["reindexable"] == 1  # HasText has chunks → a reindex includes it
+    assert [p["title"] for p in hint["needs_text"]] == ["NoText"]  # NoText needs a PDF first
 
 
 def test_embedding_cluster_see_filter_hides_private_work(db_session) -> None:

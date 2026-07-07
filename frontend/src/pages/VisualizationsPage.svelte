@@ -178,6 +178,12 @@
     }
   }
 
+  // Open a paper in the Library tab (reused by the click handler + the B2 "needs a PDF" list).
+  function openPaper(workId: string): void {
+    pendingLibraryOpen.set(workId);
+    if (typeof window !== 'undefined') window.location.hash = '#library';
+  }
+
   // A payload has something to draw if it has nodes (scatter/network) or a chart carrier
   // (topic river's series / similarity heatmap's matrix).
   $: hasData =
@@ -359,6 +365,37 @@
         <ul class="notes" data-testid="viz-notes">
           {#each payload.notes as note (note)}<li>{note}</li>{/each}
         </ul>
+      {/if}
+      {#if payload.reindex_hint}
+        <div class="notes" data-testid="viz-reindex-hint">
+          {#if payload.reindex_hint.reindexable > 0}
+            <p>
+              ⚠ {payload.reindex_hint.reindexable} paper{payload.reindex_hint.reindexable === 1
+                ? ''
+                : 's'} aren't indexed for this model — reindex embeddings (AI &amp; Models) to include
+              them.
+            </p>
+          {/if}
+          {#if payload.reindex_hint.needs_text.length > 0}
+            <details data-testid="viz-needs-text">
+              <summary
+                >⚠ {payload.reindex_hint.needs_text.length} paper{payload.reindex_hint.needs_text
+                  .length === 1
+                  ? ' has'
+                  : 's have'} no extracted text yet — attach a PDF and extract (reindexing can't include
+                {payload.reindex_hint.needs_text.length === 1 ? 'it' : 'them'})</summary
+              >
+              <ul>
+                {#each payload.reindex_hint.needs_text as p (p.work_id)}
+                  <li>
+                    <button type="button" class="link" on:click={() => openPaper(p.work_id)}
+                      title="Open this paper to attach a PDF and extract it">{p.title}</button>
+                  </li>
+                {/each}
+              </ul>
+            </details>
+          {/if}
+        </div>
       {/if}
       {#if !hasData}
         <p class="empty">No papers to plot in this scope.</p>

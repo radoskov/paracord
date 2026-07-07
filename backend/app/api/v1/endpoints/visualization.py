@@ -73,6 +73,9 @@ class VizPayloadResponse(BaseModel):
     # app.services.visualization.VizPayload for the shapes.
     series: dict | None = None
     matrix: dict | None = None
+    # B2: {reindexable: int, needs_text:[{work_id, title}]} — some papers aren't indexed for the
+    # model; splits "reindex to include" from "attach a PDF & extract" + lists the file-less papers.
+    reindex_hint: dict | None = None
 
 
 class VizViewTypesResponse(BaseModel):
@@ -176,4 +179,5 @@ def get_visualization(
         ),
         series=payload.series,
         matrix=payload.matrix,
+        reindex_hint=payload.reindex_hint,
     )

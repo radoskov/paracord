@@ -300,6 +300,12 @@ export interface VizPayload {
   // P5a chart carriers; null for scatter/network views. See backend VizPayload.
   series: VizSeries | null;
   matrix: VizMatrix | null;
+  // B2: some papers aren't indexed for the model — split into reindexable vs needs-a-PDF, with the
+  // specific file-less papers listed so the user can open + extract them.
+  reindex_hint?: {
+    reindexable: number;
+    needs_text: { work_id: string; title: string }[];
+  } | null;
 }
 
 export interface VizParams {
