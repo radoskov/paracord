@@ -129,3 +129,55 @@ sync, that compares the local index against `get_my_files()` and offers, each in
 
 Once you validate these, I'll turn this into a phased workplan (status model + GUI vocabulary →
 prune + bulk actions → reconcile/reverse-sync with preview → CLI parity + polish) and implement it.
+
+---
+
+## Validated decisions (owner, 2026-07-07)
+
+**Q1 — delete-on-disk on reconcile: approved WITH hard safety guards.** In addition to the base rec
+(opt-in, moves to a recoverable trash/aside dir), the auto-delete must:
+- **Never cross the watched-folder boundary.** Only files whose `real_path` resolves *strictly
+  inside a currently-watched folder* are ever eligible (no symlink escape, no unwatched/arbitrary
+  path). This is a hard safety bound, enforced before anything is touched.
+- **Two dialogs:** (1) a confirmation popup to *enable* the feature; (2) a review dialog listing
+  **every to-be-deleted file with full path + name** before it runs — sized so the whole list fits
+  in the message.
+- **Hard cap: 100 files.** If a reconcile would delete more than 100, the feature **refuses to run**
+  and tells the user to delete those files manually. (No partial mass-delete.)
+- **One-shot, self-disabling.** The user enables it right before a reverse sync; it processes that
+  one run, then **auto-disables**. Using it again requires re-enabling. The enable dialog must state
+  this clearly ("this applies to the next reconcile only, then turns itself off").
+
+**Q2 — unwatching a folder: PROMPT, default KEEP.** When a watched folder is removed/disabled and it
+leaves now-unwatched indexed files, **prompt** the user: keep them in the index (default) or prune.
+Kept files are marked so they're exempt from auto-prune (see the Q2/Q4 reconciliation below).
+
+**Q3 — unwatching does NOT signal the server.** Confirmed: merely unwatching never tells the server
+a file was removed (only true disk-deletion / explicit prune / server-side deletion does).
+
+**Q4 — buttons split; prune defaults.** Decision: keep **two separate operations** —
+- **Forward sync ("Scan & push")** — auto-prune-unwatched is a **toggle, default ON**, so routine
+  syncing keeps the index mirroring the watched set (controllable).
+- **Reverse sync ("Reconcile with server")** — removes server-deleted files; does **not** prune
+  unwatched.
+
+**★ Q2/Q4 reconciliation (one point to confirm).** Q2 says unwatching defaults to *keep*, but Q4
+says forward sync auto-prunes unwatched *by default* — a direct conflict if both act on the same
+files. Proposed resolution: the Q2 prompt sets a per-file **"keep (pinned)"** flag on the files the
+user chooses to keep; forward-sync auto-prune (default ON) then prunes unwatched files **except**
+those pinned. So: remove a folder → prompt → "keep" pins those files (they survive auto-prune) or
+"prune" drops them now; any *new* unwatched file with no decision is auto-pruned on the next forward
+sync. This honors both defaults without contradiction. **Confirm this is the intended behavior.**
+
+**Additional (owner 2026-07-07) — GUI feedback + tooltips.**
+- **Sync/Refresh feedback.** Both currently "just happen" with no indication. Add visible feedback: a
+  spinner/mini-animation on the button while running + a concise status message on completion
+  (e.g. "Synced: 3 pushed, 1 pruned" / "Nothing to do" / "Reconciled: 2 un-indexed"). Applies to
+  Scan & push, Reconcile, and Refresh.
+- **Tooltips.** Audit every button's hover-help across the agent GUI so it's present, accurate, and
+  descriptive (they've drifted / are missing in places).
+
+These are now settled; this becomes a phased workplan (status model + truthful GUI vocabulary →
+prune + bulk actions + the keep-pin → reconcile/reverse-sync with the guarded one-shot delete +
+preview → sync/refresh feedback + tooltips → CLI parity) and implements after the current UI/feature
+batches (queued behind Batch P/C/S/D).
