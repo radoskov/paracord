@@ -356,6 +356,133 @@ def test_sync_auto_prune_toggle(tmp_path: Path) -> None:
     assert len(state.all_files()) == 1
 
 
+# --- Phase 3: reverse sync "Reconcile with server" + delete-on-disk guards --
+
+
+def _server_known_file(tmp_path: Path, name: str = "a.pdf"):
+    """A watched, indexed file marked server-known (teleported) — a reconcile un-index candidate."""
+    root = tmp_path / "papers"
+    root.mkdir(exist_ok=True)
+    pdf = root / name
+    pdf.write_bytes(b"%PDF-1.4\n" + name.encode())
+    config = AgentConfig(folders=[ManagedFolder(path=root)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    lid = next(r.local_file_id for r in state.all_files() if r.real_path == str(pdf))
+    state.set_processing_state(lid, "teleported")
+    return root, pdf, config, state, lid
+
+
+def test_reconcile_un_indexes_server_deleted(tmp_path: Path) -> None:
+    root, pdf, config, state, lid = _server_known_file(tmp_path)
+    # Server no longer lists it → candidate. Dry-run changes nothing; apply un-indexes it.
+    preview = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=False))
+    assert preview["would_un_index"] == 1 and preview["dry_run"] is True
+    assert len(state.all_files()) == 1  # dry-run applied nothing
+
+    applied = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=True))
+    assert applied["un_indexed"] == 1
+    assert state.all_files() == []
+
+
+def test_reconcile_ignores_never_pushed_and_still_on_server(tmp_path: Path) -> None:
+    root, pdf, config, state, lid = _server_known_file(tmp_path)
+    # Still on the server → kept.
+    kept = asyncio.run(
+        agent_ops.reconcile(
+            config, state, FakeClient(my_files=[{"local_file_id": lid}]), apply=True
+        )
+    )
+    assert kept["un_indexed"] == 0
+    # A never-pushed index_only row (state "indexed") is never a reconcile candidate.
+    state.set_processing_state(lid, "indexed")
+    r = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=True))
+    assert r["would_un_index"] == 0 and state.all_files()
+
+
+def test_delete_on_disk_boundary_rejects_outside_and_symlink_escape(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PARACORD_AGENT_HOME", str(tmp_path))
+    root, pdf, config, state, _ = _server_known_file(tmp_path)
+    # An indexed, server-known file that lives OUTSIDE the watched folder.
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.4\nO")
+    state.upsert(local_file_id="outside", real_path=str(outside), sha256="o", size_bytes=1)
+    state.set_processing_state("outside", "teleported")
+    # A symlink INSIDE the watched folder that escapes to an outside target.
+    escape_target = tmp_path / "escape.pdf"
+    escape_target.write_bytes(b"%PDF-1.4\nE")
+    link = root / "link.pdf"
+    link.symlink_to(escape_target)
+    state.upsert(local_file_id="escape", real_path=str(link), sha256="s", size_bytes=1)
+    state.set_processing_state("escape", "teleported")
+
+    assert agent_ops.is_strictly_inside_watched_folder(str(pdf), config) is True
+    assert agent_ops.is_strictly_inside_watched_folder(str(outside), config) is False
+    assert agent_ops.is_strictly_inside_watched_folder(str(link), config) is False
+
+    agent_ops.arm_delete_on_disk(state)
+    r = asyncio.run(
+        agent_ops.reconcile(
+            config, state, FakeClient(my_files=[]), delete_on_disk=True, apply=False
+        )
+    )
+    deletable = {c["local_file_id"] for c in r["delete_candidates"]}
+    assert deletable == {
+        next(x.local_file_id for x in state.all_files() if x.real_path == str(pdf))
+    }
+
+
+def test_delete_on_disk_requires_arming(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PARACORD_AGENT_HOME", str(tmp_path))
+    root, pdf, config, state, lid = _server_known_file(tmp_path)
+    # Not armed → refused; nothing deleted or un-indexed.
+    r = asyncio.run(
+        agent_ops.reconcile(config, state, FakeClient(my_files=[]), delete_on_disk=True, apply=True)
+    )
+    assert r["refused"] is True and "arm" in r["reason"].lower()
+    assert r["deleted"] == 0 and r["un_indexed"] == 0
+    assert pdf.exists() and state.all_files()
+
+
+def test_delete_on_disk_cap_refuses(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PARACORD_AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(agent_ops, "MAX_DELETE_ON_DISK", 1)
+    root, pdf1, config, state, _ = _server_known_file(tmp_path, "a.pdf")
+    _, pdf2, _, _, _ = _server_known_file(tmp_path, "b.pdf")
+    # Re-scan so both files are indexed + mark both server-known.
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    for rec in state.all_files():
+        state.set_processing_state(rec.local_file_id, "teleported")
+
+    agent_ops.arm_delete_on_disk(state)
+    r = asyncio.run(
+        agent_ops.reconcile(config, state, FakeClient(my_files=[]), delete_on_disk=True, apply=True)
+    )
+    assert r["refused"] is True and "> 1" in r["reason"]
+    assert pdf1.exists() and pdf2.exists()  # no partial mass-delete
+    assert len(state.all_files()) == 2  # nothing un-indexed on a refused delete run
+    assert agent_ops.is_delete_on_disk_armed(state) is False  # still self-disabled
+
+
+def test_delete_on_disk_moves_to_trash_and_self_disables(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PARACORD_AGENT_HOME", str(tmp_path))
+    root, pdf, config, state, lid = _server_known_file(tmp_path)
+    agent_ops.arm_delete_on_disk(state)
+    assert agent_ops.is_delete_on_disk_armed(state) is True
+
+    r = asyncio.run(
+        agent_ops.reconcile(config, state, FakeClient(my_files=[]), delete_on_disk=True, apply=True)
+    )
+    assert r["deleted"] == 1 and r["un_indexed"] == 1
+    assert not pdf.exists()  # moved off the original path
+    trashed = list((tmp_path / "trash").iterdir())
+    assert len(trashed) == 1 and trashed[0].name.endswith("a.pdf")  # recoverable, not unlinked
+    assert state.all_files() == []
+    assert agent_ops.is_delete_on_disk_armed(state) is False  # one-shot: auto-disabled
+
+
 def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch) -> None:
     """An unchanged file is not re-hashed on rescan (E7 incremental scan)."""
     config = _folder(tmp_path, "index_only")

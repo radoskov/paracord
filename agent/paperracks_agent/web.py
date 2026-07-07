@@ -305,6 +305,35 @@ def create_app(
         summary = await agent_ops.sync(config, _state(), _client(config))
         return JSONResponse(summary)
 
+    async def api_reconcile_arm_delete(request: Request):
+        """Arm the one-shot guarded delete-on-disk for the next reconcile (dialog 1)."""
+        if (deny := guard(request)) is not None:
+            return deny
+        agent_ops.arm_delete_on_disk(_state())
+        return JSONResponse({"ok": True, "armed": True})
+
+    async def api_reconcile(request: Request):
+        """Reverse sync. ``apply=false`` returns the dry-run preview; ``apply=true`` applies it.
+
+        ``delete_on_disk`` additionally moves guard-eligible server-deleted files to the trash dir
+        (see agent_ops.reconcile for the enforced guards). Server-unreachable is a clean 502.
+        """
+        if (deny := guard(request)) is not None:
+            return deny
+        body = await request.json() if await request.body() else {}
+        config = _config()
+        try:
+            result = await agent_ops.reconcile(
+                config,
+                _state(),
+                _client(config),
+                delete_on_disk=bool(body.get("delete_on_disk")),
+                apply=bool(body.get("apply")),
+            )
+        except Exception as exc:  # noqa: BLE001 - server unreachable / auth: surface, don't crash
+            return JSONResponse({"detail": str(exc) or "server unreachable"}, status_code=502)
+        return JSONResponse(result)
+
     async def api_files(request: Request):
         if (deny := guard(request)) is not None:
             return deny
@@ -435,6 +464,8 @@ def create_app(
         Route("/api/prune-unwatched", api_prune_unwatched, methods=["POST"]),
         Route("/api/bulk", api_bulk, methods=["POST"]),
         Route("/api/sync", api_sync, methods=["POST"]),
+        Route("/api/reconcile", api_reconcile, methods=["POST"]),
+        Route("/api/reconcile/arm-delete", api_reconcile_arm_delete, methods=["POST"]),
         Route("/api/files", api_files),
         Route("/api/files/{local_file_id}/view", api_view_file),
         Route("/api/requests", api_requests),
@@ -567,6 +598,7 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
   <section class="tab" data-tab="files">
     <div class="card"><h2>Indexed files
         <button class="sec tiny" id="btnScan" onclick="doScan()" title="Forward sync: re-scan the watched folders and push the manifest to the server. Never deletes anything.">Scan &amp; push</button>
+        <button class="sec tiny" id="btnReconcile" onclick="openReconcile()" title="Reverse sync: compare the local index with the server and un-index files the server no longer has. Previews first; never touches unwatched files.">Reconcile with server…</button>
         <button class="sec tiny" id="btnRefresh" onclick="refresh()" title="Reload the indexed-files list from local state + the server">Refresh</button></h2>
       <div id="badges" class="badges"></div>
       <div class="filters">
@@ -631,6 +663,24 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
         <label><input type="radio" name="pMode" value="once" onchange="savePMode()"> once</label>
       </span>
       <button onclick="addCurrentFolder()" title="Watch the folder currently shown above">Add this folder</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="reconcileModal">
+  <div class="box">
+    <div class="head"><b>Reconcile with server</b>
+      <button class="sec tiny" onclick="closeReconcile()" title="Close without changing anything">✕</button></div>
+    <div class="body" style="padding:.8rem 1rem">
+      <p id="reconcileMsg" class="muted">Comparing…</p>
+      <label style="display:block;margin:.5rem 0" title="Also delete the local copy of each server-deleted file (guarded, one-shot). Off by default.">
+        <input type="checkbox" id="recDelete" onchange="onRecDeleteToggle()"> Also delete these files from disk (guarded — moves to a recoverable trash folder)</label>
+      <div id="reconcileUnindex"></div>
+      <div id="reconcileDelete"></div>
+    </div>
+    <div class="foot">
+      <button class="sec" onclick="closeReconcile()" title="Cancel — change nothing">Cancel</button>
+      <button id="recApplyBtn" onclick="reconcileApply()" title="Apply the reconcile shown above">Apply</button>
     </div>
   </div>
 </div>
@@ -945,6 +995,64 @@ function sync(){return api('/api/sync',{method:'POST'}).then(r=>{
   if(r.pruned)bits.push(`pruned ${r.pruned}`);
   return 'Scan & push: '+bits.join(', ');});}
 function doScan(){act(sync);}
+
+// --- reverse sync: reconcile with the server (Phase 3) ---
+let recArmed=false;         // whether delete-on-disk was armed this session (one-shot server-side)
+let recPreview=null;        // last dry-run result, for the apply confirm
+function openReconcile(){recArmed=false;
+  const cb=document.getElementById('recDelete');cb.checked=false;
+  document.getElementById('reconcileUnindex').innerHTML='';document.getElementById('reconcileDelete').innerHTML='';
+  document.getElementById('reconcileMsg').textContent='Comparing with the server…';
+  document.getElementById('reconcileModal').classList.add('open');reconcilePreview();}
+function closeReconcile(){document.getElementById('reconcileModal').classList.remove('open');}
+// Dialog 1 — enable the guarded delete-on-disk (one-shot; the text spells out the self-disable).
+async function onRecDeleteToggle(){
+  const cb=document.getElementById('recDelete');
+  if(cb.checked&&!recArmed){
+    if(!confirm('Enable delete-on-disk for this reconcile?\n\n'
+      +'This applies to the NEXT reconcile only, then turns itself off — you must re-enable it next time.\n\n'
+      +'Only files that resolve STRICTLY INSIDE a currently-watched folder are eligible; symlink escapes are rejected. '
+      +'Deleted files are moved to a recoverable trash folder (never hard-deleted). '
+      +'A run that would delete more than 100 files refuses entirely.')){cb.checked=false;return;}
+    try{await api('/api/reconcile/arm-delete',{method:'POST'});recArmed=true;}
+    catch(e){toast(e.message,'bad');cb.checked=false;return;}
+  }
+  reconcilePreview();
+}
+// Dry-run preview; when delete-on-disk is on this doubles as dialog 2 (the review list).
+async function reconcilePreview(){
+  const del=document.getElementById('recDelete').checked;
+  let r;
+  try{r=await api('/api/reconcile',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apply:false,delete_on_disk:del})});}
+  catch(e){document.getElementById('reconcileMsg').textContent='Error: '+e.message;return;}
+  recPreview=r;
+  document.getElementById('reconcileMsg').textContent=
+    `${r.would_un_index} file(s) to un-index`+(del?`, ${r.would_delete} to delete on disk`:'')+'.';
+  document.getElementById('reconcileUnindex').innerHTML=r.would_un_index
+    ? '<b>Un-index (the server no longer has these):</b><ul class="filelist">'
+      +r.un_index_candidates.slice(0,300).map(c=>`<li>${esc(c.virtual_path||c.local_file_id.slice(0,12))} <span class="pth">${esc(c.real_path)}</span></li>`).join('')+'</ul>'
+    : '<p class="muted">Nothing to un-index — the local index matches the server.</p>';
+  const delEl=document.getElementById('reconcileDelete');
+  const applyBtn=document.getElementById('recApplyBtn');
+  if(del&&r.refused){delEl.innerHTML=`<p class="bad">${esc(r.reason)}</p>`;applyBtn.disabled=true;}
+  else if(del){delEl.innerHTML='<b>Delete on disk — every file below (review the full paths):</b><ul class="filelist">'
+      +r.delete_candidates.map(c=>`<li>${esc(c.virtual_path||c.local_file_id.slice(0,12))} <span class="pth">${esc(c.real_path)}</span></li>`).join('')
+      +(r.would_delete?'':'<li class="muted">No eligible files inside a watched folder.</li>')+'</ul>';applyBtn.disabled=false;}
+  else{delEl.innerHTML='';applyBtn.disabled=false;}
+}
+async function reconcileApply(){
+  const del=document.getElementById('recDelete').checked;
+  const p=recPreview||{};
+  if(!del&&!p.would_un_index){toast('Nothing to do','ok');closeReconcile();return;}
+  if(!confirm('Apply reconcile?\n\n'+(p.would_un_index||0)+' to un-index'
+    +(del?', '+(p.would_delete||0)+' to delete on disk (moved to trash)':'')))return;
+  let r;
+  try{r=await api('/api/reconcile',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apply:true,delete_on_disk:del})});}
+  catch(e){toast(e.message,'bad');return;}
+  if(r.refused)toast(r.reason,'bad');
+  else toast(`Reconciled: ${r.un_indexed} un-indexed`+(r.deleted?`, ${r.deleted} deleted`:''),'ok');
+  recArmed=false;closeReconcile();await refresh();
+}
 function fileAct(id,a,msg){act(()=>api(`/api/requests/${id}/${a}`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}),msg);}
 function reqAct(id,a,msg){act(()=>api(`/api/requests/${id}/${a}`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}),msg);}
 function rejectForever(id){if(!confirm('Reject and block all future requests for this file?'))return;
