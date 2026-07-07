@@ -7,6 +7,36 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Batch A — local-agent overhaul (2026-07-07)
+
+Five phases of the local-agent overhaul (`docs/AGENT_OVERHAUL_DESIGN.md`, FINAL MODEL), one commit
+per phase on `main` (not pushed). Agent-only. See
+`docs/agent_handoffs/2026-07-07-batch-a-agent-overhaul.md`. Agent suite: 34 → 58 tests, all green;
+`ruff check/format agent` clean.
+
+- **Phase 1 — truthful status model (fixes the "no longer on this workstation" bug).** `present`
+  now means **exists-on-disk** (re-`stat`ed by `state.refresh_presence()`), independent of scan
+  membership; the buggy `mark_absent_except` is gone. `agent_ops.classify(real_path, config)`
+  derives `watched` / `unwatched` (on disk, outside every enabled watched root — labelled "on disk,
+  not in a watched folder") / `missing` (gone from disk — the correct "no longer on this
+  workstation"). `sync` reports `report_source_removed` **only for truly-missing** files, never for
+  merely-unwatched, and a subset scan never flags other roots' files.
+- **Phase 2 — prune + unwatch dialog.** Per-item Forget/Prune, a "Prune unwatched" bulk button, and
+  multi-select bulk Forget/Prune/Teleport/Block/Unblock/Re-extract in the Indexed tab; status badge
+  counts + status/blocked filters + status sort. Removing/disabling a folder that leaves
+  now-unwatched files opens a keep-by-default dialog (checkbox "also remove these from the index
+  now" prunes only the listed ids). Forward auto-prune is a config toggle **default OFF**. Pruning
+  never contacts the server.
+- **Phase 3 — reverse-sync "Reconcile with server".** Distinct from forward "Scan & push". Dry-run
+  preview, then un-indexes server-deleted files (only `SERVER_KNOWN_STATES`, never a never-pushed
+  `index_only` row). Guarded one-shot delete-on-disk: strict watched-folder boundary (symlink
+  escapes rejected), two-dialog gating + arm flag, hard cap 100 (refuses, no partial delete),
+  self-disabling after one run, moves to a recoverable trash dir (never `unlink`).
+- **Phase 4 — feedback + tooltips.** Spinner + completion toast on Scan & push / Reconcile /
+  Refresh; tooltip audit across the GUI; auto-prune toggle surfaced in the Folders tab.
+- **Phase 5 — CLI parity.** `reconcile` (`--apply`, `--delete-on-disk` gated by `--confirm-delete`),
+  `prune-unwatched` (`--dry-run`), and bulk `forget <id>...`.
+
 ## Batch P — paper view / metadata (2026-07-07)
 
 Three WORKPLAN Batch P items, one commit per item on `main` (not pushed). See
