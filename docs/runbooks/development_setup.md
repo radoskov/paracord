@@ -68,8 +68,10 @@ make logs-worker          # follow worker logs
 make logs-agent           # follow agent logs
 
 make down                 # stop containers but keep database volumes
-make clean                # stop containers and delete volumes/data; destructive
-make rebuild              # rebuild Docker images from scratch
+make clean                # stop containers and delete ALL volumes/data (incl. models); destructive
+make rebuild              # rebuild images --no-cache and recreate containers (keeps volumes/data)
+make fresh CONFIRM=1      # clean slate: drop DB + library + frontend deps, keep models, then rebuild
+make smoke                # assert the dev stack is healthy (api/frontend/worker/postgres/redis)
 
 make migrate              # apply Alembic migrations in the API container
 make migration MSG="..."  # create a new Alembic migration
@@ -106,9 +108,13 @@ make source-archive       # create source archive
 | Situation | Command |
 |---|---|
 | First checkout | `make init` |
-| Start everything | `make up` |
+| Start everything | `make up` (core) / `make up-all` (+ GROBID + Ollama) |
+| After a `git pull` (self-heals deps/ownership/migrations) | `make up-all` |
+| Confirm the stack is healthy | `make smoke` |
 | Stop without deleting data | `make down` |
-| Full local reset | `make clean` |
+| Build caches wedged / bad container state (keep data) | `make rebuild` |
+| Guaranteed clean slate (drops DB + library, keeps models) | `make fresh CONFIRM=1` |
+| Full local reset (drops everything incl. models) | `make clean` |
 | Apply DB migrations | `make migrate` |
 | Create DB migration | `make migration MSG="..."` |
 | Fast local formatting | `make fix` |
