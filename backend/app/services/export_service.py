@@ -1,9 +1,13 @@
 """Citation and bibliography export service."""
 
+import csv
+import io
 import json
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -678,3 +682,94 @@ _RENDERERS = {
     "latex": _render_latex,
     "pandoc": _render_pandoc,
 }
+
+
+# --- frequently-cited-but-missing list export (Track C C3b) ------------------------------------
+#
+# These entries are aggregated citation references (not local works), so only what the reference
+# carried is known — a citation key, title, year, DOI/arXiv, and how often the scope cites them.
+
+
+class _MissingItem(Protocol):
+    """Structural type for a frequently-cited-missing entry (``citation_summary.MissingWork``)."""
+
+    key: str
+    title: str
+    doi: str | None
+    arxiv_id: str | None
+    year: int | None
+    cited_by_count: int
+    mention_count: int
+
+
+# format -> (file extension, content type) for the missing-list export.
+MISSING_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "bibtex": ("bib", "application/x-bibtex"),
+    "csv": ("csv", "text/csv"),
+}
+
+
+def _missing_citation_key(item: _MissingItem, used: set[str]) -> str:
+    """A unique ``firstwordYEAR`` citation key for a missing entry (deduped within the batch)."""
+    words = re.findall(r"[A-Za-z0-9]+", item.title or "")
+    stem = (words[0] if words else "work").lower()
+    base = f"{stem}{item.year or 'nd'}"
+    key = base
+    suffix = 1
+    while key in used:
+        suffix += 1
+        key = f"{base}{suffix}"
+    used.add(key)
+    return key
+
+
+def render_missing_works(items: Sequence[_MissingItem], output_format: str) -> str:
+    """Render the frequently-cited-but-missing list as BibTeX or CSV (Track C C3b)."""
+    if output_format == "bibtex":
+        return _render_missing_bibtex(items)
+    if output_format == "csv":
+        return _render_missing_csv(items)
+    raise ValueError(f"Unsupported missing-list export format: {output_format}")
+
+
+def _render_missing_bibtex(items: Sequence[_MissingItem]) -> str:
+    used: set[str] = set()
+    entries: list[str] = []
+    for item in items:
+        key = _missing_citation_key(item, used)
+        fields: list[tuple[str, str]] = [("title", item.title or "Untitled")]
+        if item.year:
+            fields.append(("year", str(item.year)))
+        if item.doi:
+            fields.append(("doi", item.doi))
+        if item.arxiv_id:
+            fields.append(("eprint", item.arxiv_id))
+            fields.append(("archivePrefix", "arXiv"))
+        fields.append(("note", f"Cited by {item.cited_by_count} paper(s) in the scope"))
+        body = ",\n".join(f"  {name} = {{{_escape_bibtex(value)}}}" for name, value in fields)
+        entries.append("@misc{" + key + ",\n" + body + "\n}")
+    return "\n\n".join(entries)
+
+
+def _render_missing_csv(items: Sequence[_MissingItem]) -> str:
+    used: set[str] = set()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["key", "title", "authors", "year", "doi", "arxiv", "cited_by_count", "mention_count"]
+    )
+    for item in items:
+        key = _missing_citation_key(item, used)
+        writer.writerow(
+            [
+                key,
+                item.title or "",
+                "",  # authors are not carried on aggregated references
+                item.year or "",
+                item.doi or "",
+                item.arxiv_id or "",
+                item.cited_by_count,
+                item.mention_count,
+            ]
+        )
+    return buffer.getvalue()
