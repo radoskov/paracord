@@ -7,6 +7,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Theming UX — distinct selected state + "load as template" (2026-07-07)
+
+Two owner-reported theming fixes; frontend + one small read-only backend endpoint, on `main`
+(not pushed). See `docs/agent_handoffs/2026-07-07-theme-picker-selected-state-and-template-load.md`.
+
+**T1 — rack/shelf picker selection was invisible in the dark themes.** Two causes: (a) `--surface-hover`
+in `mocha-warm`/`mocha-cool` was nearly identical to the button overlay background, so hover read as
+no change (brightened it to sit clearly above the overlay; the two light themes were already fine);
+(b) the selected row used the neutral `--status-success-bg`, too close to hover. Added an
+accent-tinted **`--surface-selected`** (+ `-border`, `-text`) role token to the schema + all 4 YAMLs
+(AA-contrast text, distinct from both base and hover), regenerated `themes.generated.ts`, and applied
+it to the `.item.active` rows in `RacksPage`/`ShelvesPage` (kept on `:hover` too so the selection
+stays highlighted under the cursor).
+
+**T2 — "Load existing as template" in the admin custom-theme editor.** A picker of bundled + custom
+themes prefills the YAML editor from an existing theme. Bundled YAML is now compiled into the app
+(`build-themes.mjs` emits `bundledThemeYaml`); custom YAML is served by a new read-only
+`GET /themes/{slug}/source` from the stored `yaml_source` (frontend `getThemeSource`). openapi.json
+regenerated.
+
+Verified: vitest 171 passed / 1 skipped (+ new selected/hover-token and template-load tests), build
+clean, `test_custom_themes.py` 12 passed, `check_secrets` clean. Playwright shots (owner, 1440×900
+@2x, uncommitted) in `/home/zednik/paracord-theme-shots/`: `picker_states_mocha-cool.png`,
+`picker_states_latte-warm.png`, `theme_template_load.png`.
+
 ## Batch W — Makefile & Docker workflow robustness (2026-07-07)
 
 Batch W of `docs/WORKPLAN_2026-07-06.md`; infra-only (Makefile / compose / entrypoint / docs),
