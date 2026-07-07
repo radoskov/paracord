@@ -23,7 +23,7 @@ from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.web_find_allowed_host import WebFindAllowedHost
 from app.models.web_find_settings import WebFindSettings
-from app.models.work import Work, WorkVersion
+from app.models.work import Work, WorkLink, WorkVersion
 
 __all__ = [
     "AIConfig",
@@ -69,5 +69,6 @@ __all__ = [
     "WebFindSettings",
     "Work",
     "WorkChunk",
+    "WorkLink",
     "WorkVersion",
 ]

@@ -3,7 +3,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -73,6 +83,19 @@ class Work(Base):
     citation_count_fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Duplicate-merge shadow marker (Batch D). When set, this work has been merged INTO the work
+    # with this id: it is a hidden "shadow" (never listed/searched/graphed/exported) and its incoming
+    # references resolve to the base. NULL = a normal, visible work. FK SET NULL so deleting a base
+    # never cascades a shadow away (it just becomes standalone again).
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Reversal record for the MOST RECENT merge that produced this shadow (Batch D single-level
+    # unmerge). Captures the base fields filled, the conflict assertions added, and the ids of every
+    # entity moved/redirected, so Unmerge can exactly reverse it. NULL when this is not a shadow OR
+    # when the shadow has been finalized (flatten-on-re-merge makes older merges permanent). A shadow
+    # is reversible iff ``merged_into_id`` is set AND ``merge_record`` is not NULL.
+    merge_record: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -98,6 +121,36 @@ class WorkVersion(Base):
     version_type: Mapped[str] = mapped_column(String(64), default="unknown")
     arxiv_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+
+class WorkLink(Base):
+    """A user-declared bidirectional relationship between two works (Batch D "Link").
+
+    Records that two papers are related / the same work WITHOUT moving files or hiding either side
+    (unlike a merge). The pair is stored order-normalized (``work_a_id`` < ``work_b_id`` as strings)
+    with a unique constraint so the same relationship is never duplicated; the detail view queries
+    either column to show + jump to the other paper.
+    """
+
+    __tablename__ = "work_links"
+    __table_args__ = (
+        UniqueConstraint("work_a_id", "work_b_id", "link_type", name="uq_work_link_pair"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    work_a_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), index=True
+    )
+    work_b_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="CASCADE"), index=True
+    )
+    link_type: Mapped[str] = mapped_column(String(32), default="related")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
