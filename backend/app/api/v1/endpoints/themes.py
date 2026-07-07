@@ -55,6 +55,12 @@ class ResolvedThemeOut(BaseModel):
     graph: dict[str, Any]
 
 
+class ThemeSourceOut(BaseModel):
+    # The verbatim YAML source of a custom theme, so the admin editor can load it as a template.
+    id: str
+    yaml: str
+
+
 class ThemeUpload(BaseModel):
     # The full theme YAML text (same schema as a bundled frontend/themes/*.yaml file).
     yaml: str
@@ -83,6 +89,15 @@ def get_custom_theme(slug: str, db: Session = DB_DEP, _user: User = AUTH_DEP) ->
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Theme not found")
     return custom_themes.resolve_row(row).as_theme_object()
+
+
+@router.get("/{slug}/source", response_model=ThemeSourceOut)
+def get_custom_theme_source(slug: str, db: Session = DB_DEP, _user: User = AUTH_DEP) -> dict:
+    """Return a custom theme's verbatim YAML source, for loading it as an editor template."""
+    row = custom_themes.get_theme(db, slug)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Theme not found")
+    return {"id": row.slug, "yaml": row.yaml_source}
 
 
 @admin_router.post("/themes", response_model=ThemeUploadResult, status_code=status.HTTP_201_CREATED)

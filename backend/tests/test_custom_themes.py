@@ -185,6 +185,21 @@ def test_delete_removes_and_audits(client, auth_headers, db):
     assert db.scalars(select(AuditEvent).where(AuditEvent.event_type == "theme.uploaded")).all()
 
 
+def test_theme_source_returns_verbatim_yaml(client, auth_headers):
+    admin = auth_headers("admin")
+    reader = auth_headers("reader")
+    assert _upload(client, admin, VALID_THEME).status_code == 201
+
+    # Any authenticated user may fetch the verbatim YAML source (for loading it as an editor template).
+    r = client.get("/api/v1/themes/ocean-dusk/source", headers=reader)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "ocean-dusk"
+    assert body["yaml"] == VALID_THEME
+    # A missing theme is a 404.
+    assert client.get("/api/v1/themes/nope/source", headers=reader).status_code == 404
+
+
 def test_delete_missing_theme_404(client, auth_headers):
     admin = auth_headers("admin")
     assert client.delete("/api/v1/admin/themes/nope", headers=admin).status_code == 404

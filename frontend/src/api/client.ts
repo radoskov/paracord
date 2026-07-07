@@ -1154,6 +1154,13 @@ export class ApiClient {
     return this.request<Theme>(`/api/v1/themes/${encodeURIComponent(id)}`);
   }
 
+  // A custom theme's verbatim YAML source — used to prefill the admin editor as a template.
+  async getThemeSource(id: string): Promise<{ id: string; yaml: string }> {
+    return this.request<{ id: string; yaml: string }>(
+      `/api/v1/themes/${encodeURIComponent(id)}/source`,
+    );
+  }
+
   async uploadTheme(yaml: string): Promise<ThemeUploadResult> {
     return this.request<ThemeUploadResult>('/api/v1/admin/themes', {
       method: 'POST',

@@ -5470,6 +5470,24 @@
         "title": "ThemeListItem",
         "type": "object"
       },
+      "ThemeSourceOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "yaml": {
+            "title": "Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "yaml"
+        ],
+        "title": "ThemeSourceOut",
+        "type": "object"
+      },
       "ThemeSwatch": {
         "properties": {
           "accents": {
@@ -15485,6 +15503,65 @@
           }
         },
         "summary": "Get Custom Theme",
+        "tags": [
+          "themes"
+        ]
+      }
+    },
+    "/api/v1/themes/{slug}/source": {
+      "get": {
+        "description": "Return a custom theme's verbatim YAML source, for loading it as an editor template.",
+        "operationId": "get_custom_theme_source_api_v1_themes__slug__source_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeSourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Custom Theme Source",
         "tags": [
           "themes"
         ]
