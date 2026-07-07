@@ -231,7 +231,7 @@ def build_index(db: Session, *, config: Bm25fConfig | None = None) -> Bm25fIndex
         body_by_work[str(work_id)].append((section, chunk_text))
 
     for work_id, title, abstract in db.execute(
-        select(Work.id, Work.canonical_title, Work.abstract)
+        select(Work.id, Work.canonical_title, Work.abstract).where(Work.merged_into_id.is_(None))
     ).all():
         fields: dict[str, list[str]] = {f: [] for f in FIELDS}
         fields["title"].extend(tokenize(title or ""))
@@ -526,7 +526,12 @@ def lexical_search_papers(
     if not ranked:
         return []
     ids = [uuid.UUID(work_id) for work_id, _ in ranked]
-    works = {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(ids))).all()}
+    works = {
+        w.id: w
+        for w in db.scalars(
+            select(Work).where(Work.id.in_(ids), Work.merged_into_id.is_(None))
+        ).all()
+    }
     hits = []
     for work_id, score in ranked:
         work = works.get(uuid.UUID(work_id))

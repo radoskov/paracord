@@ -203,7 +203,7 @@ def list_shelf_works(
     stmt = (
         select(Work)
         .join(ShelfWork, ShelfWork.work_id == Work.id)
-        .where(ShelfWork.shelf_id == shelf_id)
+        .where(ShelfWork.shelf_id == shelf_id, Work.merged_into_id.is_(None))
         .order_by(ShelfWork.position.nullslast(), Work.canonical_title)
     )
     visible = access.visible_work_ids(db, actor)

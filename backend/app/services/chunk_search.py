@@ -96,7 +96,11 @@ def _rollup(db: Session, rows: list[tuple], limit: int) -> list[PaperHit]:
     ranked = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)[:limit]
     works = {
         w.id: w
-        for w in db.scalars(select(Work).where(Work.id.in_([wid for wid, _ in ranked]))).all()
+        for w in db.scalars(
+            select(Work).where(
+                Work.id.in_([wid for wid, _ in ranked]), Work.merged_into_id.is_(None)
+            )
+        ).all()
     }
     hits: list[PaperHit] = []
     for wid, (score, section, passage) in ranked:

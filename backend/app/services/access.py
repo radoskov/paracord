@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, exists, inspect, or_, select
+from sqlalchemy import Select, and_, exists, inspect, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import Role, role_at_least
@@ -293,15 +293,17 @@ def _visible_work_condition(db: Session, user: User):
             )
         )
         conditions.append(granted_cond)
-    return or_(*conditions)
+    # A merged shadow (Batch D) is never visible to anyone — clamp it out alongside the shelf rule.
+    return and_(Work.merged_into_id.is_(None), or_(*conditions))
 
 
 def visible_works_query(db: Session, user: User) -> Select:
     """Return a ``select(Work)`` filtered to the works the user may see.
 
-    Admin/owner get an unfiltered query.
+    Admin/owner get an unfiltered query, EXCEPT merged shadows (Batch D) which are hidden from
+    everyone in every work-returning path.
     """
-    stmt = select(Work)
+    stmt = select(Work).where(Work.merged_into_id.is_(None))
     if is_admin_or_owner(user):
         return stmt
     return stmt.where(_visible_work_condition(db, user))

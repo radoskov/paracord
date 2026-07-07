@@ -1444,6 +1444,8 @@ def search_annotations(
         )
     if annotation_type:
         stmt = stmt.where(Annotation.annotation_type == annotation_type)
+    # Never surface annotations attached to a merged shadow (Batch D), for anyone.
+    stmt = stmt.where(Annotation.work_id.in_(select(Work.id).where(Work.merged_into_id.is_(None))))
     visible = access.visible_work_ids(db, actor)
     if visible is not None:
         stmt = stmt.where(Annotation.work_id.in_(visible))

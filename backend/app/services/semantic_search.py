@@ -115,7 +115,7 @@ def ensure_work_embeddings(
     )
     pending: list[tuple[uuid.UUID, str]] = []
     for work_id, title, abstract in db.execute(
-        select(Work.id, Work.canonical_title, Work.abstract)
+        select(Work.id, Work.canonical_title, Work.abstract).where(Work.merged_into_id.is_(None))
     ).all():
         if work_id in indexed:
             continue
@@ -266,7 +266,10 @@ def related_works(
         scored.sort(key=lambda i: i[1], reverse=True)
         top = scored[:limit]
     works = {
-        w.id: w for w in db.scalars(select(Work).where(Work.id.in_([wid for wid, _ in top]))).all()
+        w.id: w
+        for w in db.scalars(
+            select(Work).where(Work.id.in_([wid for wid, _ in top]), Work.merged_into_id.is_(None))
+        ).all()
     }
     return [SearchHit(work=works[wid], score=score) for wid, score in top if wid in works]
 
@@ -282,7 +285,7 @@ def _lexical_search(
     if not terms:
         return []
     hits: list[SearchHit] = []
-    for work in db.scalars(select(Work)).all():
+    for work in db.scalars(select(Work).where(Work.merged_into_id.is_(None))).all():
         if visible_ids is not None and work.id not in visible_ids:
             continue
         tokens = _WORD.findall(_work_text(work).lower())
@@ -356,6 +359,8 @@ def semantic_search(
 
     works = {
         work.id: work
-        for work in db.scalars(select(Work).where(Work.id.in_([wid for wid, _ in top]))).all()
+        for work in db.scalars(
+            select(Work).where(Work.id.in_([wid for wid, _ in top]), Work.merged_into_id.is_(None))
+        ).all()
     }
     return [SearchHit(work=works[wid], score=score) for wid, score in top if wid in works]

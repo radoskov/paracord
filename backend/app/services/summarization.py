@@ -326,8 +326,12 @@ def _scope_works(
         )
     else:
         raise ValueError(f"Unsupported scope type: {scope_type!r}")
-    if visible_ids is not None:
-        works = [w for w in works if w.id in visible_ids]
+    # Merged shadows (Batch D) are never part of a scope summary, for anyone.
+    works = [
+        w
+        for w in works
+        if w.merged_into_id is None and (visible_ids is None or w.id in visible_ids)
+    ]
     return works
 
 

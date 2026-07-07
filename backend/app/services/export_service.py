@@ -144,9 +144,13 @@ def _resolve_works(
     visible_ids: set[uuid.UUID] | None = None,
 ) -> list[Work]:
     def _filter(works: list[Work]) -> list[Work]:
-        if visible_ids is None:
-            return works
-        return [w for w in works if w.id in visible_ids]
+        # Always drop merged shadows (Batch D) — never exported for anyone — then apply the
+        # per-user visibility clamp (``visible_ids`` is None for admin/owner).
+        return [
+            w
+            for w in works
+            if w.merged_into_id is None and (visible_ids is None or w.id in visible_ids)
+        ]
 
     if scope_type == "saved_filter":
         # A saved filter resolved to its work ids by the endpoint (already visibility-clamped for

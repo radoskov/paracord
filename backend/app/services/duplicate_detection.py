@@ -59,6 +59,9 @@ def scan_duplicate_candidates(
 
 def find_work_candidates(db: Session, *, work: Work) -> list[DuplicateCandidate]:
     """Find work-level candidates by DOI, arXiv base ID, and fuzzy title."""
+    # A merged shadow (Batch D) is already resolved into its base — never re-propose it.
+    if work.merged_into_id is not None:
+        return []
     candidates: list[DuplicateCandidate] = []
     candidates.extend(_same_doi_candidates(db, work))
     candidates.extend(_same_arxiv_candidates(db, work))
@@ -165,7 +168,9 @@ def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
         return []
     doi = normalize_doi(work.doi)
     # SQL-pushdown: DOIs are stored normalized so exact equality works.
-    others = db.scalars(select(Work).where(Work.doi == doi, Work.id != work.id)).all()
+    others = db.scalars(
+        select(Work).where(Work.doi == doi, Work.id != work.id, Work.merged_into_id.is_(None))
+    ).all()
     return [
         _upsert_candidate(
             db,
@@ -189,13 +194,21 @@ def _same_arxiv_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
     # SQL-pushdown: filter by the indexed arxiv_base_id column when available.
     if work.arxiv_base_id:
         others = db.scalars(
-            select(Work).where(Work.arxiv_base_id == base, Work.id != work.id)
+            select(Work).where(
+                Work.arxiv_base_id == base,
+                Work.id != work.id,
+                Work.merged_into_id.is_(None),
+            )
         ).all()
     else:
         others = [
             other
             for other in db.scalars(
-                select(Work).where(Work.arxiv_id.is_not(None), Work.id != work.id)
+                select(Work).where(
+                    Work.arxiv_id.is_not(None),
+                    Work.id != work.id,
+                    Work.merged_into_id.is_(None),
+                )
             ).all()
             if split_arxiv_id(other.arxiv_id)["base"] == base
         ]
@@ -236,7 +249,7 @@ def _fuzzy_title_candidates(db: Session, work: Work) -> list[DuplicateCandidate]
     candidates: list[DuplicateCandidate] = []
     block = _blocking_key(title)
     # Blocking: only compare works whose normalized title starts with the same first token.
-    stmt = select(Work).where(Work.id != work.id)
+    stmt = select(Work).where(Work.id != work.id, Work.merged_into_id.is_(None))
     if block:
         stmt = stmt.where(Work.normalized_title.like(f"{block}%"))
     for other in db.scalars(stmt):

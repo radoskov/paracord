@@ -61,8 +61,11 @@ def _resolve_works(
     visible_ids: set[uuid.UUID] | None,
 ) -> list[Work]:
     if work_ids is not None:
-        works = list(db.scalars(select(Work).where(Work.id.in_(work_ids))))
+        works = list(
+            db.scalars(select(Work).where(Work.id.in_(work_ids), Work.merged_into_id.is_(None)))
+        )
     else:
+        # ``_scope_works`` already drops merged shadows (Batch D) for every scope.
         works = _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
     if visible_ids is not None:
         works = [w for w in works if w.id in visible_ids]

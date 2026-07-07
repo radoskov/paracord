@@ -313,8 +313,13 @@ def _scope_works(
         works = db.scalars(select(Work).where(Work.import_batch_id == scope_id)).all()
     else:
         raise ValueError(f"Unsupported graph scope: {scope_type}")
-    if visible_ids is not None:
-        works = [work for work in works if work.id in visible_ids]
+    # Drop merged shadows (Batch D) unconditionally — they are never a node/target for anyone,
+    # including admin (where ``visible_ids`` is None) — then apply the per-user visibility clamp.
+    works = [
+        work
+        for work in works
+        if work.merged_into_id is None and (visible_ids is None or work.id in visible_ids)
+    ]
     return {work.id: work for work in works}
 
 
@@ -354,6 +359,8 @@ def _local_work_index(
             )
     index: dict[str, Work] = {}
     for work in candidates:
+        if work.merged_into_id is not None:
+            continue  # a merged shadow is never a reference resolution target (Batch D)
         if visible_ids is not None and work.id not in visible_ids:
             continue
         for key in _identifier_keys(doi=work.doi, arxiv_id=work.arxiv_id):
@@ -661,8 +668,8 @@ def build_citation_neighborhood(
     if visible_ids is not None and work_id not in visible_ids:
         return None
     focus = db.get(Work, work_id)
-    if focus is None:
-        return None
+    if focus is None or focus.merged_into_id is not None:
+        return None  # a merged shadow (Batch D) is never a neighborhood focus
 
     collected: set[uuid.UUID] = {work_id}
     frontier: set[uuid.UUID] = {work_id}
@@ -695,7 +702,9 @@ def _direct_citation_neighbors(
     db: Session, frontier: set[uuid.UUID], *, visible_ids: set[uuid.UUID] | None
 ) -> set[uuid.UUID]:
     """Local works one citation link from any work in ``frontier`` (both directions), SEE-clamped."""
-    frontier_works = db.scalars(select(Work).where(Work.id.in_(frontier))).all()
+    frontier_works = db.scalars(
+        select(Work).where(Work.id.in_(frontier), Work.merged_into_id.is_(None))
+    ).all()
     neighbors: set[uuid.UUID] = set()
 
     # Outgoing: references from the frontier works, resolved to local works (anywhere in the library,
@@ -723,6 +732,14 @@ def _direct_citation_neighbors(
     neighbors.update(citer_ids)
 
     neighbors.discard(None)  # defensive: never carry a NULL citer through
+    if neighbors:
+        # Drop any merged shadow (Batch D) that a persisted resolved_work_id / DOI match pulled in.
+        shadow_ids = set(
+            db.scalars(
+                select(Work.id).where(Work.id.in_(neighbors), Work.merged_into_id.is_not(None))
+            ).all()
+        )
+        neighbors -= shadow_ids
     if visible_ids is not None:
         neighbors = {work_id for work_id in neighbors if work_id in visible_ids}
     return neighbors

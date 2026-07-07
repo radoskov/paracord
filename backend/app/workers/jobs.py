@@ -186,7 +186,7 @@ def scan_duplicates_job() -> None:
     from app.services.duplicate_detection import scan_duplicate_candidates
 
     with SessionLocal() as db:
-        for work in db.scalars(select(Work)).all():
+        for work in db.scalars(select(Work).where(Work.merged_into_id.is_(None))).all():
             scan_duplicate_candidates(db, work=work)
         for file in db.scalars(select(File)).all():
             scan_duplicate_candidates(db, file=file)
