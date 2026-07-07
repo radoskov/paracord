@@ -8,6 +8,7 @@ from app.models.app_config import AppConfig
 from app.models.audit import AuditEvent
 from app.models.chunk import WorkChunk
 from app.models.citation import CitationMention, RawTeiDocument, Reference
+from app.models.citation_worklist import MissingWorkDecision
 from app.models.custom_theme import CustomTheme
 from app.models.duplicate import DuplicateCandidate
 from app.models.embedding_registry import EmbeddingModelRegistry
@@ -49,6 +50,7 @@ __all__ = [
     "ImportRoot",
     "Location",
     "MetadataAssertion",
+    "MissingWorkDecision",
     "Rack",
     "RackShelf",
     "RawTeiDocument",
