@@ -26,6 +26,10 @@ FRONTEND_RUN := $(COMPOSE) run --rm --no-deps $(FRONTEND_SERVICE)
 
 NODE_IMAGE ?= node:24-bookworm-slim
 
+# Compose project name (used to target this stack's named volumes in `make fresh`). Compose derives
+# it from the directory name; override to match if you set COMPOSE_PROJECT_NAME.
+PROJECT ?= $(notdir $(CURDIR))
+
 .PHONY: help
 help: ## Show this help.
 	@echo "PaRacORD developer commands"
@@ -198,8 +202,53 @@ clean: ## Stop containers and remove named volumes/data. Destructive.
 	$(COMPOSE) down -v
 
 .PHONY: rebuild
-rebuild: ## Rebuild images from scratch.
+rebuild: init ## Rebuild images from scratch (no cache) and recreate containers. Use when build caches are wedged.
 	$(COMPOSE) build --no-cache
+	$(COMPOSE) up -d --force-recreate
+
+.PHONY: fresh
+fresh: init ## DESTRUCTIVE clean slate: drop DB + managed library + frontend deps volumes, keep Ollama models, then rebuild+start. Guard: make fresh CONFIRM=1
+	@if [ "$(CONFIRM)" != "1" ]; then \
+		echo "Refusing: 'make fresh' DROPS the database, the managed library, and the frontend node_modules"; \
+		echo "(the Ollama models volume is kept). Re-run to confirm:  make fresh CONFIRM=1"; \
+		exit 1; \
+	fi
+	$(COMPOSE) --profile '*' down
+	@for vol in paperracks_postgres paperracks_library paperracks_frontend_node_modules; do \
+		ids=$$(docker volume ls -q \
+			--filter "label=com.docker.compose.project=$(PROJECT)" \
+			--filter "label=com.docker.compose.volume=$$vol"); \
+		if [ -n "$$ids" ]; then echo "Dropping volume: $$ids"; docker volume rm $$ids; \
+		else echo "No volume for $$vol (nothing to drop)"; fi; \
+	done
+	@rm -rf frontend/dist
+	$(COMPOSE) up -d --build
+
+.PHONY: smoke
+smoke: ## Dev-stack health assertions: postgres, redis, api /health, frontend, worker (grobid/ollama if profiled). Non-zero on failure.
+	@fail=0; \
+	echo "PaRacORD dev smoke test"; \
+	if $(COMPOSE) exec -T postgres sh -c 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' >/dev/null 2>&1; then \
+		echo "  ok   postgres: accepting connections"; else echo "  FAIL postgres: not ready"; fail=1; fi; \
+	if $(COMPOSE) exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; then \
+		echo "  ok   redis: PONG"; else echo "  FAIL redis: no PONG"; fail=1; fi; \
+	if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1; then \
+		echo "  ok   api: /api/v1/health 200"; else echo "  FAIL api: /api/v1/health not responding"; fail=1; fi; \
+	if curl -fsS http://127.0.0.1:5173 >/dev/null 2>&1; then \
+		echo "  ok   frontend: dev server serving on :5173"; else echo "  FAIL frontend: not serving on :5173"; fail=1; fi; \
+	wid=$$($(COMPOSE) ps -q worker); \
+	if [ -n "$$wid" ] && [ "$$(docker inspect -f '{{.State.Running}}' $$wid 2>/dev/null)" = "true" ]; then \
+		echo "  ok   worker: running"; else echo "  FAIL worker: not running"; fail=1; fi; \
+	if [ -n "$$($(COMPOSE) ps -q grobid)" ]; then \
+		if curl -fsS http://127.0.0.1:8070/api/isalive >/dev/null 2>&1; then \
+			echo "  ok   grobid: alive (extraction profile up)"; else echo "  FAIL grobid: up but not alive"; fail=1; fi; \
+	else echo "  --   grobid: not started (extraction profile down)"; fi; \
+	if [ -n "$$($(COMPOSE) ps -q ollama)" ]; then \
+		if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then \
+			echo "  ok   ollama: responding (ai profile up)"; else echo "  FAIL ollama: up but not responding"; fail=1; fi; \
+	else echo "  --   ollama: not started (ai profile down)"; fi; \
+	if [ "$$fail" -eq 0 ]; then echo "✅ smoke passed"; else echo "❌ smoke failed"; fi; \
+	exit $$fail
 
 # Docker orphaned containers
 .PHONY: docker-orphans
