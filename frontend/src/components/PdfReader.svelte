@@ -4,6 +4,11 @@
 
   import type { Annotation, CitationContext, PdfCoordinateBox } from '../api/client';
   import {
+    annotationBoxesForPage,
+    citationBoxesForPage,
+    overlayBoxStyle,
+  } from '../lib/reader/overlayBoxes';
+  import {
     readStoredReadingMode,
     readingModeFilter,
     writeReadingMode,
@@ -146,31 +151,13 @@
   let annotationContent = '';
   let selectionBoxes: PdfCoordinateBox[] | null = null;
 
-  // Boxes are stored in PDF user-space, top-left origin (matching GROBID), so a shared
-  // converter maps them back to on-screen pixels for the current scale.
+  // Overlay boxes (citation anchors + annotation highlights) are derived per page from the SAME
+  // scale the page canvas is rendered at (see lib/reader/overlayBoxes), so they track the text
+  // across zoom, resize and re-render. The paged view shows one page; the scroll view builds the
+  // same overlays per page (each scroll page owns its own canvas + overlay layer at `scale`).
   function boxToStyle(box: PdfCoordinateBox): string {
-    return (
-      `left:${box.x * scale}px;top:${box.y * scale}px;` +
-      `width:${box.w * scale}px;height:${box.h * scale}px`
-    );
+    return overlayBoxStyle(box, scale);
   }
-
-  // Citation boxes whose page is the page currently shown.
-  $: pageBoxes = contexts
-    .filter((c) => (c.pdf_coordinates?.length ?? 0) > 0)
-    .flatMap((c) =>
-      (c.pdf_coordinates ?? [])
-        .filter((box) => box.page === currentPage)
-        .map((box) => ({ box, context: c })),
-    );
-
-  // Persisted annotation highlight boxes on the current page.
-  $: annotationBoxes = annotations.flatMap((a) => {
-    const boxes = (a.coordinates as { boxes?: PdfCoordinateBox[] } | null)?.boxes ?? [];
-    return boxes
-      .filter((box) => box.page === currentPage)
-      .map((box) => ({ box, annotation: a }));
-  });
 
   async function ensurePdfjs(): Promise<PdfModule> {
     if (pdfjs) return pdfjs;
@@ -903,7 +890,7 @@
             >
               <canvas bind:this={canvasEl}></canvas>
               <div class="textLayer" bind:this={textLayerEl}></div>
-              {#each pageBoxes as item (item.context.id + ':' + item.box.x + ',' + item.box.y)}
+              {#each citationBoxesForPage(contexts, currentPage) as item (item.context.id + ':' + item.box.x + ',' + item.box.y)}
                 <button
                   type="button"
                   class="overlay"
@@ -915,7 +902,7 @@
                   style={boxToStyle(item.box)}
                 ></button>
               {/each}
-              {#each annotationBoxes as item (item.annotation.id + ':' + item.box.x + ',' + item.box.y)}
+              {#each annotationBoxesForPage(annotations, currentPage) as item (item.annotation.id + ':' + item.box.x + ',' + item.box.y)}
                 <div
                   class="annotation-overlay"
                   class:flash={flashKey === `ann:${item.annotation.id}`}
@@ -936,6 +923,26 @@
                 >
                   <canvas use:bindScrollCanvas={i + 1}></canvas>
                   <div class="textLayer" use:bindScrollLayer={i + 1}></div>
+                  {#each citationBoxesForPage(contexts, i + 1) as item (item.context.id + ':' + item.box.x + ',' + item.box.y)}
+                    <button
+                      type="button"
+                      class="overlay"
+                      class:flash={flashKey === `ctx:${item.context.id}`}
+                      title={item.context.reference_title ?? item.context.marker_text ?? 'citation'}
+                      on:click={() => onOverlayClick(item.context)}
+                      style={boxToStyle(item.box)}
+                    ></button>
+                  {/each}
+                  {#each annotationBoxesForPage(annotations, i + 1) as item (item.annotation.id + ':' + item.box.x + ',' + item.box.y)}
+                    <div
+                      class="annotation-overlay"
+                      class:flash={flashKey === `ann:${item.annotation.id}`}
+                      title={item.annotation.selected_text ??
+                        item.annotation.content_markdown ??
+                        'annotation'}
+                      style={boxToStyle(item.box)}
+                    ></div>
+                  {/each}
                 </div>
               {/each}
             </div>
