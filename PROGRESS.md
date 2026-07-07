@@ -7,6 +7,67 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Batch W — Makefile & Docker workflow robustness (2026-07-07)
+
+Batch W of `docs/WORKPLAN_2026-07-06.md`; infra-only (Makefile / compose / entrypoint / docs),
+committed on `main` (not pushed). Goal: `make init && make up-all` works out of the box and a
+`git pull` + rebuild self-heals (deps, ownership, migrations) with no manual steps.
+
+**Frontend node_modules self-heal — verified + solidified.** Traced all four cases in
+`frontend/docker-entrypoint.sh` against the baked copy at `/opt/paracord-frontend` (Dockerfile) and
+`.dockerignore` (which excludes `frontend/node_modules`, so the image's `npm ci` tree survives
+`COPY frontend ./` and seeds a fresh volume): (a) fresh/empty volume → baked-copy restore, no
+`npm ci`; (b) hash match → no-op; (c) hash mismatch with matching baked copy → fast restore;
+(d) mismatch, no baked match → `npm ci` fallback. Marker `.paracord-package-lock.sha256` is written
+**last** so a crash mid-restore just re-heals. **Hole fixed:** the old chown guard checked only the
+top-level `node_modules` dir, so after a restore/`npm ci` (which rewrites contents as root while the
+dir keeps its owner) the new files stayed root-owned and were never chowned. Rewrote the entrypoint
+to track a `healed` flag and always `chown -R node:node` after any heal, in addition to the
+fresh-root-volume check.
+
+**Named-volume ownership audit.** Full table (volume → writer → ownership handling):
+
+| Named volume | Written by | Runs as | Ownership fix |
+|---|---|---|---|
+| `paperracks_postgres` | postgres | postgres (official image) | image-managed; no action |
+| `paperracks_ollama` | ollama | root (official image) | n/a |
+| `paperracks_library` (`/app/storage`) | api + worker | `appuser` (UID 1000) | `backend/docker-entrypoint.sh` chowns before `gosu` (both share the entrypoint) |
+| `paperracks_frontend_node_modules` | frontend | `node` (UID 1000) | `frontend/docker-entrypoint.sh` chowns before `gosu` |
+
+`frontend/dist` is on the `./frontend` bind mount (not a named volume) and is also chowned by the
+frontend entrypoint. The **agent** container runs non-root (`USER appuser`) but mounts only the
+`./agent` bind mount — no root-owned named volume — so no entrypoint chown is needed (confirmed; no
+change).
+
+**Startup ordering.** `docker-compose.yml`: added `start_period: 30s` to the api healthcheck (so a
+cold start running `alembic upgrade head` isn't marked unhealthy before it listens) and made the
+**worker depend on `api: service_healthy`** — since both share the migration-on-start backend
+entrypoint, an healthy api means the schema is at head before the worker touches any table. Postgres
+(`pg_isready`) and Redis (`redis-cli ping`) healthchecks and the api→postgres/redis `service_healthy`
+gates were already present.
+
+**New Make targets** (`## help`-annotated, consistent `.PHONY`/`$(COMPOSE)` style): `make rebuild`
+now `build --no-cache` **then** `up -d --force-recreate` (was build-only); `make fresh` — destructive
+clean slate guarded by `CONFIRM=1`, drops `paperracks_postgres` + `paperracks_library` +
+`paperracks_frontend_node_modules` (targeted via compose `project`+`volume` labels) and `frontend/dist`,
+**keeps** `paperracks_ollama`, then `up -d --build`; `make smoke` — asserts postgres/redis/api
+`/health`/frontend/worker, checks grobid/ollama only when their profiles are up, non-zero on failure.
+
+**Proof (ran against the live stack, no data touched).** Rebuilt the frontend image with the new
+entrypoint and recreated only the frontend container: entrypoint logged "restoring dependencies from
+the baked image copy", wrote the marker, deps (`yaml`/`echarts`/`cytoscape`) came back **owned by
+`node`**, served HTTP 200 — no manual `docker volume rm`. Then simulated a dependency change (bumped
+`frontend/package.json` + `package-lock.json` version `0.0.0`→`0.0.1`, lock hash
+`f939…`→`4989…`), rebuilt (npm ci reran) + recreated: the stale volume marker mismatched, the new
+baked hash matched, deps restored from the baked copy, marker updated to `4989…`, HTTP 200 —
+self-healed with no manual volume removal. Reverted the version bump and rebuilt/recreated to restore
+the original state (marker back to `f939…`, `git diff` on the package files empty). `make smoke`
+passes; api container health = `healthy`. Did **not** run `make fresh` (would drop the demo DB);
+instead verified its volume-selection labels resolve to exactly the three app volumes (ollama
+excluded) and `make -n fresh` parses. `check_secrets` clean.
+
+Handoff: `docs/agent_handoffs/2026-07-07-batch-w-docker-workflow.md`.
+
 ## Reader Batch R — Dim/Dark tuning + reference-box overhaul (2026-07-07)
 
 Batch R of `docs/WORKPLAN_2026-07-06.md`; frontend-only, committed on `main` (not pushed). **R1 —
