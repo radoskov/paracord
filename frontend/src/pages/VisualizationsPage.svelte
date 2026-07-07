@@ -15,6 +15,8 @@
   import '../lib/viz/coCitation';
   import '../lib/viz/topicRiver';
   import '../lib/viz/similarityHeatmap';
+  import { VIEW_HELP, helpForView } from '../lib/viz/vizHelp';
+  import Modal from '../components/Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -187,6 +189,12 @@
     }
   }
 
+  // B1 help: description of the current view + the "About this view" / "Visualization types" popups.
+  let showAbout = false;
+  let showTypes = false;
+  $: help = helpForView(viewType);
+  const allViewHelp = Object.values(VIEW_HELP);
+
   // Open a paper in the Library tab (reused by the click handler + the B2 "needs a PDF" list).
   function openPaper(workId: string): void {
     pendingLibraryOpen.set(workId);
@@ -236,23 +244,40 @@
   {#if message}<p class="msg" role="status">{message}</p>{/if}
 
   <div class="card">
-    <h2>Visualizations</h2>
-    <p class="muted">
-      Explore your library visually. The <strong>temporal citation map</strong> plots each paper as
-      a point; pick any value for each axis.
-    </p>
+    <div class="viz-header">
+      <h2>Visualizations</h2>
+      <button
+        type="button"
+        class="secondary"
+        data-testid="viz-types-help"
+        on:click={() => (showTypes = true)}
+        title="Overview of every visualization type and what each is for"
+      >
+        Visualization types
+      </button>
+    </div>
+    <p class="muted">Explore your library visually — pick a view below and Build it over a scope.</p>
 
     <div class="controls">
       <label>
         View
-        <select bind:value={viewType} on:change={reloadIfLoaded} data-testid="viz-view-select" title="Visualization type">
+        <select bind:value={viewType} on:change={reloadIfLoaded} data-testid="viz-view-select" title="The visualization type — see ‘Visualization types’ for what each does">
           {#each viewTypes as vt (vt)}<option value={vt}>{vt.replace('_', ' ')}</option>{/each}
         </select>
       </label>
+    </div>
+    {#if help}
+      <p class="hintline" data-testid="viz-view-desc">
+        {help.short}
+        <button type="button" class="link" on:click={() => (showAbout = true)}
+          title="More about this view and its settings">ⓘ About this view</button>
+      </p>
+    {/if}
 
+    <div class="controls">
       <label>
         Scope
-        <select bind:value={scopeType} data-testid="viz-scope-type" title="What to visualize">
+        <select bind:value={scopeType} data-testid="viz-scope-type" title="Which papers to include — whole library, a shelf, a rack, the search result, or selected papers">
           <option value="library">Whole library</option>
           <option value="shelf">A shelf</option>
           <option value="rack">A rack</option>
@@ -287,12 +312,12 @@
     <div class="controls">
       {#if isTemporal}
         <label>X axis
-          <select bind:value={xAxis} on:change={reloadIfLoaded} data-testid="viz-x-axis" title="Value on the X axis">
+          <select bind:value={xAxis} on:change={reloadIfLoaded} data-testid="viz-x-axis" title="The value plotted on the horizontal axis — year, citation count, local degree, velocity, or similarity to a focus paper">
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
           </select>
         </label>
         <label>Y axis
-          <select bind:value={yAxis} on:change={reloadIfLoaded} data-testid="viz-y-axis" title="Value on the Y axis">
+          <select bind:value={yAxis} on:change={reloadIfLoaded} data-testid="viz-y-axis" title="The value plotted on the vertical axis — year, citation count, local degree, velocity, or similarity to a focus paper">
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
           </select>
         </label>
@@ -328,21 +353,21 @@
       {/if}
       {#if isTemporal || isCluster}
         <label>Size
-          <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="Point size encoding">
+          <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="What point size represents — local citation degree or citation count">
             {#each SIZE_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
           </select>
         </label>
       {/if}
       {#if isTemporal || isNetwork}
         <label>Color
-          <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="Point color encoding">
+          <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="What point colour represents — e.g. reading status">
             {#each COLOR_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
           </select>
         </label>
       {/if}
       {#if needsFocus}
         <label>Focus paper
-          <select bind:value={focusWorkId} on:change={reloadIfLoaded} data-testid="viz-focus" title="Reference paper for similarity">
+          <select bind:value={focusWorkId} on:change={reloadIfLoaded} data-testid="viz-focus" title="The focus paper the ‘similarity to focus’ axes compare every other paper against">
             <option value="">Choose a focus paper…</option>
             {#each payload?.nodes ?? [] as node (node.id)}<option value={node.id}>{node.label}</option>{/each}
           </select>
@@ -431,6 +456,39 @@
     </div>
   {/if}
 </section>
+
+{#if showAbout}
+  <Modal title={`About: ${help.name}`} onClose={() => (showAbout = false)}>
+    <p>{help.about}</p>
+    {#if help.requirements}
+      <p class="muted"><strong>Requirements:</strong> {help.requirements}</p>
+    {/if}
+    {#if help.params.length}
+      <h4>Settings</h4>
+      <dl class="viz-params">
+        {#each help.params as p (p.name)}
+          <dt>{p.name}</dt>
+          <dd>{p.help}</dd>
+        {/each}
+      </dl>
+    {/if}
+  </Modal>
+{/if}
+
+{#if showTypes}
+  <Modal title="Visualization types" wide onClose={() => (showTypes = false)}>
+    <p class="muted">Pick the view that matches what you want to see.</p>
+    {#each allViewHelp as v (v.key)}
+      <div class="viz-type-entry">
+        <h4>{v.name}</h4>
+        <p>{v.short}</p>
+        {#if v.requirements}
+          <p class="muted"><strong>Requirements:</strong> {v.requirements}</p>
+        {/if}
+      </div>
+    {/each}
+  </Modal>
+{/if}
 
 <style>
   .layout {
@@ -533,5 +591,48 @@
 
   .empty {
     color: var(--ink-muted);
+  }
+
+  .viz-header {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+  }
+
+  .link {
+    background: none;
+    border: none;
+    color: var(--accent, #3b82f6);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-decoration: underline;
+  }
+
+  .viz-params {
+    display: grid;
+    gap: 0.15rem 0.75rem;
+    grid-template-columns: max-content 1fr;
+    margin: 0.3rem 0 0;
+  }
+
+  .viz-params dt {
+    font-weight: 600;
+  }
+
+  .viz-params dd {
+    color: var(--ink-muted);
+    margin: 0;
+  }
+
+  .viz-type-entry {
+    border-top: 1px solid var(--border, #e5e7eb);
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+  }
+
+  .viz-type-entry h4 {
+    margin: 0 0 0.2rem;
   }
 </style>
