@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS files (
     extracted_authors TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_files_real_path ON files (real_path);
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -169,6 +173,31 @@ class AgentState:
         self._conn.commit()
         return cur.rowcount > 0
 
+    def forget_many(self, local_file_ids: list[str]) -> int:
+        """Drop several files from the local index at once (on-disk files untouched). Returns count."""
+        removed = 0
+        for local_file_id in local_file_ids:
+            cur = self._conn.execute("DELETE FROM files WHERE local_file_id=?", (local_file_id,))
+            removed += cur.rowcount
+        self._conn.commit()
+        return removed
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = self._conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self._conn.commit()
+
+    def delete_setting(self, key: str) -> None:
+        self._conn.execute("DELETE FROM settings WHERE key=?", (key,))
+        self._conn.commit()
+
     def resolve_path(self, local_file_id: str) -> Path | None:
         """Return the real on-disk path for an indexed id (local-only resolution), or None."""
         row = self._conn.execute(
@@ -195,26 +224,30 @@ class AgentState:
         ).fetchone()
         return bool(row and row["teleport_blocked"])
 
-    def mark_absent_except(
-        self, present_ids: set[str], real_path_prefix: str | None = None
-    ) -> list[str]:
-        """Mark files not in ``present_ids`` as gone; return the ids newly marked absent.
+    def refresh_presence(self) -> list[str]:
+        """Re-stat every indexed file and set ``present`` to whether it still exists on disk.
 
-        Optionally scoped to files under ``real_path_prefix`` (so rescanning one folder doesn't
-        flag files from other roots).
+        ``present`` means **"exists on disk"** — an independent fact from scan-membership, so a
+        scan of a subset of watched roots never flags files from other roots as gone. A file that
+        was moved *outside* a watched folder still exists on disk (``present=1``, classified
+        ``unwatched``); only a file truly deleted from disk becomes ``present=0`` (``missing``).
+        Returns the ids that transitioned from present to gone this call (the newly-missing set),
+        so the caller can report exactly those to the server.
         """
         rows = self._conn.execute("SELECT local_file_id, real_path, present FROM files").fetchall()
-        newly_absent: list[str] = []
+        newly_missing: list[str] = []
         for row in rows:
-            if real_path_prefix and not str(row["real_path"]).startswith(real_path_prefix):
-                continue
-            if row["local_file_id"] not in present_ids and row["present"]:
+            exists = Path(row["real_path"]).exists()
+            new_present = 1 if exists else 0
+            if new_present != row["present"]:
                 self._conn.execute(
-                    "UPDATE files SET present=0 WHERE local_file_id=?", (row["local_file_id"],)
+                    "UPDATE files SET present=? WHERE local_file_id=?",
+                    (new_present, row["local_file_id"]),
                 )
-                newly_absent.append(row["local_file_id"])
+                if not exists:
+                    newly_missing.append(row["local_file_id"])
         self._conn.commit()
-        return newly_absent
+        return newly_missing
 
     def all_files(self) -> list[FileRecord]:
         rows = self._conn.execute("SELECT * FROM files ORDER BY virtual_path").fetchall()

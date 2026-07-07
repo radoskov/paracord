@@ -228,14 +228,18 @@ def create_app(
     async def api_files(request: Request):
         if (deny := guard(request)) is not None:
             return deny
+        config = _config()
         state = _state()
         local = {r.local_file_id: r for r in state.all_files()}
         server = {}
         with contextlib.suppress(Exception):
-            server = {f["local_file_id"]: f for f in await _client(_config()).get_my_files()}
+            server = {f["local_file_id"]: f for f in await _client(config).get_my_files()}
         rows = []
         for lid, rec in local.items():
             sf = server.get(lid, {})
+            # Truthful status computed fresh from on-disk + watched facts (not scan-membership),
+            # so an unwatched file is never mislabelled "no longer on this workstation".
+            status = agent_ops.classify(rec.real_path, config)
             rows.append(
                 {
                     "local_file_id": lid,
@@ -243,7 +247,8 @@ def create_app(
                     "action": rec.import_action,
                     "teleport_policy": rec.teleport_policy,
                     "blocked": rec.teleport_blocked,
-                    "present": rec.present,
+                    "present": status != "missing",
+                    "status": status,
                     # Prefer the local "extract_queue_failed" marker over the server's optimistic
                     # "extracting" so a dropped extraction enqueue is visible in the GUI (D7).
                     "processing_state": (
@@ -590,6 +595,13 @@ async function refresh(){
     : '<p class="muted">No pending requests.</p>');
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');}
+// Truthful status badge for an indexed file (Phase 1): missing (gone from disk) / unwatched
+// (on disk, outside every watched folder — NOT gone) / watched (normal, no badge).
+function statusBadge(status){
+  if(status==='missing')return ' <span class="bad" title="The file is no longer on disk on this workstation — the agent can no longer see it. The server still keeps its indexed copy and metadata.">(file no longer on this workstation)</span>';
+  if(status==='unwatched')return ' <span class="pill" style="background:#fdecc8;color:#7a5b00" title="The file is still on disk but is not inside any watched folder. It stays in the index until you prune it.">on disk, not in a watched folder</span>';
+  return '';
+}
 // Encode a value for safe use as an onclick JS-string argument (apostrophe included). Decoded in the handler.
 function enc(s){return encodeURIComponent(String(s)).replace(/'/g,'%27');}
 
@@ -632,7 +644,7 @@ function renderFiles(){
       const teleported=(f.processing_state==='teleported')||(f.teleport_status==='complete');
       const offerBtn=(canTeleport&&!teleported&&!f.blocked&&f.present)
         ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')" title="Upload this file into the server library">offer teleport</button>`:'';
-      const gone=f.present?'':' <span class="bad" title="The original file is no longer present in the indexed folder on this workstation — the agent can no longer see it. The server still keeps the indexed copy and metadata.">(file no longer on this workstation)</span>';
+      const gone=statusBadge(f.status);
       return `<tr><td class="pathcell">${esc(f.virtual_path||f.local_file_id.slice(0,10))}${gone}</td>`+
         `<td><span class="pill mono" data-hash="${esc(f.local_file_id)}" onclick="copyHash('${f.local_file_id}')" title="click to copy full hash (the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span>`+
         `<span class="fullhash">${esc(f.local_file_id)}</span></td>`+

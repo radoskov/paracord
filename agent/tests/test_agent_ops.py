@@ -214,6 +214,89 @@ def test_request_teleport_offer_missing_file_returns_false(tmp_path: Path) -> No
     assert asyncio.run(agent_ops.request_teleport_offer(state, FakeClient(), "nope")) is False
 
 
+# --- Phase 1: truthful watched/unwatched/missing status model ---------------
+
+
+def test_classify_watched_unwatched_missing(tmp_path: Path) -> None:
+    watched_root = tmp_path / "papers"
+    watched_root.mkdir()
+    inside = watched_root / "a.pdf"
+    inside.write_bytes(b"%PDF-1.4")
+    outside = tmp_path / "loose.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    config = AgentConfig(folders=[ManagedFolder(path=watched_root)])
+
+    assert agent_ops.classify(str(inside), config) == "watched"
+    assert agent_ops.classify(str(outside), config) == "unwatched"
+    assert agent_ops.classify(str(tmp_path / "nope.pdf"), config) == "missing"
+
+
+def test_moved_out_of_watched_folder_is_unwatched_not_missing(tmp_path: Path) -> None:
+    """A file moved on disk out of a watched folder is ``unwatched`` (still on disk), never missing."""
+    root = tmp_path / "papers"
+    root.mkdir()
+    pdf = root / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4\nA")
+    config = AgentConfig(folders=[ManagedFolder(path=root)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    lid = state.all_files()[0].local_file_id
+
+    moved = tmp_path / "moved.pdf"
+    pdf.rename(moved)
+    # Point the index row at the new (still-on-disk) location, as a rescan would.
+    rec = state.all_files()[0]
+    state.upsert(
+        local_file_id=lid, real_path=str(moved), sha256=rec.sha256, size_bytes=rec.size_bytes
+    )
+    assert agent_ops.classify(str(moved), config) == "unwatched"
+
+
+def test_subset_scan_does_not_mark_other_roots_missing(tmp_path: Path) -> None:
+    """Scanning only one enabled root must never flag files from another (still on disk) root."""
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    (root_a / "a.pdf").write_bytes(b"%PDF-1.4\nA")
+    (root_b / "b.pdf").write_bytes(b"%PDF-1.4\nB")
+    state = AgentState(tmp_path / "state.sqlite3")
+
+    both = AgentConfig(folders=[ManagedFolder(path=root_a), ManagedFolder(path=root_b)])
+    client = FakeClient()
+    asyncio.run(agent_ops.sync(both, state, client))
+    assert len(state.all_files()) == 2
+
+    # Now disable root_b (subset scan of only root_a). b.pdf is still on disk → not missing.
+    subset = AgentConfig(
+        folders=[ManagedFolder(path=root_a), ManagedFolder(path=root_b, enabled=False)]
+    )
+    client2 = FakeClient()
+    summary = asyncio.run(agent_ops.sync(subset, state, client2))
+    assert summary["removed"] == 0
+    assert client2.removed == []  # server NOT told anything was removed
+    statuses = {agent_ops.classify(r.real_path, subset) for r in state.all_files()}
+    assert statuses == {"watched", "unwatched"}
+
+
+def test_report_source_removed_only_for_missing_not_unwatched(tmp_path: Path) -> None:
+    """report_source_removed fires for disk-gone files, never for merely-unwatched ones."""
+    root = tmp_path / "papers"
+    root.mkdir()
+    gone = root / "gone.pdf"
+    gone.write_bytes(b"%PDF-1.4\nA")
+    config = AgentConfig(folders=[ManagedFolder(path=root)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    lid = state.all_files()[0].local_file_id
+
+    gone.unlink()  # truly deleted from disk
+    client = FakeClient()
+    summary = asyncio.run(agent_ops.sync(config, state, client))
+    assert summary["removed"] == 1
+    assert client.removed == [lid]
+
+
 def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch) -> None:
     """An unchanged file is not re-hashed on rescan (E7 incremental scan)."""
     config = _folder(tmp_path, "index_only")

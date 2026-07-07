@@ -52,12 +52,38 @@ def test_extracted_metadata_persists_and_is_not_wiped(tmp_path: Path) -> None:
     state.close()
 
 
-def test_mark_absent_except(tmp_path: Path) -> None:
+def test_refresh_presence_tracks_on_disk_not_scan(tmp_path: Path) -> None:
+    """``present`` = exists-on-disk: only truly-gone files go absent, and only once."""
+    on_disk = tmp_path / "here.pdf"
+    on_disk.write_bytes(b"%PDF-1.4")
+    state = AgentState(tmp_path / "state.sqlite3")
+    state.upsert(local_file_id="here", real_path=str(on_disk), sha256="h", size_bytes=1)
+    state.upsert(
+        local_file_id="gone", real_path=str(tmp_path / "gone.pdf"), sha256="g", size_bytes=1
+    )
+
+    newly_missing = state.refresh_presence()
+    assert newly_missing == ["gone"]
+    by_id = {r.local_file_id: r for r in state.all_files()}
+    assert by_id["here"].present is True
+    assert by_id["gone"].present is False
+    # Idempotent: an already-missing file is not reported again.
+    assert state.refresh_presence() == []
+    state.close()
+
+
+def test_forget_many_and_settings(tmp_path: Path) -> None:
     state = AgentState(tmp_path / "state.sqlite3")
     for i in (1, 2, 3):
         state.upsert(local_file_id=f"h{i}", real_path=f"/p/{i}.pdf", sha256=f"h{i}", size_bytes=1)
-    newly_absent = state.mark_absent_except({"h1", "h3"})
-    assert newly_absent == ["h2"]
-    # Idempotent: already-absent files aren't reported again.
-    assert state.mark_absent_except({"h1", "h3"}) == []
+    assert state.forget_many(["h1", "h3", "nope"]) == 2
+    assert {r.local_file_id for r in state.all_files()} == {"h2"}
+
+    assert state.get_setting("k", "default") == "default"
+    state.set_setting("k", "v")
+    assert state.get_setting("k") == "v"
+    state.set_setting("k", "v2")
+    assert state.get_setting("k") == "v2"
+    state.delete_setting("k")
+    assert state.get_setting("k") is None
     state.close()

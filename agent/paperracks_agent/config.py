@@ -43,6 +43,9 @@ class AgentConfig(BaseModel):
     default_action: str = "index_only"
     default_teleport_policy: str = "ask"
     follow_symlinks: bool = False
+    # Forward "Scan & push" auto-prune of unwatched entries — OFF by default so keep-by-default
+    # holds and a routine push never silently drops unwatched-but-kept files (owner-confirmed).
+    auto_prune_unwatched: bool = False
     folders: list[ManagedFolder] = Field(default_factory=list)
     files: list[ManagedFile] = Field(default_factory=list)
 
