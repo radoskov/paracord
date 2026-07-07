@@ -428,6 +428,9 @@ export interface Shelf {
   // Whether the requesting caller may modify this shelf's structure/membership (librarian floor +
   // grant). Defaulted server-side; used by ShelfPicker's `modifiableOnly` pre-filter.
   can_modify?: boolean;
+  // Whether this is the ephemeral default/Inbox shelf (loose-paper fallback). Used by ShelfPicker's
+  // `excludeDefault` pre-filter so it isn't offered as a "Put into" move-target.
+  is_default?: boolean;
   created_at: string;
   updated_at: string;
 }

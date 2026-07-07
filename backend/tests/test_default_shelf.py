@@ -252,3 +252,20 @@ def test_backfill_no_op_when_nothing_loose(db):
     from app.services.default_shelf import backfill_loose_papers_onto_default
 
     assert backfill_loose_papers_onto_default(db) == 0
+
+
+# --- L1: the shelf-list read flags the default shelf so the UI can exclude it as a move-target ---
+
+
+def test_shelf_list_flags_default_shelf(client, auth_headers, db):
+    """GET /shelves marks the default/Inbox shelf with is_default=True and real shelves False, so
+    the frontend can drop the default shelf from "Put into" menus without hardcoding a name."""
+    owner = auth_headers("owner")
+    _new_paper(client, owner, "bootstrap default")  # ensures the default shelf exists
+    real_id = _new_shelf(client, owner, "A real shelf")
+    default_id = str(get_default_shelf_id(db))
+
+    shelves = client.get("/api/v1/shelves", headers=owner).json()
+    by_id = {s["id"]: s for s in shelves}
+    assert by_id[default_id]["is_default"] is True
+    assert by_id[real_id]["is_default"] is False

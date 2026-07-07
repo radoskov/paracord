@@ -72,6 +72,10 @@ class ShelfRead(BaseModel):
     # per-shelf grant). Defaulted so existing callers/serializers are unaffected; populated by
     # ``list_shelves`` so the "Put into…" picker can pre-filter to modifiable shelves.
     can_modify: bool = False
+    # Whether this is the ephemeral default/Inbox shelf (the fallback home for loose papers). The
+    # frontend uses it to exclude the default shelf from "Put into" move-target menus, where moving a
+    # paper makes no sense. Defaulted + populated by ``list_shelves``.
+    is_default: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -114,12 +118,14 @@ def list_shelves(db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[ShelfRead
     granted = (
         set() if access.is_admin_or_owner(actor) else access.granted_target_ids(db, actor, "shelf")
     )
+    default_id = get_default_shelf_id(db)
     return [
         ShelfRead.model_validate(shelf).model_copy(
             update={
                 "can_modify": access.can_modify_shelf_precomputed(
                     actor, shelf, granted_shelf_ids=granted
-                )
+                ),
+                "is_default": shelf.id == default_id,
             }
         )
         for shelf in shelves

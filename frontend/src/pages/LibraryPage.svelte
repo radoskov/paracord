@@ -816,7 +816,7 @@
   <Modal title="Put into a shelf" onClose={() => (showBatchPutInto = false)}>
     <div class="putinto">
       <p class="muted">Add {selectedIds.length} selected paper(s) to a shelf.</p>
-      <ShelfPicker {client} bind:value={batchPutIntoShelfId} modifiableOnly />
+      <ShelfPicker {client} bind:value={batchPutIntoShelfId} modifiableOnly excludeDefault />
       <div class="putinto-actions">
         <button type="button" class="secondary" on:click={() => (showBatchPutInto = false)}
           title="Close without adding">Cancel</button>

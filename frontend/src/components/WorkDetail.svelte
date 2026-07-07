@@ -1264,7 +1264,7 @@
 {#if showPutInto}
   <Modal title="Put into a shelf" onClose={() => (showPutInto = false)}>
     <div class="putinto">
-      <ShelfPicker {client} bind:value={putIntoShelfId} modifiableOnly />
+      <ShelfPicker {client} bind:value={putIntoShelfId} modifiableOnly excludeDefault />
       <div class="putinto-actions">
         <button type="button" class="secondary" on:click={() => (showPutInto = false)}
           title="Close without adding">Cancel</button>
