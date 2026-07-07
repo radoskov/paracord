@@ -17,6 +17,9 @@ const EXPECTED_TOKENS = [
   '--surface-overlay',
   '--surface-sunken',
   '--surface-hover',
+  '--surface-selected',
+  '--surface-selected-border',
+  '--surface-selected-text',
   '--ink-strong',
   '--ink-normal',
   '--ink-muted',
@@ -103,6 +106,44 @@ describe('bundled themes', () => {
       }
     }
   });
+});
+
+// Relative luminance + WCAG contrast for the selected-row token pair. The owner reported the
+// selection "vanishing" in the dark themes because selected == hover == a near-neutral surface; the
+// fix is a distinct accent-tinted `--surface-selected` with AA-readable text. These guard both.
+function relLuminance(hex: string): number {
+  const c = hex.replace('#', '');
+  const ch = (i: number) => {
+    const v = parseInt(c.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
+}
+function contrastRatio(a: string, b: string): number {
+  const la = relLuminance(a);
+  const lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+describe('selected / hover surface states', () => {
+  for (const theme of bundledThemes) {
+    it(`${theme.id}: selected differs from base and hover, with AA-readable text`, () => {
+      const s = theme.tokens.surface;
+      expect(s.selected, `${theme.id} selected non-empty`).toMatch(/^#/);
+      expect(s['selected-border']).toMatch(/^#/);
+      expect(s['selected-text']).toMatch(/^#/);
+      // The three list-row states must be visually distinct colours.
+      expect(s.selected, `${theme.id} selected vs base`).not.toBe(s.base);
+      expect(s.selected, `${theme.id} selected vs hover`).not.toBe(s.hover);
+      expect(s.hover, `${theme.id} hover vs base`).not.toBe(s.base);
+      expect(s.hover, `${theme.id} hover vs overlay (button bg)`).not.toBe(s.overlay);
+      // Selected-row text must meet WCAG AA (4.5:1) against the selected background.
+      const ratio = contrastRatio(s['selected-text'], s.selected);
+      expect(ratio, `${theme.id} selected text contrast ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    });
+  }
 });
 
 describe('categorical data-palette validation', () => {

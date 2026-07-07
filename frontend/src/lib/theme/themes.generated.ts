@@ -15,7 +15,10 @@ export const bundledThemes: Theme[] = [
         "raised": "#fafbfd",
         "overlay": "#ffffff",
         "sunken": "#e4e8f0",
-        "hover": "#e7ecf3"
+        "hover": "#e7ecf3",
+        "selected": "#d6e2f2",
+        "selected-border": "#245a8f",
+        "selected-text": "#4c4f69"
       },
       "ink": {
         "strong": "#4c4f69",
@@ -106,7 +109,10 @@ export const bundledThemes: Theme[] = [
         "raised": "#fbf8f4",
         "overlay": "#fffdfb",
         "sunken": "#ece6de",
-        "hover": "#efe8e0"
+        "hover": "#efe8e0",
+        "selected": "#f1d4da",
+        "selected-border": "#a83250",
+        "selected-text": "#4c4f69"
       },
       "ink": {
         "strong": "#4c4f69",
@@ -197,7 +203,10 @@ export const bundledThemes: Theme[] = [
         "raised": "#262a3d",
         "overlay": "#2e3348",
         "sunken": "#171826",
-        "hover": "#2b3044"
+        "hover": "#383e58",
+        "selected": "#33436e",
+        "selected-border": "#89b4fa",
+        "selected-text": "#cdd6f4"
       },
       "ink": {
         "strong": "#cdd6f4",
@@ -288,7 +297,10 @@ export const bundledThemes: Theme[] = [
         "raised": "#2a2536",
         "overlay": "#322c40",
         "sunken": "#191622",
-        "hover": "#302a3d"
+        "hover": "#423a54",
+        "selected": "#4a3826",
+        "selected-border": "#fab387",
+        "selected-text": "#f2e3d5"
       },
       "ink": {
         "strong": "#cdd6f4",

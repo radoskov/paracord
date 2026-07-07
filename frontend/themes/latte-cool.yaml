@@ -24,7 +24,7 @@ palette:
   lavender: "#7287fd"
 
 tokens:
-  surface: {base: "#edf0f5", raised: "#fafbfd", overlay: "#ffffff", sunken: "#e4e8f0", hover: "#e7ecf3"}
+  surface: {base: "#edf0f5", raised: "#fafbfd", overlay: "#ffffff", sunken: "#e4e8f0", hover: "#e7ecf3", selected: "#d6e2f2", selected-border: "#245a8f", selected-text: "#4c4f69"}
   ink: {strong: "#4c4f69", normal: "#565971", muted: "#5f6278", inverse: "#ffffff"}
   border: {normal: "#cdd3de", strong: "#bcc4d2", focus: "#1e66f5"}
   accent: {primary: "#245a8f", primary-strong: "#1c4a78", secondary: "#3a3c52", link: "#1a5fd0", note: "#7c34d6", note-bg: "#ece0fb", note-border: "#d0b8f2"}

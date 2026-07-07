@@ -7,7 +7,17 @@ export type ThemeMode = 'light' | 'dark';
 
 /** Role tokens — become CSS custom properties on `[data-theme="<id>"]`. */
 export interface ThemeTokens {
-  surface: { base: string; raised: string; overlay: string; sunken: string; hover: string };
+  surface: {
+    base: string;
+    raised: string;
+    overlay: string;
+    sunken: string;
+    hover: string;
+    /** Selected/active list-row background — accent-tinted, distinct from both base and hover. */
+    selected: string;
+    'selected-border': string;
+    'selected-text': string;
+  };
   ink: { strong: string; normal: string; muted: string; inverse: string };
   border: { normal: string; strong: string; focus: string };
   accent: {
