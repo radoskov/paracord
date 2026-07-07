@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 from paperracks_agent import agent_ops
-from paperracks_agent.config import AgentConfig, ManagedFolder
+from paperracks_agent.config import AgentConfig, ManagedFile, ManagedFolder
 from paperracks_agent.state import AgentState
 
 
@@ -295,6 +295,65 @@ def test_report_source_removed_only_for_missing_not_unwatched(tmp_path: Path) ->
     summary = asyncio.run(agent_ops.sync(config, state, client))
     assert summary["removed"] == 1
     assert client.removed == [lid]
+
+
+# --- Phase 2: prune (per-item + bulk) + unwatch preview ---------------------
+
+
+def _two_root_state(tmp_path: Path):
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    (root_a / "a.pdf").write_bytes(b"%PDF-1.4\nA")
+    (root_b / "b.pdf").write_bytes(b"%PDF-1.4\nB")
+    both = AgentConfig(folders=[ManagedFolder(path=root_a), ManagedFolder(path=root_b)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(both, state, FakeClient()))
+    return root_a, root_b, both, state
+
+
+def test_prune_unwatched_drops_only_unwatched(tmp_path: Path) -> None:
+    root_a, root_b, both, state = _two_root_state(tmp_path)
+    # Disable root_b so its file becomes unwatched (still on disk).
+    subset = AgentConfig(
+        folders=[ManagedFolder(path=root_a), ManagedFolder(path=root_b, enabled=False)]
+    )
+    pruned = agent_ops.prune_unwatched(subset, state)
+    assert len(pruned) == 1
+    remaining = state.all_files()
+    assert len(remaining) == 1
+    assert agent_ops.classify(remaining[0].real_path, subset) == "watched"
+
+
+def test_files_unwatched_if_removed_previews_affected(tmp_path: Path) -> None:
+    root_a, root_b, both, state = _two_root_state(tmp_path)
+    affected = agent_ops.files_unwatched_if_removed(both, state, str(root_b))
+    assert len(affected) == 1
+    assert affected[0].real_path.endswith("b.pdf")
+    # Removing a folder with no indexed files affects nothing.
+    assert agent_ops.files_unwatched_if_removed(both, state, str(tmp_path / "nope")) == []
+
+
+def test_managed_file_is_watched(tmp_path: Path) -> None:
+    pdf = tmp_path / "solo.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    config = AgentConfig(files=[ManagedFile(path=pdf)])
+    assert agent_ops.classify(str(pdf), config) == "watched"
+    disabled = AgentConfig(files=[ManagedFile(path=pdf, enabled=False)])
+    assert agent_ops.classify(str(pdf), disabled) == "unwatched"
+
+
+def test_sync_auto_prune_toggle(tmp_path: Path) -> None:
+    """auto_prune_unwatched (default OFF) prunes unwatched rows on a forward push when enabled."""
+    root_a, root_b, both, state = _two_root_state(tmp_path)
+    subset = AgentConfig(
+        folders=[ManagedFolder(path=root_a), ManagedFolder(path=root_b, enabled=False)],
+        auto_prune_unwatched=True,
+    )
+    summary = asyncio.run(agent_ops.sync(subset, state, FakeClient()))
+    assert summary["pruned"] == 1
+    assert len(state.all_files()) == 1
 
 
 def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch) -> None:

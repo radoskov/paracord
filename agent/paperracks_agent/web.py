@@ -206,8 +206,17 @@ def create_app(
         config.folders = [f for f in config.folders if str(f.path.expanduser()) != target]
         config.files = [f for f in config.files if str(f.path.expanduser()) != target]
         save_config(config, config_path)
+        # Optional prune-now (unwatch dialog checkbox): drop only the specific rows the dialog listed
+        # as newly-unwatched — never other pre-existing unwatched entries the user chose to keep.
+        # Default is keep-by-default (no prune_ids). Server not contacted.
+        prune_ids = body.get("prune_ids") or []
+        pruned = _state().forget_many(prune_ids) if prune_ids else 0
         return JSONResponse(
-            {"ok": True, "removed": before - (len(config.folders) + len(config.files))}
+            {
+                "ok": True,
+                "removed": before - (len(config.folders) + len(config.files)),
+                "pruned": pruned,
+            }
         )
 
     async def api_forget(request: Request):
@@ -217,6 +226,77 @@ def create_app(
         body = await request.json()
         gone = _state().forget(body["local_file_id"])
         return JSONResponse({"ok": True, "forgotten": gone})
+
+    async def api_unwatch_preview(request: Request):
+        """How many indexed files would become ``unwatched`` if a folder/file were removed/disabled.
+
+        Powers the unwatch confirmation dialog (default keep; optional prune-now). Server not contacted.
+        """
+        if (deny := guard(request)) is not None:
+            return deny
+        target = request.query_params.get("path") or ""
+        config = _config()
+        affected = agent_ops.files_unwatched_if_removed(config, _state(), target)
+        return JSONResponse(
+            {
+                "count": len(affected),
+                "files": [
+                    {"local_file_id": r.local_file_id, "virtual_path": r.virtual_path}
+                    for r in affected
+                ],
+            }
+        )
+
+    async def api_prune_unwatched(request: Request):
+        """Bulk-remove every ``unwatched`` index row (on-disk files untouched, server not contacted)."""
+        if (deny := guard(request)) is not None:
+            return deny
+        pruned = agent_ops.prune_unwatched(_config(), _state())
+        return JSONResponse({"ok": True, "pruned": len(pruned)})
+
+    async def api_bulk(request: Request):
+        """Apply one action to a selected set of indexed files (per-item stays available too).
+
+        ``forget``/``prune`` remove index rows locally (server not contacted); ``block`` is local;
+        ``teleport``/``unblock``/``reextract`` contact the server per id, tolerating per-id failures.
+        """
+        if (deny := guard(request)) is not None:
+            return deny
+        body = await request.json()
+        action = body.get("action")
+        ids = body.get("local_file_ids") or []
+        config = _config()
+        state = _state()
+        if action in ("forget", "prune"):
+            return JSONResponse({"ok": True, "affected": state.forget_many(ids)})
+        if action == "block":
+            for lid in ids:
+                state.set_blocked(lid, True)
+            return JSONResponse({"ok": True, "affected": len(ids)})
+        client = _client(config)
+        affected, errors = 0, []
+        for lid in ids:
+            try:
+                if action == "unblock":
+                    await agent_ops.unblock(state, client, lid)
+                elif action == "teleport":
+                    if not await agent_ops.request_teleport_offer(state, client, lid):
+                        errors.append(lid)
+                        continue
+                elif action == "reextract":
+                    path = state.resolve_path(lid)
+                    if path and path.exists():
+                        with path.open("rb") as handle:
+                            await client.upload_for_extraction(lid, handle)
+                    else:
+                        errors.append(lid)
+                        continue
+                else:
+                    return JSONResponse({"detail": "unknown bulk action"}, status_code=400)
+                affected += 1
+            except Exception:  # noqa: BLE001 - tolerate per-id failures, report the count
+                errors.append(lid)
+        return JSONResponse({"ok": True, "affected": affected, "errors": errors})
 
     async def api_sync(request: Request):
         if (deny := guard(request)) is not None:
@@ -350,7 +430,10 @@ def create_app(
         Route("/api/items", api_add_item, methods=["POST"]),
         Route("/api/items/update", api_update_item, methods=["POST"]),
         Route("/api/remove", api_remove, methods=["POST"]),
+        Route("/api/unwatch-preview", api_unwatch_preview),
         Route("/api/forget", api_forget, methods=["POST"]),
+        Route("/api/prune-unwatched", api_prune_unwatched, methods=["POST"]),
+        Route("/api/bulk", api_bulk, methods=["POST"]),
         Route("/api/sync", api_sync, methods=["POST"]),
         Route("/api/files", api_files),
         Route("/api/files/{local_file_id}/view", api_view_file),
@@ -421,6 +504,20 @@ th.sortable{cursor:pointer;user-select:none}
 #toasts{position:fixed;top:.8rem;right:.8rem;display:flex;flex-direction:column;gap:.4rem;z-index:40}
 .toast{background:#243443;color:#fff;padding:.5rem .8rem;border-radius:6px;font-size:.85rem;box-shadow:0 2px 8px rgba(0,0,0,.2);max-width:24rem}
 .toast.bad{background:#9c1c12}.toast.ok{background:#1f6b3a}
+.badges{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem}
+.badge{font-size:.78rem;border-radius:12px;padding:.15rem .6rem;cursor:pointer;border:1px solid #d8dee6;background:#fff}
+.badge.active{outline:2px solid #5aa0e0;font-weight:600}
+.badge.watched{color:#14532d}.badge.unwatched{color:#7a5b00}.badge.missing{color:#b3261e}
+.bulkbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;padding:.45rem .5rem;
+  border:1px solid #e3e8ee;border-radius:6px;background:#f7f9fb;font-size:.82rem}
+.bulkbar .sel{font-weight:600;margin-right:.3rem}
+.filelist{list-style:none;margin:.3rem 0 0;padding:0;max-height:40vh;overflow:auto}
+.filelist li{padding:.15rem .2rem;font-size:.82rem;border-bottom:1px solid #f0f3f6;overflow-wrap:anywhere}
+.filelist li .pth{color:#64717f;font-size:.75rem}
+.spin{display:inline-block;width:.8rem;height:.8rem;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.35rem}
+button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style></head><body>
 <header>
   <div class="title"><span class="statusLight" id="statusLight" title="server status"></span>PaRacORD Local Agent</div>
@@ -469,18 +566,24 @@ th.sortable{cursor:pointer;user-select:none}
 
   <section class="tab" data-tab="files">
     <div class="card"><h2>Indexed files
-        <button class="sec tiny" onclick="act(sync)" title="Re-scan the watched folders and send the manifest to the server">Sync now</button>
-        <button class="sec tiny" onclick="refresh()" title="Reload the indexed-files list">Refresh</button></h2>
+        <button class="sec tiny" id="btnScan" onclick="doScan()" title="Forward sync: re-scan the watched folders and push the manifest to the server. Never deletes anything.">Scan &amp; push</button>
+        <button class="sec tiny" id="btnRefresh" onclick="refresh()" title="Reload the indexed-files list from local state + the server">Refresh</button></h2>
+      <div id="badges" class="badges"></div>
       <div class="filters">
         <input id="fSearch" placeholder="search filename, hash, title or authors…" oninput="renderFiles()">
+        <label>status <select id="fStatus" onchange="renderFiles()"><option value="">all</option>
+          <option value="watched">watched</option><option value="unwatched">unwatched</option><option value="missing">missing</option></select></label>
         <label>action <select id="fAction" onchange="renderFiles()"><option value="">all</option>
           <option value="index_only">index_only</option><option value="index_and_extract">index_and_extract</option><option value="teleport">teleport</option></select></label>
         <label>state <select id="fState" onchange="renderFiles()"><option value="">all</option></select></label>
+        <label>blocked <select id="fBlocked" onchange="renderFiles()"><option value="">all</option>
+          <option value="1">blocked</option><option value="0">not blocked</option></select></label>
       </div>
       <div class="radios">
         <span class="radiogroup"><span>sort by</span>
           <label><input type="radio" name="fSortField" value="file" onchange="saveSort();renderFiles()"> file</label>
           <label><input type="radio" name="fSortField" value="title" onchange="saveSort();renderFiles()"> title</label>
+          <label><input type="radio" name="fSortField" value="status" onchange="saveSort();renderFiles()"> status</label>
           <label><input type="radio" name="fSortField" value="action" onchange="saveSort();renderFiles()"> action</label>
           <label><input type="radio" name="fSortField" value="state" onchange="saveSort();renderFiles()"> state</label>
           <label><input type="radio" name="fSortField" value="hash" onchange="saveSort();renderFiles()"> hash</label>
@@ -489,6 +592,17 @@ th.sortable{cursor:pointer;user-select:none}
           <label><input type="radio" name="fSortDir" value="asc" onchange="saveSort();renderFiles()"> asc</label>
           <label><input type="radio" name="fSortDir" value="desc" onchange="saveSort();renderFiles()"> desc</label>
         </span>
+      </div>
+      <div class="bulkbar">
+        <label title="Select or clear every file matching the current filters"><input type="checkbox" id="selAll" onchange="toggleAll(this.checked)"> select filtered</label>
+        <span class="sel"><span id="selCount">0</span> selected</span>
+        <button class="sec tiny" onclick="bulk('forget','Forget the selected files from the index? (files on disk are untouched)')" title="Remove the selected files from the local index (on-disk files untouched; the server keeps its copies)">Forget</button>
+        <button class="sec tiny" onclick="bulk('prune','Prune the selected files from the index? (files on disk are untouched)')" title="Remove the selected (typically unwatched) files from the local index (on-disk files untouched)">Prune</button>
+        <button class="sec tiny" onclick="bulk('teleport')" title="Upload the selected files into the server library now">Teleport</button>
+        <button class="sec tiny" onclick="bulk('block')" title="Block the selected files from all future teleport requests">Block</button>
+        <button class="sec tiny" onclick="bulk('unblock')" title="Unblock the selected files so they can be processed again">Unblock</button>
+        <button class="sec tiny" onclick="bulk('reextract')" title="Ask the server to extract the selected files again">Re-extract</button>
+        <button class="danger tiny" onclick="pruneUnwatched()" title="Remove EVERY unwatched entry (on disk, outside all watched folders) from the index">Prune unwatched</button>
       </div>
       <div id="files"></div>
     </div>
@@ -517,6 +631,23 @@ th.sortable{cursor:pointer;user-select:none}
         <label><input type="radio" name="pMode" value="once" onchange="savePMode()"> once</label>
       </span>
       <button onclick="addCurrentFolder()" title="Watch the folder currently shown above">Add this folder</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="unwatchModal">
+  <div class="box">
+    <div class="head"><b>Unwatch — keep these files in the index, or prune them?</b>
+      <button class="sec tiny" onclick="closeUnwatch()" title="Cancel — change nothing">✕</button></div>
+    <div class="body" style="padding:.8rem 1rem">
+      <p id="unwatchMsg" class="muted"></p>
+      <ul class="filelist" id="unwatchList"></ul>
+      <label style="display:block;margin-top:.7rem">
+        <input type="checkbox" id="unwatchPrune"> Also remove these from the index now (prune). The files on disk are <b>not</b> touched, and the server is not contacted.</label>
+    </div>
+    <div class="foot">
+      <button class="sec" onclick="closeUnwatch()" title="Cancel — keep watching this item">Cancel</button>
+      <button onclick="confirmUnwatch()" title="Apply: stop watching this item. By default the files stay in the index as ‘unwatched’; tick the box above to prune them now.">Unwatch</button>
     </div>
   </div>
 </div>
@@ -605,10 +736,19 @@ function statusBadge(status){
 // Encode a value for safe use as an onclick JS-string argument (apostrophe included). Decoded in the handler.
 function enc(s){return encodeURIComponent(String(s)).replace(/'/g,'%27');}
 
-// --- indexed files: client-side search / sort / filter (#15) ---
+// --- indexed files: client-side search / sort / filter (#15) + status/bulk (Phase 2) ---
+let selected=new Set();        // local_file_ids ticked for bulk actions (survives re-render)
+let lastFilteredIds=[];        // ids currently shown (for "select filtered")
 function renderFiles(){
   const files=allFiles||[];
   document.getElementById('cFiles').textContent=files.length;
+  // Status badge counts (Phase 2): each is a one-click filter.
+  const counts={watched:0,unwatched:0,missing:0};
+  files.forEach(f=>{if(counts[f.status]!==undefined)counts[f.status]++;});
+  const fStatus=document.getElementById('fStatus');
+  const badge=(st,label,cls)=>`<span class="badge ${cls}${fStatus.value===st?' active':''}" onclick="setStatusFilter('${st}')" title="Show only ${label} files (click again to clear)">${counts[st]} ${label}</span>`;
+  document.getElementById('badges').innerHTML=
+    badge('watched','watched','watched')+badge('unwatched','unwatched','unwatched')+badge('missing','missing','missing');
   // Keep the state filter's options in sync with the states actually present.
   const fState=document.getElementById('fState');
   const states=[...new Set(files.map(f=>f.processing_state).filter(Boolean))].sort();
@@ -618,34 +758,46 @@ function renderFiles(){
   const q=document.getElementById('fSearch').value.trim().toLowerCase();
   const fAction=document.getElementById('fAction').value;
   const fSt=fState.value;
+  const fStat=fStatus.value;
+  const fBlocked=document.getElementById('fBlocked').value;
   const sortR=document.querySelector('input[name=fSortField]:checked');
   const sort=sortR?sortR.value:'file';
   const dirR=document.querySelector('input[name=fSortDir]:checked');
   const dir=dirR?dirR.value:'asc';
   let rows=files.filter(f=>{
+    if(fStat&&f.status!==fStat)return false;
     if(fAction&&f.action!==fAction)return false;
     if(fSt&&f.processing_state!==fSt)return false;
+    if(fBlocked!==''&&String(f.blocked?1:0)!==fBlocked)return false;
     if(!q)return true;
     const hay=[f.virtual_path,f.local_file_id,f.extracted_title,f.extracted_authors].map(x=>(x||'').toLowerCase());
     return hay.some(h=>h.includes(q));
   });
   const key=f=>({file:(f.virtual_path||f.local_file_id),title:(f.extracted_title||''),
-    action:f.action,state:f.processing_state,hash:f.local_file_id})[sort]||'';
+    status:f.status,action:f.action,state:f.processing_state,hash:f.local_file_id})[sort]||'';
   rows.sort((a,b)=>{const cmp=String(key(a)).toLowerCase().localeCompare(String(key(b)).toLowerCase());return dir==='desc'?-cmp:cmp;});
+  lastFilteredIds=rows.map(f=>f.local_file_id);
+  // Drop stale selections for ids no longer present at all.
+  const allIds=new Set(files.map(f=>f.local_file_id));
+  [...selected].forEach(id=>{if(!allIds.has(id))selected.delete(id);});
   const el=document.getElementById('files');
-  if(!files.length){el.innerHTML='<p class="muted">No files indexed yet — add a folder, then “Sync now”.</p>';return;}
-  if(!rows.length){el.innerHTML='<p class="muted">No files match the current filters.</p>';return;}
+  if(!files.length){el.innerHTML='<p class="muted">No files indexed yet — add a folder, then “Scan &amp; push”.</p>';updateSelCount();return;}
+  if(!rows.length){el.innerHTML='<p class="muted">No files match the current filters.</p>';updateSelCount();return;}
   el.innerHTML='<table class="filetable">'+
-    '<col style="width:26%"><col style="width:16%"><col style="width:26%">'+
-    '<col style="width:10%"><col style="width:12%"><col style="width:10%">'+
-    '<tr><th>file</th><th>id (hash)</th><th>title</th><th>action</th><th>state</th><th></th></tr>'+
+    '<col style="width:3%"><col style="width:23%"><col style="width:16%"><col style="width:24%">'+
+    '<col style="width:10%"><col style="width:12%"><col style="width:12%">'+
+    '<tr><th></th><th>file</th><th>id (hash)</th><th>title</th><th>action</th><th>state</th><th></th></tr>'+
     rows.map(f=>{
       const title=f.extracted_title?`<span class="titlecell" title="${esc(f.extracted_title)}${f.extracted_authors?'\n'+esc(f.extracted_authors):''}">${esc(f.extracted_title)}</span>`:'<span class="muted">—</span>';
       const teleported=(f.processing_state==='teleported')||(f.teleport_status==='complete');
       const offerBtn=(canTeleport&&!teleported&&!f.blocked&&f.present)
         ?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','offer_teleport','Teleport offered — uploading')" title="Upload this file into the server library">offer teleport</button>`:'';
       const gone=statusBadge(f.status);
-      return `<tr><td class="pathcell">${esc(f.virtual_path||f.local_file_id.slice(0,10))}${gone}</td>`+
+      const pruneBtn=(f.status==='unwatched')
+        ?`<button class="danger tiny" onclick="pruneOne('${f.local_file_id}')" title="Prune this unwatched file from the index (on-disk file untouched)">prune</button>`:'';
+      const ck=selected.has(f.local_file_id)?' checked':'';
+      return `<tr><td><input type="checkbox"${ck} onchange="toggleOne('${f.local_file_id}',this.checked)" title="Select this file for a bulk action"></td>`+
+        `<td class="pathcell">${esc(f.virtual_path||f.local_file_id.slice(0,10))}${gone}</td>`+
         `<td><span class="pill mono" data-hash="${esc(f.local_file_id)}" onclick="copyHash('${f.local_file_id}')" title="click to copy full hash (the cross-reference shown on the server)">#${esc(f.local_file_id.slice(0,12))}…</span>`+
         `<span class="fullhash">${esc(f.local_file_id)}</span></td>`+
         `<td>${title}</td>`+
@@ -654,9 +806,35 @@ function renderFiles(){
         offerBtn+
         `<button class="sec tiny" onclick="fileAct('${f.local_file_id}','reextract','Re-extract requested')" title="Ask the server to extract this file again">re-extract</button>`+
         (f.blocked?`<button class="sec tiny" onclick="fileAct('${f.local_file_id}','unblock','Unblocked')" title="Unblock this file so it can be processed again">unblock</button>`:'')+
+        pruneBtn+
         `<button class="danger tiny" onclick="forget('${f.local_file_id}')" title="Forget this file locally (the server keeps its copy)">forget</button></td></tr>`;
     }).join('')+'</table>';
+  updateSelCount();
 }
+// Toggle a status badge / dropdown as a filter (clicking the active one clears it).
+function setStatusFilter(st){const sel=document.getElementById('fStatus');sel.value=(sel.value===st)?'':st;renderFiles();}
+function toggleOne(id,on){if(on)selected.add(id);else selected.delete(id);updateSelCount();}
+function toggleAll(on){lastFilteredIds.forEach(id=>{if(on)selected.add(id);else selected.delete(id);});renderFiles();}
+function updateSelCount(){
+  document.getElementById('selCount').textContent=selected.size;
+  const all=document.getElementById('selAll');
+  all.checked=lastFilteredIds.length>0&&lastFilteredIds.every(id=>selected.has(id));
+}
+async function bulk(action,confirmMsg){
+  const ids=[...selected];
+  if(!ids.length){toast('Select some files first','bad');return;}
+  if(confirmMsg&&!confirm(confirmMsg+'\n\n'+ids.length+' file(s)'))return;
+  try{const r=await api('/api/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,local_file_ids:ids})});
+    const bad=(r.errors&&r.errors.length)?`, ${r.errors.length} failed`:'';
+    toast(`${action}: ${r.affected} file(s)${bad}`,bad?'bad':'ok');
+    selected.clear();
+  }catch(e){toast(e.message,'bad');}
+  await refresh();
+}
+function pruneOne(id){if(!confirm('Prune this unwatched file from the index? (the file on disk is untouched)'))return;
+  act(()=>api('/api/forget',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({local_file_id:id})}),'Pruned');}
+function pruneUnwatched(){if(!confirm('Remove EVERY unwatched entry from the index?\n(Files on disk are untouched; the server keeps its copies.)'))return;
+  act(()=>api('/api/prune-unwatched',{method:'POST'}),r=>`Pruned ${r.pruned} unwatched`);}
 // Open a locally-indexed PDF in a new tab (#13). The httpOnly session cookie authorizes the
 // same-origin navigation; the captured page token is appended as a fallback when no cookie is set.
 function readFile(id){const q=pageToken?`?token=${encodeURIComponent(pageToken)}`:'';
@@ -673,9 +851,55 @@ function setToken(){return api('/api/set-token',{method:'POST',headers:{'content
 function addByPath(){const p=document.getElementById('path').value.trim();if(!p){toast('Enter a path','bad');return;}
   act(()=>api('/api/items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})}).then(()=>{document.getElementById('path').value='';}),'Added');}
 function updateItem(path,field,value){path=decodeURIComponent(path);act(()=>api('/api/items/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,[field]:value})}),'Updated');}
-function togglePause(path,enabled){path=decodeURIComponent(path);act(()=>api('/api/items/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,enabled:!enabled})}),enabled?'Paused':'Resumed');}
-function removeItem(path){path=decodeURIComponent(path);if(!confirm('Stop managing this path?\n'+path))return;act(()=>api('/api/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path})}),'Removed');}
+// Pausing/disabling a folder can leave now-unwatched files → offer the keep/prune dialog first.
+async function togglePause(path,enabled){path=decodeURIComponent(path);
+  if(enabled){ // enabled→disabled: may leave unwatched files
+    const prev=await previewUnwatch(path);
+    if(prev&&prev.count>0){openUnwatch(path,'disable',prev);return;}
+  }
+  act(()=>api('/api/items/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,enabled:!enabled})}),enabled?'Paused':'Resumed');}
+async function removeItem(path){path=decodeURIComponent(path);
+  const prev=await previewUnwatch(path);
+  if(prev&&prev.count>0){openUnwatch(path,'remove',prev);return;}
+  if(!confirm('Stop managing this path?\n'+path))return;
+  act(()=>api('/api/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path})}),'Removed');}
 function forget(id){if(!confirm('Forget this file from the index? (the file on disk is untouched)'))return;act(()=>api('/api/forget',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({local_file_id:id})}),'Forgotten');}
+
+// --- unwatch keep/prune dialog (Phase 2) ---
+let unwatchCtx=null;  // {path, mode:'remove'|'disable', ids:[]}
+async function previewUnwatch(path){
+  try{return await api('/api/unwatch-preview?path='+encodeURIComponent(path));}catch(e){return null;}
+}
+function openUnwatch(path,mode,prev){
+  unwatchCtx={path,mode,ids:prev.files.map(f=>f.local_file_id)};
+  const verb=mode==='remove'?'Removing':'Disabling';
+  document.getElementById('unwatchMsg').textContent=
+    `${verb} this item leaves ${prev.count} indexed file(s) outside every watched folder. By default they stay in the index labelled “unwatched”. You can also prune them now.`;
+  document.getElementById('unwatchList').innerHTML=prev.files.slice(0,200)
+    .map(f=>`<li>${esc(f.virtual_path||f.local_file_id.slice(0,12))}</li>`).join('')
+    +(prev.count>200?`<li class="muted">…and ${prev.count-200} more</li>`:'');
+  document.getElementById('unwatchPrune').checked=false;
+  document.getElementById('unwatchModal').classList.add('open');
+}
+function closeUnwatch(){document.getElementById('unwatchModal').classList.remove('open');unwatchCtx=null;}
+async function confirmUnwatch(){
+  if(!unwatchCtx)return;
+  const {path,mode,ids}=unwatchCtx;
+  const prune=document.getElementById('unwatchPrune').checked;
+  closeUnwatch();
+  try{
+    if(mode==='remove'){
+      const r=await api('/api/remove',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,prune_ids:prune?ids:[]})});
+      toast(prune?`Removed; pruned ${r.pruned}`:'Removed (files kept as unwatched)','ok');
+    }else{
+      await api('/api/items/update',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path,enabled:false})});
+      if(prune&&ids.length){const r=await api('/api/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'prune',local_file_ids:ids})});
+        toast(`Paused; pruned ${r.affected}`,'ok');}
+      else toast('Paused (files kept as unwatched)','ok');
+    }
+  }catch(e){toast(e.message,'bad');}
+  await refresh();
+}
 
 // --- picker ---
 function openPicker(){document.getElementById('picker').classList.add('open');browse(null);}
@@ -715,7 +939,12 @@ function addPath(path,kind){
 function addCurrentFolder(){addPath(document.getElementById('pickerPath').textContent,'folder');}
 
 // --- files / requests ---
-function sync(){return api('/api/sync',{method:'POST'}).then(r=>`Indexed ${r.indexed}, applied ${r.actions_applied}, removed ${r.removed}`);}
+function sync(){return api('/api/sync',{method:'POST'}).then(r=>{
+  const bits=[`indexed ${r.indexed}`,`applied ${r.actions_applied}`];
+  if(r.removed)bits.push(`removed ${r.removed}`);
+  if(r.pruned)bits.push(`pruned ${r.pruned}`);
+  return 'Scan & push: '+bits.join(', ');});}
+function doScan(){act(sync);}
 function fileAct(id,a,msg){act(()=>api(`/api/requests/${id}/${a}`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}),msg);}
 function reqAct(id,a,msg){act(()=>api(`/api/requests/${id}/${a}`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}),msg);}
 function rejectForever(id){if(!confirm('Reject and block all future requests for this file?'))return;

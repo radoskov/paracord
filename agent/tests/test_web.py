@@ -143,6 +143,79 @@ def test_forget_removes_indexed_file(tmp_path) -> None:
     assert AgentState(state_path).all_files() == []
 
 
+def _post(app, path, body, *, path_params=None):
+    import json
+
+    endpoint = _route(app, path)
+    req = _request(path, query=b"token=tok", method="POST", body=json.dumps(body).encode())
+    if path_params:
+        req.scope["path_params"] = path_params
+    return asyncio.run(endpoint(req))
+
+
+def test_prune_unwatched_and_bulk_forget(tmp_path) -> None:
+    """Prune-unwatched removes only unwatched rows; bulk forget removes the selected set."""
+    import json
+
+    from paperracks_agent.config import AgentConfig, ManagedFolder, save_config
+    from paperracks_agent.state import AgentState
+
+    watched = tmp_path / "papers"
+    watched.mkdir()
+    config_path = tmp_path / "agent.yaml"
+    save_config(AgentConfig(folders=[ManagedFolder(path=watched)]), config_path)
+    state_path = tmp_path / "state.sqlite3"
+    state = AgentState(state_path)
+    state.upsert(local_file_id="in", real_path=str(watched / "a.pdf"), sha256="d", size_bytes=1)
+    (watched / "a.pdf").write_bytes(b"%PDF-1.4")
+    loose = tmp_path / "loose.pdf"
+    loose.write_bytes(b"%PDF-1.4")
+    state.upsert(local_file_id="out", real_path=str(loose), sha256="e", size_bytes=1)
+    state.close()
+
+    app = create_app("tok", config_path=config_path, state_path=state_path)
+    res = _post(app, "/api/prune-unwatched", {})
+    assert json.loads(res.body)["pruned"] == 1
+    assert {r.local_file_id for r in AgentState(state_path).all_files()} == {"in"}
+
+    # Bulk forget the remaining watched row.
+    res = _post(app, "/api/bulk", {"action": "forget", "local_file_ids": ["in"]})
+    assert json.loads(res.body)["affected"] == 1
+    assert AgentState(state_path).all_files() == []
+
+
+def test_unwatch_preview_and_prune_now(tmp_path) -> None:
+    """unwatch-preview lists affected files; remove with prune_ids drops exactly those."""
+    import json
+
+    from paperracks_agent.config import AgentConfig, ManagedFolder, save_config
+    from paperracks_agent.state import AgentState
+
+    folder = tmp_path / "papers"
+    folder.mkdir()
+    pdf = folder / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    config_path = tmp_path / "agent.yaml"
+    save_config(AgentConfig(folders=[ManagedFolder(path=folder)]), config_path)
+    state_path = tmp_path / "state.sqlite3"
+    state = AgentState(state_path)
+    state.upsert(local_file_id="x", real_path=str(pdf), sha256="d", size_bytes=1)
+    state.close()
+
+    app = create_app("tok", config_path=config_path, state_path=state_path)
+    preview = _route(app, "/api/unwatch-preview")
+    res = asyncio.run(
+        preview(_request("/api/unwatch-preview", query=b"token=tok&path=" + str(folder).encode()))
+    )
+    payload = json.loads(res.body)
+    assert payload["count"] == 1 and payload["files"][0]["local_file_id"] == "x"
+
+    res = _post(app, "/api/remove", {"path": str(folder), "prune_ids": ["x"]})
+    body = json.loads(res.body)
+    assert body["pruned"] == 1
+    assert AgentState(state_path).all_files() == []
+
+
 def test_view_route_streams_local_pdf(tmp_path) -> None:
     """The local Read route (#13) serves an indexed PDF, resolving its path local-only."""
     from paperracks_agent.state import AgentState
