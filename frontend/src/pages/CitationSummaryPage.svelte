@@ -4,12 +4,17 @@
   import {
     ApiClient,
     type CitationSummary,
+    type ExternalPreview,
     type GraphScopeType,
+    type MissingDecision,
     type MissingWork,
     type Rack,
     type RankedWork,
     type Shelf,
+    type Work,
   } from '../api/client';
+  import Modal from '../components/Modal.svelte';
+  import WorkDetail from '../components/WorkDetail.svelte';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
@@ -29,6 +34,25 @@
   let busy = false;
   let message = '';
   let importing = '';
+
+  // A paper opened directly in the paper view (WorkDetail modal) — the same action the search tab
+  // uses (C2). Distinct from the title click, which jumps to the Library tab.
+  let detailWork: Work | null = null;
+
+  // Frequently-cited-but-missing worklist (C3a): key -> 'import' | 'ignore'. Loaded with the summary.
+  let decisions: Record<string, MissingDecision> = {};
+  let showIgnored = false;
+
+  // External-reference previews (C1): key -> preview | 'loading' | null (fetched on demand).
+  let previews: Record<string, ExternalPreview | 'loading'> = {};
+
+  let exportingMissing = false;
+
+  // Inline "open in a panel/view" glyph for the paper-view icon button (kept self-contained).
+  const openIcon =
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.5" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/>' +
+    '<path d="M2 5.5h12"/><path d="M5.5 9l2 2 3.5-4"/></svg>';
 
   let chartContainer: HTMLDivElement | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,11 +90,14 @@
       } else if (scopeType === 'selected_papers') {
         workIds = $selectedPaperIds;
       }
+      currentWorkIds = workIds;
       summary = await client.citationSummary({
         scopeType,
         scopeId: scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null,
         workIds,
       });
+      previews = {};
+      decisions = await client.getWorklist();
     } catch (error) {
       message = errorMessage(error);
       summary = null;
@@ -79,9 +106,21 @@
     }
   }
 
+  // The resolved work ids used for the last summary (search/selection scopes), reused for exports.
+  let currentWorkIds: string[] | undefined;
+
   function openPaper(workId: string): void {
     pendingLibraryOpen.set(workId);
     if (typeof window !== 'undefined') window.location.hash = '#library';
+  }
+
+  // Open the paper directly in the in-app paper view (WorkDetail modal), reusing the search-tab flow.
+  async function openInPaperView(workId: string): Promise<void> {
+    try {
+      detailWork = await client.getWork(workId);
+    } catch (error) {
+      message = errorMessage(error);
+    }
   }
 
   async function importMissing(missing: MissingWork): Promise<void> {
@@ -98,6 +137,73 @@
       importing = '';
     }
   }
+
+  async function togglePreview(missing: MissingWork): Promise<void> {
+    if (missing.key in previews) {
+      const { [missing.key]: _drop, ...rest } = previews;
+      previews = rest;
+      return;
+    }
+    previews = { ...previews, [missing.key]: 'loading' };
+    try {
+      const preview = await client.externalPreview({
+        doi: missing.doi,
+        arxiv: missing.arxiv_id,
+        referenceId: missing.reference_id,
+      });
+      previews = { ...previews, [missing.key]: preview };
+    } catch (error) {
+      message = errorMessage(error);
+      const { [missing.key]: _drop, ...rest } = previews;
+      previews = rest;
+    }
+  }
+
+  async function decide(missing: MissingWork, decision: MissingDecision): Promise<void> {
+    try {
+      decisions = await client.setWorklistDecision(missing.key, decision);
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
+  async function undoDecision(missing: MissingWork): Promise<void> {
+    try {
+      decisions = await client.clearWorklistDecision(missing.key);
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
+  async function exportMissing(format: 'bibtex' | 'csv'): Promise<void> {
+    exportingMissing = true;
+    try {
+      const result = await client.exportMissingWorks({
+        scopeType,
+        scopeId: scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null,
+        workIds: currentWorkIds,
+        format,
+      });
+      const url = URL.createObjectURL(new Blob([result.content], { type: result.content_type }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      message = errorMessage(error);
+    } finally {
+      exportingMissing = false;
+    }
+  }
+
+  // Partition the missing list by decision so ignored items collapse out of the active worklist.
+  $: activeMissing = (summary?.frequently_cited_missing ?? []).filter(
+    (m) => decisions[m.key] !== 'ignore',
+  );
+  $: ignoredMissing = (summary?.frequently_cited_missing ?? []).filter(
+    (m) => decisions[m.key] === 'ignore',
+  );
 
   async function render(): Promise<void> {
     if (!summary || !chartContainer || summary.chronological.length === 0) return;
@@ -212,6 +318,19 @@
         {summary.scope_work_count} papers · bridge method: {summary.bridge_method}
       </p>
 
+      {#if summary.coverage_total > 0}
+        <div class="coverage" data-testid="summary-coverage">
+          <span class="coverage-pct">{summary.coverage_pct}%</span>
+          <span class="coverage-text">
+            You hold <strong>{summary.coverage_pct}%</strong> of the works your library cites
+            ({summary.coverage_held} / {summary.coverage_total}).
+          </span>
+          <span class="coverage-bar" aria-hidden="true">
+            <span class="coverage-fill" style="width:{summary.coverage_pct}%"></span>
+          </span>
+        </div>
+      {/if}
+
       <div class="grid">
         <div class="block" data-testid="summary-most-cited-local">
           <h3>Most-cited (in your library)</h3>
@@ -223,6 +342,13 @@
                 <li>
                   <button class="link" type="button" on:click={() => openPaper(w.work_id)}>{w.title}</button>
                   <span class="badge">{w.score} citing</span>
+                  <button
+                    class="iconbtn"
+                    type="button"
+                    title="Open in paper view"
+                    aria-label="Open in paper view"
+                    data-testid="open-paper-view"
+                    on:click={() => openInPaperView(w.work_id)}>{@html openIcon}</button>
                 </li>
               {/each}
             </ol>
@@ -239,36 +365,138 @@
                 <li>
                   <button class="link" type="button" on:click={() => openPaper(w.work_id)}>{w.title}</button>
                   <span class="badge">{w.score} citations</span>
+                  <button
+                    class="iconbtn"
+                    type="button"
+                    title="Open in paper view"
+                    aria-label="Open in paper view"
+                    data-testid="open-paper-view"
+                    on:click={() => openInPaperView(w.work_id)}>{@html openIcon}</button>
                 </li>
               {/each}
             </ol>
           {/if}
         </div>
 
-        <div class="block" data-testid="summary-missing">
-          <h3>Frequently cited but missing</h3>
+        <div class="block missing-block" data-testid="summary-missing">
+          <div class="block-head">
+            <h3>Frequently cited but missing</h3>
+            {#if summary.frequently_cited_missing.length > 0}
+              <span class="export-group">
+                <button
+                  class="ghost"
+                  type="button"
+                  disabled={exportingMissing}
+                  on:click={() => exportMissing('bibtex')}
+                  data-testid="summary-export-bibtex"
+                  title="Export the missing list as BibTeX">BibTeX</button>
+                <button
+                  class="ghost"
+                  type="button"
+                  disabled={exportingMissing}
+                  on:click={() => exportMissing('csv')}
+                  data-testid="summary-export-csv"
+                  title="Export the missing list as CSV">CSV</button>
+              </span>
+            {/if}
+          </div>
           {#if summary.frequently_cited_missing.length === 0}
             <p class="empty">Every frequently-cited work is already in your library.</p>
           {:else}
-            <ol>
-              {#each summary.frequently_cited_missing as m (m.key)}
+            <ol data-testid="summary-missing-active">
+              {#each activeMissing as m (m.key)}
                 <li>
-                  <span class="missing-title">{m.title}</span>
-                  <span class="badge">{m.cited_by_count} cite this</span>
-                  {#if m.reference_id}
+                  <div class="missing-row">
+                    <span class="missing-title">{m.title}</span>
+                    <span class="badge">{m.cited_by_count} cite this</span>
+                    {#if decisions[m.key] === 'import'}
+                      <span class="badge queued" data-testid="summary-queued">queued</span>
+                    {/if}
+                  </div>
+                  <div class="missing-actions">
+                    {#if m.doi || m.arxiv_id || m.reference_id}
+                      <button
+                        class="ghost"
+                        type="button"
+                        on:click={() => togglePreview(m)}
+                        data-testid="summary-preview-toggle"
+                        title="Preview title, authors and abstract before importing">
+                        {m.key in previews ? 'Hide preview' : 'Preview'}
+                      </button>
+                    {/if}
+                    {#if decisions[m.key] === 'import'}
+                      <button
+                        class="ghost"
+                        type="button"
+                        on:click={() => undoDecision(m)}
+                        data-testid="summary-undo">Un-queue</button>
+                    {:else}
+                      <button
+                        class="ghost"
+                        type="button"
+                        on:click={() => decide(m, 'import')}
+                        data-testid="summary-queue"
+                        title="Mark this work as one to acquire">Queue</button>
+                    {/if}
                     <button
-                      class="import"
+                      class="ghost"
                       type="button"
-                      disabled={importing === m.key}
-                      on:click={() => importMissing(m)}
-                      data-testid="summary-import"
-                    >
-                      {importing === m.key ? 'Importing…' : 'Import'}
-                    </button>
+                      on:click={() => decide(m, 'ignore')}
+                      data-testid="summary-ignore"
+                      title="Hide this work from the active list">Ignore</button>
+                    {#if m.reference_id}
+                      <button
+                        class="import"
+                        type="button"
+                        disabled={importing === m.key}
+                        on:click={() => importMissing(m)}
+                        data-testid="summary-import">
+                        {importing === m.key ? 'Importing…' : 'Import'}
+                      </button>
+                    {/if}
+                  </div>
+                  {#if m.key in previews}
+                    <div class="preview" data-testid="summary-preview">
+                      {#if previews[m.key] === 'loading'}
+                        <p class="empty">Loading preview…</p>
+                      {:else if previews[m.key] && (previews[m.key] as ExternalPreview).available}
+                        {@const p = previews[m.key] as ExternalPreview}
+                        <p class="preview-title">{p.title ?? m.title}</p>
+                        {#if p.authors.length}<p class="preview-meta">{p.authors.join(', ')}</p>{/if}
+                        <p class="preview-meta">
+                          {[p.year, p.venue].filter(Boolean).join(' · ')}
+                        </p>
+                        {#if p.abstract}<p class="preview-abstract">{p.abstract}</p>{/if}
+                        {#if p.sources.length}
+                          <p class="preview-src">via {p.sources.join(', ')}</p>
+                        {/if}
+                      {:else}
+                        <p class="empty">
+                          {(previews[m.key] as ExternalPreview)?.message ?? 'No preview available.'}
+                        </p>
+                      {/if}
+                    </div>
                   {/if}
                 </li>
               {/each}
             </ol>
+            {#if ignoredMissing.length > 0}
+              <details class="ignored" bind:open={showIgnored} data-testid="summary-ignored">
+                <summary>Ignored ({ignoredMissing.length})</summary>
+                <ol>
+                  {#each ignoredMissing as m (m.key)}
+                    <li>
+                      <span class="missing-title muted-strike">{m.title}</span>
+                      <button
+                        class="ghost"
+                        type="button"
+                        on:click={() => undoDecision(m)}
+                        data-testid="summary-undo">Restore</button>
+                    </li>
+                  {/each}
+                </ol>
+              </details>
+            {/if}
           {/if}
         </div>
 
@@ -282,6 +510,13 @@
                 <li>
                   <button class="link" type="button" on:click={() => openPaper(w.work_id)}>{w.title}</button>
                   <span class="badge">centrality {w.score}</span>
+                  <button
+                    class="iconbtn"
+                    type="button"
+                    title="Open in paper view"
+                    aria-label="Open in paper view"
+                    data-testid="open-paper-view"
+                    on:click={() => openInPaperView(w.work_id)}>{@html openIcon}</button>
                 </li>
               {/each}
             </ol>
@@ -297,6 +532,13 @@
               {#each summary.isolated_papers as w (w.work_id)}
                 <li>
                   <button class="link" type="button" on:click={() => openPaper(w.work_id)}>{w.title}</button>
+                  <button
+                    class="iconbtn"
+                    type="button"
+                    title="Open in paper view"
+                    aria-label="Open in paper view"
+                    data-testid="open-paper-view"
+                    on:click={() => openInPaperView(w.work_id)}>{@html openIcon}</button>
                 </li>
               {/each}
             </ol>
@@ -318,6 +560,20 @@
     </div>
   {/if}
 </section>
+
+{#if detailWork}
+  <Modal title={detailWork.title ?? 'Paper'} wide onClose={() => (detailWork = null)}>
+    {#key detailWork.id}
+      <WorkDetail
+        {client}
+        work={detailWork}
+        onUpdated={(w) => (detailWork = w)}
+        onDeleted={() => (detailWork = null)}
+        onClose={() => (detailWork = null)}
+      />
+    {/key}
+  </Modal>
+{/if}
 
 <style>
   .layout {
@@ -440,6 +696,150 @@
     margin-left: 0.4rem;
     min-height: 0;
     padding: 0.1rem 0.45rem;
+  }
+
+  .coverage {
+    align-items: center;
+    background: var(--surface-sunken, var(--surface-raised));
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin: 0 0 0.9rem;
+    padding: 0.6rem 0.9rem;
+  }
+
+  .coverage-pct {
+    color: var(--accent-primary);
+    font-size: 1.5rem;
+    font-weight: 800;
+  }
+
+  .coverage-text {
+    color: var(--ink-strong);
+    font-size: 0.9rem;
+  }
+
+  .coverage-bar {
+    background: var(--border-strong);
+    border-radius: 999px;
+    flex: 1 1 8rem;
+    height: 0.5rem;
+    overflow: hidden;
+  }
+
+  .coverage-fill {
+    background: var(--accent-primary);
+    display: block;
+    height: 100%;
+  }
+
+  .iconbtn {
+    align-items: center;
+    background: none;
+    border: none;
+    color: var(--status-info);
+    cursor: pointer;
+    display: inline-flex;
+    margin-left: 0.35rem;
+    min-height: 0;
+    padding: 0.1rem;
+    vertical-align: middle;
+  }
+
+  .ghost {
+    background: none;
+    border: 1px solid var(--border-strong);
+    color: var(--ink-strong);
+    font-size: 0.72rem;
+    font-weight: 600;
+    min-height: 0;
+    padding: 0.1rem 0.4rem;
+  }
+
+  .block-head {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+  }
+
+  .export-group {
+    display: inline-flex;
+    gap: 0.3rem;
+  }
+
+  .missing-block li {
+    margin-bottom: 0.6rem;
+  }
+
+  .missing-row {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .missing-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.2rem;
+  }
+
+  .queued {
+    color: var(--status-success);
+    font-weight: 700;
+  }
+
+  .preview {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    margin-top: 0.35rem;
+    padding: 0.5rem 0.7rem;
+  }
+
+  .preview-title {
+    color: var(--ink-strong);
+    font-weight: 700;
+    margin: 0 0 0.2rem;
+  }
+
+  .preview-meta {
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+    margin: 0 0 0.2rem;
+  }
+
+  .preview-abstract {
+    color: var(--ink-strong);
+    font-size: 0.84rem;
+    margin: 0.3rem 0 0;
+    max-height: 9rem;
+    overflow-y: auto;
+  }
+
+  .preview-src {
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    margin: 0.3rem 0 0;
+  }
+
+  .ignored {
+    margin-top: 0.6rem;
+  }
+
+  .ignored summary {
+    color: var(--ink-muted);
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+
+  .muted-strike {
+    color: var(--ink-muted);
+    text-decoration: line-through;
   }
 
   .selcount {
