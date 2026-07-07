@@ -31,6 +31,9 @@ class AgentManifestItem(BaseModel):
 class AgentManifestRequest(BaseModel):
     # The agent is identified by its bearer token, not a body field.
     items: list[AgentManifestItem] = Field(default_factory=list)
+    # B6: whether index_only entries create a minimal library "stub" paper (the agent's
+    # "Create library stubs for index-only files" toggle, default on). Older agents omit it → True.
+    create_stubs: bool = True
 
 
 class PendingTeleportItem(BaseModel):

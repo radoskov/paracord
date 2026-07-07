@@ -430,6 +430,11 @@
       },
       "AgentManifestRequest": {
         "properties": {
+          "create_stubs": {
+            "default": true,
+            "title": "Create Stubs",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/AgentManifestItem"
@@ -6499,6 +6504,18 @@
             "title": "Notes",
             "type": "array"
           },
+          "reindex_hint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reindex Hint"
+          },
           "series": {
             "anyOf": [
               {
@@ -8271,6 +8288,59 @@
           }
         },
         "summary": "Ai Embedding Models",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/lexical-rebuild": {
+      "post": {
+        "description": "Manually rebuild the lexical (BM25F+) index. Enqueues a background rebuild when a worker queue\nis available; otherwise (SQLite dev / Redis down) rebuilds synchronously so the button still\ntakes effect. The index also self-rebuilds when the corpus changes — this is the explicit knob.",
+        "operationId": "rebuild_lexical_index_endpoint_api_v1_admin_ai_lexical_rebuild_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rebuild Lexical Index Endpoint Api V1 Admin Ai Lexical Rebuild Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rebuild Lexical Index Endpoint",
         "tags": [
           "admin",
           "ai"
@@ -16553,6 +16623,24 @@
               "default": false,
               "title": "Include Edges",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "edge_max_nodes",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Edge Max Nodes"
             }
           },
           {

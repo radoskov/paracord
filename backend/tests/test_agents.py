@@ -578,3 +578,86 @@ def test_agent_me_and_source_removed(client, db) -> None:
     assert r.status_code == 200 and r.json()["marked"] == 1
     row = db.query(AgentFile).filter(AgentFile.local_file_id == "g1").first()
     assert row.processing_state == "source_removed"
+
+
+def test_index_only_manifest_creates_promotable_stub(client, db) -> None:
+    """B6: an index_only entry creates a minimal library stub (badged not-extracted) linked to the
+    agent file; re-scanning is idempotent (no duplicate stub)."""
+    from app.models.agent import AgentFile
+    from app.models.work import Work
+    from sqlalchemy import func, select
+
+    agent, headers = _agent_with_token(db)
+    item = {
+        "local_file_id": "s1",
+        "sha256": _PDF_SHA,
+        "size_bytes": len(_PDF),
+        "virtual_path": "papers/attention_is_all_you_need.pdf",
+        "import_action": "index_only",
+    }
+    assert (
+        client.post("/api/v1/agents/manifest", headers=headers, json={"items": [item]}).status_code
+        == 202
+    )
+    row = db.scalar(select(AgentFile).where(AgentFile.local_file_id == "s1"))
+    assert row.work_id is not None
+    stub = db.get(Work, row.work_id)
+    assert stub.canonical_metadata_source == "agent_index_only"  # badged "not extracted"
+    assert "attention" in (stub.canonical_title or "").lower()  # filename-derived title
+    # Re-scan → no second stub.
+    client.post("/api/v1/agents/manifest", headers=headers, json={"items": [item]})
+    assert db.scalar(select(func.count()).select_from(Work)) == 1
+
+
+def test_index_only_stub_suppressed_when_toggle_off(client, db) -> None:
+    """B6: create_stubs=False (agent toggle off) → index_only records the file only, no stub."""
+    from app.models.work import Work
+    from sqlalchemy import func, select
+
+    _agent, headers = _agent_with_token(db)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "local_file_id": "s2",
+                    "sha256": _PDF_SHA,
+                    "size_bytes": len(_PDF),
+                    "import_action": "index_only",
+                }
+            ],
+            "create_stubs": False,
+        },
+    )
+    assert db.scalar(select(func.count()).select_from(Work)) == 0
+
+
+def test_deleting_stub_removes_agent_file(client, auth_headers, db) -> None:
+    """B6/Q4: deleting the stub paper on the server drops the linked agent file, so it vanishes from
+    the agent's server view (a reverse-sync Reconcile then un-indexes it locally)."""
+    from app.models.agent import AgentFile
+    from sqlalchemy import select
+
+    agent, headers = _agent_with_token(db)
+    client.post(
+        "/api/v1/agents/manifest",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "local_file_id": "s3",
+                    "sha256": _PDF_SHA,
+                    "size_bytes": len(_PDF),
+                    "import_action": "index_only",
+                }
+            ]
+        },
+    )
+    row = db.scalar(select(AgentFile).where(AgentFile.local_file_id == "s3"))
+    work_id = row.work_id
+    assert work_id is not None
+    r = client.delete(f"/api/v1/works/{work_id}", headers=auth_headers("owner"))
+    assert r.status_code in (200, 204)
+    db.expire_all()
+    assert db.scalar(select(AgentFile).where(AgentFile.local_file_id == "s3")) is None

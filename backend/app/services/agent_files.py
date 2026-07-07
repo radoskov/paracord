@@ -28,55 +28,81 @@ from app.services.identifiers import arxiv_base_id
 from app.utils.normalization import normalize_title
 
 
-def ingest_manifest(db: Session, *, agent: Agent, items: list) -> int:
+def _stub_title(item) -> str:
+    """A filename-derived title for an index_only stub paper (B6)."""
+    name = item.virtual_path or item.display_path or item.local_file_id
+    return storage._title_from_filename(Path(name))
+
+
+def ingest_manifest(db: Session, *, agent: Agent, items: list, create_stubs: bool = True) -> int:
     """Upsert the agent's manifest entries. Returns the number of items processed.
 
     Existing rows keep their teleport state; only the reported metadata is refreshed. A manifest
     over the configured ``max_batch_items`` cap is rejected (D1); the agent chunks large scans into
     ≤cap manifests, so a rejection here means an unchunked/oversized client push.
+
+    B6: when ``create_stubs`` is on (the agent's default), an ``index_only`` entry also creates a
+    minimal library "stub" paper (filename title, no PDF, ``source='agent_index_only'``) linked via
+    ``AgentFile.work_id`` — visible in the library and promotable later via Extract/Teleport. The
+    link makes it idempotent: a re-scan never creates a second stub.
     """
     from app.services.app_config import enforce_batch_limit
 
     enforce_batch_limit(db, len(items))
     now = datetime.now(UTC)
+    stubs_created = 0
     for item in items:
-        existing = db.scalar(
+        row = db.scalar(
             select(AgentFile).where(
                 AgentFile.agent_id == agent.id, AgentFile.local_file_id == item.local_file_id
             )
         )
-        if existing is None:
-            db.add(
-                AgentFile(
-                    agent_id=agent.id,
-                    local_file_id=item.local_file_id,
-                    sha256=item.sha256,
-                    size_bytes=item.size_bytes,
-                    display_path=item.display_path,
-                    virtual_path=item.virtual_path or item.display_path,
-                    mime_type=item.mime_type,
-                    import_action=item.import_action,
-                    teleport_policy=item.teleport_policy,
-                )
+        if row is None:
+            row = AgentFile(
+                agent_id=agent.id,
+                local_file_id=item.local_file_id,
+                sha256=item.sha256,
+                size_bytes=item.size_bytes,
+                display_path=item.display_path,
+                virtual_path=item.virtual_path or item.display_path,
+                mime_type=item.mime_type,
+                import_action=item.import_action,
+                teleport_policy=item.teleport_policy,
             )
+            db.add(row)
         else:
-            existing.sha256 = item.sha256
-            existing.size_bytes = item.size_bytes
-            existing.display_path = item.display_path
-            existing.virtual_path = item.virtual_path or item.display_path
-            existing.mime_type = item.mime_type
-            existing.import_action = item.import_action
-            existing.teleport_policy = item.teleport_policy
+            row.sha256 = item.sha256
+            row.size_bytes = item.size_bytes
+            row.display_path = item.display_path
+            row.virtual_path = item.virtual_path or item.display_path
+            row.mime_type = item.mime_type
+            row.import_action = item.import_action
+            row.teleport_policy = item.teleport_policy
             # A re-indexed file that had been marked source-removed is present again.
-            if existing.processing_state == "source_removed":
-                existing.processing_state = "indexed"
-            existing.updated_at = now
+            if row.processing_state == "source_removed":
+                row.processing_state = "indexed"
+            row.updated_at = now
+        # B6: create a promotable stub for an index_only entry that doesn't already have one.
+        if create_stubs and item.import_action == "index_only" and row.work_id is None:
+            title = _stub_title(item)
+            work = Work(
+                canonical_title=title,
+                normalized_title=normalize_title(title),
+                # Origin marker the UI badges as "not extracted"; cleared on extract/teleport.
+                canonical_metadata_source="agent_index_only",
+                created_by_user_id=agent.created_by_user_id,
+            )
+            db.add(work)
+            db.flush()
+            row.work_id = work.id
+            place_on_default_if_loose(db, work.id, actor_id=agent.created_by_user_id)
+            stubs_created += 1
     record_event(
         db,
         "agent.manifest_received",
         entity_type="agent",
         entity_id=str(agent.id),
-        details={"item_count": len(items)},
+        details={"item_count": len(items), "stubs_created": stubs_created},
     )
     return len(items)
 
@@ -211,17 +237,24 @@ def complete_teleport(
     # of a file whose work was removed still has something to attach extraction to.
     has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
     if not has_link:
-        title = storage._title_from_filename(Path(name))
-        raw_arxiv = storage._arxiv_id_from_filename(Path(name))
-        work = Work(
-            canonical_title=title,
-            normalized_title=normalize_title(title),
-            canonical_metadata_source="teleport",
-            arxiv_id=raw_arxiv,
-            arxiv_base_id=arxiv_base_id(raw_arxiv),
-        )
-        db.add(work)
-        db.flush()
+        # B6: teleporting a previously index_only file enriches its existing stub paper rather than
+        # creating a duplicate — attach the uploaded file and clear the "index_only" origin marker.
+        stub = db.get(Work, agent_file.work_id) if agent_file.work_id else None
+        if stub is not None:
+            stub.canonical_metadata_source = "teleport"  # clears the "not extracted" marker
+            work = stub
+        else:
+            title = storage._title_from_filename(Path(name))
+            raw_arxiv = storage._arxiv_id_from_filename(Path(name))
+            work = Work(
+                canonical_title=title,
+                normalized_title=normalize_title(title),
+                canonical_metadata_source="teleport",
+                arxiv_id=raw_arxiv,
+                arxiv_base_id=arxiv_base_id(raw_arxiv),
+            )
+            db.add(work)
+            db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
         place_on_default_if_loose(
             db, work.id, actor_id=agent_file.requested_by_user_id
@@ -423,17 +456,25 @@ def extract_and_index(
     # discarded; without this the extraction worker fails with "File has no linked work".
     has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
     if not has_link:
-        title = storage._title_from_filename(Path(name))
-        raw_arxiv = storage._arxiv_id_from_filename(Path(name))
-        work = Work(
-            canonical_title=title,
-            normalized_title=normalize_title(title),
-            canonical_metadata_source="agent-extract",
-            arxiv_id=raw_arxiv,
-            arxiv_base_id=arxiv_base_id(raw_arxiv),
-        )
-        db.add(work)
-        db.flush()
+        # B6: if this file was an index_only stub, enrich that existing paper instead of creating a
+        # second one — attach the PDF to the stub and drop its "index_only" origin marker so it is
+        # no longer badged as un-extracted (extraction then fills its real metadata).
+        stub = db.get(Work, agent_file.work_id) if agent_file.work_id else None
+        if stub is not None:
+            stub.canonical_metadata_source = "agent-extract"  # clears the "not extracted" marker
+            work = stub
+        else:
+            title = storage._title_from_filename(Path(name))
+            raw_arxiv = storage._arxiv_id_from_filename(Path(name))
+            work = Work(
+                canonical_title=title,
+                normalized_title=normalize_title(title),
+                canonical_metadata_source="agent-extract",
+                arxiv_id=raw_arxiv,
+                arxiv_base_id=arxiv_base_id(raw_arxiv),
+            )
+            db.add(work)
+            db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
         place_on_default_if_loose(db, work.id)  # no free-floating papers (#1)
 

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_authenticated_user, require_contributor
 from app.core.config import get_settings
 from app.db.session import get_db
+from app.models.agent import AgentFile
 from app.models.ai import Embedding, Summary
 from app.models.annotation import Annotation
 from app.models.chunk import WorkChunk
@@ -171,6 +172,8 @@ class WorkRead(BaseModel):
     venue: str | None = None
     year: int | None = None
     reading_status: str
+    # Origin marker; "agent_index_only" on a not-yet-extracted local-agent stub (B6), cleared once
+    # the paper is extracted/teleported — the library UI badges it "not extracted" while set.
     canonical_metadata_source: str | None = None
     # User-chosen primary file for one-click "Read" (#16); NULL → the UI uses the first file.
     main_file_id: uuid.UUID | None = None
@@ -1087,6 +1090,11 @@ def delete_work(
         .where(CitationMention.resolved_cited_work_id == work_id)
         .values(resolved_cited_work_id=None)
     )
+
+    # B6: drop any local-agent file that created/owns this paper as a stub, so deleting the paper on
+    # the server makes it vanish from the agent's server view and a "Reconcile with server" un-indexes
+    # it locally (the FK is SET NULL, but we want the row gone, not just detached).
+    db.execute(delete(AgentFile).where(AgentFile.work_id == work_id))
 
     db.delete(work)
     record_event(

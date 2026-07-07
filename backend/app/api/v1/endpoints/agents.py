@@ -80,7 +80,9 @@ def receive_manifest(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Agent lacks the index privilege"
         )
-    received = agent_files.ingest_manifest(db, agent=agent, items=payload.items)
+    received = agent_files.ingest_manifest(
+        db, agent=agent, items=payload.items, create_stubs=payload.create_stubs
+    )
     db.commit()
     return {"status": "accepted", "received": received}
 

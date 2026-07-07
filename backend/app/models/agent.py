@@ -124,6 +124,11 @@ class AgentFile(Base):
     file_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True
     )
+    # The library "stub" paper an ``index_only`` entry created (B6). Kept so a re-scan doesn't
+    # duplicate the stub and a later extract/teleport enriches this same work. SET NULL on delete.
+    work_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True
     )
