@@ -88,6 +88,7 @@ class MissingWork:
     cited_by_count: int
     mention_count: int
     reference_id: uuid.UUID | None
+    arxiv_id: str | None = None
 
 
 @dataclass
@@ -101,6 +102,12 @@ class YearCount:
 @dataclass
 class CitationSummary:
     scope_work_count: int
+    # Library coverage (Track C C3c): of the resolvable works the scope cites, how many are held
+    # locally. ``coverage_total`` = distinct held cited works + distinct missing cited works;
+    # ``coverage_held`` = the held subset; ``coverage_pct`` = held / total (0..100), None when total 0.
+    coverage_held: int = 0
+    coverage_total: int = 0
+    coverage_pct: float | None = None
     most_cited_local: list[RankedWork] = field(default_factory=list)
     most_cited_external: list[RankedWork] = field(default_factory=list)
     frequently_cited_missing: list[MissingWork] = field(default_factory=list)
@@ -237,11 +244,17 @@ def _compute(
     bridge_papers = _bridge_papers(db, adjacency, node_by_id, limit)
     isolated_papers = _isolated_papers(works, linked, limit)
     most_cited_external = _most_cited_external(works, limit)
-    frequently_cited_missing = _missing_works(references, scope_id_set, visible, db, limit)
+    frequently_cited_missing, coverage_held, coverage_total = _missing_works(
+        references, scope_id_set, visible, db, limit
+    )
+    coverage_pct = round(100.0 * coverage_held / coverage_total, 1) if coverage_total else None
     chronological = _chronological(works)
 
     return CitationSummary(
         scope_work_count=len(works),
+        coverage_held=coverage_held,
+        coverage_total=coverage_total,
+        coverage_pct=coverage_pct,
         most_cited_local=most_cited_local,
         most_cited_external=most_cited_external,
         frequently_cited_missing=frequently_cited_missing,
@@ -346,13 +359,21 @@ def _most_cited_external(works: list[Work], limit: int) -> list[RankedWork]:
     return ranked[:limit]
 
 
-def _missing_works(references, scope_id_set, visible, db, limit) -> list[MissingWork]:
+def _missing_works(
+    references, scope_id_set, visible, db, limit
+) -> tuple[list[MissingWork], int, int]:
     """Aggregate unresolved references by normalized identifier/title, ranked by citation frequency.
 
     Resolution reuses the citation graph's helpers (``_local_work_index`` / ``_resolve_reference``);
     a reference is "missing" only when it resolves to an *external* node — a reference that resolves
     to a local work (even one hidden from the actor) is not surfaced. ``cited_by_count`` counts the
     distinct scope works citing the missing work; ``mention_count`` counts every citing reference.
+
+    Returns ``(missing, coverage_held, coverage_total)`` where the coverage counts (Track C C3c) come
+    from the same resolution pass: ``coverage_held`` = distinct *resolvable* cited works that resolve
+    to a local work; ``coverage_total`` = those plus the distinct external (missing) cited works.
+    References that resolve to nothing (no identifier / unresolvable) are not "resolvable" and are
+    excluded from both counts.
     """
     scope_works = {wid: db.get(Work, wid) for wid in scope_id_set}
     scope_works = {wid: w for wid, w in scope_works.items() if w is not None}
@@ -365,18 +386,23 @@ def _missing_works(references, scope_id_set, visible, db, limit) -> list[Missing
         title: str
         doi: str | None
         year: int | None
+        arxiv_id: str | None
         citing: set[uuid.UUID]
         mentions: int
         reference_id: uuid.UUID
         has_doi: bool
 
     aggregates: dict[str, _Agg] = {}
+    held_local_ids: set[uuid.UUID] = set()
     for reference in references:
         resolved = _resolve_reference(reference, local_index)
         if resolved is None:
             continue
-        _node, resolution = resolved
+        node, resolution = resolved
         if resolution != "external":
+            # A resolvable reference held locally (counts toward coverage; never surfaced as missing).
+            if node.work_id is not None:
+                held_local_ids.add(node.work_id)
             continue
         key = _missing_key(reference)
         if key is None:
@@ -389,6 +415,7 @@ def _missing_works(references, scope_id_set, visible, db, limit) -> list[Missing
                 title=title,
                 doi=normalize_doi(reference.doi) if reference.doi else None,
                 year=reference.year,
+                arxiv_id=reference.arxiv_id,
                 citing={reference.citing_work_id},
                 mentions=1,
                 reference_id=reference.id,
@@ -406,6 +433,8 @@ def _missing_works(references, scope_id_set, visible, db, limit) -> list[Missing
                 agg.has_doi = agg.has_doi or has_doi
                 if reference.doi and agg.doi is None:
                     agg.doi = normalize_doi(reference.doi)
+            if agg.arxiv_id is None and reference.arxiv_id is not None:
+                agg.arxiv_id = reference.arxiv_id
             if agg.year is None and reference.year is not None:
                 agg.year = reference.year
 
@@ -418,11 +447,14 @@ def _missing_works(references, scope_id_set, visible, db, limit) -> list[Missing
             cited_by_count=len(agg.citing),
             mention_count=agg.mentions,
             reference_id=agg.reference_id,
+            arxiv_id=agg.arxiv_id,
         )
         for key, agg in aggregates.items()
     ]
     missing.sort(key=lambda m: (-m.cited_by_count, -m.mention_count, m.title.casefold()))
-    return missing[:limit]
+    coverage_held = len(held_local_ids)
+    coverage_total = coverage_held + len(aggregates)
+    return missing[:limit], coverage_held, coverage_total
 
 
 def _chronological(works: list[Work]) -> list[YearCount]:
