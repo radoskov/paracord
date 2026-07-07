@@ -31,6 +31,11 @@ from app.services import access
 from app.services.app_config import effective_max_papers_per_page
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
+from app.services.duplicate_resolution import (
+    has_reversible_shadow,
+    linked_work_ids,
+    unmerge_work,
+)
 from app.services.file_paths import (
     FileLocationError,
     resolve_streamable_pdf_path,
@@ -183,6 +188,11 @@ class WorkRead(BaseModel):
     citation_count_fetched_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    # Duplicate-merge shadow marker (Batch D): non-null on a hidden shadow (never returned by the
+    # library/search paths). ``has_reversible_shadow`` is computed (get_work only): true when this
+    # paper is a merge base whose most recent merge can still be undone — drives the Unmerge button.
+    merged_into_id: uuid.UUID | None = None
+    has_reversible_shadow: bool = False
     # Library columns (D32): the paper's SEE-filtered shelves and their SEE-filtered racks. Populated
     # by ``list_works`` (batched across the page); other endpoints leave these empty.
     shelves: list[WorkShelfRef] = []
@@ -828,6 +838,60 @@ def related_papers(
     return related
 
 
+@router.get("/{work_id}/related-links", response_model=list[WorkRead])
+def list_related_links(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[WorkRead]:
+    """Return papers bidirectionally LINKED to this one (Batch D "Link" — related / same work).
+
+    Distinct from ``/related`` (embedding similarity): these are user-declared relationships. Both
+    the paper and every linked paper are SEE-filtered; merged shadows never appear.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    ids = linked_work_ids(db, work_id)
+    if not ids:
+        return []
+    visible = access.visible_work_ids(db, actor)
+    linked = db.scalars(
+        select(Work).where(Work.id.in_(ids), Work.merged_into_id.is_(None))
+    ).all()
+    return [
+        WorkRead.model_validate(w)
+        for w in linked
+        if visible is None or w.id in visible
+    ]
+
+
+@router.post("/{work_id}/unmerge", response_model=WorkRead)
+def unmerge_paper(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> WorkRead:
+    """Undo the most recent merge into this paper, restoring the shadow to a standalone paper.
+
+    One transaction: moves the merged entities back, un-redirects the incoming references, clears
+    the base fields the merge filled, and removes the conflict assertions it added. 400 if the paper
+    has no reversible merge to undo.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    try:
+        unmerge_work(db, base_id=work_id, actor=actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(work)
+    return WorkRead.model_validate(work).model_copy(
+        update={"has_reversible_shadow": has_reversible_shadow(db, work_id)}
+    )
+
+
 @router.get("/{work_id}/shelves", response_model=list[WorkShelfMembership])
 def list_work_shelves(
     work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
@@ -910,7 +974,7 @@ def list_work_tags(
 
 
 @router.get("/{work_id}", response_model=WorkRead)
-def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> Work:
+def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> WorkRead:
     """Return one work, recording a debounced `paper.viewed` audit event (§7.6).
 
     The event (an INSERT + COMMIT) is skipped when the same user viewed the same work within
@@ -929,7 +993,9 @@ def get_work(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -
             entity_id=str(work_id),
         )
         db.commit()
-    return work
+    return WorkRead.model_validate(work).model_copy(
+        update={"has_reversible_shadow": has_reversible_shadow(db, work_id)}
+    )
 
 
 @router.patch("/{work_id}", response_model=WorkRead)

@@ -22,6 +22,7 @@ from app.services.duplicate_resolution import (
     apply_duplicate_action,
     candidate_entity_maps,
     describe_candidate,
+    merge_preview,
     reopen_duplicate_candidate,
     split_multiwork_file,
 )
@@ -201,6 +202,53 @@ def scan_duplicates(
             for candidate in candidates
         ],
     )
+
+
+class MergePreview(BaseModel):
+    base_work_id: uuid.UUID
+    source_work_id: uuid.UUID
+    fill_fields: list[str]
+    conflict_fields: list[str]
+    file_count: int
+    incoming_reference_count: int
+    will_flatten: bool
+
+
+@router.get("/{candidate_id}/merge-preview", response_model=MergePreview)
+def duplicate_merge_preview(
+    candidate_id: uuid.UUID,
+    base_work_id: uuid.UUID = Query(...),
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> MergePreview:
+    """Preview what merging this work/work candidate into ``base_work_id`` would do (no changes).
+
+    ``base_work_id`` is the surviving canonical paper (item #1 / the swapped choice); the other
+    candidate work is the source. Powers the review UI's per-action confirmation.
+    """
+    candidate = db.get(DuplicateCandidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if not _candidate_visible(candidate, access.visible_work_ids(db, actor)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if candidate.entity_a_type != "work" or candidate.entity_b_type != "work":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Not a work/work candidate"
+        )
+    if base_work_id == candidate.entity_a_id:
+        base_id, source_id = candidate.entity_a_id, candidate.entity_b_id
+    elif base_work_id == candidate.entity_b_id:
+        base_id, source_id = candidate.entity_b_id, candidate.entity_a_id
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="base_work_id must be one of the candidate works",
+        )
+    base = db.get(Work, base_id)
+    source = db.get(Work, source_id)
+    if base is None or source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    return MergePreview(**merge_preview(db, base=base, source=source))
 
 
 @router.patch("/{candidate_id}", response_model=DuplicateCandidateRead)

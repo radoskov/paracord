@@ -3430,6 +3430,57 @@
         "title": "MembershipAdd",
         "type": "object"
       },
+      "MergePreview": {
+        "properties": {
+          "base_work_id": {
+            "format": "uuid",
+            "title": "Base Work Id",
+            "type": "string"
+          },
+          "conflict_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflict Fields",
+            "type": "array"
+          },
+          "file_count": {
+            "title": "File Count",
+            "type": "integer"
+          },
+          "fill_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fill Fields",
+            "type": "array"
+          },
+          "incoming_reference_count": {
+            "title": "Incoming Reference Count",
+            "type": "integer"
+          },
+          "source_work_id": {
+            "format": "uuid",
+            "title": "Source Work Id",
+            "type": "string"
+          },
+          "will_flatten": {
+            "title": "Will Flatten",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_work_id",
+          "source_work_id",
+          "fill_fields",
+          "conflict_fields",
+          "file_count",
+          "incoming_reference_count",
+          "will_flatten"
+        ],
+        "title": "MergePreview",
+        "type": "object"
+      },
       "MetadataAssertionRead": {
         "properties": {
           "confidence": {
@@ -7163,6 +7214,11 @@
             ],
             "title": "Doi"
           },
+          "has_reversible_shadow": {
+            "default": false,
+            "title": "Has Reversible Shadow",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -7187,6 +7243,18 @@
               }
             ],
             "title": "Main File Id"
+          },
+          "merged_into_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Into Id"
           },
           "racks": {
             "default": [],
@@ -12566,6 +12634,76 @@
           }
         },
         "summary": "Update Duplicate Candidate",
+        "tags": [
+          "duplicates"
+        ]
+      }
+    },
+    "/api/v1/duplicates/{candidate_id}/merge-preview": {
+      "get": {
+        "description": "Preview what merging this work/work candidate into ``base_work_id`` would do (no changes).\n\n``base_work_id`` is the surviving canonical paper (item #1 / the swapped choice); the other\ncandidate work is the source. Powers the review UI's per-action confirmation.",
+        "operationId": "duplicate_merge_preview_api_v1_duplicates__candidate_id__merge_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base_work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Base Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Duplicate Merge Preview",
         "tags": [
           "duplicates"
         ]
@@ -18819,6 +18957,70 @@
         ]
       }
     },
+    "/api/v1/works/{work_id}/related-links": {
+      "get": {
+        "description": "Return papers bidirectionally LINKED to this one (Batch D \"Link\" — related / same work).\n\nDistinct from ``/related`` (embedding similarity): these are user-declared relationships. Both\nthe paper and every linked paper are SEE-filtered; merged shadows never appear.",
+        "operationId": "list_related_links_api_v1_works__work_id__related_links_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkRead"
+                  },
+                  "title": "Response List Related Links Api V1 Works  Work Id  Related Links Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Related Links",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}/shelves": {
       "get": {
         "description": "Return every shelf containing this paper that the caller may SEE (\"Where is this?\").\n\nGuarded like ``get_work`` (404 if the paper is missing or the caller can't see it). Each shelf\nis annotated with its ``access_level``, a ``can_modify`` flag (the librarian-floor STRUCTURE\nrule via ``access.can_modify_shelf`` — NOT the paper-edit rule), and its containing racks,\nthemselves SEE-filtered (a private rack without a grant is omitted even when the shelf shows).",
@@ -19145,6 +19347,66 @@
           }
         },
         "summary": "Topic Work Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/unmerge": {
+      "post": {
+        "description": "Undo the most recent merge into this paper, restoring the shadow to a standalone paper.\n\nOne transaction: moves the merged entities back, un-redirects the incoming references, clears\nthe base fields the merge filled, and removes the conflict assertions it added. 400 if the paper\nhas no reversible merge to undo.",
+        "operationId": "unmerge_paper_api_v1_works__work_id__unmerge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unmerge Paper",
         "tags": [
           "works"
         ]
