@@ -1601,6 +1601,25 @@
             "title": "Computed At",
             "type": "string"
           },
+          "coverage_held": {
+            "title": "Coverage Held",
+            "type": "integer"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct"
+          },
+          "coverage_total": {
+            "title": "Coverage Total",
+            "type": "integer"
+          },
           "frequently_cited_missing": {
             "items": {
               "$ref": "#/components/schemas/MissingWorkModel"
@@ -1647,6 +1666,8 @@
         },
         "required": [
           "scope_work_count",
+          "coverage_held",
+          "coverage_total",
           "most_cited_local",
           "most_cited_external",
           "frequently_cited_missing",
@@ -2207,6 +2228,113 @@
           "content"
         ],
         "title": "ExportResponse",
+        "type": "object"
+      },
+      "ExternalPreviewResponse": {
+        "description": "A compact on-demand metadata preview for an external (cited-but-missing) reference.",
+        "properties": {
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          },
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
+          "authors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "ExternalPreviewResponse",
         "type": "object"
       },
       "FieldReview": {
@@ -3347,8 +3475,42 @@
         "title": "MetadataAssertionRead",
         "type": "object"
       },
+      "MissingExportResponse": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "content_type",
+          "content"
+        ],
+        "title": "MissingExportResponse",
+        "type": "object"
+      },
       "MissingWorkModel": {
         "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
           "cited_by_count": {
             "title": "Cited By Count",
             "type": "integer"
@@ -7281,6 +7443,41 @@
           }
         },
         "title": "WorkUpdate",
+        "type": "object"
+      },
+      "WorklistDecisionRequest": {
+        "properties": {
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "decision"
+        ],
+        "title": "WorklistDecisionRequest",
+        "type": "object"
+      },
+      "WorklistResponse": {
+        "description": "A user's recorded import/ignore decisions, keyed by the normalized missing-work key.",
+        "properties": {
+          "decisions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Decisions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "decisions"
+        ],
+        "title": "WorklistResponse",
         "type": "object"
       },
       "YearCountModel": {
@@ -11641,6 +11838,221 @@
         ]
       }
     },
+    "/api/v1/citations/external-preview": {
+      "get": {
+        "description": "Fetch a metadata preview for a cited-but-missing reference by DOI / arXiv id.\n\nIdentifier-only egress (SPEC §7): only the identifier is sent to the enrichment connectors. When\n``reference_id`` is given, its citing work must be visible to the actor (404 otherwise) and the\nreference's DOI/arXiv id is used. With no identifier — or when no source returns anything — the\nresponse is ``available=false`` with a \"no preview available\" message rather than an error.",
+        "operationId": "get_external_preview_api_v1_citations_external_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "doi",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Doi"
+            }
+          },
+          {
+            "in": "query",
+            "name": "arxiv",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Arxiv"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reference_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reference Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get External Preview",
+        "tags": [
+          "citations"
+        ]
+      }
+    },
+    "/api/v1/citations/missing-export": {
+      "get": {
+        "description": "Export the scope's frequently-cited-but-missing works as BibTeX or CSV (Track C C3b).",
+        "operationId": "export_missing_works_api_v1_citations_missing_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "default": "library",
+              "enum": [
+                "library",
+                "shelf",
+                "rack",
+                "search_result",
+                "selected_papers",
+                "import_batch",
+                "saved_filter"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "bibtex",
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissingExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Missing Works",
+        "tags": [
+          "citations"
+        ]
+      }
+    },
     "/api/v1/citations/summary": {
       "get": {
         "description": "Compute the scoped citation summary (§8.11) for the given scope.\n\nAccess control: a shelf/rack scope requires SEE on that container (404 otherwise); the summary's\nworks/references are clamped to the caller's visible works. Cached + versioned by a scope\nsignature (see :func:`app.services.citation_summary.citation_summary`).",
@@ -11754,6 +12166,171 @@
           }
         },
         "summary": "Get Citation Summary",
+        "tags": [
+          "citations"
+        ]
+      }
+    },
+    "/api/v1/citations/worklist": {
+      "delete": {
+        "description": "Clear the caller's decision for one missing work (undo).",
+        "operationId": "delete_worklist_decision_api_v1_citations_worklist_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Worklist Decision",
+        "tags": [
+          "citations"
+        ]
+      },
+      "get": {
+        "description": "Return the caller's frequently-cited-but-missing import/ignore decisions.",
+        "operationId": "get_worklist_api_v1_citations_worklist_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Worklist",
+        "tags": [
+          "citations"
+        ]
+      },
+      "put": {
+        "description": "Record (upsert) the caller's ``import``/``ignore`` decision for one missing work.",
+        "operationId": "put_worklist_decision_api_v1_citations_worklist_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorklistDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Worklist Decision",
         "tags": [
           "citations"
         ]
