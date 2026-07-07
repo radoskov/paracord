@@ -5,6 +5,12 @@ pydantic>=2.8
 pydantic-settings>=2.4
 sqlalchemy>=2.0
 psycopg[binary]>=3.2
+# pgvector's SQLAlchemy integration: importing it (see app/db/base.py) registers the `vector`
+# column type in the Postgres dialect's ischema_names so schema *reflection* (Alembic autogenerate,
+# the migration-parity test) recognizes the pgvector columns instead of warning. Pure-Python, tiny.
+# We deliberately do NOT install the psycopg adapter (register_vector) — the app reads vectors via
+# raw SQL and parses the text form itself, and that path stays unchanged.
+pgvector>=0.4
 alembic>=1.13
 python-multipart>=0.0.9
 bcrypt>=4.1
