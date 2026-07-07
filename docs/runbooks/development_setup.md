@@ -87,6 +87,7 @@ make test                 # backend (api container) + agent (agent container) te
 make test-api             # run backend tests in the API container
 make test-agent           # run agent tests in the agent container
 make test-local           # run tests on the host, only if dependencies are installed
+make test-safety          # deeper adversarial security/attack/web-stability battery (Batch S; @safety, NOT in make test/test-full)
 
 make check                # lint + Docker backend/agent tests + migration parity
 make ready                # fix + pre-commit + check + frontend-check (run before pushing)

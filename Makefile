@@ -305,23 +305,31 @@ PYTEST := python -m pytest -o cache_dir=/tmp/paracord-pytest-cache
 # `slow` tests need a real Postgres, run a full multi-step acceptance flow, or are
 # supplementary/forward-looking contract coverage (see the marker docstring in pyproject.toml).
 # They still run in CI (bare `pytest`) and in every *-full target — only these fast targets skip them.
-PYTEST_FAST := $(PYTEST) -m "not slow"
+# `safety` tests (Batch S) are the DEEPER adversarial battery; they are deselected from BOTH the fast
+# and the full core suites and run only via `make test-safety` (or `pytest -m safety`).
+PYTEST_FAST := $(PYTEST) -m "not slow and not safety"
+PYTEST_FULL := $(PYTEST) -m "not safety"
+PYTEST_SAFETY := $(PYTEST) -m safety
 
 .PHONY: test-api
 test-api: init ## Run backend tests inside the API container (fast tier: skips @slow).
 	$(API_RUN_NODEPS) $(PYTEST_FAST) backend/tests
 
 .PHONY: test-api-full
-test-api-full: init ## Run ALL backend tests inside the API container, including @slow.
-	$(API_RUN_NODEPS) $(PYTEST) backend/tests
+test-api-full: init ## Run ALL backend tests inside the API container, including @slow (excludes @safety).
+	$(API_RUN_NODEPS) $(PYTEST_FULL) backend/tests
 
 .PHONY: test-agent
 test-agent: init ## Run agent tests inside the agent container (fast tier: skips @slow).
 	$(AGENT_RUN) $(PYTEST_FAST) agent/tests
 
 .PHONY: test-agent-full
-test-agent-full: init ## Run ALL agent tests inside the agent container, including @slow.
-	$(AGENT_RUN) $(PYTEST) agent/tests
+test-agent-full: init ## Run ALL agent tests inside the agent container, including @slow (excludes @safety).
+	$(AGENT_RUN) $(PYTEST_FULL) agent/tests
+
+.PHONY: test-safety
+test-safety: init ## Run the DEEPER adversarial security/attack/web-stability battery (Batch S) in the API container. Postgres-gated probes skip cleanly when absent.
+	$(API_RUN_NODEPS) $(PYTEST_SAFETY) backend/tests/safety
 
 .PHONY: test-migrations
 test-migrations: init ## Run the migration<->model parity test against the compose Postgres.
