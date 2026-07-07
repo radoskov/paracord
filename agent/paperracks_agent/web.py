@@ -268,8 +268,10 @@ def create_app(
     async def api_bulk(request: Request):
         """Apply one action to a selected set of indexed files (per-item stays available too).
 
-        ``forget``/``prune`` remove index rows locally (server not contacted); ``block`` is local;
-        ``teleport``/``unblock``/``reextract`` contact the server per id, tolerating per-id failures.
+        ``forget`` removes the selected index rows regardless of status; ``prune`` removes only the
+        ``unwatched`` rows among the selection (watched files are left indexed — Forget or unwatch
+        them first). Both are local (server not contacted); ``block`` is local; ``teleport``/
+        ``unblock``/``reextract`` contact the server per id, tolerating per-id failures.
         """
         if (deny := guard(request)) is not None:
             return deny
@@ -278,8 +280,13 @@ def create_app(
         ids = body.get("local_file_ids") or []
         config = _config()
         state = _state()
-        if action in ("forget", "prune"):
+        if action == "forget":
             return JSONResponse({"ok": True, "affected": state.forget_many(ids)})
+        if action == "prune":
+            pruned, skipped = agent_ops.prune_selected(config, state, ids)
+            return JSONResponse(
+                {"ok": True, "affected": len(pruned), "pruned": len(pruned), "skipped": skipped}
+            )
         if action == "block":
             for lid in ids:
                 state.set_blocked(lid, True)
@@ -643,7 +650,7 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
         <label title="Select or clear every file matching the current filters"><input type="checkbox" id="selAll" onchange="toggleAll(this.checked)"> select filtered</label>
         <span class="sel"><span id="selCount">0</span> selected</span>
         <button class="sec tiny" onclick="bulk('forget','Forget the selected files from the index? (files on disk are untouched)')" title="Remove the selected files from the local index (on-disk files untouched; the server keeps its copies)">Forget</button>
-        <button class="sec tiny" onclick="bulk('prune','Prune the selected files from the index? (files on disk are untouched)')" title="Remove the selected (typically unwatched) files from the local index (on-disk files untouched)">Prune</button>
+        <button class="sec tiny" onclick="bulk('prune','Prune the UNWATCHED files among the selection from the index? (watched files are kept; files on disk are untouched)')" title="Remove only the unwatched files among the selection from the local index; watched files are kept (Forget or unwatch them first). On-disk files untouched.">Prune</button>
         <button class="sec tiny" onclick="bulk('teleport')" title="Upload the selected files into the server library now">Teleport</button>
         <button class="sec tiny" onclick="bulk('block')" title="Block the selected files from all future teleport requests">Block</button>
         <button class="sec tiny" onclick="bulk('unblock')" title="Unblock the selected files so they can be processed again">Unblock</button>
@@ -891,7 +898,8 @@ async function bulk(action,confirmMsg){
   if(confirmMsg&&!confirm(confirmMsg+'\n\n'+ids.length+' file(s)'))return;
   try{const r=await api('/api/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,local_file_ids:ids})});
     const bad=(r.errors&&r.errors.length)?`, ${r.errors.length} failed`:'';
-    toast(`${action}: ${r.affected} file(s)${bad}`,bad?'bad':'ok');
+    const kept=(action==='prune'&&r.skipped)?`, kept ${r.skipped} watched`:'';
+    toast(`${action}: ${r.affected} file(s)${kept}${bad}`,bad?'bad':'ok');
     selected.clear();
   }catch(e){toast(e.message,'bad');}
   await refresh();

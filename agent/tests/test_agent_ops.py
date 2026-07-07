@@ -510,3 +510,27 @@ def test_scan_reuses_cached_hash_for_unchanged_files(tmp_path: Path, monkeypatch
     os.utime(pdf, (pdf.stat().st_atime, pdf.stat().st_mtime + 10))
     agent_ops.scan_managed(config, state)
     assert calls["n"] == 1
+
+
+def test_prune_selected_prunes_only_unwatched_leaves_watched(tmp_path: Path) -> None:
+    """Bulk prune on a mixed selection drops only unwatched rows; watched files stay indexed."""
+    root = tmp_path / "papers"
+    root.mkdir()
+    (root / "keep.pdf").write_bytes(b"%PDF-1.4\nW")
+    config = AgentConfig(folders=[ManagedFolder(path=root)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    asyncio.run(agent_ops.sync(config, state, FakeClient()))
+    watched_id = state.all_files()[0].local_file_id
+
+    # An unwatched row: a file on disk but outside every watched folder.
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.4\nO")
+    state.upsert(local_file_id="unw1", real_path=str(outside), sha256="x" * 64, size_bytes=9)
+    assert agent_ops.classify(str(outside), config) == "unwatched"
+
+    pruned, skipped = agent_ops.prune_selected(config, state, [watched_id, "unw1"])
+    assert pruned == ["unw1"]
+    assert skipped == 1
+    remaining = {r.local_file_id for r in state.all_files()}
+    assert watched_id in remaining  # watched file kept in the index
+    assert "unw1" not in remaining  # unwatched file pruned

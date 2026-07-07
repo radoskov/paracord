@@ -446,6 +446,24 @@ def prune_unwatched(config: AgentConfig, state: AgentState) -> list[str]:
     return ids
 
 
+def prune_selected(config: AgentConfig, state: AgentState, ids: list[str]) -> tuple[list[str], int]:
+    """Prune only the ``unwatched`` rows among ``ids`` (like ``prune_unwatched``, but scoped to a
+    multi-select). Watched files in the selection are left indexed — they must be Forgotten or
+    unwatched first — so a mixed selection never silently drops a watched file. On-disk files are
+    untouched and the server is not contacted. Returns ``(pruned_ids, skipped_count)``."""
+    selected = set(ids)
+    statuses = {
+        r.local_file_id: classify(r.real_path, config)
+        for r in state.all_files()
+        if r.local_file_id in selected
+    }
+    unwatched = [lid for lid, s in statuses.items() if s == "unwatched"]
+    if unwatched:
+        state.forget_many(unwatched)
+    skipped = len(statuses) - len(unwatched)
+    return unwatched, skipped
+
+
 def _config_without(config: AgentConfig, target_path: str) -> AgentConfig:
     """A shallow config copy with the folder/file at ``target_path`` removed (for unwatch preview)."""
     target = str(Path(target_path).expanduser())
