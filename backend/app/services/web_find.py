@@ -62,6 +62,7 @@ from sqlalchemy.orm import Session
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
+from app.services.identifiers import backfill_identifiers
 from app.services.metadata_enrichment import (
     ATOM_NS,
     _get,
@@ -214,6 +215,7 @@ class WebCandidate:
     authors: list[str] = field(default_factory=list)
     year: int | None = None
     doi: str | None = None
+    arxiv_id: str | None = None
     pdf_url: str | None = None
     landing_url: str | None = None
     is_oa: bool = False
@@ -576,6 +578,7 @@ def search_arxiv(
                 authors=[a for a in (_clean(n) for n in author_names) if a],
                 year=_year_from(published),
                 doi=_clean(entry.findtext("arxiv:doi", namespaces=ATOM_NS)),
+                arxiv_id=arxiv_id or None,
                 pdf_url=f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else None,
                 landing_url=raw_id or None,
                 is_oa=True,
@@ -1106,6 +1109,8 @@ def download_and_attach(
     actor,
     settings,
     confirmed: bool = False,
+    doi: str | None = None,
+    arxiv_id: str | None = None,
     file_read=None,
     streamer=None,
     resolver: Callable[[str], list[str]] | None = None,
@@ -1214,13 +1219,21 @@ def download_and_attach(
         db.refresh(file_obj)
         if newly_linked:
             enqueue_extraction(file_obj.id)
+        # Persist the arXiv id / DOI known from the chosen candidate onto the work when those fields
+        # are still empty (find-on-web previously dropped them). User-locked values are respected.
+        filled = backfill_identifiers(work, doi=doi, arxiv_id=arxiv_id)
         record_event(
             db,
             "web_find.downloaded",
             actor_user_id=getattr(actor, "id", None),
             entity_type="work",
             entity_id=str(work.id),
-            details={"source": source, "file_id": str(file_obj.id), "url": candidate_url},
+            details={
+                "source": source,
+                "file_id": str(file_obj.id),
+                "url": candidate_url,
+                "identifiers_filled": filled,
+            },
         )
         db.commit()
         result = {"status": "attached" if newly_linked else "deduped"}

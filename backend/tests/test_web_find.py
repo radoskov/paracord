@@ -641,6 +641,59 @@ def test_download_and_attach_success(db_session, tmp_path, monkeypatch):
     assert db_session.scalar(select(File)) is not None
 
 
+def test_download_backfills_arxiv_id_and_doi(db_session, tmp_path):
+    """P3: the candidate's identifiers land on a work whose fields were empty."""
+    work = Work(canonical_title="Attention Is All You Need")
+    db_session.add(work)
+    db_session.flush()
+
+    def fake_stream(url, *, timeout, max_bytes):
+        return _PDF_BYTES
+
+    out = download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://arxiv.org/pdf/1706.03762.pdf",
+        source="arxiv",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        doi="10.5555/attention",
+        arxiv_id="1706.03762v5",
+        streamer=fake_stream,
+    )
+    assert out["status"] == "attached"
+    db_session.refresh(work)
+    assert work.arxiv_id == "1706.03762v5"
+    assert work.arxiv_base_id == "1706.03762"
+    assert work.doi == "10.5555/attention"
+
+
+def test_download_respects_locked_identifier(db_session, tmp_path):
+    """P3: a user-locked identifier is never overwritten; an empty one is still filled."""
+    work = Work(canonical_title="Locked paper", doi="10.1/kept")
+    work.confirmed_fields = ["doi"]
+    db_session.add(work)
+    db_session.flush()
+
+    def fake_stream(url, *, timeout, max_bytes):
+        return _PDF_BYTES
+
+    download_and_attach(
+        db_session,
+        work=work,
+        candidate_url="https://arxiv.org/pdf/2101.00001.pdf",
+        source="arxiv",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        doi="10.2/other",
+        arxiv_id="2101.00001",
+        streamer=fake_stream,
+    )
+    db_session.refresh(work)
+    assert work.doi == "10.1/kept"  # locked → not overwritten
+    assert work.arxiv_id == "2101.00001"  # empty + unlocked → filled
+
+
 def test_download_dedup_returns_deduped(db_session, tmp_path):
     work = _seed_work(db_session)
     settings = _attach_settings(tmp_path)

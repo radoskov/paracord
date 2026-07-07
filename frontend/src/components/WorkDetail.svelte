@@ -519,6 +519,8 @@
         candidate_id: c.candidate_id,
         url: fetchUrl(c) as string,
         source: c.source,
+        doi: c.doi,
+        arxiv_id: c.arxiv_id,
       }));
     if (items.length === 0) return;
     downloading = true;
@@ -551,7 +553,13 @@
         if (result.status === 'attached' || result.status === 'deduped') attachedAny = true;
         downloadDone += 1;
       }
-      if (attachedAny) files = await client.listWorkFiles(work.id);
+      if (attachedAny) {
+        // The download backfills the work's arxiv_id/doi and queues extraction — refetch so the
+        // view shows the new identifiers, and re-arm the job watch for the extraction.
+        const fresh = await client.getWork(work.id);
+        onUpdated(fresh);
+        await loadDetail(fresh);
+      }
     } catch (error) {
       message = errorMessage(error);
     } finally {

@@ -6328,6 +6328,17 @@
       },
       "WebCandidateRead": {
         "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
           "authors": {
             "default": [],
             "items": {
@@ -6497,6 +6508,17 @@
       },
       "WebFindDownloadItem": {
         "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
           "candidate_id": {
             "title": "Candidate Id",
             "type": "string"
@@ -6505,6 +6527,17 @@
             "default": false,
             "title": "Confirmed",
             "type": "boolean"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
           },
           "source": {
             "title": "Source",

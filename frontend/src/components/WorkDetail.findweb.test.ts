@@ -31,6 +31,7 @@ const CANDIDATES = [
     authors: ['Kaiming He'],
     year: 2016,
     doi: '10.1/x',
+    arxiv_id: '1512.03385',
     pdf_url: 'https://arxiv.org/pdf/1512.03385.pdf',
     landing_url: 'https://arxiv.org/abs/1512.03385',
     resolved_url: 'https://arxiv.org/pdf/1512.03385.pdf',
@@ -46,6 +47,7 @@ const CANDIDATES = [
     authors: [],
     year: 2015,
     doi: '10.1/y',
+    arxiv_id: null,
     pdf_url: null,
     landing_url: 'https://doi.org/10.1/y',
     resolved_url: 'https://www.sciencedirect.com/science/article/pii/123',
@@ -90,6 +92,8 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     streamFindOnWeb: streamMock(DEFAULT_EVENTS),
     findOnWeb: vi.fn(),
     downloadWebCandidates: vi.fn(),
+    getJobs: vi.fn().mockResolvedValue({ available: false, workers: 0, counts: {}, jobs: [] }),
+    getWork: vi.fn().mockResolvedValue(WORK),
     ...overrides,
   };
 }
@@ -137,7 +141,13 @@ describe('WorkDetail find-on-web picker (v2)', () => {
     // Downloads go one item at a time.
     await waitFor(() =>
       expect(downloadWebCandidates).toHaveBeenCalledWith('w1', [
-        { candidate_id: 'c1', url: 'https://arxiv.org/pdf/1512.03385.pdf', source: 'openalex' },
+        {
+          candidate_id: 'c1',
+          url: 'https://arxiv.org/pdf/1512.03385.pdf',
+          source: 'openalex',
+          doi: '10.1/x',
+          arxiv_id: '1512.03385',
+        },
       ]),
     );
     expect(await screen.findByText(/Attached/)).toBeTruthy();
@@ -196,6 +206,8 @@ describe('WorkDetail find-on-web picker (v2)', () => {
           candidate_id: 'c2',
           url: 'https://www.sciencedirect.com/science/article/pii/123',
           source: 'crossref',
+          doi: '10.1/y',
+          arxiv_id: null,
         },
       ]),
     );
@@ -258,6 +270,8 @@ describe('WorkDetail find-on-web picker (v2)', () => {
           candidate_id: 'c1',
           url: 'https://arxiv.org/pdf/1512.03385.pdf',
           source: 'openalex',
+          doi: '10.1/x',
+          arxiv_id: '1512.03385',
           confirmed: true,
         },
       ]),

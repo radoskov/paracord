@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
+from app.services.identifiers import backfill_identifiers
 from app.utils.normalization import normalize_title
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ class ExternalMetadata:
     abstract: str | None = None
     authors: list[str] = field(default_factory=list)
     doi: str | None = None
+    arxiv_id: str | None = None
     year: int | None = None
     venue: str | None = None
     # External citation count (Track C P1). None when the source did not report one.
@@ -97,12 +99,15 @@ def parse_arxiv_atom(xml: str) -> ExternalMetadata | None:
     published = entry.findtext("a:published", namespaces=ATOM_NS) or ""
     year = int(published[:4]) if published[:4].isdigit() else None
     authors = [name.text for name in entry.findall("a:author/a:name", ATOM_NS) if name.text]
+    raw_id = entry.findtext("a:id", namespaces=ATOM_NS) or ""
+    atom_arxiv_id = raw_id.rsplit("/abs/", 1)[-1] if "/abs/" in raw_id else None
     return ExternalMetadata(
         source="arxiv",
         title=_clean(entry.findtext("a:title", namespaces=ATOM_NS)),
         abstract=_clean(entry.findtext("a:summary", namespaces=ATOM_NS)),
         authors=[a for a in (_clean(n) for n in authors) if a],
         doi=_clean(entry.findtext("arxiv:doi", namespaces=ATOM_NS)),
+        arxiv_id=_clean(atom_arxiv_id),
         year=year,
     )
 
@@ -183,6 +188,7 @@ def parse_semantic_scholar(payload: dict) -> ExternalMetadata | None:
         abstract=_clean(paper.get("abstract")),
         authors=[a for a in (_clean(name) for name in authors) if a],
         doi=(paper.get("externalIds") or {}).get("DOI"),
+        arxiv_id=_clean((paper.get("externalIds") or {}).get("ArXiv")),
         year=paper.get("year"),
         venue=_clean(paper.get("venue")),
         citation_count=_as_int(paper.get("citationCount")),
@@ -410,6 +416,9 @@ def enrich_work(
         if meta is None:
             continue
         promoted += _store_external(db, work, meta)
+        # DOI is promoted via the assertion machinery above; the arXiv id is not a promotable
+        # canonical field, so backfill it directly onto the work when still empty (respecting locks).
+        promoted += backfill_identifiers(work, arxiv_id=meta.arxiv_id)
         sources.append(meta.source)
         if meta.citation_count is not None:
             counts[meta.source] = meta.citation_count

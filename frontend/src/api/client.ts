@@ -602,6 +602,7 @@ export interface WebCandidate {
   authors: string[];
   year: number | null;
   doi: string | null;
+  arxiv_id: string | null;
   pdf_url: string | null;
   landing_url: string | null;
   // Final URL after following the redirect chain of `pdf_url || landing_url` (nullable).
@@ -625,6 +626,9 @@ export interface WebFindDownloadItem {
   source: string;
   // Re-sent as true to proceed past a `needs_confirmation` result (unrestricted mode, unknown host).
   confirmed?: boolean;
+  // Candidate identifiers, so the work's empty arxiv_id/doi are backfilled when the PDF attaches.
+  doi?: string | null;
+  arxiv_id?: string | null;
 }
 
 export type WebFindDownloadStatus =

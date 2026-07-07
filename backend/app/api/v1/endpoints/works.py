@@ -1863,6 +1863,7 @@ class WebCandidateRead(BaseModel):
     authors: list[str] = []
     year: int | None = None
     doi: str | None = None
+    arxiv_id: str | None = None
     pdf_url: str | None = None
     landing_url: str | None = None
     is_oa: bool = False
@@ -1890,6 +1891,10 @@ class WebFindDownloadItem(BaseModel):
     # find-on-web v2: in ``unrestricted`` mode, a host not on the allow-list/known-publisher list
     # returns ``needs_confirmation``; the client re-sends the item with ``confirmed=true`` to proceed.
     confirmed: bool = False
+    # The candidate's identifiers, carried through so the work's empty arxiv_id/doi get backfilled
+    # when the PDF is attached (find-on-web previously dropped them).
+    doi: str | None = None
+    arxiv_id: str | None = None
 
 
 class WebFindDownloadRequest(BaseModel):
@@ -1919,6 +1924,7 @@ def _candidate_read(candidate: WebCandidate) -> WebCandidateRead:
         authors=candidate.authors,
         year=candidate.year,
         doi=candidate.doi,
+        arxiv_id=candidate.arxiv_id,
         pdf_url=candidate.pdf_url,
         landing_url=candidate.landing_url,
         is_oa=candidate.is_oa,
@@ -2003,6 +2009,8 @@ def find_on_web_download_endpoint(
             actor=actor,
             settings=settings,
             confirmed=item.confirmed,
+            doi=item.doi,
+            arxiv_id=item.arxiv_id,
             file_read=_file_read,
         )
         results.append(
