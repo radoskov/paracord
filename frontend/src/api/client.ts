@@ -330,7 +330,26 @@ export interface MissingWork {
   cited_by_count: number;
   mention_count: number;
   reference_id: string | null;
+  arxiv_id: string | null;
 }
+
+// On-demand external-reference preview (Track C C1). `available` is false when there is no
+// identifier to query or no source returned anything (`message` explains).
+export interface ExternalPreview {
+  available: boolean;
+  title: string | null;
+  authors: string[];
+  year: number | null;
+  venue: string | null;
+  abstract: string | null;
+  doi: string | null;
+  arxiv_id: string | null;
+  sources: string[];
+  message: string | null;
+}
+
+// A missing work's import/ignore decision (Track C C3a).
+export type MissingDecision = 'import' | 'ignore';
 
 export interface YearCount {
   year: number | null;
@@ -339,6 +358,10 @@ export interface YearCount {
 
 export interface CitationSummary {
   scope_work_count: number;
+  // Library coverage (Track C C3c): held / total resolvable cited works, and the percentage.
+  coverage_held: number;
+  coverage_total: number;
+  coverage_pct: number | null;
   most_cited_local: RankedWork[];
   most_cited_external: RankedWork[];
   frequently_cited_missing: MissingWork[];
@@ -2256,6 +2279,64 @@ export class ApiClient {
     for (const id of params.workIds ?? []) query.append('work_ids', id);
     if (params.limit != null) query.set('limit', String(params.limit));
     return this.request<CitationSummary>(`/api/v1/citations/summary?${query}`);
+  }
+
+  /** On-demand preview of an external cited-but-missing reference (Track C C1; identifier-only). */
+  async externalPreview(params: {
+    doi?: string | null;
+    arxiv?: string | null;
+    referenceId?: string | null;
+  }): Promise<ExternalPreview> {
+    const query = new URLSearchParams();
+    if (params.doi) query.set('doi', params.doi);
+    if (params.arxiv) query.set('arxiv', params.arxiv);
+    if (params.referenceId) query.set('reference_id', params.referenceId);
+    return this.request<ExternalPreview>(`/api/v1/citations/external-preview?${query}`);
+  }
+
+  /** The caller's frequently-cited-but-missing import/ignore decisions (Track C C3a). */
+  async getWorklist(): Promise<Record<string, MissingDecision>> {
+    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
+      '/api/v1/citations/worklist',
+    );
+    return body.decisions;
+  }
+
+  /** Record (upsert) an import/ignore decision for a missing work; returns the updated map. */
+  async setWorklistDecision(
+    key: string,
+    decision: MissingDecision,
+  ): Promise<Record<string, MissingDecision>> {
+    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
+      '/api/v1/citations/worklist',
+      { method: 'PUT', body: { key, decision } },
+    );
+    return body.decisions;
+  }
+
+  /** Clear (undo) a missing-work decision; returns the updated map. */
+  async clearWorklistDecision(key: string): Promise<Record<string, MissingDecision>> {
+    const query = new URLSearchParams({ key });
+    const body = await this.request<{ decisions: Record<string, MissingDecision> }>(
+      `/api/v1/citations/worklist?${query}`,
+      { method: 'DELETE' },
+    );
+    return body.decisions;
+  }
+
+  /** Export the scope's frequently-cited-but-missing list as BibTeX or CSV (Track C C3b). */
+  async exportMissingWorks(params: {
+    scopeType?: GraphScopeType;
+    scopeId?: string | null;
+    workIds?: string[];
+    format: 'bibtex' | 'csv';
+  }): Promise<ExportResponse> {
+    const query = new URLSearchParams();
+    query.set('scope_type', params.scopeType ?? 'library');
+    if (params.scopeId) query.set('scope_id', params.scopeId);
+    for (const id of params.workIds ?? []) query.append('work_ids', id);
+    query.set('format', params.format);
+    return this.request<ExportResponse>(`/api/v1/citations/missing-export?${query}`);
   }
 
   /** Import batches for the graph's import-batch scope picker (access-filtered, newest first). */
