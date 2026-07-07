@@ -8,6 +8,8 @@
     type AppliedTag,
     type CitationContext,
     type FieldReview,
+    type JobRecord,
+    type QueueStatus,
     type ReferenceRecord,
     type RelatedWork,
     type Summary,
@@ -143,7 +145,93 @@
     }
   }
 
-  async function loadDetail(w: Work): Promise<void> {
+  // Live-refresh: while a background extract/enrich/topic/keyword job is in flight for the OPEN
+  // paper, poll the jobs queue and refetch the work once every relevant job has settled, so its
+  // metadata updates without the user navigating away/back. Polls only while something is pending.
+  const JOB_POLL_MS = 4000;
+  const JOB_POLL_MAX_TICKS = 90; // ~6 min safety cap
+  const IN_FLIGHT_STATUSES = new Set(['queued', 'started', 'deferred', 'scheduled']);
+  let jobPollTimer: ReturnType<typeof setInterval> | undefined;
+  let jobPollTicks = 0;
+  let watchedJobIds = new Set<string>();
+  let sawInFlightJob = false;
+
+  $: workFileIds = new Set(files.map((f) => f.id));
+
+  function jobMatchesOpenWork(job: JobRecord): boolean {
+    if (job.target_kind === 'work' && job.target_id === work.id) return true;
+    if (job.target_kind === 'file' && job.target_id && workFileIds.has(job.target_id)) return true;
+    return false;
+  }
+
+  function stopJobPolling(): void {
+    if (jobPollTimer) {
+      clearInterval(jobPollTimer);
+      jobPollTimer = undefined;
+    }
+    watchedJobIds = new Set();
+    sawInFlightJob = false;
+    jobPollTicks = 0;
+  }
+
+  async function refreshOpenWork(): Promise<void> {
+    try {
+      const fresh = await client.getWork(work.id);
+      onUpdated(fresh);
+      await loadDetail(fresh, false);
+    } catch {
+      // Best-effort refresh; keep the current view if the refetch fails.
+    }
+  }
+
+  async function pollJobsForOpenWork(): Promise<void> {
+    jobPollTicks += 1;
+    let status: QueueStatus;
+    try {
+      status = await client.getJobs(60);
+    } catch {
+      stopJobPolling();
+      return;
+    }
+    if (!status.available) {
+      stopJobPolling();
+      return;
+    }
+    const jobs = status.jobs ?? [];
+    const byId = new Map(jobs.map((j) => [j.id, j]));
+    let explicitPending = false;
+    for (const id of watchedJobIds) {
+      const j = byId.get(id);
+      if (j && IN_FLIGHT_STATUSES.has(j.status)) explicitPending = true;
+    }
+    const matchedPending = jobs.some(
+      (j) => jobMatchesOpenWork(j) && IN_FLIGHT_STATUSES.has(j.status),
+    );
+    if (matchedPending) sawInFlightJob = true;
+    if (!explicitPending && !matchedPending) {
+      const hadWork = watchedJobIds.size > 0 || sawInFlightJob;
+      stopJobPolling();
+      if (hadWork) await refreshOpenWork();
+      return;
+    }
+    if (jobPollTicks >= JOB_POLL_MAX_TICKS) {
+      stopJobPolling();
+      await refreshOpenWork();
+    }
+  }
+
+  // Begin (or extend) polling for the open paper. Pass the job ids returned by an action so a job
+  // that finishes before the first poll is still detected; called with no args on open to pick up
+  // a job already in flight (e.g. import extraction).
+  function watchWorkJobs(jobIds: (string | null | undefined)[] = []): void {
+    for (const id of jobIds) if (id) watchedJobIds.add(id);
+    if (jobPollTimer) return;
+    jobPollTicks = 0;
+    jobPollTimer = setInterval(() => void pollJobsForOpenWork(), JOB_POLL_MS);
+  }
+
+  async function loadDetail(w: Work, watchJobs = true): Promise<void> {
+    if (w.id !== loadedId) stopJobPolling();
     loadedId = w.id;
     clearReader();
     form = {
@@ -168,6 +256,8 @@
           client.listWorkTags(w.id),
         ]);
     });
+    // Pick up a job already in flight for this paper (e.g. extraction queued at import time).
+    if (watchJobs) watchWorkJobs();
   }
 
   async function save(): Promise<void> {
@@ -250,9 +340,10 @@
   async function enrich(): Promise<void> {
     await run(async () => {
       const result = await client.enrichWork(work.id);
+      watchWorkJobs([result.job_id]);
       message =
         `Enrichment ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
-        'It runs in the background worker — watch the Jobs tab for progress.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
@@ -263,27 +354,30 @@
         message = 'No files attached — attach a PDF first, then extract.';
         return;
       }
+      watchWorkJobs(result.job_ids ?? []);
       message =
         `Extraction queued for ${result.queued} file${result.queued === 1 ? '' : 's'}. ` +
-        'It runs in the background worker — watch the Jobs tab for progress.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
   async function topic(): Promise<void> {
     await run(async () => {
       const result = await client.topicWork(work.id);
+      watchWorkJobs([result.job_id]);
       message =
         `Topic modeling ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
-        'It runs in the background worker — watch the Jobs tab for progress.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
   async function keywords(): Promise<void> {
     await run(async () => {
       const result = await client.keywordsWork(work.id);
+      watchWorkJobs([result.job_id]);
       message =
         `Keyword extraction ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
-        'It runs in the background worker — watch the Jobs tab for progress.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
@@ -527,16 +621,18 @@
       await client.uploadWorkFile(work.id, file);
       attachFile = null;
       files = await client.listWorkFiles(work.id);
-    }, `Attached “${file.name}”; extraction queued`);
+      watchWorkJobs();
+    }, `Attached “${file.name}”; extraction queued — the paper refreshes when it finishes`);
   }
 
   async function reextract(file: WorkFile): Promise<void> {
     await run(async () => {
       const result = await client.extractFile(file.id);
       files = await client.listWorkFiles(work.id);
+      watchWorkJobs([result.job_id]);
       message =
         `Extraction ${result.status} (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
-        'It runs in the background worker — watch the Jobs tab.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
@@ -545,9 +641,10 @@
     await run(async () => {
       const result = await client.extractFile(file.id, true);
       files = await client.listWorkFiles(work.id);
+      watchWorkJobs([result.job_id]);
       message =
         `OCR extraction queued (job ${(result.job_id ?? '').slice(0, 8) || 'n/a'}). ` +
-        'It runs in the background worker — watch the Jobs tab.';
+        'It runs in the background worker — this paper refreshes automatically when it finishes.';
     });
   }
 
@@ -703,7 +800,10 @@
     window.location.hash = '#library';
   }
 
-  onDestroy(clearReader);
+  onDestroy(() => {
+    clearReader();
+    stopJobPolling();
+  });
 </script>
 
 <div class="detail">
