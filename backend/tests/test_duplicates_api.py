@@ -12,12 +12,15 @@ from app.api.v1.endpoints.duplicates import (
 )
 from app.core.security import hash_password
 from app.db.base import Base
+from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
+from app.models.citation import CitationMention, Reference
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink
+from app.models.metadata import MetadataAssertion
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
-from app.models.work import Work, WorkVersion
+from app.models.work import Work, WorkLink, WorkVersion
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -37,6 +40,7 @@ def db_session(tmp_path: Path):
             AuditEvent.__table__,
             Work.__table__,
             WorkVersion.__table__,
+            WorkLink.__table__,
             File.__table__,
             FileSegment.__table__,
             FileWorkLink.__table__,
@@ -44,6 +48,10 @@ def db_session(tmp_path: Path):
             ShelfWork.__table__,
             Tag.__table__,
             TagLink.__table__,
+            Reference.__table__,
+            CitationMention.__table__,
+            Annotation.__table__,
+            MetadataAssertion.__table__,
             DuplicateCandidate.__table__,
         ],
     )
@@ -226,7 +234,9 @@ def test_merge_works_relinks_memberships_without_deleting_source(db_session, edi
     )
 
 
-def test_link_as_version_creates_version_and_relinks_file(db_session, editor: User) -> None:
+def test_link_relates_both_works_without_moving_files(db_session, editor: User) -> None:
+    # Batch D: "Link" now records a bidirectional related-works link — both papers and their own
+    # files are kept; nothing is moved, hidden, or turned into a version.
     target = Work(canonical_title="Paper", normalized_title="paper", arxiv_id="1706.03762v1")
     source = Work(
         canonical_title="Paper v2",
@@ -257,19 +267,17 @@ def test_link_as_version_creates_version_and_relinks_file(db_session, editor: Us
         actor=editor,
     )
 
-    version = db_session.scalar(select(WorkVersion))
-    assert version.work_id == target.id
-    assert version.version_type == "arxiv"
-    assert version.arxiv_version == "v2"
+    # No version created, the file stays on the source, neither paper is hidden.
+    assert db_session.scalar(select(WorkVersion)) is None
     link = db_session.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
-    assert link.work_id == target.id
-    assert link.version_id == version.id
-    assert link.warning_state == "work_has_multiple_files"
-    # Phase B6: both works join the target's version group (target is the representative).
+    assert link.work_id == source.id
     db_session.refresh(target)
     db_session.refresh(source)
-    assert target.version_group_id == target.id
-    assert source.version_group_id == target.id
+    assert target.merged_into_id is None
+    assert source.merged_into_id is None
+    # A bidirectional related-works link now connects the two.
+    work_link = db_session.scalar(select(WorkLink))
+    assert {work_link.work_a_id, work_link.work_b_id} == {target.id, source.id}
 
 
 def test_mark_duplicate_file_marks_file_links(db_session, editor: User) -> None:
@@ -367,6 +375,10 @@ def _work_pair_candidate(db_session, work_a: Work, work_b: Work, **kwargs) -> Du
 
 
 def test_applying_action_to_resolved_candidate_is_rejected(db_session, editor: User) -> None:
+    # Owner actor: after the merge the source is a hidden shadow, so a non-admin would 404 on the
+    # candidate (it touches a hidden work). The owner still sees it, exercising the resolved-guard.
+    owner = User(username="owner", password_hash=hash_password("secret"), role="owner")
+    db_session.add(owner)
     target = Work(canonical_title="Keep", normalized_title="keep")
     source = Work(canonical_title="Drop", normalized_title="drop")
     db_session.add_all([target, source])
@@ -377,7 +389,7 @@ def test_applying_action_to_resolved_candidate_is_rejected(db_session, editor: U
         candidate.id,
         DuplicateCandidateUpdate(action="merge_works", target_work_id=target.id),
         db=db_session,
-        actor=editor,
+        actor=owner,
     )
     # A second merge (e.g. a double-click) must be refused, not silently re-applied.
     with pytest.raises(HTTPException) as exc:
@@ -385,7 +397,7 @@ def test_applying_action_to_resolved_candidate_is_rejected(db_session, editor: U
             candidate.id,
             DuplicateCandidateUpdate(action="merge_works", target_work_id=target.id),
             db=db_session,
-            actor=editor,
+            actor=owner,
         )
     assert exc.value.status_code == 400
     assert "already been resolved" in exc.value.detail

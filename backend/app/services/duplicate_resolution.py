@@ -561,6 +561,7 @@ def _add_merge_assertion(
     db: Session, base: Work, field: str, value: Any, *, canonical: bool
 ) -> uuid.UUID:
     assertion = MetadataAssertion(
+        id=uuid.uuid4(),
         entity_type="work",
         entity_id=base.id,
         field_name=field,

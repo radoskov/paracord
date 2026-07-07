@@ -20,6 +20,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 _JSONB = JSON().with_variant(JSONB(), "postgresql")
+# Like ``_JSONB`` but stores Python ``None`` as SQL NULL (not a JSON ``null``), so ``IS NULL`` /
+# ``IS NOT NULL`` reliably distinguish "no value" — used by the merge-record reversibility check.
+_JSONB_NONE_NULL = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 
 class Work(Base):
@@ -95,7 +98,7 @@ class Work(Base):
     # entity moved/redirected, so Unmerge can exactly reverse it. NULL when this is not a shadow OR
     # when the shadow has been finalized (flatten-on-re-merge makes older merges permanent). A shadow
     # is reversible iff ``merged_into_id`` is set AND ``merge_record`` is not NULL.
-    merge_record: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
+    merge_record: Mapped[dict | None] = mapped_column(_JSONB_NONE_NULL, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
