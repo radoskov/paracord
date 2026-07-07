@@ -170,7 +170,11 @@ def test_similarity_axes_unavailable_without_focus(db_session) -> None:
             {"x_axis": axis, "y_axis": "year"},
         )
         assert _node_by_id(payload, work.id).x is None
-        assert any(axis in note and "unavailable" in note for note in payload.notes)
+        # The note is user-facing (no raw axis key): it says the axis is unavailable and points at
+        # the focus paper as the thing to fix.
+        assert any(
+            "unavailable" in note.lower() and "focus" in note.lower() for note in payload.notes
+        )
 
 
 def test_topic_similarity_to_focus_jaccard(db_session) -> None:

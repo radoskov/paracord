@@ -208,12 +208,16 @@ def _similarity_axis(
     db: Session, works: list[Work], ctx: _AxisContext
 ) -> tuple[dict[uuid.UUID, float | None], str | None]:
     if ctx.focus_work_id is None:
-        return ({w.id: None for w in works}, "similarity_to_focus unavailable: no focus paper set.")
+        return (
+            {w.id: None for w in works},
+            "Similarity-to-focus axis unavailable: pick a focus paper first.",
+        )
     focus = ctx.focus_work
     if focus is None:
         return (
             {w.id: None for w in works},
-            "similarity_to_focus unavailable: focus paper not found or not visible.",
+            "Similarity-to-focus axis unavailable: the focus paper wasn't found or isn't visible "
+            "to you.",
         )
     target_works = list(works)
     if all(w.id != focus.id for w in works):
@@ -222,14 +226,16 @@ def _similarity_axis(
     if vectors is None:
         return (
             {w.id: None for w in works},
-            "similarity_to_focus unavailable: no real embedding model active.",
+            "Similarity-to-focus axis unavailable: no real embedding model is active — select a "
+            "MiniLM/nomic model (AI & Models) and reindex.",
         )
     vec_by_id: dict[uuid.UUID, dict[int, float]] = {kw.id: vectors[i] for i, kw in enumerate(kept)}
     focus_vec = vec_by_id.get(focus.id)
     if focus_vec is None:
         return (
             {w.id: None for w in works},
-            "similarity_to_focus unavailable: focus paper is not indexed for this model.",
+            "Similarity-to-focus axis unavailable: the focus paper isn't indexed for this "
+            "embedding model. Reindex embeddings (AI & Models), then rebuild.",
         )
     values: dict[uuid.UUID, float | None] = {}
     for work in works:
@@ -244,14 +250,15 @@ def _topic_similarity_axis(
     if ctx.focus_work_id is None:
         return (
             {w.id: None for w in works},
-            "topic_similarity_to_focus unavailable: no focus paper set.",
+            "Topic-similarity axis unavailable: pick a focus paper first.",
         )
     focus = ctx.focus_work
     focus_topics = {str(t).casefold() for t in (focus.topics or [])} if focus else set()
     if not focus_topics:
         return (
             {w.id: None for w in works},
-            "topic_similarity_to_focus unavailable: focus paper has no topic terms.",
+            "Topic-similarity axis unavailable: the focus paper has no topic terms yet. Run Topic "
+            "modeling (AI & Models) over a scope that includes it, then rebuild.",
         )
     values: dict[uuid.UUID, float | None] = {}
     for work in works:
