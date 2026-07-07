@@ -387,6 +387,14 @@
     void loadWorks();
   }
 
+  // Explicit "refresh data" (issue batch 6 #7): re-fetch the current view + counts without a full
+  // page reload — e.g. after the local agent pushes new papers, which don't otherwise appear until
+  // a filter/sort change or a browser reload. Keeps the current page/filters (unlike reload()).
+  async function refreshData(): Promise<void> {
+    await loadWorks();
+    if (!message) message = 'Refreshed';
+  }
+
   function resetFilters(): void {
     statusFilter = shelfFilter = rackFilter = tagFilter = pdfFilter = refsFilter = '';
     missing = [];
@@ -686,6 +694,8 @@
             : ''}</span
         >
         <span class="bar-actions">
+          <button type="button" class="secondary" on:click={refreshData} disabled={loading}
+            title="Reload the papers list and counts (e.g. after the local agent pushes new papers)">Refresh</button>
           <button type="button" class="secondary" on:click={jumpToSelected} disabled={!selected}
             title={selected ? 'Scroll the open paper’s row into view' : 'Open a paper to jump to its row'}>Jump to open</button>
           <button type="button" class="secondary" on:click={() => (showColumns = true)}
