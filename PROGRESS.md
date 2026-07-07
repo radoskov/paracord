@@ -7,6 +7,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Batch L — library / insights UX (2026-07-07)
+
+Four owner-facing UX fixes (WORKPLAN Batch L), one commit per item on `main` (not pushed). See
+`docs/agent_handoffs/2026-07-07-batch-l-library-insights-ux.md`.
+
+- **L1 — Inbox excluded from Put-into menus.** The default/Inbox shelf (the loose-paper fallback)
+  is no longer offered as a move-target. Robust marker: `access_settings.default_shelf_id` surfaced
+  as `is_default` on `ShelfRead` (no migration), filtered by a new `ShelfPicker.excludeDefault` on
+  the single **Put into…** and batch **Put all into…** menus. Inbox stays visible elsewhere.
+- **L2 — redundant Insights search removed.** Search has its own tab; dropped the Insights-tab
+  search card + its state/handlers/styles + obsolete vitest, and the "semantic search" tab hint.
+- **L3 — Jump-to-open button.** A library-toolbar button scrolls the open paper's row into view and
+  briefly flashes it (`data-work-id` + a flash pulse). Off-page (not in the current result set) it
+  explains rather than jumping.
+- **L4 — scope summary honors the configured AI model.** `POST /ai/summaries` resolves the provider
+  from the admin AI config (`summary_provider`/`summary_model`) when unset — like per-work summaries
+  — so a configured `local_llm` model is used; the Insights UI shows an "extractive — set a model in
+  Admin → AI" hint (or the fallback reason) whenever the result isn't model-based.
+
+Verified: full backend suite 881 passed; `make frontend-check` 176 passed / 1 skipped + build;
+ruff + openapi-check clean. Screenshots (not committed) in `/home/zednik/paracord-theme-shots/`:
+`putmenu_no_inbox.png`, `insights_no_search.png`.
+
 ## Theming UX — distinct selected state + "load as template" (2026-07-07)
 
 Two owner-reported theming fixes; frontend + one small read-only backend endpoint, on `main`
