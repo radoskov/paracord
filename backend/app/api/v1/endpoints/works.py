@@ -855,14 +855,8 @@ def list_related_links(
     if not ids:
         return []
     visible = access.visible_work_ids(db, actor)
-    linked = db.scalars(
-        select(Work).where(Work.id.in_(ids), Work.merged_into_id.is_(None))
-    ).all()
-    return [
-        WorkRead.model_validate(w)
-        for w in linked
-        if visible is None or w.id in visible
-    ]
+    linked = db.scalars(select(Work).where(Work.id.in_(ids), Work.merged_into_id.is_(None))).all()
+    return [WorkRead.model_validate(w) for w in linked if visible is None or w.id in visible]
 
 
 @router.post("/{work_id}/unmerge", response_model=WorkRead)
