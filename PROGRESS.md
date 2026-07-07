@@ -1302,6 +1302,28 @@ Progress notes:
   self-heal message). Commits: `bf74e03` (pgvector), `6b19748` (export test), `974fe36` (Makefile),
   `abdf368` (echarts). api/worker + frontend images rebuilt so the baked copies carry the new deps.
 
+- issue_batch_6 "all clear" items (2026-07-07): triaged `issue_batch_6.md` into all-clear vs
+  needs-discussion (`docs/WORKPLAN_2026-07-07_batch6.md`; both intentionally uncommitted working
+  docs) and implemented the six unambiguous ones. **2a** — `reindex_status` reported the impossible
+  "7 / 3 papers indexed" because it counted raw `Embedding` rows (incl. stale rows for deleted/merged
+  papers) against a total of current works; now both aggregates run over the same population (text,
+  non-shadow) and `indexed` counts distinct joined works, so `indexed ≤ total`. **1e** — reworded the
+  similarity / topic-similarity axis-unavailable notes to actionable paper-facing text (pick a focus
+  paper / run topic modeling / reindex) instead of the raw axis key. **1g** — the visualization
+  view-type selector now orders by a renderer `order` hint so the temporal map leads and is the
+  default (was alphabetical → co-citation first). **1b** — the temporal-map year axis renders whole
+  years (2019, 2020) via `minInterval:1` + integer formatter, not ECharts' default fractional,
+  thousands-separated ticks (2,019 / 2,019.2). **3** — agent bulk **Prune** now prunes only the
+  unwatched rows among a selection (watched files kept; Forget/unwatch first) via
+  `agent_ops.prune_selected`, toast "kept N watched"; **Forget** still removes all selected. **7** —
+  the library toolbar gained a **Refresh** button that re-fetches the current view + counts (keeps
+  page/filters) so agent-pushed papers appear without a full browser reload. Each shipped with a
+  test; commits `081852c` (2a), `4e0d977` (1e), `e6f970d` (1g+1b), `4ccef25` (3), `d24aae7` (7). The
+  remaining seven issues (1a viz help, 1c reindex-vs-no-PDF messaging, 1d default citation edges, 1f
+  overlap jitter/hover, 2b lexical-index staleness, 4 Scan&push server-entry semantics + agent help
+  tab, 5 weighted per-paper reference graph, 6 stored per-paper AI summary) are deferred to owner
+  discussion (workplan §B). See `docs/agent_handoffs/2026-07-07-issue-batch-6-all-clear.md`.
+
 ## Next milestone: M1 core library, organization, and files
 
 See `ROADMAP.md` / `SPECIFICATION.md` §20 for the full plan. The local agent and teleport
