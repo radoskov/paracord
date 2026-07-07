@@ -7,6 +7,42 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Batch P — paper view / metadata (2026-07-07)
+
+Three WORKPLAN Batch P items, one commit per item on `main` (not pushed). See
+`docs/agent_handoffs/2026-07-07-batch-p-paper-view-metadata.md`.
+
+- **P1a — live-refresh the open paper after a background job.** `WorkDetail` now polls the jobs
+  queue (4 s, self-terminating) only while an extract/enrich/topic/keyword job is in flight for the
+  open paper, and refetches the work (+ re-runs `loadDetail`) once every relevant job settles — no
+  navigate-away/reload. Jobs are correlated by `target_id` (work id) or the file ids the paper owns
+  (extraction is file-targeted). Started from the action handlers (with the returned job ids, so a
+  fast job isn't missed) and auto-detected on open for a job already running (e.g. import
+  extraction). A web-download also refetches so backfilled identifiers show immediately.
+- **P1b — mutations refresh their view.** Audited every mutation handler across library/shelves/
+  racks/tags/duplicates — shelves, racks, tags, duplicates, and library batch-delete already
+  refetch. Fixed: **library single-delete** now also decrements the `{n} papers` counter and page
+  count (the row was already spliced out, but the count/pagination were stale); **search-results**
+  delete now removes the row from the results list (previously only closed the modal).
+- **P2 — metadata-conflict "match %".** `GET /works/{id}/metadata` `FieldReview` gained
+  `match_pct` (0–100, null when no conflict) = lowest pairwise similarity among the distinct
+  conflicting values. New `normalize_for_similarity` (join line-break hyphenation, collapse
+  whitespace, lowercase) + `similarity_pct` (rapidfuzz `max(ratio, token_set_ratio)`, difflib
+  fallback) in `utils/normalization.py`; values differing only by formatting score ~100. The paper
+  view shows a "N% match" badge next to each conflicting field.
+- **P3 — arXiv id / DOI not filled from web/enriched papers (bug).** Root cause: the find-on-web
+  download path dropped the candidate's identifiers (`WebCandidate` had no `arxiv_id`;
+  `WebFindDownloadItem`/`download_and_attach` never carried or persisted doi/arxiv_id), and
+  enrichment could never set `arxiv_id` (absent from `ExternalMetadata`/`_apply_field`). Fix: a
+  shared `identifiers.backfill_identifiers` fills an EMPTY, unlocked `arxiv_id`/`doi` (normalized);
+  wired into `download_and_attach` (candidate carries doi + arxiv id through the API) and into
+  enrichment (arxiv id parsed from the arXiv Atom `id` and Semantic Scholar `externalIds.ArXiv`).
+  User-confirmed/locked values are never overwritten.
+
+Verified: full backend suite green; `make frontend-check` (181 passed / 1 skipped) + build; ruff +
+openapi-check clean. `openapi.json` regenerated (FieldReview.match_pct, WebCandidateRead.arxiv_id,
+WebFindDownloadItem.doi/arxiv_id).
+
 ## Batch L — library / insights UX (2026-07-07)
 
 Four owner-facing UX fixes (WORKPLAN Batch L), one commit per item on `main` (not pushed). See
