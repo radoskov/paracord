@@ -148,26 +148,28 @@ prune + bulk actions → reconcile/reverse-sync with preview → CLI parity + po
   one run, then **auto-disables**. Using it again requires re-enabling. The enable dialog must state
   this clearly ("this applies to the next reconcile only, then turns itself off").
 
-**Q2 — unwatching a folder: PROMPT, default KEEP.** When a watched folder is removed/disabled and it
-leaves now-unwatched indexed files, **prompt** the user: keep them in the index (default) or prune.
-Kept files are marked so they're exempt from auto-prune (see the Q2/Q4 reconciliation below).
+**FINAL MODEL (owner-confirmed 2026-07-07) — no pinning; keep-by-default; manual prune.** The
+earlier "pin" idea is DROPPED (it only patched a contradiction caused by auto-pruning by default):
+- **Unwatch a folder** → confirmation dialog. Default: the files become **unwatched but kept in the
+  index** (clearly labelled `unwatched`). The dialog offers an optional checkbox **"also remove
+  these from the index now"** (prune locally). Never contacts the server (Q3).
+- **Pruning is a MANUAL action, not automatic.** Forward sync ("Scan & push") does **NOT** auto-prune
+  by default — it's a toggle **default OFF**, so "keep by default" always holds and nothing silently
+  removes kept files. A separate **"Prune unwatched"** bulk button (Indexed tab) removes unwatched
+  entries when the user chooses; every row also has its own per-item **Prune** (and **Forget**).
+- Unwatched files can also arise without unwatching a folder (e.g. a file **moved on disk** out of a
+  watched folder) — they simply show as `unwatched` and are handled by the same manual prune. No
+  special state, no pin, no unpin.
 
 **Q3 — unwatching does NOT signal the server.** Confirmed: merely unwatching never tells the server
 a file was removed (only true disk-deletion / explicit prune / server-side deletion does).
 
-**Q4 — buttons split; prune defaults.** Decision: keep **two separate operations** —
-- **Forward sync ("Scan & push")** — auto-prune-unwatched is a **toggle, default ON**, so routine
-  syncing keeps the index mirroring the watched set (controllable).
-- **Reverse sync ("Reconcile with server")** — removes server-deleted files; does **not** prune
-  unwatched.
+**Q4 — two separate operations.** **Forward "Scan & push"** (auto-prune toggle default OFF) vs
+**Reverse "Reconcile with server"** (removes server-deleted; does not touch unwatched).
 
-**★ Q2/Q4 reconciliation (one point to confirm).** Q2 says unwatching defaults to *keep*, but Q4
-says forward sync auto-prunes unwatched *by default* — a direct conflict if both act on the same
-files. Proposed resolution: the Q2 prompt sets a per-file **"keep (pinned)"** flag on the files the
-user chooses to keep; forward-sync auto-prune (default ON) then prunes unwatched files **except**
-those pinned. So: remove a folder → prompt → "keep" pins those files (they survive auto-prune) or
-"prune" drops them now; any *new* unwatched file with no decision is auto-pruned on the next forward
-sync. This honors both defaults without contradiction. **Confirm this is the intended behavior.**
+**Per-item AND bulk (owner-confirmed).** Every indexed row keeps its own actions — **Forget**,
+**Prune** (if unwatched), **Teleport now**, **Block/Unblock**, **Re-extract** — and multi-select
+"apply to selected" is an *additional* faster path, never the only option.
 
 **Additional (owner 2026-07-07) — GUI feedback + tooltips.**
 - **Sync/Refresh feedback.** Both currently "just happen" with no indication. Add visible feedback: a
@@ -177,7 +179,9 @@ sync. This honors both defaults without contradiction. **Confirm this is the int
 - **Tooltips.** Audit every button's hover-help across the agent GUI so it's present, accurate, and
   descriptive (they've drifted / are missing in places).
 
-These are now settled; this becomes a phased workplan (status model + truthful GUI vocabulary →
-prune + bulk actions + the keep-pin → reconcile/reverse-sync with the guarded one-shot delete +
-preview → sync/refresh feedback + tooltips → CLI parity) and implements after the current UI/feature
-batches (queued behind Batch P/C/S/D).
+Fully settled — no open questions. Phased build: (1) truthful watched/unwatched/missing status model
++ GUI vocabulary; (2) per-item + bulk Forget/Prune + the unwatch keep/prune-now dialog + manual
+"Prune unwatched"; (3) reverse-sync "Reconcile with server" (un-index server-deleted + the guarded
+one-shot delete-on-disk + dry-run preview) vs forward "Scan & push" (auto-prune toggle default OFF);
+(4) sync/refresh feedback + tooltip audit; (5) CLI parity. This is Batch A, built after Batches
+P/C/S/D (all complete).
