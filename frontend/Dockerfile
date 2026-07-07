@@ -21,6 +21,9 @@ WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
 RUN npm ci
+RUN mkdir -p /opt/paracord-frontend \
+    && cp -a node_modules /opt/paracord-frontend/node_modules \
+    && sha256sum package-lock.json | awk '{print $1}' > /opt/paracord-frontend/package-lock.sha256
 
 COPY frontend ./
 # Baked outside the bind-mounted /app/frontend so it stays stable regardless of the host tree.

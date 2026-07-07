@@ -149,6 +149,12 @@ down-extraction: ## Stop GROBID extraction profile.
 up-ai: init ## Start Ollama AI profile.
 	$(COMPOSE) --profile ai up -d ollama
 
+.PHONY: up-all
+up-all: init ## start standard + extraction + ai
+	$(COMPOSE) up -d --build
+	$(COMPOSE) --profile extraction up -d grobid
+	$(COMPOSE) --profile ai up -d ollama
+
 .PHONY: down-ai
 down-ai: ## Stop Ollama AI profile.
 	$(COMPOSE) --profile ai stop ollama
