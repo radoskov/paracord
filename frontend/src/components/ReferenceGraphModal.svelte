@@ -7,6 +7,7 @@
   import { pendingLibraryOpen } from '../lib/selection';
   import {
     DEFAULT_SECTION_WEIGHTS,
+    REFERENCE_GRAPH_HELP,
     REFERENCE_Y_AXES,
     buildReferenceGraphOption,
     yValueFor,
@@ -21,6 +22,7 @@
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
   let yAxis = 'weighted';
+  let showHelp = false;
 
   // How many reference nodes have no value for the current Y axis (→ the dashed "n/a" lane).
   $: naCount = graph
@@ -116,6 +118,15 @@
         {naCount} reference{naCount === 1 ? '' : 's'} have no value for this axis (dashed, on the
         “n/a” lane).{/if}</span
     >
+    <button
+      type="button"
+      class="help"
+      data-testid="rg-help"
+      on:click={() => (showHelp = true)}
+      title="What each axis and setting means, and how to read the graph"
+    >
+      ⓘ Help
+    </button>
   </div>
   {#if message}<p class="msg" role="status">{message}</p>{/if}
   {#if loading && !graph}<p class="muted">Loading…</p>{/if}
@@ -125,6 +136,35 @@
     <p class="muted">This paper has no extracted references yet — run extraction to populate them.</p>
   {/if}
 </Modal>
+
+{#if showHelp}
+  <Modal title="About the reference graph" onClose={() => (showHelp = false)}>
+    <p>{REFERENCE_GRAPH_HELP.overview}</p>
+    <h4>Layout &amp; encodings</h4>
+    <dl class="rg-help">
+      <dt>X axis</dt>
+      <dd>{REFERENCE_GRAPH_HELP.xAxis}</dd>
+      <dt>Node size</dt>
+      <dd>{REFERENCE_GRAPH_HELP.size}</dd>
+      <dt>Colour</dt>
+      <dd>{REFERENCE_GRAPH_HELP.color}</dd>
+      <dt>“n/a” lane</dt>
+      <dd>{REFERENCE_GRAPH_HELP.naLane}</dd>
+    </dl>
+    <h4>Y axis options</h4>
+    <dl class="rg-help">
+      {#each REFERENCE_Y_AXES as opt (opt.key)}
+        <dt>{opt.label}</dt>
+        <dd>{opt.help}</dd>
+      {/each}
+    </dl>
+    <h4>Other settings</h4>
+    <dl class="rg-help">
+      <dt>Local reference-to-reference edges</dt>
+      <dd>{REFERENCE_GRAPH_HELP.refEdges}</dd>
+    </dl>
+  </Modal>
+{/if}
 
 <style>
   .rg-controls {
@@ -142,5 +182,28 @@
   .muted {
     color: var(--ink-muted);
     font-size: 0.85rem;
+  }
+  .help {
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: var(--ink-strong);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    margin-left: auto;
+    padding: 0.25rem 0.6rem;
+  }
+  .rg-help {
+    margin: 0.3rem 0 0.6rem;
+  }
+  .rg-help dt {
+    color: var(--ink-strong);
+    font-weight: 600;
+  }
+  .rg-help dd {
+    color: var(--ink-muted);
+    font-size: 0.85rem;
+    margin: 0 0 0.5rem;
   }
 </style>

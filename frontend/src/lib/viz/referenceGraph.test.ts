@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { ReferenceGraph } from "../../api/client";
 import {
   DEFAULT_SECTION_WEIGHTS,
+  REFERENCE_GRAPH_HELP,
+  REFERENCE_Y_AXES,
   buildReferenceGraphOption,
   weightedSize,
   yValueFor,
@@ -16,6 +18,28 @@ describe("referenceGraph weighting", () => {
       weightedSize({ methods: 2, introduction: 1 }, DEFAULT_SECTION_WEIGHTS),
     ).toBe(10);
     expect(weightedSize({}, DEFAULT_SECTION_WEIGHTS)).toBe(0);
+  });
+});
+
+describe("reference graph help content", () => {
+  it("gives every Y-axis option a non-trivial help string", () => {
+    for (const opt of REFERENCE_Y_AXES) {
+      expect(opt.help, `missing help for ${opt.key}`).toBeTruthy();
+      expect(opt.help.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("describes the graph's layout and each non-axis setting", () => {
+    for (const key of [
+      "overview",
+      "xAxis",
+      "size",
+      "color",
+      "refEdges",
+      "naLane",
+    ] as const) {
+      expect(REFERENCE_GRAPH_HELP[key].length).toBeGreaterThan(10);
+    }
   });
 });
 

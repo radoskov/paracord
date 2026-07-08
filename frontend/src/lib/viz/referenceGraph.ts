@@ -77,6 +77,8 @@ export interface YAxisOption {
   key: string;
   label: string;
   axisName: string;
+  /** What this axis plots and how to read it (shown in the graph's Help popup). */
+  help: string;
 }
 
 // Selectable Y axes (B7 v2). X stays year; weighted mentions is the default. citations/topic/degree
@@ -86,28 +88,48 @@ export const REFERENCE_Y_AXES: YAxisOption[] = [
     key: "weighted",
     label: "Weighted citations (default)",
     axisName: "Weighted citations",
+    help: "How many times this paper cites the reference, weighted by where the citations appear (a mention in Methods counts more than one in Related work). The section weights are set in your Profile. This is also always the node size.",
   },
   {
     key: "mentions",
     label: "Mention count",
     axisName: "Times cited by this paper",
+    help: "Raw number of times this paper cites the reference, ignoring section weighting. Available for every reference.",
   },
   {
     key: "citations",
     label: "Citation count",
     axisName: "Global citation count",
+    help: "The reference's own citation count across all literature (from stored metadata). External references without metadata fall to the “n/a” lane.",
   },
   {
     key: "topic",
     label: "Topic similarity to this paper",
     axisName: "Topic similarity",
+    help: "How strongly the reference shares this paper's topics. Only in-library references with topics have a value; the rest fall to the “n/a” lane.",
   },
   {
     key: "degree",
     label: "Local citation degree",
     axisName: "In-library citations",
+    help: "How many papers in your library cite the reference — its connectedness within your collection. Only meaningful for in-library references; external ones fall to the “n/a” lane.",
   },
 ];
+
+/** Help for the reference graph's settings beyond the Y-axis options (shown in the Help popup). */
+export const REFERENCE_GRAPH_HELP = {
+  overview:
+    "Each node is a work this paper cites. It plots where those references sit in time and how heavily this paper leans on each, so you can see which references are load-bearing and how they cluster by year.",
+  xAxis:
+    "The horizontal axis is always publication year (older to the left, newer to the right). References with no known year sit in a separate “no year” lane at the far left so they stay visible.",
+  size: "Node size is always the section-weighted citation count — how heavily this paper relies on that reference. The per-section weights (abstract, methods, …) are set in your Profile.",
+  color:
+    "Colour marks the node kind: this paper, an in-library reference (a work you already have), or an external reference (cited but not in your library).",
+  refEdges:
+    "“Local reference-to-reference edges”: when on, also draws citation links between the in-library references that cite one another — not just from this paper out to each reference — revealing how your cited works build on each other. Off by default because it needs those references' own extracted citations.",
+  naLane:
+    "References with no value for the chosen Y axis are drawn with a dashed outline on a separate “n/a” lane below the real values, so they stay visible instead of being misread as zero.",
+} as const;
 
 /** The Y value for a node under the chosen axis, or null when it has none (→ the "n/a" lane). */
 export function yValueFor(

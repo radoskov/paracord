@@ -26,6 +26,28 @@ const SCOPE_PARAM: VizParamHelp = {
   help: "Which papers to include — the whole library, a shelf, a rack, or the current search results.",
 };
 
+// Per-axis-option help for the temporal map's X / Y selectors: what each option is and how to read
+// it. Keyed by the axis `key` returned in payload.axis_options (with sensible built-in defaults).
+// Kept as data so it's unit-testable and can be rendered wherever the axis options are shown.
+export const AXIS_OPTION_HELP: Record<string, string> = {
+  year: "Publication year. Read left→right as older→newer — pair it with a metric on the other axis to watch that metric evolve over time.",
+  citation_count:
+    "Total times the paper has been cited across all literature (from stored metadata). Higher means more widely influential overall.",
+  local_degree:
+    "How many papers within the current scope cite or are cited by it — its connectedness inside your library, not the wider world. Higher means more central to your collection.",
+  citation_velocity:
+    "Citations gained per year since publication (citation count ÷ years since published). Surfaces fast-rising papers regardless of age.",
+  similarity_to_focus:
+    "Cosine similarity of the paper's embedding to the chosen focus paper (1 = most alike, 0 = unrelated). Needs a focus paper and embeddings.",
+  topic_similarity_to_focus:
+    "How strongly the paper shares the focus paper's topics (from extracted topics). Higher means more topical overlap. Needs a focus paper and topics.",
+};
+
+/** Help for one axis option, or a safe fallback for an unknown/new axis key. */
+export function axisOptionHelp(key: string): string {
+  return AXIS_OPTION_HELP[key] ?? "A value plotted on this axis.";
+}
+
 export const VIEW_HELP: Record<string, VizViewHelp> = {
   temporal_map: {
     key: "temporal_map",

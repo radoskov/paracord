@@ -15,7 +15,7 @@
   import '../lib/viz/coCitation';
   import '../lib/viz/topicRiver';
   import '../lib/viz/similarityHeatmap';
-  import { VIEW_HELP, helpForView } from '../lib/viz/vizHelp';
+  import { VIEW_HELP, axisOptionHelp, helpForView } from '../lib/viz/vizHelp';
   import Modal from '../components/Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
@@ -469,6 +469,16 @@
         {#each help.params as p (p.name)}
           <dt>{p.name}</dt>
           <dd>{p.help}</dd>
+        {/each}
+      </dl>
+    {/if}
+    {#if isTemporal}
+      <h4>How to read each axis</h4>
+      <p class="muted">Any of these can go on the X or Y axis.</p>
+      <dl class="viz-params" data-testid="viz-axis-help">
+        {#each axisOptions as opt (opt.key)}
+          <dt>{opt.label}</dt>
+          <dd>{axisOptionHelp(opt.key)}</dd>
         {/each}
       </dl>
     {/if}
