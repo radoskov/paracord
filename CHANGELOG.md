@@ -8,6 +8,15 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Visualization axis help + reference-graph help modal.** The temporal map's "About this view"
+  popup now explains each X/Y axis option (what it is and how to read it), and the per-paper
+  reference graph gains a "ⓘ Help" button documenting its layout, every Y-axis option, and the
+  "Local reference-to-reference edges" toggle. Help text lives as testable data in
+  `frontend/src/lib/viz/vizHelp.ts` and `frontend/src/lib/viz/referenceGraph.ts`.
+- **Duplicates & multi-work files split into two sub-tabs.** `DuplicatesPage` now separates the
+  largely-correct duplicate/version candidates from the noisy `multiwork_file` candidates into
+  their own sub-tabs (with counts), so multi-work false positives no longer bury the duplicates.
+
 - **P2/item6 — Navigation shell + Admin UI:** `frontend/src/App.svelte` now does hash-based
   routing (`#library` / `#admin`) with a nav bar and lifts the auth token so both pages share one
   authenticated client. New `frontend/src/pages/AdminPage.svelte` provides user management (create /

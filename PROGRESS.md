@@ -9,6 +9,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Viz help + duplicates sub-tabs (2026-07-08)
+
+Two small UX features on `main` (not pushed). Frontend-only; `npm run build` clean, full Vitest
+suite green (224 passed / 4 skipped).
+
+- **Visualization axis help.** New `AXIS_OPTION_HELP` / `axisOptionHelp()` in `lib/viz/vizHelp.ts`
+  explain each temporal-map X/Y axis option (year, citation count, local degree, citation velocity,
+  similarity/topic-similarity to focus) — what it is and how to read it. Surfaced as a "How to read
+  each axis" list in the temporal map's "About this view" modal.
+- **Reference-graph help modal.** `ReferenceGraphModal` gains a "ⓘ Help" button opening a modal
+  that documents the layout/encodings (X = year, size = section-weighted citations, colour = node
+  kind, the "n/a" lane), every selectable Y axis, and the "Local reference-to-reference edges"
+  toggle. Help text lives as data (`REFERENCE_GRAPH_HELP` + a `help` field on each `REFERENCE_Y_AXES`
+  entry) in `lib/viz/referenceGraph.ts` so it's unit-testable.
+- **Duplicates split into two sub-tabs.** `DuplicatesPage` now partitions candidates client-side
+  (one fetch) into a **Duplicates** tab (same-DOI/arXiv, fuzzy-title, identical-file pairs) and a
+  **Multi-work files** tab (`multiwork_file`, mostly false positives) with per-tab counts and empty
+  states, so the noisy multi-work results no longer bury the largely-correct duplicate results.
+
 ## Batch A — local-agent overhaul (2026-07-07)
 
 Five phases of the local-agent overhaul (`docs/AGENT_OVERHAUL_DESIGN.md`, FINAL MODEL), one commit
