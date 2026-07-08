@@ -73,6 +73,7 @@ def create_app(
             "default_action": config.default_action,
             "default_teleport_policy": config.default_teleport_policy,
             "auto_prune_unwatched": config.auto_prune_unwatched,
+            "create_index_stubs": config.create_index_stubs,
             "folders": [f.model_dump(mode="json") for f in config.folders],
             "files": [f.model_dump(mode="json") for f in config.files],
             "folder_stats": agent_ops.folder_stats(config),
@@ -133,6 +134,16 @@ def create_app(
         config.auto_prune_unwatched = bool(body.get("enabled"))
         save_config(config, config_path)
         return JSONResponse({"ok": True, "auto_prune_unwatched": config.auto_prune_unwatched})
+
+    async def api_set_create_stubs(request: Request):
+        """Toggle whether index_only files create library paper stubs on the server (B6; default ON)."""
+        if (deny := guard(request)) is not None:
+            return deny
+        body = await request.json()
+        config = _config()
+        config.create_index_stubs = bool(body.get("enabled"))
+        save_config(config, config_path)
+        return JSONResponse({"ok": True, "create_index_stubs": config.create_index_stubs})
 
     async def api_enroll(request: Request):
         if (deny := guard(request)) is not None:
@@ -473,6 +484,7 @@ def create_app(
         Route("/api/browse", api_browse),
         Route("/api/connect", api_connect, methods=["POST"]),
         Route("/api/set-auto-prune", api_set_auto_prune, methods=["POST"]),
+        Route("/api/set-create-stubs", api_set_create_stubs, methods=["POST"]),
         Route("/api/enroll", api_enroll, methods=["POST"]),
         Route("/api/set-token", api_set_token, methods=["POST"]),
         Route("/api/items", api_add_item, methods=["POST"]),
@@ -578,6 +590,7 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
   <button data-tab="folders" onclick="show('folders')" title="Folders and files this agent watches">Folders &amp; files <span class="count" id="cFolders">0</span></button>
   <button data-tab="files" onclick="show('files')" title="Files this agent has indexed">Indexed <span class="count" id="cFiles">0</span></button>
   <button data-tab="reqs" onclick="show('reqs')" title="Teleport requests from the server">Requests <span class="count" id="cReqs">0</span></button>
+  <button data-tab="help" onclick="show('help')" title="How the agent works + a glossary of terms">Help</button>
 </nav>
 <main>
   <section class="tab active" data-tab="conn">
@@ -613,6 +626,8 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
       <div id="items" style="margin-top:.7rem"></div>
       <label style="display:block;margin-top:.8rem;font-size:.85rem" title="When ON, each ‘Scan &amp; push’ also removes entries that are on disk but outside every watched folder. OFF by default so kept files are never silently dropped.">
         <input type="checkbox" id="autoPrune" onchange="setAutoPrune(this.checked)"> Auto-prune unwatched entries on “Scan &amp; push” <span class="muted">(off by default)</span></label>
+      <label style="display:block;margin-top:.5rem;font-size:.85rem" title="When ON, ‘Scan &amp; push’ creates a library paper stub for each index-only file (promotable later via Extract/Teleport). Turn OFF to avoid adding not-yet-extracted stubs to the library.">
+        <input type="checkbox" id="createStubs" onchange="setCreateStubs(this.checked)"> Create library stubs for index-only files <span class="muted">(on by default)</span></label>
     </div>
   </section>
 
@@ -664,6 +679,31 @@ button.sec .spin{border:2px solid rgba(33,48,61,.25);border-top-color:#21303d}
   <section class="tab" data-tab="reqs">
     <div class="card"><h2>Teleport requests <button class="sec tiny" onclick="refresh()" title="Reload the teleport requests list">Refresh</button></h2>
       <div id="reqs"></div>
+    </div>
+  </section>
+
+  <section class="tab" data-tab="help">
+    <div class="card">
+      <h2>How it works</h2>
+      <ol style="line-height:1.5;padding-left:1.2rem">
+        <li>Add the folders (or files) you want tracked in <strong>Folders &amp; files</strong>.</li>
+        <li>Click <strong>Scan &amp; push</strong> — the agent hashes your PDFs and tells the server which files it has. Each <em>index-only</em> file becomes a library paper <em>stub</em> (unless you turned that off), which you can enrich later.</li>
+        <li>For any file, choose <strong>Extract</strong> (upload it so the server pulls out metadata + full text) or <strong>Teleport</strong> (upload the file into the server library).</li>
+        <li>Use <strong>Reconcile with server</strong> to mirror server-side deletions back here — files you deleted on the server get un-indexed locally (optionally moved to a recoverable trash).</li>
+      </ol>
+      <h2>Glossary</h2>
+      <dl style="line-height:1.45">
+        <dt><strong>Watched / Unwatched / Missing</strong></dt>
+        <dd>Watched = on disk and inside a watched folder. Unwatched = on disk but outside every watched folder. Missing = no longer on this workstation.</dd>
+        <dt><strong>index-only / extract / teleport</strong></dt>
+        <dd>index-only registers the file (and creates a library stub); extract uploads it for metadata + text extraction; teleport uploads the file itself into the library.</dd>
+        <dt><strong>Prune vs Forget</strong></dt>
+        <dd>Both remove entries from the local index only (never the file on disk, never the server copy). <em>Prune</em> removes only <em>unwatched</em> entries; <em>Forget</em> removes any selected entry.</dd>
+        <dt><strong>Scan &amp; push vs Reconcile with server</strong></dt>
+        <dd>Scan &amp; push is the forward direction (tell the server what you have). Reconcile is the reverse (un-index what the server no longer has); it can optionally delete server-removed files from disk, behind strict one-shot guards.</dd>
+        <dt><strong>Auto-prune / Library stubs</strong> (Folders &amp; files)</dt>
+        <dd>Auto-prune (off by default) drops unwatched entries on every push. Library stubs (on by default) create a paper per index-only file so it shows in the library right away.</dd>
+      </dl>
     </div>
   </section>
 </main>
@@ -765,6 +805,7 @@ async function refresh(){
     : `<span class="bad">●</span> not connected (${esc(s.server_url)}) ${s.error?'— '+esc(s.error):''}`;
   const url=document.getElementById('url');if(document.activeElement!==url)url.value=s.server_url;
   const ap=document.getElementById('autoPrune');if(ap)ap.checked=!!s.auto_prune_unwatched;
+  const cs=document.getElementById('createStubs');if(cs)cs.checked=s.create_index_stubs!==false;
   // managed items
   const items=[...s.folders.map(f=>({...f,kind:'folder'})),...s.files.map(f=>({...f,kind:'file'}))];
   document.getElementById('cFolders').textContent=items.length;
@@ -918,6 +959,7 @@ function copyHash(h){navigator.clipboard.writeText(h).then(()=>toast('Hash copie
 // --- server connection / enrollment ---
 function connect(){return api('/api/connect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:document.getElementById('url').value})});}
 function setAutoPrune(on){act(()=>api('/api/set-auto-prune',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:on})}),on?'Auto-prune ON':'Auto-prune OFF');}
+function setCreateStubs(on){act(()=>api('/api/set-create-stubs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:on})}),on?'Library stubs ON':'Library stubs OFF');}
 // Show a spinner on a button + disable it while an async action runs, then restore it (Phase 4).
 async function withBusy(btnId,fn){
   const btn=document.getElementById(btnId);

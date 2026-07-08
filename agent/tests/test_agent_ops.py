@@ -385,19 +385,33 @@ def test_reconcile_un_indexes_server_deleted(tmp_path: Path) -> None:
     assert state.all_files() == []
 
 
-def test_reconcile_ignores_never_pushed_and_still_on_server(tmp_path: Path) -> None:
-    root, pdf, config, state, lid = _server_known_file(tmp_path)
-    # Still on the server → kept.
+def test_reconcile_keeps_files_still_on_server(tmp_path: Path) -> None:
+    _root, _pdf, config, state, lid = _server_known_file(tmp_path)
     kept = asyncio.run(
         agent_ops.reconcile(
             config, state, FakeClient(my_files=[{"local_file_id": lid}]), apply=True
         )
     )
-    assert kept["un_indexed"] == 0
-    # A never-pushed index_only row (state "indexed") is never a reconcile candidate.
+    assert kept["un_indexed"] == 0 and state.all_files()
+
+
+def test_reconcile_un_indexes_index_only_stub_deleted_on_server(tmp_path: Path) -> None:
+    """B6-Q4: with library stubs ON (default), an index_only file that vanished from the server
+    (its stub was deleted there) is un-indexed locally on Reconcile."""
+    _root, _pdf, config, state, lid = _server_known_file(tmp_path)
+    state.set_processing_state(lid, "indexed")  # index_only, never extracted/teleported
+    r = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=True))
+    assert r["un_indexed"] == 1 and not state.all_files()
+
+
+def test_reconcile_ignores_index_only_when_stubs_off(tmp_path: Path) -> None:
+    """With library stubs OFF, an index_only file has no server stub, so a reverse sync never drops
+    a purely-local index_only row (preserves the Batch-A guarantee)."""
+    _root, _pdf, config, state, lid = _server_known_file(tmp_path)
+    config.create_index_stubs = False
     state.set_processing_state(lid, "indexed")
     r = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=True))
-    assert r["would_un_index"] == 0 and state.all_files()
+    assert r["un_indexed"] == 0 and state.all_files()
 
 
 def test_delete_on_disk_boundary_rejects_outside_and_symlink_escape(
@@ -534,3 +548,20 @@ def test_prune_selected_prunes_only_unwatched_leaves_watched(tmp_path: Path) -> 
     remaining = {r.local_file_id for r in state.all_files()}
     assert watched_id in remaining  # watched file kept in the index
     assert "unw1" not in remaining  # unwatched file pruned
+
+
+def test_sync_sends_create_stubs_flag(tmp_path: Path) -> None:
+    """B6: Scan & push carries the agent's 'create library stubs' toggle to the server."""
+    root = tmp_path / "papers"
+    root.mkdir()
+    (root / "a.pdf").write_bytes(b"%PDF-1.4\nA")
+    config = AgentConfig(folders=[ManagedFolder(path=root)])
+    state = AgentState(tmp_path / "state.sqlite3")
+    client = FakeClient()
+    asyncio.run(agent_ops.sync(config, state, client))
+    assert client.manifests[0]["create_stubs"] is True  # default on
+
+    config.create_index_stubs = False
+    client2 = FakeClient()
+    asyncio.run(agent_ops.sync(config, state, client2))
+    assert client2.manifests[0]["create_stubs"] is False

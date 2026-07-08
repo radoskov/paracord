@@ -46,6 +46,10 @@ class AgentConfig(BaseModel):
     # Forward "Scan & push" auto-prune of unwatched entries — OFF by default so keep-by-default
     # holds and a routine push never silently drops unwatched-but-kept files (owner-confirmed).
     auto_prune_unwatched: bool = False
+    # B6: whether "Scan & push" tells the server to create a library paper "stub" for each
+    # index_only file (promotable later via Extract/Teleport). Default ON; turn off to avoid
+    # populating the library with not-yet-extracted stubs.
+    create_index_stubs: bool = True
     folders: list[ManagedFolder] = Field(default_factory=list)
     files: list[ManagedFile] = Field(default_factory=list)
 

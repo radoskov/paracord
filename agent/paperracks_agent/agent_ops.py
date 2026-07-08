@@ -265,16 +265,19 @@ async def _resolve_batch_cap(client: PaRacORDServerClient) -> int:
 
 
 async def _send_manifest_chunked(
-    client: PaRacORDServerClient, scanned: list[ScannedFile], cap: int
+    client: PaRacORDServerClient, scanned: list[ScannedFile], cap: int, *, create_stubs: bool = True
 ) -> None:
     """Send the manifest in ≤cap chunks sequentially. An empty scan still sends one empty manifest
-    so the server sees the agent currently has no files."""
+    so the server sees the agent currently has no files. ``create_stubs`` carries the agent's
+    "create library stubs for index-only files" toggle (B6) to the server on every chunk."""
     if not scanned:
-        await client.send_manifest({"items": []})
+        await client.send_manifest({"items": [], "create_stubs": create_stubs})
         return
     for start in range(0, len(scanned), cap):
         chunk = scanned[start : start + cap]
-        await client.send_manifest({"items": [_manifest_item(s) for s in chunk]})
+        await client.send_manifest(
+            {"items": [_manifest_item(s) for s in chunk], "create_stubs": create_stubs}
+        )
 
 
 async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerClient) -> dict:
@@ -300,7 +303,9 @@ async def sync(config: AgentConfig, state: AgentState, client: PaRacORDServerCli
             extracted_authors=sf.get("extracted_authors"),
         )
     cap = await _resolve_batch_cap(client)
-    await _send_manifest_chunked(client, scanned, cap)
+    await _send_manifest_chunked(
+        client, scanned, cap, create_stubs=getattr(config, "create_index_stubs", True)
+    )
 
     # Re-stat every indexed file: ``present`` tracks existence-on-disk, independent of which roots
     # this scan covered. Only files that truly vanished from disk (missing) are reported to the
@@ -541,10 +546,20 @@ async def reconcile(
     """
     server_files = await client.get_my_files()
     server_ids = {f["local_file_id"] for f in server_files}
+    # An index_only file is server-known too once stubs are enabled (B6): "Scan & push" created a
+    # library stub for it, so if the server no longer lists it the stub was deleted → un-index it.
+    # With stubs off the server keeps the file listed (only the AgentFile, no stub), so such rows
+    # never go absent and this widening is a no-op — matching the Batch-A "never drop a purely-local
+    # index_only file" guarantee.
+    stubs_on = getattr(config, "create_index_stubs", True)
     candidates = [
         rec
         for rec in state.all_files()
-        if rec.local_file_id not in server_ids and rec.processing_state in SERVER_KNOWN_STATES
+        if rec.local_file_id not in server_ids
+        and (
+            rec.processing_state in SERVER_KNOWN_STATES
+            or (stubs_on and rec.import_action == "index_only")
+        )
     ]
 
     deletable: list[FileRecord] = []
