@@ -22,8 +22,8 @@ _DEFAULT_MAX_PAPERS_PER_PAGE = 500
 
 # Out-of-the-box overload-protection defaults (D1). Rate limits are per rolling minute; a request
 # exceeding either the per-client or the global ceiling is rejected with 429.
-_DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN = 60
-_DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN = 300
+_DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN = 120
+_DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN = 600
 
 # Out-of-the-box ceiling on how many items a single client import batch may carry (D1). Server-folder
 # scans (a local scan, not a client batch) are exempt from this cap.
