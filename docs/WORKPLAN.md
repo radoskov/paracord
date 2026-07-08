@@ -64,8 +64,9 @@ built:
 - **Non-root nginx master** in the prod image (workers already non-root; the master still runs as
   root).
 - **TLS enforcement** + a **prod-deployment runbook** (reverse proxy / certs). Fold in the audit
-  hardening residuals as defense-in-depth (see AUDIT E1 Redis fail-closed flag, E5 read-only mounts
-  + backup verification in CI).
+  hardening residuals as defense-in-depth (E1 Redis fail-closed flag **done 2026-07-09** —
+  `PARACORD_PRODUCTION_REQUIRE_REDIS`, document it in the runbook; E5 read-only mounts + backup
+  verification in CI still open).
 
 ### M3 — Unified processing center
 *Source: UX_FEATURE_IMPROVEMENTS §2; AUDIT E4 (partial).* JobsPage already shows queue/worker health,
@@ -121,13 +122,14 @@ in-app theme editor; a bundled-theme gallery.
 envisioned is not wired. Cosmetic polish.
 
 ### L7 — Audit hardening residuals (defense-in-depth)
-Tracked in [`AUDIT.md`](AUDIT.md), listed here so they're on the build radar: **E1** (Redis
-fail-closed flag + admin "limits unavailable" status), **E2** (parser-level PDF validation via a
-PyMuPDF open-probe before GROBID/OCR), **E3** (SQL visibility predicates instead of
+Tracked in [`AUDIT.md`](AUDIT.md), listed here so they're on the build radar. **Done 2026-07-09**
+(easy-audit-items batch): **E1** (Redis fail-closed flag + admin "limits unavailable" status),
+**E2** (parser-level PDF validation via a PyMuPDF open-probe before GROBID/OCR), and the
+`Agent.revoked_at` dead-column cleanup. **Still open:** **E3** (SQL visibility predicates instead of
 Python-materialized `IN` lists), **E5** (read-only container mounts + backup-restore verification in
 CI), **D2 residual** (HttpOnly-cookie token migration — *deferred by design*, only worth it beyond
 LAN), **S2 residual** (agent loopback-GUI token niceties: one-time launch token, rotation on
-restart). Also a cleanup: remove the dead `Agent.revoked_at` column/code.
+restart).
 
 ---
 

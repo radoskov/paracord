@@ -9,6 +9,32 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Easy-audit-items batch + CI fix (2026-07-09)
+
+Self-contained audit items that needed no owner decision, plus an owner-reported CI regression, on
+`feature/library-resize` (not pushed). Plan: `docs/WORKPLAN_2026-07-09_easy-audit-items.md`. Handoff:
+`docs/agent_handoffs/2026-07-09-easy-audit-items.md`. One commit per chunk; each verified in the API
+container (fast suite, migration parity on Postgres, upload-abuse safety, rate-limit/queue-cap) and
+the frontend container (Vitest + `npm run build`).
+
+- **Docs — audit merge.** Folded the extended audit's non-issue narrative into `docs/AUDIT.md` as
+  Appendix A and removed the standalone `docs/AUDIT_EXT.md`, so there is a single audit register.
+- **CI fix — flaky `no such table: groups`.** Seven services memoized optional-table existence in a
+  dict keyed on `id(db.get_bind())`; CPython reuses a GC'd engine's address, so a later narrow test
+  DB inherited a stale `True` and queried a missing table. Replaced all seven with one
+  `WeakKeyDictionary`-backed `app.utils.table_presence` helper (purged on engine GC). Regression
+  test added. Full fast backend suite green (671 passed).
+- **AUDIT E2 — parser-level PDF validation.** `storage.probe_pdf_openable` opens uploaded bytes with
+  PyMuPDF and fails closed on encrypted/page-less/unparseable PDFs, wired into all five upload
+  handlers after the `%PDF` header check so invalid bytes never reach GROBID/OCR. Unit + upload-abuse
+  tests; upload happy-path tests now send real openable PDFs.
+- **AUDIT E1 — Redis fail-closed option.** `PARACORD_PRODUCTION_REQUIRE_REDIS` (default off): when
+  set and Redis is unreachable, rate-limit → 503 (`unavailable` scope) and queue-capacity → 503
+  instead of failing open; Jobs page shows a red "limits unavailable" banner
+  (`queue_status.require_redis`). Login-throttle already degrades to a per-process window, left as-is.
+- **AUDIT L7 — `Agent.revoked_at` removed.** Dead column (revocation is via `status`/`delete_agent`)
+  dropped; migration `0055_drop_agent_revoked_at`, Postgres parity green. Spec table updated.
+
 ## issue_batch_7 — extraction/dedup, viz, library & metadata UX (2026-07-08)
 
 Implemented the "ready to build" items from `docs/WORKPLAN_2026-07-08_batch7.md` (the triage doc,

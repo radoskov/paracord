@@ -1034,7 +1034,6 @@ capabilities jsonb
 last_seen_at
 created_by_user_id
 created_at
-revoked_at nullable
 ```
 
 #### sources

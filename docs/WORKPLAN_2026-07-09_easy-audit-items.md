@@ -5,6 +5,9 @@ that are **self-contained and need no owner decision**, plus a CI regression the
 mid-batch. Each item was verified against the current code (branch `feature/library-resize`) by
 dedicated research passes before being scheduled here.
 
+> **Status: all items below implemented 2026-07-09** (§0 CI fix, §1 E2, §2 E1, §3 L7). See
+> `PROGRESS.md` and `docs/agent_handoffs/2026-07-09-easy-audit-items.md`. Not pushed.
+
 **Selection rule.** "Easy to implement, no additional information required." Excluded because they
 need an owner call or are out of the stated scale: **H3** (default embedding model — gated on an
 owner decision), **D38** (import breadth / Zotero — product-scope decisions), **E6** (onboarding —
