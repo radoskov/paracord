@@ -296,7 +296,7 @@ Reset an owner/admin password from the server console:
 make reset-admin-password
 ```
 
-See `docs/runbooks/credential_recovery.md`.
+See `docs/runbooks/operations.md` (Credential Recovery).
 
 ## Security assumptions
 

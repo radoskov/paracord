@@ -170,12 +170,10 @@ docs/latex/chapters/a_configuration.tex
 docs/latex/chapters/b_glossary.tex
 docs/latex/main.tex
 docs/latex/references.bib
-docs/runbooks/credential_recovery.md
-docs/runbooks/dev_containers.md
-docs/runbooks/development_setup.md
-docs/runbooks/local_agent.md
+docs/runbooks/development.md
+docs/runbooks/features.md
+docs/runbooks/operations.md
 docs/runbooks/secrets_management.md
-docs/runbooks/teleport.md
 frontend/Dockerfile
 frontend/README.md
 frontend/dist/assets/index-BPNP00NF.js

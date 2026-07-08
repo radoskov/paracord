@@ -4,7 +4,7 @@
 **Document type:** implementation specification and multi-agent build guide
 **Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser
 **Document date:** 2026-06-23 (revised 2026-07-01)
-**Status:** v1.0 implementation-ready draft. This is a destination document: it describes the agreed feature set. Most of it is built; access control (groups, the full role ladder, rack/shelf ACL), raw-citation batch import, the per-paper topic/keyword actions, and a few smaller items in the 2026-07-01 round are the defined target and are noted as in-progress where relevant (see §20).
+**Status:** v1.0 implementation-ready draft. This is a destination document: it describes the agreed feature set. Most of it is built and shipped, including everything called out in the 2026-07-01 round — access control (groups, the full role ladder, rack/shelf ACL, §7.1.2/§7.9), raw-citation batch import (§8.1.1), and the per-paper topic/keyword actions (§8.15). Later rounds (2026-07-03…07) added the visualization suite, the per-paper reference graph, citation summaries, the four-theme + custom-YAML theming system, reader reading-modes, the reversible duplicate merge/unmerge model, and the local-agent status/reconcile overhaul (see §20). Remaining genuinely-optional / off-by-default items are noted where relevant.
 
 ## Contents
 
@@ -13,7 +13,7 @@
 3. Architecture, deployment, security, and access control
 4. Functional requirements
 5. Data model and API specification
-6. Local agent protocol (§11; redesigned in §32, review draft)
+6. Local agent protocol (§11; redesigned and implemented in §32)
 7. Processing pipelines
 8. User interface specification
 9. Search, export, performance, and configuration
@@ -1527,7 +1527,7 @@ Export request example:
 > **Note (2026-06-29):** A redesigned agent model — single persistent agent, a local-only web
 > GUI, privilege-gated and agent-controlled teleport, and an `index_only` / `index_and_extract` /
 > `teleport` action model — is specified in **§32 (Local agent & teleport — redesign v2)**. §32 is a
-> review draft that supersedes/expands this section once accepted. §6.2 and §7.5 still apply.
+> redesign that supersedes and expands this section (accepted and implemented). §6.2 and §7.5 still apply.
 
 ### 11.1 Agent responsibilities
 
@@ -1717,25 +1717,24 @@ Output: TEI blob + parsed records
 ### 13.1 Main navigation
 
 ```text
-Dashboard
 Library
-Reading queue
+Search
+Import         (editor+; hidden for readers)
 Shelves
 Racks
-Files
-Graphs
-Imports        (editor+; hidden for readers)
+Tags
 Duplicates     (editor+; hidden for readers)
-Topics
-Search
-Exports
+Jobs           (editor+; hidden for readers)
+Insights
+Visualizations
+Citation summary
 Admin          (admin/owner)
 AI & Models    (admin/owner; dedicated top-level tab)
-Events / Audit (admin/owner)
-Settings / Profile
+Events         (admin/owner)
+Profile
 ```
 
-Tabs are role-gated: readers see Library, Shelves, Racks, Tags, Insights, and Profile; Import/Jobs/Duplicates require editor+; Admin/AI/Events are admin/owner. The header groups the username and the Profile link into one user-menu chip.
+Tabs are role-gated: readers see Library, Search, Shelves, Racks, Tags, Duplicates(view), Insights, Visualizations, Citation summary, and Profile; Import and Jobs require editor+ (contributor and up); Admin, AI & Models, and Events are admin/owner. `Insights` hosts the citation graph, topics, and scope summaries; `Visualizations` hosts the analytical view suite (§33.1); `Citation summary` hosts the scoped citation analytics (§8.11). The header groups the username and the Profile link into one user-menu chip.
 
 ### 13.2 Dashboard
 
@@ -2276,6 +2275,8 @@ Acceptance:
 The ordering is value-first and dependency-sound: it front-loads the complete single-machine loop — import → organize → extract → read → export (Milestones 1–4) — so the tool is genuinely useful early, then adds the remote-machine agent (5) and the heavier analytical layers, citation graph (6) and local AI/topics (7), before final hardening (8). `ROADMAP.md` is a condensed mirror of this list and `WORK_SPLIT.md` maps the work packages onto it.
 
 **Status (2026-07-01).** Milestones 0–7 are substantially built, and the system has been through several in-vivo testing rounds. Beyond the original milestones, the following are **implemented**: the `admin` role and immutable-owner model (§7.1.1); the PDF.js text-layer reader with whole-document search, working annotations, and bidirectional citation↔reference navigation (§13.8); library configurable/sortable columns, hash search, and reference↔citation cross-linking (§13.3); separate Enrich/Extract actions; the agent web-GUI overhaul (§32.7); owner-only server import roots; UI-wide hover hints; and **find-on-web** with live streaming search, resolved platform/redirect-following, the safe-OA allowlist + denylist + SSRF guard, and the three owner-set download-policy modes (§8.18). The 2026-07-01 round (see "Milestone 9" below) also shipped: the linear role ladder and group/collection access control (§7.1.2, §7.9), raw-citation batch import and import-into-rack/shelf (§8.1.1), the per-paper Topic/Keyword action buttons (§8.15), the metadata-conflict **remove/resolve** action (§8.12), and the dedicated **AI & Models** tab (§13.11). No dates or completion metrics are asserted here beyond done/in-progress.
+
+**Status (2026-07-07).** Since the 2026-07-01 round the following shipped: the D38 **visualization suite** (temporal map, embedding-cluster map, co-citation/coupling, topic river, similarity heatmap) plus **citation summaries** and a **per-paper reference graph** with a selectable Y axis and Profile-configurable section weights (§8.9/§8.11/§13.9); the **theming system** — four bundled Catppuccin themes plus admin-uploaded custom YAML themes, a per-user picker, follow-system, and live restyle (§13/§17); **reader reading-modes** (Original/Dim/Dark, §13.8); the **reversible duplicate merge/unmerge** model (§8.4/§13.10); the **local-agent overhaul** — truthful watched/unwatched/missing status, forward "Scan & push" vs reverse "Reconcile with server", per-item/bulk prune, and a guarded one-shot delete-on-disk (§32.12); and infrastructure hardening — a **queue-capacity guard** + overload throttle (§16.2/§18) and a **safety test battery** (§19.4). Still genuinely optional / off by default (unchanged): a shipped default embedding model (lexical `hash_bow` remains the default), full BERTopic topic modeling, Tier-2 local-LLM summaries, and OCR.
 
 ### Milestone 0: foundation
 
@@ -2962,12 +2963,15 @@ Implement only your assigned section of PaRacORD. Preserve the no-guest, no-arbi
 
 ---
 
-## 32. Local agent & teleport — redesign v2 (review draft)
+## 32. Local agent & teleport — redesign v2 (implemented)
 
-**Status:** Accepted; supersedes and expands §11. §6.2 (deployment) and §7.5 (agent security) still
-apply. Much of this is now built — notably the local web GUI and its management features (§32.7).
-Some pieces (e.g. the full teleport-request approve/reject-forever/unblock workflow and per-entry
-`teleport_policy = ask`) may still be partial. The single persistent agent, the
+**Status:** Accepted and implemented; supersedes and expands §11. §6.2 (deployment) and §7.5 (agent
+security) still apply. This is now built, including the local web GUI and its management features
+(§32.7). The teleport-request approve / reject / reject-forever / unblock workflow and the per-entry
+`teleport_policy = ask` gating are implemented (agent CLI `request --approve / --reject [--forever] /
+--unblock`, a `teleport_blocked` flag in `state.sqlite3`, and the same controls in the web GUI); the
+truthful watched/unwatched/missing status model, reverse-sync reconcile, and guarded delete-on-disk
+are covered in §32.12. The single persistent agent, the
 `index_only`/`index_and_extract`/`teleport` action model, agent-initiated teleport when
 `can_teleport` is granted, the durable `state.sqlite3` index, and per-agent privileges are the
 agreed model.
@@ -3210,3 +3214,82 @@ Lowest-priority / left to implementer (Linux is the primary target):
 - **Daemonization on non-Linux:** Linux uses a systemd **user** unit (primary). macOS/Windows are
   best-effort — a built-in `--detach` fallback, with a documented launchd plist (macOS) and
   NSSM/Task Scheduler recipe (Windows). Not a v1 blocker.
+
+### 32.12 Status model & reconcile (implemented)
+
+Each indexed file is classified **watched** (on disk, inside an enabled watched root), **unwatched**
+("on disk, not in a watched folder"), or **missing** (gone from disk); presence is re-`stat`ed each
+cycle, so "missing" is the true "no longer on this workstation" signal and is the only state reported
+to the server as source-removed. Forward **"Scan & push"** and reverse **"Reconcile with server"**
+are distinct operations: reconcile does a dry-run preview, then un-indexes files the server no longer
+has, with an opt-in, heavily guarded **one-shot delete-on-disk** — strict watched-root boundary,
+symlink-escape rejection, two-dialog + arm-flag gating, a hard cap of 100 files, self-disabling after
+one run, and moves to a recoverable trash dir (never `unlink`). Per-item and bulk **Forget/Prune**
+remove entries locally without contacting the server; forward auto-prune is a config toggle **off by
+default**. CLI parity: `reconcile`, `prune-unwatched`, and bulk `forget`. An `index_only` file also
+creates a filename-titled server **stub** (migration 0054, gated by the agent `create_index_stubs`
+toggle, default on) that later extraction/teleport enriches in place; the agent GUI carries a **Help**
+tab glossing these states.
+
+---
+
+## 33. Post-v1.0 shipped features (2026-07)
+
+Features built and shipped after the v1.0 draft, documented here and cross-referenced from their
+home sections. (Consolidated 2026-07-08 from the per-feature design docs, now archived.)
+
+### 33.1 Visualization suite (see §8.9)
+Beyond the citation graph, a Visualizations module renders SEE-filtered analytical views over any
+scope (library / rack / shelf / search-result / selected / import-batch) through a provider registry
+(`GET /api/v1/viz/{view_type}` → a normalized `VizPayload`), rendered with **ECharts** (lazy-loaded):
+a **temporal map** (both axes independently selectable — year, citation count, local degree, citation
+velocity, similarity/topic-similarity to a focus paper; size/color/shape encodings; optional edge
+overlay), an **embedding-cluster map** (PCA-2D by default, opt-in UMAP, k-means-coloured,
+server-cached), **co-citation / bibliographic-coupling** networks, a **topic river** (per-year topic
+shares), and a **similarity heatmap** (pairwise cosine, ≤50 papers). Views are cached by a scope
+signature and cap at 500 nodes with a truncation note. Network depth adds weighted degree, PageRank,
+exact Brandes betweenness, `color_by`, warning rings, and a neighborhood endpoint.
+
+### 33.2 Per-paper reference graph (see §8.9, §13.7)
+A per-paper **reference graph** (`GET /works/{id}/reference-graph`, opened from the paper detail view)
+renders the focus paper and its references as a small graph. X encodes publication year and node size
+encodes **section-weighted citation importance** (the per-section weights are configurable in
+Profile). The **Y axis is user-selectable** (section-weighted citations / raw mentions / citation
+count / topic similarity to the focus / local citation degree), restyled client-side without a
+refetch; references with no value for the current axis fall into a dashed "n/a" lane. The base→ref
+edges always show; local ref→ref edges toggle on.
+
+### 33.3 Reversible duplicate merge / unmerge (see §8.4, §13.10)
+Merging is **reversible**. Merging a source work into a base moves the source's files, shelf/tag
+links, references, citation mentions, annotations, and versions to the base and hides the source as a
+**shadow** (`merged_into_id` set, never surfaced in listings/search) carrying a `merge_record`.
+`POST /works/{id}/unmerge` replays that record to restore the shadow as a standalone paper.
+Re-merging into a base that already has a reversible shadow **flattens** the prior merge (unmerge stays
+single-level). A `merge-preview` endpoint shows the effect before committing.
+
+### 33.4 Theming (see §13, §17)
+The UI ships four bundled Catppuccin-based themes (`latte-warm`, `latte-cool`, `mocha-warm`,
+`mocha-cool`) authored as hand-editable YAML compiled to role tokens (`--surface-*` / `--ink-*` /
+`--accent-*` / `--status-*`, plus a `graph` block driving the Cytoscape/ECharts palettes). A per-user
+**picker** (Profile) persists the choice (`PATCH /auth/me` → `theme`), restyles live with no reload,
+and offers **follow-system** (`prefers-color-scheme`). Admin/owner can add **custom themes** at runtime
+from pasted YAML (`POST /admin/themes`, stored in `custom_themes`, palette- and readability-validated)
+with no rebuild; everyone can then pick them.
+
+### 33.5 Reader reading-modes (see §13.8)
+An opt-in "Page: Original / Dim / Dark" control eases the rendered page canvas (Original = no filter;
+Dim = warm cream; Dark = warm dark-grey page with AA-readable light text) via a CSS filter on the page
+canvas only, so the text layer, highlights, and citation/annotation overlays keep true colours. Works
+in paged and scroll views and persists per user in `localStorage`.
+
+### 33.6 Queue-capacity guard & overload protection (see §16.2, §18)
+Job-creating requests call a single capacity check before enqueuing; when the pending RQ queue is at
+the configured `max_queue_len` ceiling the request is rejected with **HTTP 429** (fail-open if depth
+can't be measured). A shared per-client + global rate-limit throttle, a login-attempt throttle, a
+`max_batch_items` cap (413), and admin queue/worker controls protect against overload.
+
+### 33.7 Safety test battery (see §19.4)
+A dedicated safety battery (`backend/tests/safety/`, run via `make test-safety`) covers auth/session
+integrity, authz/IDOR, path traversal, privilege escalation, rate-limit/throttle, SQL injection,
+SSRF, upload abuse, web stability, XXE, and filesystem isolation; the agent adds `tests/safety/`
+path-safety contracts.

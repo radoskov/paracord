@@ -76,3 +76,6 @@ docs/archive/
 
 # Stale root-owned build dir renamed aside during the 2026-07-03 non-root migration (userns-remap; needs host root to delete)
 frontend/dist.stale-root/
+
+# Consolidated stale documentation (workplans, design docs, audit sources, pre-merge runbooks) — 2026-07-08
+documentation_archive.zip

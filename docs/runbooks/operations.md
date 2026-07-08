@@ -1,4 +1,17 @@
-# Backup & restore (SPEC §8.16)
+# Operations: backup, restore & credential recovery
+
+Consolidated runbook (2026-07-08). Operator procedures for backup/restore and credential recovery. The authoritative **secrets & credential-handling policy** remains separate in [`secrets_management.md`](secrets_management.md) (it is referenced by CI, the secret scanner, and docker-compose, so it keeps its filename).
+
+## Contents
+- Backup & restore (SPEC §8.16)
+- Credential Recovery Runbook
+
+
+---
+
+<!-- consolidated from docs/runbooks/backup_restore.md -->
+
+## Backup & restore (SPEC §8.16)
 
 PaRacORD's durable state is two things: the **PostgreSQL database** (works, metadata, organization,
 annotations, audit log, agent records) and the **managed library volume** (`paperracks_library`,
@@ -62,3 +75,28 @@ After restoring, run `make migrate` to ensure the schema is at the current Alemb
 
 `make prod-smoke` builds and starts the production stack and asserts `/api/v1/health` responds —
 run it after a restore drill to confirm the snapshot is loadable end-to-end.
+
+---
+
+<!-- consolidated from docs/runbooks/credential_recovery.md -->
+
+## Credential Recovery Runbook
+
+Credential recovery must be performed from the server PC or inside the backend container by an operator with database access.
+
+Planned command:
+
+```bash
+python scripts/reset_admin_password.py
+```
+
+Expected behavior:
+
+1. Prompt for account username.
+2. Prompt for new password twice without echo.
+3. Hash password.
+4. Invalidate active sessions/tokens.
+5. Write an `auth.password_reset_cli` audit event with the revocation count.
+6. Print a success/failure message.
+
+No unauthenticated web password-reset route should be implemented.

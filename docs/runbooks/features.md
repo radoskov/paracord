@@ -1,4 +1,19 @@
-# Theming runbook — adding & customizing themes
+# Feature Runbooks
+
+Consolidated runbook (2026-07-08). Per-feature operational how-tos: theming, AI providers, and the local agent + teleport. Each former runbook is preserved in full.
+
+## Contents
+- Theming runbook — adding & customizing themes
+- AI providers & models — choosing/enabling embedding, summary, and topic engines
+- Local Agent Runbook — registration & file-access flow
+- Teleport Runbook — required safety checks
+
+
+---
+
+<!-- consolidated from docs/runbooks/theming.md -->
+
+## Theming runbook — adding & customizing themes
 
 PaRacORD themes are defined in **YAML** and drive both the GUI (CSS custom properties) and the
 data visualizations (charts + the citation network). One YAML file is one theme. There are two ways
@@ -9,8 +24,9 @@ to add a theme:
 2. **Custom (runtime)** — an owner/admin pastes YAML into **Admin → Themes**. No rebuild; stored in
    the database and immediately available in everyone's picker.
 
-The authoritative schema description lives in [`docs/THEMING_DESIGN.md`](../THEMING_DESIGN.md) (see
-"YAML theme schema"). This runbook is the operational how-to.
+The theming system is specified in [`SPECIFICATION.md` §33.4](../../SPECIFICATION.md) (the original
+`THEMING_DESIGN.md` design brief is archived in `documentation_archive.zip`). The full YAML schema is
+documented below; this runbook is the operational how-to.
 
 ---
 
@@ -130,3 +146,104 @@ As owner or admin: **Admin → Themes**.
 Create and delete are recorded as audit events (`theme.uploaded` / `theme.deleted`). The canonical
 YAML lives in the `custom_themes` table, so custom themes are included in the normal database
 backup.
+
+---
+
+<!-- consolidated from docs/runbooks/ai_providers.md -->
+
+## AI providers & models (Admin → AI & Models)
+
+PaRacORD's semantic search, summaries, and topic modeling run on **dependency-free lexical
+baselines by default** (hash-BOW embeddings, extractive summaries, TF-IDF topics). Heavier local
+providers are **opt-in and configured from the web UI** (Admin → AI & Models), not from a config
+file. Owner only.
+
+## What you can choose (Admin → AI & Models)
+
+| Engine | Default | Heavier options |
+|--------|---------|-----------------|
+| Embeddings (semantic search) | `hash_bow` | `sentence_transformers`, `ollama` |
+| Summaries | `extractive` | `local_llm` (Ollama) |
+| Topics | `tfidf` | `embedding` / `bertopic` (deterministic embedding clustering) |
+
+Each provider shows **available** or a one-line hint for how to enable it. Changing the **embedding
+model** automatically queues a **reindex** (vectors are stored per provider+model); the panel shows
+`indexed / total` coverage for the active model and has a **Reindex** button.
+
+## Enabling the heavier providers
+
+Two independent things: the **runtime** (a Python package or a daemon) and the **model weights**.
+
+### Ollama (recommended — fully GUI-drivable)
+
+Ollama needs **no Python dependency**, only a reachable daemon. It powers both embedding
+(`ollama`) and `local_llm` summaries.
+
+```bash
+make up-ai          # starts the Ollama service (compose `ai` profile)
+```
+
+Then in Admin → AI & Models: set **Ollama URL** (default `http://ollama:11434` in compose, or
+`http://localhost:11434`), **Pull model** (e.g. `nomic-embed-text` for embeddings, `qwen3:4b` for
+summaries), select the provider, and **Save**. Pulls run as background jobs — watch the Jobs tab.
+
+### sentence-transformers (Python package)
+
+The Python package is **not** in the base image (immutable images; no runtime `pip install`). Enable
+it by rebuilding with the AI extra (uncomment `sentence-transformers` in
+`backend/requirements.txt`, or use an `ai` build target), then redeploy. Once importable, the panel
+marks it **available**; selecting a model downloads its weights into the model-cache on first use /
+via **Pull model** (`provider = sentence_transformers`).
+
+## How the config is applied
+
+The choices are stored in the single-row `ai_config` table (migration `0018`) and overlaid on the
+static `Settings` defaults at request time (`app/services/ai_config.py`). An empty table reproduces
+the exact out-of-the-box baseline behavior, so the GUI never has to be touched to get a working
+system — it only *upgrades* the engines when you choose to.
+
+---
+
+<!-- consolidated from docs/runbooks/local_agent.md -->
+
+## Local Agent Runbook
+
+The local agent scans only configured roots. It sends manifests to the server and can teleport selected PDFs to the managed server library.
+
+## Registration flow
+
+1. Owner creates an agent bootstrap token on the server.
+2. Workstation runs `paracord-agent register`.
+3. Server returns an agent ID and token.
+4. Agent stores token in a user-readable-only token file.
+5. Future requests use the scoped token.
+
+## File access flow
+
+- Server may request a known `local_file_id`.
+- Agent resolves the ID through its local index.
+- Agent verifies the file is still inside an allowed root.
+- Agent streams or uploads the file.
+- Agent refuses raw path requests.
+
+---
+
+<!-- consolidated from docs/runbooks/teleport.md -->
+
+## Teleport Runbook
+
+Teleport means copying a PDF from a workstation/agent or server allowed root into the server managed-library store.
+
+## Required checks
+
+1. User is authenticated and authorized.
+2. File ID is known to the server.
+3. Agent confirms the file is available and inside an allowed root.
+4. Server receives file in chunks.
+5. Server computes SHA-256.
+6. Server compares computed hash to manifest hash.
+7. Server writes the file to content-addressed storage.
+8. Server creates or updates File, Location, and ImportBatch records.
+9. Audit event is written.
+
+Teleport must not delete the original file unless a future explicit feature is added.

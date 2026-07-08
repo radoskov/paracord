@@ -122,7 +122,7 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
 
 ## M8: Polish, backup, and deployment hardening — substantially DONE (2026-06-30)
 
-- Backup/restore — **DONE** (`make backup`/`restore` + `docs/runbooks/backup_restore.md`).
+- Backup/restore — **DONE** (`make backup`/`restore` + `docs/runbooks/operations.md`).
 - Security checklist — auth throttling, in-app change-password + session revocation, SSRF-hardened
   egress, `SECURITY.md` reconciled (Stage 7). LAN deployment docs exist; prod smoke = `make
   prod-smoke`.

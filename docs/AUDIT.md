@@ -1,212 +1,128 @@
-# PaRacORD — Audit: current & deferred issues
+# PaRacORD — Audit (merged)
 
-Living list of **known technical issues** (security, correctness, performance, hygiene) that are
-open or deferred. Each has a severity and a recommended fix; none blocks daily use. Product- and
-architecture-level *choices* live in `DISCUSSIONS.md`; everything resolved or stale is in
-`ARCHIVED_AUDIT_LOG.md` (originals of the pre-2026-07-02 documents are in `docs/archive/`).
+**Consolidated & status-verified 2026-07-08.** The single register of **known technical issues**
+(security, correctness, performance, hygiene). Merges the former `AUDIT.md` (D-IDs), `AUDIT_EXT.md`
+(2026-07-08 extended audit; its net-new items are the **E-series** below), and
+`ARCHIVED_AUDIT_LOG.md` (resolved tail). Product/architecture **choices** are not issues — they live
+at the end of [`WORKPLAN.md`](WORKPLAN.md); build tasks that resolve an open issue are in
+`WORKPLAN.md` and cross-reference the IDs here.
 
-Item IDs (D1…) are stable and shared with the 2026-07-02 consolidated audit; when an item is
-fixed, move it to the archive log with its ID.
+**Scale assumption.** Mostly single-user, but **a few users on a LAN is a supported mode** —
+multi-user / IDOR / transport findings are weighted accordingly (taken seriously, not inflated to
+internet-facing severity).
 
-Scale assumption: mostly single-user, but a few users on a LAN is a supported mode — cross-user
-visibility, LAN transport, and shared-workstation issues are real product concerns. Efficiency is
-judged at hundreds–few-thousand papers.
+**Important:** the pre-consolidation `AUDIT.md` was badly stale — it listed most D-items as open when
+git history and `PROGRESS.md` show they shipped in the 2026-07-02/03 and 2026-07-07/08 batches. The
+table below reflects **verified** current status; almost everything moved to the archive section.
 
-Status at last full audit (2026-07-02): `make test-full` green (660 backend + 32 agent),
-`make frontend-check` green (75 tests + build), CI green.
+Item IDs are stable. When an open item is fixed, move it to the archive section with its ID.
 
 ---
 
-## Security
+## Open & partial issues
 
-**D1 · MEDIUM — Overload protection + per-process throttle.** — **DECIDED 2026-07-02 (revised).**
-Architecture note: gunicorn/uvicorn workers (API HTTP servers, `GUNICORN_WORKERS`) are separate
-from RQ extraction workers (the `worker` container). Owner's decision: **keep API workers at 2**;
-**make RQ worker count admin-configurable, default raised to 4**; protect the host with
-rate-limiting + caps rather than more API workers. Scope:
-Finalized parameters (owner, 2026-07-02):
-- **RQ worker count = the global concurrency control** (`rq_worker_count`, AppConfig, **default 2**,
-  admin-editable). **Apply on restart** (option A): a supervisor entrypoint reads the count at
-  worker-container start and launches that many `rq worker` children; the admin UI notes "restart
-  the worker to apply." No per-job-type sub-limits — the worker count alone caps concurrent heavy
-  jobs.
-- **Rate limiting** — per-client (user/IP) + global request caps, Redis-backed, admin-editable.
-  Defaults: **per-client 60/min, global 300/min**. A batch import counts as one request.
-- **Batch item cap** (`max_batch_items`, AppConfig, default **100**, admin-editable): applies to
-  agent / DOI-identifier / BibTeX / RIS-CSL / citation imports. Server web-GUI batches over the cap
-  are **rejected with a clear warning**; the **local agent chunks** oversized imports into ≤cap
-  batches client-side (fetches the server's cap). **Server-folder scans are exempt** (local scan,
-  not a client batch).
-- **Login throttle → Redis** (correctness across the 2 API workers; fail-open if Redis down).
+| ID | Title | Status | Description (merged; source IDs) | Priority |
+|---|---|---|---|---|
+| **D3** | Agent↔server traffic is plaintext HTTP, no guard | **OPEN** | The 180-day agent bearer + enrollment token cross the LAN in clear; an active sniffer can impersonate the agent. No `allow_insecure_http` guard exists. Fix: warn/refuse plaintext for non-loopback hosts unless opted in, + an INSTALL TLS note. (Overlaps AUDIT_EXT §2.2 "prod deployment guide".) Build task: `WORKPLAN.md` M2. | **Medium** — real transport/impersonation risk in the *supported* LAN mode, but confined to the owner's own LAN and needs an active sniffer. Highest genuinely-open item. |
+| **D38** | Big spec features — remaining deltas | **PARTIAL** | Headline items done (§8.11 citation summaries, §8.9 graph depth). Still absent: preprint↔published & same-file-different-path duplicate kinds (§8.4); backup/restore REST endpoints (§10.2, CLI-only today); CSV/TSV + watched-folder + Zotero import (§8.1); reference-string fallback parser (§8.2). Build task: `WORKPLAN.md` M1. | **Medium** — product features, owner-scheduled; none is a defect. |
+| **E6** | Onboarding / library-health / unified-jobs UX gap | **OPEN (product)** | First-run wizard, library-health dashboard, single progress center, plain-language explanations for index-only/teleport. (AUDIT_EXT §6; agent mental-model sub-item already met by the batch-6 agent Help tab.) Build tasks: `WORKPLAN.md` H1/H2/M3. | **Medium (product value)** — not a bug; UI density is the app's main UX risk. |
+| **D30** | Ops polish: slim OCR image + runtime frontend config | **OPEN** | OCR toolchain (+300–500 MB) is baked into the base backend image (breaks "heavy = opt-in"); `VITE_API_BASE_URL` is baked at build time. Optional `slim` target + runtime `config.js` injection. Build task: `WORKPLAN.md` L3. | **Low** |
+| **E1** | No fail-closed option when Redis is unreachable | **OPEN** | Rate-limit + queue-cap + login-throttle all fail *open* if Redis is down (deliberate, correct for single-user). Add a `PARACORD_PRODUCTION_REQUIRE_REDIS`-style flag + a red admin "limits unavailable" status. (was AUDIT_EXT **S1**.) | **Low** — defense-in-depth for the LAN mode. |
+| **E2** | PDF validation is header-only, not parser-level | **PARTIAL** | Uploads check size + `%PDF` header; the Batch-S safety battery already tests 413/400 on oversized/non-PDF/malformed/zero-byte/bomb. Missing: a PyMuPDF open-first-page probe to reject encrypted/unsupported PDFs with a clear failed state *before* GROBID/OCR. (was AUDIT_EXT **S3**.) | **Low** — meaningful hardening already landed; residual is defense-in-depth. |
+| **E3** | Python-materialized visibility sets vs SQL predicates | **OPEN** | `visible_work_ids()` returns a Python set; files-list/graph/export scopes build large `IN` lists. Reuse `_visible_work_condition` / `EXISTS`. (was AUDIT_EXT **O1**.) | **Low** — fine at hundreds–few-thousand papers; only bites large multi-user collections (out of the stated scale). |
+| **E4** | Extraction pipeline not queue-budget/phase aware | **OPEN** | Split bulk import into cheap/expensive phases surfaced in the Jobs UI with pause/cancel per batch. (was AUDIT_EXT **O4**; overlaps the "unified progress center", `WORKPLAN.md` M3.) | **Low** — feature, not a defect. |
+| **E5** | Production Compose least-privilege residuals | **PARTIAL** | Non-root containers (D4) + DB/Redis/API healthchecks (Batch W) are done. Missing: read-only container mounts where possible, and backup/restore verification in CI / a scheduled run. (was AUDIT_EXT **R4**.) | **Low** |
+| **D2** | Browser token in `localStorage` | **PARTIAL** | CSP + `X-Frame-Options`/`X-Content-Type-Options`/`Referrer-Policy` were added to `frontend/nginx.conf` (2026-07-03, smoke-tested). **Deliberate caveat:** `connect-src` is relaxed to `http:/https:` because the API is a separate origin from the nginx-served SPA — do not "fix" this back. Residual: the token still lives in `localStorage`; the HttpOnly-cookie migration is **deferred by design** (only worth it beyond LAN). | **Low** — the requested second layer (CSP) shipped; residual is explicitly deferred. |
+| **S2** | Agent loopback-GUI token hardening residual | **PARTIAL** | The agent GUI already uses a token + HttpOnly SameSite cookie + a `0600` token file (assessed "sound"). Residual niceties: a one-time launch token, rotation on restart, no-referrer / cache-control on the launch URL. (was AUDIT_EXT **S2**.) | **Low** — loopback-only. |
 
-**D39 · MEDIUM — Queue-length cap + admin queue/worker controls.** — **DECIDED 2026-07-02 ·
-to implement** (completes the D1 overload story). Scope:
-- `max_queue_len` (AppConfig, admin-editable, **default 1000** — pending final owner confirm;
-  chosen over 500 because chained jobs (extraction → chunk → embed) + the 100-item batch cap mean
-  a few legitimate stacked imports reach several hundred pending jobs, and 500 would reject real
-  bulk work). When the pending RQ queue is at/over the cap, **new job creation** (import, extract,
-  force-OCR, reindex, …) is **rejected** with a clear "queue full — wait and retry" error
-  (429/503 → frontend pop-up). Fail-open if Redis unreachable (can't measure depth → allow, since
-  the job would be dropped/visible via D7 anyway).
-- Admin controls in the Jobs tab: **Clear queue** (drop pending jobs — builds on the existing
-  `clear_jobs`) and **Reset/restart workers** (recover stuck jobs — builds on the D1 supervisor).
+---
 
-**D2 · MEDIUM — Browser token in `localStorage` + no CSP/security headers from nginx.**
-These compound: paper titles/abstracts are external (PDF/Crossref) data rendered in the SPA; any
-XSS anywhere reads the token → account takeover. The one `{@html}` is verified escaped, but there
-is no second layer. *Fix:* add `Content-Security-Policy`, `X-Frame-Options DENY`,
-`X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer` to `frontend/nginx.conf`
-(everything is bundled/self-hosted, so `'self'`-based CSP should be safe — needs one manual smoke
-of the built bundle). Migrating auth to an `HttpOnly` cookie is a bigger change, only worth it if
-ever exposed beyond the LAN.
+## Resolved / archived issues
 
-**D3 · MEDIUM — Agent ↔ server traffic is plaintext HTTP with no warning.**
-On a real LAN deployment the 180-day agent bearer token and the enrollment token cross the wire
-in clear; a LAN sniffer can impersonate the agent. *Fix:* warn/refuse plaintext for non-loopback
-hosts unless `allow_insecure_http: true` is set, plus a short INSTALL note on putting the API
-behind caddy/nginx TLS.
+Historical tail; kept for the audit trail. All verified fixed.
 
-**D4 · MEDIUM — Containers run as root.**
-An RCE in any dependency (the API parses untrusted PDFs) is root-in-container; in dev the source
-tree is bind-mounted read-write. *Fix:* add a non-root `USER` to each image. **Caution:** existing
-volumes have root-owned files — needs a one-time `chown` migration step for running deployments.
+**Implemented since the 2026-07-02 audit (the old `AUDIT.md` never reflected these):**
+- **D1** — overload protection: Redis login-throttle, per-client + global rate-limit middleware,
+  `max_batch_items=100` (413), `rq_worker_count` supervisor. Migrations 0043–0045.
+- **D39** — `max_queue_len` cap (429) + admin Clear-queue / Reset-workers. Migration 0046.
+- **D4** — non-root `appuser`/`node` + gosu entrypoints (reaffirmed Batch W). *(nginx **master** still
+  root — see open D-adjacent hardening in `WORKPLAN.md` M2.)*
+- **D5** — `make init` generates a random `POSTGRES_PASSWORD`.
+- **D6** — `ollama_url` SSRF guard (`ai_config._validate`, `ALLOW_EXTERNAL_OLLAMA`). Absorbs
+  AUDIT_EXT **S4** (find-on-web SSRF re-classifies every redirect hop).
+- **D7** — `extraction_queued` surfaced everywhere + Jobs queue-health semaphore + durable
+  `File.extraction_requested_at` (migration 0042) + startup sweep + deterministic `extract-{id}` id.
+- **D8** — per-source enrichment resilience (`failed` list).
+- **D9** — folder import per-file SAVEPOINTs; batch row committed up front (partial imports visible).
+- **D10** — worker supervisor waits `alembic current == head`; Batch W also gates the worker on
+  `api: service_healthy`.
+- **D11** — idempotent loose-paper backfill in the FastAPI lifespan.
+- **D12** — multimode clustering skips dim-mismatched models (no padding).
+- **D13** *(was HIGH)* — BM25 rebuild moved off the read path to a coalesced `rebuild_bm25_job`;
+  builds from `work_chunks`, not TEI.
+- **D14** — `embed_many()` batch embedding; `/search/reindex` routed to the queue.
+- **D15** — full-library duplicate scan forced onto the worker.
+- **D16** — chunked `Promise.allSettled` (concurrency 6) for batch frontend ops.
+- **D17** — Cytoscape show/hide on the live instance; relayout only on data change.
+- **D19** — topic views skip un-indexed papers + `unindexed_work_count` notice.
+- **D20** — topic-graph cosine → a single numpy `M @ M.T`.
+- **D22** — HNSW provisioning in its own short transaction.
+- **D24** — hash-pinned `backend/requirements.lock` (`--require-hashes`); httpx2 2.4.0→2.5.0.
+- **D29** — all 7 frontend majors verified stable; echarts later bumped 5.5→6.1 (`abdf368`), which
+  also cleared XSS **W1** (GHSA-fgmj-fm8m-jvvx).
+- **D31** items 1–5 — audit-event wiring + JSONL sink; summary provenance (migration 0048);
+  annotation JSON export; extra search operators; latex/pandoc export + import_batch/missing_references
+  targets. *(Item 6 dropped by owner.)*
+- **D35** — dead Nougat/Marker/`full_ml` ML-extraction seam removed (migration 0047).
+- **D36 / D36a** — Playwright wired into CI; suite expanded to 25+ journeys.
+- **D37** — `pgvector_enabled` default flipped on; ANN (HNSW) route with JSON/Python-cosine fallback.
+- **D18 / D32** — library pagination envelope + per-user `papers_per_page` + shelves/racks columns.
+- **R3** (AUDIT_EXT) — guarded one-shot delete-on-disk (watched-root boundary, symlink-escape reject,
+  arm-flag, cap 100, trash dir) shipped in Batch A + covered by Batch-S safety tests.
+- **S5 / O5** (AUDIT_EXT) — access service already centralized; topic-modeling ordering stabilized.
+- **issue_batch_6** (owner report, 2026-07-07/08) — all 7 items closed (viz axis/help/edges/overlap
+  markers/default view; embed-count fix; lexical-index freshness + Rebuild button; agent
+  bulk-prune-skips-watched; library Refresh button; `index_only`→server stub + agent Help tab;
+  per-paper weighted reference graph; stored per-paper AI summary).
 
-**D5 · LOW — `.env.example` ships a literal default Postgres password** (and local `.env`s tend
-to keep it). Postgres is loopback-only today; becomes a problem the day the port mapping changes.
-*Fix:* have `make init` generate a random `POSTGRES_PASSWORD`.
+**Already in the former `ARCHIVED_AUDIT_LOG.md`:** C1–C5, H1–H7 (2026-06-25); A1–A3, B1–B10
+(2026-06-26); efficiency E1–E7 (2026-06-30); the ~30-fix 2026-07-02 consolidated pass (agent
+perms/XSS, import IDOR, 900 s RQ timeout, transactional backup/restore, provider cache, 4 dead deps
+removed, etc.); D21/D23 de-fanged/resolved; the httpx2 supply-chain flag = false positive. *(Full
+original documents are in `documentation_archive.zip` and the earlier gitignored `docs/archive/`.)*
 
-**D6 · LOW — Admin-set `ollama_url` has no SSRF guard.**
-Admin/owner-only and defaults to loopback, but it's the one egress URL with no validation.
-*Fix:* validate scheme+host; allow loopback/docker-service names freely; require an explicit
-config opt-in for other hosts.
+---
 
-## Correctness / robustness
+## Duplicates folded (audit-trail of the merge)
+- AUDIT_EXT **S1** → **E1** (Redis fail-closed) — distinct from D1/D7/D39, which are the fail-*open*
+  mechanisms.
+- AUDIT_EXT **S2** → **S2** (agent GUI token) — mostly covered by the archived "agent GUI sound"
+  finding; only niceties remain.
+- AUDIT_EXT **S3** → **E2** (PDF validation) — partly covered by Batch-S upload-abuse tests.
+- AUDIT_EXT **S4** → folded into **D6** + archived find-on-web SSRF (resolved).
+- AUDIT_EXT **R1** → the SQLite/Postgres dual-path *discussion* (`WORKPLAN.md` → D27).
+- AUDIT_EXT **R2** (migration squash) → pre-release *discussion* (`WORKPLAN.md`).
+- AUDIT_EXT **R3** → resolved (Batch A guarded delete + Batch-S).
+- AUDIT_EXT **R4** → **E5** (partial).
+- AUDIT_EXT **O1** → **E3** (SQL visibility).
+- AUDIT_EXT **O2** (materialize graph summaries) → folded into **D38 §8.11** (in-process cache
+  shipped; a persisted cache is the stated extension).
+- AUDIT_EXT **O3** (Postgres FTS + pgvector) → the BM25-vs-FTS *discussion* (`WORKPLAN.md` → D26) +
+  **D37** (pgvector done).
+- AUDIT_EXT **O4** → **E4** (phased extraction).
+- AUDIT_EXT **O5** → resolved (topic determinism).
+- AUDIT_EXT **§6 UX** → **E6** (UX cluster).
+- AUDIT_EXT **§2.2** duplicate/Zotero/OCR/reference-parser gaps → folded into **D38**.
 
-**D7 · MEDIUM — Redis down at enqueue = imports "succeed" but files silently never get
-extracted.** (Detailed write-up requested by the owner 2026-07-02; **awaiting approval of the fix
-shape below before implementing.**)
+---
 
-*What happens.* Import paths (folder scan, upload, agent teleport) create the File/Work rows,
-commit, then **enqueue** the background jobs — GROBID extraction, metadata enrichment, chunking,
-embedding — onto Redis/RQ. Enqueue is deliberately best-effort: `workers/queue.py` catches any
-failure to reach Redis, logs a warning, and returns `None` instead of raising (rationale: "a
-missing/unreachable Redis must not break the import flow").
-
-*The hole.* If Redis is down — or the worker container is mid-restart during a
-`docker compose up -d --build` upgrade — at the enqueue moment, the jobs are silently dropped: no
-retry, no dead-letter, no record they were owed. The import HTTP response still reports success.
-So you can upload 40 PDFs, see them all in the library, and none ever get extraction, references,
-real metadata, or embeddings — they keep filename-derived titles forever. Nothing surfaces it:
-the only endpoint that 503s on a dead queue is the manual `/files/{id}/extract`; bulk import
-swallows it. No sweep later notices "status=available but never extracted" and re-queues.
-
-*Why it's real, not theoretical.* A brief Redis blip is normal exactly during an upgrade — which
-is also when someone might import. On a single self-hosted box, one transient blip =
-permanently unprocessed papers with no signal.
-
-*Fix — DECIDED 2026-07-02 · implementing (layer 1 + startup sweep; no outbox table):*
-1. **Make it visible — everywhere.** Thread the enqueue result into responses: `extraction_queued:
-   false` in the server web-GUI import/upload payloads (UI warns "imported, but couldn't queue
-   extraction — retry later"), AND in the **local-agent** push responses so the agent surfaces it
-   (log + status) and keeps the item retryable rather than marking it done. Also add a **queue/
-   worker health indicator to the Jobs tab**: a semaphore (green = workers up + queue draining;
-   yellow = queued but idle/degraded; red = Redis unreachable / no workers) + a short status line
-   (worker count, queue depth). Needs a queue-health endpoint (RQ worker count + depth + Redis
-   reachability).
-2. **Make it self-heal — with a durable "owed" marker (no double-work).** Add a durable
-   `File.extraction_requested_at` (or equivalent) set **transactionally at import** whenever
-   extraction is intended; the worker clears it on terminal success/failure. A startup (and
-   optionally periodic / admin-button) sweep re-enqueues files whose marker is set and that are
-   not currently `extracting`/queued. This cleanly distinguishes:
-   - **owed** (enqueue dropped): marker set, not extracted, not in-flight → re-enqueue;
-   - **never requested** (nobody clicked extract, if reachable): marker null → left alone;
-   - **user clicked re-extract**: sets the marker + status `extracting` + enqueues with a
-     **deterministic job id** (`extract:{file_id}`) so a concurrent sweep is a no-op, not a
-     duplicate — this closes the collision the owner flagged.
-
-*Not doing:* a transactional `pending_jobs` outbox table (most robust, but duplicates RQ; overkill
-at this scale). Ties to DISCUSSIONS D28 (keep RQ).
-
-**D8 · MEDIUM — Enrichment stops at the first failing source.**
-`enrich_work` raises on the first failing source (arXiv down → Crossref never tried). Chunk/embed
-indexing is already guaranteed regardless (fixed 2026-07-02). *Fix:* catch per source, record
-which sources failed in the job result, continue with the rest.
-
-**D9 · MEDIUM — Folder import is one giant HTTP-request transaction.**
-Any mid-scan error rolls back every file imported in that scan (including the
-`batch.status="failed"` marker); big folders risk proxy timeouts. *Fix:* commit the batch row
-first, per-file savepoints, finalize status at the end — or move whole-folder scans to the worker
-queue. (Mild contract change: partial imports become visible.)
-
-**D10 · MEDIUM — Worker container starts without waiting for migrations.**
-After an upgrade with jobs still queued, the worker can run them against a not-yet-migrated
-schema. *Fix:* gate the worker command on `alembic current == head` (wait loop in the entrypoint).
-
-**D11 · LOW — Rolling-deploy window for the "no loose papers" invariant.**
-Migration 0037 backfilled; the invariant is enforced in app code (all creation paths hooked as of
-2026-07-02). *Fix:* run the backfill idempotently at startup — cheap, closes the deploy window.
-
-**D12 · LOW — Multimode clustering does not enforce per-model dimensions strictly.**
-A malformed-row guard exists; pad/truncate enforcement doesn't. *Fix:* skip-with-warning on dim
-mismatch rather than pad — mismatches indicate a real registry bug and padding would hide it.
-
-## Performance (visible at the target scale)
-
-**D13 · HIGH — BM25 lexical index rebuilds synchronously inside the first search after ANY
-edit.** `corpus_signature` includes `max(updated_at)`, so editing one paper invalidates the whole
-index; the next lexical/hybrid search rebuilds it inline — one SELECT + full TEI XML re-parse per
-work (2 k papers → seconds-to-minutes first search, every session). *Fix:* (a) enqueue rebuild as
-a background job and serve the stale index meanwhile — the user-visible win; (b) build from the
-already-materialized `work_chunks` instead of re-parsing TEI. (The unbounded index-file growth
-half was fixed 2026-07-02.)
-
-**D14 · MEDIUM — First activation of a real embedding model = 20 k sequential HTTP calls.**
-Backfill embeds one chunk per Ollama round-trip (the API accepts batches), and the legacy
-`POST /search/reindex` runs the pipeline synchronously in-request. Batched commits (fixed
-2026-07-02) make it survivable; batching makes it fast. *Fix:* add `embed_many()` + route
-`/search/reindex` to the queued job.
-
-**D15 · MEDIUM — Whole-library duplicate scan in one request.**
-Per-work query fan-out was batched (2026-07-02), but a full-library scan is still a minutes-long
-synchronous request at 2 k works. *Fix:* force `background=true` for full-library scans (the
-queued path exists); keep sync for single-work scans.
-
-**D16 · MEDIUM — Frontend batch operations run N sequential requests.**
-"Select 100 → set status" = 100 serial round-trips; batch re-extract is N×M. *Fix:* chunked
-`Promise.all` (concurrency ~6) now; a backend batch endpoint only if still felt.
-
-**D17 · MEDIUM — Cytoscape graph fully rebuilds + re-runs layout on every display toggle.**
-At library scope each checkbox is a multi-second freeze. *Fix:* show/hide elements on the live
-instance; re-layout only on explicit button. (Small visual behavior change.)
-
-**D19 · LOW — Topic views embed un-indexed papers inline, one at a time.**
-When chunk vectors are missing for the selected model, the read path embeds inline. *Fix:*
-require pre-indexed vectors and skip un-indexed papers, with an "N papers not indexed for this
-model — reindex" notice; keeps reads read-only, consistent with search.
-
-**D20 · LOW — Topic-graph O(n²) pure-Python cosine.** Bounded by `MAX_NODES=400`, fine today.
-*Fix:* numpy rewrite (`M @ M.T` after one normalize) next time topics are touched; not urgent.
-
-**D22 · LOW — HNSW provisioning runs inside the reindex transaction.**
-Batched commits (2026-07-02) shrank the lock window a lot. *Fix:* split provisioning into its own
-short transaction — small now that commits are batched.
-
-## Dependency / ops hygiene
-
-**D24 · MEDIUM — No backend lockfile.** Docker is the source of truth, yet every image rebuild
-re-resolves `>=` ranges — a future major of sqlalchemy/pydantic lands unreviewed. *Fix:* compile a
-lock (`uv pip compile` / `pip-compile`) that Dockerfiles install from; keep `requirements.txt` as
-intent. Minor related: bump `httpx2` pin 2.4.0 → 2.5.0 at next rebuild.
-
-**D29 · LOW — Frontend rides bleeding-edge majors** (Vite 8, TS 6, pdfjs 6, vitest 4, jsdom 29).
-Lockfile + `npm ci` protect reproducibility; the risk is early-adopter migration bugs for zero
-feature payoff. *Fix:* verify each is a stable release; pin back any that are pre-stable.
-
-**D30 · LOW — Ops polish (optional):** OCR toolchain (+300–500 MB) is baked into the base
-backend image against the otherwise-consistent "heavy = opt-in" rule → optional `slim` target;
-`VITE_API_BASE_URL` is baked at build time → runtime `config.js` injection would avoid frontend
-rebuilds on address changes.
-
-**D36a · LOW — Playwright E2E not wired into CI.** Harness + 12 journeys exist and pass locally;
-CI never runs them. *Fix:* add the CI job (catches regressions in existing journeys). The missing
-journeys are a scope choice → `DISCUSSIONS.md` D36.
+## Notes & oddities
+- **`CHANGELOG.md` `[Unreleased]` is stale** — its top entries are old Stage 6–9 content, not the
+  recent batches. `PROGRESS.md` is the authoritative status record.
+- **`Agent.revoked_at` is dead code** (Batch-S finding): revocation is via `status != "approved"` /
+  `delete_agent`, both of which correctly 401 a stale token. Not a hole; a cleanup candidate (see
+  `WORKPLAN.md` L7).
+- **AUDIT_EXT S5** ("add a new-endpoint access-control checklist to `AGENTS.md`") is a *process*
+  recommendation, not a defect — worth adopting, but it isn't in the issue table.
+- The two audits agreed on severity throughout; AUDIT_EXT's risks are a superset framing of the
+  already-fixed D-items, with E1–E6 as the net-new content.

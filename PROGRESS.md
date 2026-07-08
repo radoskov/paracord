@@ -1,9 +1,11 @@
 # Progress Report
 
-> **Audit & decision docs (read these first):** `docs/AUDIT.md` — current & deferred technical
-> issues; `docs/DISCUSSIONS.md` — open product/architecture choices awaiting the owner's call;
-> `docs/ARCHIVED_AUDIT_LOG.md` — everything resolved or stale (chronological digest; full
-> originals in the gitignored `docs/archive/`). One rule every contributor must know: models and
+> **Planning & audit docs (read these first):** `docs/AUDIT.md` — current & deferred technical
+> issues (open list + resolved archive); `docs/WORKPLAN.md` — the forward-looking backlog, with the
+> open product/architecture choices awaiting the owner's call collected at its end; `docs/WORKPLAN_ARCHIVE.md`
+> — completed workplan history. (The former `DISCUSSIONS.md` and `ARCHIVED_AUDIT_LOG.md` were
+> consolidated into these on 2026-07-08; their originals live in the gitignored
+> `documentation_archive.zip`.) One rule every contributor must know: models and
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
