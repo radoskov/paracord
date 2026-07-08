@@ -5,6 +5,7 @@ import → organize → search → read (M1), and the extraction review surface 
 complement the service-level unit tests by covering routing, auth, schemas, and wiring.
 """
 
+import fitz
 import pytest
 from app.models.citation import CitationMention, Reference
 from app.models.metadata import MetadataAssertion
@@ -231,7 +232,17 @@ def test_m2_enrich_trigger_requires_identifier(client, auth_headers, db, no_queu
     assert client.post(f"/api/v1/works/{with_id['id']}/enrich", headers=h).status_code == 202
 
 
-_PDF_BYTES = b"%PDF-1.4\n% extract test fixture\n%%EOF\n"
+def _real_pdf_bytes() -> bytes:
+    """A real, openable single-page PDF (the AUDIT E2 upload probe rejects header-only stubs)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "extract test fixture")
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+_PDF_BYTES = _real_pdf_bytes()
 
 
 def test_work_extract_no_files(client, auth_headers):

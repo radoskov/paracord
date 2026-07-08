@@ -16,11 +16,22 @@ import hashlib
 import io
 from unittest.mock import patch
 
+import fitz
 import pytest
 
 pytestmark = pytest.mark.slow
 
-_PDF = b"%PDF-1.4\n%%EOF\n"
+
+def _real_pdf_bytes() -> bytes:
+    """A real, openable single-page PDF (the AUDIT E2 upload probe rejects header-only stubs)."""
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+_PDF = _real_pdf_bytes()
 _SHA = hashlib.sha256(_PDF).hexdigest()
 _PREVIEW = {"page_count": 1, "preview_text": "x", "text_layer_quality": "unknown"}
 

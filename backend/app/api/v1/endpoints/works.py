@@ -44,7 +44,11 @@ from app.services.file_paths import (
 from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
-from app.services.storage import attach_uploaded_pdf_to_work, mark_extraction_requested
+from app.services.storage import (
+    attach_uploaded_pdf_to_work,
+    mark_extraction_requested,
+    probe_pdf_openable,
+)
 from app.services.summarization import list_work_summaries, summarize_work
 from app.services.web_find import (
     WebCandidate,
@@ -1462,6 +1466,9 @@ def upload_work_file(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is not a valid PDF"
         )
+    pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
     file_obj, _created, _linked = attach_uploaded_pdf_to_work(
         db, work=work, filename=file.filename or "upload.pdf", pdf_bytes=pdf_bytes, actor=actor
     )

@@ -16,13 +16,25 @@ parity test), so the SQLite-only local run stays green; they run in the compose 
 import uuid
 from datetime import UTC, datetime
 
+import fitz
 import pytest
 from app.core.config import get_settings
 from app.models.file import File
 from app.workers import queue as queue_mod
 from app.workers import recovery
 
-_PDF_BYTES = b"%PDF-1.4\n% d7 test fixture\n%%EOF\n"
+
+def _real_pdf_bytes() -> bytes:
+    """A real, openable single-page PDF (the AUDIT E2 upload probe rejects header-only stubs)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "d7 test fixture")
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+_PDF_BYTES = _real_pdf_bytes()
 
 
 def _redis_up() -> bool:

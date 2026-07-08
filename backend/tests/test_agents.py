@@ -321,7 +321,19 @@ import io as _io  # noqa: E402
 import secrets as _secrets  # noqa: E402
 from unittest.mock import patch as _patch  # noqa: E402
 
-_PDF = b"%PDF-1.4\n%%EOF\n"
+import fitz as _fitz  # noqa: E402
+
+
+def _real_pdf_bytes() -> bytes:
+    """A real, openable single-page PDF (the AUDIT E2 upload probe rejects header-only stubs)."""
+    doc = _fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+_PDF = _real_pdf_bytes()
 _PDF_SHA = _hashlib.sha256(_PDF).hexdigest()
 _PREVIEW = {"page_count": 1, "preview_text": "Hello.", "text_layer_quality": "good"}
 

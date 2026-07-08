@@ -403,6 +403,36 @@ def _extract_pdf_preview(path: Path) -> dict[str, Any]:
         return {"page_count": None, "preview_text": None, "text_layer_quality": "unknown"}
 
 
+def probe_pdf_openable(pdf_bytes: bytes) -> str | None:
+    """Parser-level upload validation (AUDIT E2): return an error message, or ``None`` if OK.
+
+    The upload handlers already check the size cap and the ``%PDF`` magic bytes; those catch
+    truncated/non-PDF junk but not a well-formed header wrapping bytes GROBID/OCR cannot process.
+    This opens the bytes with PyMuPDF and **fails closed** so encrypted or structurally broken PDFs
+    are rejected at upload time with a clear reason rather than failing deep inside a worker.
+
+    Unlike :func:`_extract_pdf_preview` (which fails *open* to "unknown" for quality classification),
+    a non-``None`` return here means "reject this upload". If PyMuPDF is unavailable the probe is
+    skipped (returns ``None``) — it is present in every shipped backend image, so this only affects
+    stripped environments where the existing header check remains the guard.
+    """
+    try:
+        import fitz  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+            if document.needs_pass:
+                return "The PDF is encrypted or password-protected and cannot be processed."
+            if document.page_count < 1:
+                return "The PDF has no pages."
+            # Force a real parse of the first page; a malformed page tree raises here.
+            document.load_page(0)
+    except Exception:  # noqa: BLE001 - any open/parse failure is a rejection reason
+        return "The PDF could not be opened; it may be corrupt or in an unsupported format."
+    return None
+
+
 def _title_from_filename(path: Path) -> str:
     return path.stem.replace("_", " ").replace("-", " ").strip() or path.name
 

@@ -4,14 +4,24 @@ import io
 import uuid
 from unittest.mock import patch
 
+import fitz
 from app.models.file import File, FileWorkLink, Location
 from app.models.work import Work
 from app.services.metadata_enrichment import ExternalMetadata
 
 _PREVIEW = {"page_count": 1, "preview_text": "Sample text.", "text_layer_quality": "good"}
 
-# Minimal valid PDF bytes (just the header — enough to pass the magic-byte check).
-_TINY_PDF = b"%PDF-1.4\n%%EOF\n"
+
+def _real_pdf_bytes() -> bytes:
+    """A real, openable single-page PDF (the upload probe added in AUDIT E2 rejects stubs)."""
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+_TINY_PDF = _real_pdf_bytes()
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ from app.schemas.agent import (
 from app.services import agent_files
 from app.services import agents as agent_service
 from app.services.queue_capacity import assert_queue_has_capacity
-from app.services.storage import mark_extraction_requested
+from app.services.storage import mark_extraction_requested, probe_pdf_openable
 from app.workers.queue import enqueue_extraction
 
 router = APIRouter()
@@ -123,6 +123,9 @@ def upload_teleport_content(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
         )
+    pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
     try:
         stored = agent_files.complete_teleport(
             db, agent=agent, local_file_id=local_file_id, pdf_bytes=pdf_bytes
@@ -166,6 +169,9 @@ def upload_for_extraction(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
         )
+    pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
     try:
         stored = agent_files.extract_and_index(
             db, agent=agent, local_file_id=local_file_id, pdf_bytes=pdf_bytes
@@ -318,6 +324,9 @@ def offer_teleport(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded content is not a valid PDF"
         )
+    pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
     try:
         stored = agent_files.offer_teleport(
             db,

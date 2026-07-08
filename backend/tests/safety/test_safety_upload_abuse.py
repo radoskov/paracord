@@ -51,6 +51,15 @@ def test_truncated_pdf_header_rejected_400(client, auth_headers) -> None:
     assert resp.status_code == 400
 
 
+def test_pdf_header_but_unopenable_body_rejected_400(client, auth_headers) -> None:
+    # E2: a valid %PDF magic prefix wrapping non-parseable bytes clears the header check but must
+    # be rejected by the parser-level probe (encrypted/corrupt) before it can reach GROBID/OCR.
+    resp = _upload(client, auth_headers("editor"), b"%PDF-1.7\nnot actually a real pdf body\n")
+    assert resp.status_code == 400
+    detail = resp.json()["detail"].lower()
+    assert any(s in detail for s in ("could not be opened", "no pages", "encrypt"))
+
+
 def test_decompression_bomb_style_body_is_bounded(client, auth_headers, monkeypatch) -> None:
     # A "bomb"-style body (huge, would expand on decompression) is never fully buffered: the read
     # cap trips 413 first. We prove the bound by shrinking the cap and sending far more than it.

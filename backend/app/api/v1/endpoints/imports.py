@@ -30,6 +30,7 @@ from app.services.storage import (
     import_server_folder,
     import_uploaded_pdf,
     mark_extraction_requested,
+    probe_pdf_openable,
 )
 from app.utils.normalization import normalize_title
 from app.workers.queue import enqueue_extraction
@@ -240,6 +241,9 @@ def upload_pdf(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is not a valid PDF",
         )
+    pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
     try:
         batch, file_obj, _created = import_uploaded_pdf(
             db,
