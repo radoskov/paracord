@@ -1811,19 +1811,12 @@ def _conflict_match_pct(distinct_values: list[str]) -> float:
     )
 
 
-@router.get("/{work_id}/metadata", response_model=list[FieldReview])
-def get_work_metadata(
-    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
-) -> list[FieldReview]:
-    """Return metadata assertions for a work, grouped by field, flagging conflicts."""
-    work = db.get(Work, work_id)
-    if work is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
-    _guard_see_work(db, actor, work)
+def _work_field_reviews(db: Session, work: Work) -> list[FieldReview]:
+    """Build the per-field metadata review (assertions grouped by field, conflicts flagged)."""
     confirmed = set(work.confirmed_fields or [])
     rows = db.scalars(
         select(MetadataAssertion)
-        .where(MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work_id)
+        .where(MetadataAssertion.entity_type == "work", MetadataAssertion.entity_id == work.id)
         .order_by(MetadataAssertion.field_name, MetadataAssertion.retrieved_at)
     ).all()
     by_field: dict[str, list[MetadataAssertion]] = {}
@@ -1846,6 +1839,18 @@ def get_work_metadata(
             )
         )
     return reviews
+
+
+@router.get("/{work_id}/metadata", response_model=list[FieldReview])
+def get_work_metadata(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> list[FieldReview]:
+    """Return metadata assertions for a work, grouped by field, flagging conflicts."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    return _work_field_reviews(db, work)
 
 
 @router.post("/{work_id}/enrich", status_code=status.HTTP_202_ACCEPTED)
@@ -2128,6 +2133,66 @@ def find_on_web_download_endpoint(
     return WebFindDownloadResponse(results=results)
 
 
+class WebFindApplyMetadataRequest(BaseModel):
+    """A Find-on-web result's metadata to record as candidate assertions (issue 9)."""
+
+    source: str = "web"
+    title: str | None = None
+    abstract: str | None = None
+    authors: list[str] = []
+    year: int | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    venue: str | None = None
+
+
+@router.post("/{work_id}/find-on-web/apply-metadata", response_model=list[FieldReview])
+def find_on_web_apply_metadata_endpoint(
+    work_id: uuid.UUID,
+    payload: WebFindApplyMetadataRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> list[FieldReview]:
+    """Record a Find-on-web result's metadata as candidate assertions for review (issue 9).
+
+    Adds the fetched values under a ``web_find:<source>`` provenance source through the same path as
+    external enrichment: a non-trusted source never silently overwrites, so the values surface as
+    candidates the user promotes with "Use this". Returns the refreshed per-field review so the paper
+    view can show the new candidates immediately. arXiv id (which has no review row) backfills any
+    empty, unlocked ``arxiv_id``.
+    """
+    from app.services.identifiers import backfill_identifiers
+    from app.services.metadata_enrichment import ExternalMetadata, apply_external_metadata
+
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    meta = ExternalMetadata(
+        source=f"web_find:{payload.source}",
+        title=payload.title,
+        abstract=payload.abstract,
+        authors=payload.authors,
+        doi=payload.doi,
+        arxiv_id=payload.arxiv_id,
+        year=payload.year,
+        venue=payload.venue,
+    )
+    apply_external_metadata(db, work, meta)
+    backfill_identifiers(work, arxiv_id=payload.arxiv_id)  # doi stays a reviewable candidate
+    work.updated_at = datetime.now(UTC)
+    record_event(
+        db,
+        "web_find.metadata_applied",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work_id),
+        details={"source": meta.source},
+    )
+    db.commit()
+    return _work_field_reviews(db, work)
+
+
 @router.post("/{work_id}/find-on-web/stream")
 def find_on_web_stream_endpoint(
     work_id: uuid.UUID,
@@ -2220,6 +2285,94 @@ def select_metadata_assertion(
     db.commit()
     db.refresh(work)
     return work
+
+
+def _choose_best_assertion(assertions: list[MetadataAssertion]) -> MetadataAssertion:
+    """Pick the preferred assertion for a field (issue 3 bulk apply): a GROBID value wins; else the
+    current canonical; else the most recently retrieved."""
+    grobid = [a for a in assertions if a.source == "grobid"]
+    if grobid:
+        return max(grobid, key=lambda a: a.retrieved_at)
+    canonical = next((a for a in assertions if a.selected_as_canonical), None)
+    return canonical or max(assertions, key=lambda a: a.retrieved_at)
+
+
+class BulkApplyMetadataRequest(BaseModel):
+    work_ids: list[uuid.UUID]
+    field_name: str  # one of _PROMOTABLE_FIELDS
+
+
+@router.post("/bulk-apply-metadata")
+def bulk_apply_best_metadata(
+    payload: BulkApplyMetadataRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> dict[str, int | str]:
+    """Set one metadata field from the best available source across many selected papers (issue 3).
+
+    For each selected paper independently, promote the preferred assertion for ``field_name``
+    (GROBID value preferred, else current canonical, else most recent) to canonical and apply it —
+    the same effect as clicking "Use this" per paper. Papers with the field already user-confirmed
+    (locked) are skipped so a bulk action never silently overwrites a corrected value (AGENTS.md
+    rule 5); papers the caller can't modify, or with no assertion for the field, are skipped too.
+    """
+    if payload.field_name not in _PROMOTABLE_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"field_name must be one of {sorted(_PROMOTABLE_FIELDS)}",
+        )
+    applied = 0
+    skipped = 0
+    for work_id in payload.work_ids:
+        work = db.get(Work, work_id)
+        if work is None:
+            skipped += 1
+            continue
+        try:
+            _guard_modify_work(db, actor, work)
+        except HTTPException:
+            skipped += 1  # not the caller's to modify
+            continue
+        if payload.field_name in set(work.confirmed_fields or []):
+            skipped += 1  # locked/confirmed — never clobber in bulk
+            continue
+        assertions = list(
+            db.scalars(
+                select(MetadataAssertion).where(
+                    MetadataAssertion.entity_type == "work",
+                    MetadataAssertion.entity_id == work_id,
+                    MetadataAssertion.field_name == payload.field_name,
+                )
+            ).all()
+        )
+        if not assertions:
+            skipped += 1
+            continue
+        chosen = _choose_best_assertion(assertions)
+        db.execute(
+            update(MetadataAssertion)
+            .where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == work_id,
+                MetadataAssertion.field_name == payload.field_name,
+            )
+            .values(selected_as_canonical=False)
+        )
+        chosen.selected_as_canonical = True
+        _apply_assertion_to_work(work, payload.field_name, chosen.value, chosen.source)
+        work.updated_at = datetime.now(UTC)
+        applied += 1
+    if applied:
+        record_event(
+            db,
+            "metadata.bulk_applied",
+            actor_user_id=actor.id,
+            entity_type="work",
+            entity_id="bulk",
+            details={"field": payload.field_name, "applied": applied, "skipped": skipped},
+        )
+    db.commit()
+    return {"field_name": payload.field_name, "applied": applied, "skipped": skipped}
 
 
 @router.delete("/{work_id}/metadata/{assertion_id}", response_model=WorkRead)

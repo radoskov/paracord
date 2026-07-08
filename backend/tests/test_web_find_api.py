@@ -77,6 +77,47 @@ def test_find_on_web_reader_forbidden(client, auth_headers, work_id):
     assert resp.status_code == 403
 
 
+# --- apply metadata (issue 9) -----------------------------------------------
+
+
+def test_apply_metadata_adds_reviewable_candidates(client, auth_headers, work_id):
+    """A Find-on-web result's metadata lands as candidate assertions under a web_find:* source and,
+    being non-trusted, stays non-canonical for the user to pick with 'Use this'."""
+    h = auth_headers("editor")
+    resp = client.post(
+        f"/api/v1/works/{work_id}/find-on-web/apply-metadata",
+        headers=h,
+        json={
+            "source": "openalex",
+            "title": "Deep Residual Learning for Image Recognition",
+            "authors": ["Kaiming He"],
+            "year": 2016,
+            "doi": "10.1/x",
+            "venue": "CVPR",
+            "arxiv_id": "1512.03385",
+        },
+    )
+    assert resp.status_code == 200
+    reviews = {r["field_name"]: r for r in resp.json()}
+    assert "title" in reviews and "venue" in reviews
+    title_sources = {a["source"] for a in reviews["title"]["assertions"]}
+    assert "web_find:openalex" in title_sources
+    # Non-trusted source → not auto-promoted (user chooses).
+    assert reviews["title"]["canonical_value"] is None
+    # arXiv id (no review row) backfilled onto the empty field.
+    work = client.get(f"/api/v1/works/{work_id}", headers=h).json()
+    assert work["arxiv_id"] == "1512.03385"
+
+
+def test_apply_metadata_reader_forbidden(client, auth_headers, work_id):
+    resp = client.post(
+        f"/api/v1/works/{work_id}/find-on-web/apply-metadata",
+        headers=auth_headers("reader"),
+        json={"title": "x"},
+    )
+    assert resp.status_code == 403
+
+
 # --- download ---------------------------------------------------------------
 
 

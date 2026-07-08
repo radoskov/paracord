@@ -137,3 +137,45 @@ def test_delete_403_for_non_modifying_contributor(client, db, make_user):
     r = client.delete(f"/api/v1/works/{work.id}/metadata/{a.id}", headers=_headers(db, c2))
     assert r.status_code == 403
     assert db.get(MetadataAssertion, a.id) is not None
+
+
+def test_bulk_apply_best_metadata_prefers_grobid(client, db, make_user):
+    """Issue 3: bulk apply promotes the GROBID value per selected paper (else first available),
+    skips papers with the field locked or with no assertion, and applies to the Work."""
+    editor = make_user("md-bulk", role="editor")
+    # Paper 1: has both grobid + crossref titles → grobid wins.
+    w1 = _work(db, title="stub1")
+    _assertion(db, w1, field="title", value="Crossref Title", source="crossref")
+    _assertion(db, w1, field="title", value="GROBID Title", source="grobid")
+    # Paper 2: only crossref → first available wins.
+    w2 = _work(db, title="stub2")
+    _assertion(db, w2, field="title", value="Only Crossref", source="crossref")
+    # Paper 3: title locked (user-confirmed) → skipped.
+    w3 = _work(db, title="Kept Title")
+    w3.confirmed_fields = ["title"]
+    _assertion(db, w3, field="title", value="Should Not Win", source="grobid")
+    db.commit()
+
+    r = client.post(
+        "/api/v1/works/bulk-apply-metadata",
+        headers=_headers(db, editor),
+        json={"work_ids": [str(w1.id), str(w2.id), str(w3.id)], "field_name": "title"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["applied"] == 2 and body["skipped"] == 1
+    db.expunge_all()
+    assert db.get(Work, w1.id).canonical_title == "GROBID Title"
+    assert db.get(Work, w2.id).canonical_title == "Only Crossref"
+    assert db.get(Work, w3.id).canonical_title == "Kept Title"  # locked, untouched
+
+
+def test_bulk_apply_rejects_non_promotable_field(client, db, make_user):
+    editor = make_user("md-bulk2", role="editor")
+    w = _work(db)
+    r = client.post(
+        "/api/v1/works/bulk-apply-metadata",
+        headers=_headers(db, editor),
+        json={"work_ids": [str(w.id)], "field_name": "keywords"},
+    )
+    assert r.status_code == 400

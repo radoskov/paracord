@@ -4,13 +4,17 @@ Lets an owner or admin choose the embedding/summary/topic providers and models, 
 or delete model weights, and reindex embeddings — all from the web UI rather than a config file.
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.user import User
+from app.models.work import Work
 from app.services.ai_config import (
     EMBEDDING_PROVIDERS,
     OCR_BACKENDS,
@@ -234,6 +238,90 @@ def rebuild_lexical_index_endpoint(db: Session = DB_DEP, owner: User = ADMIN_DEP
 def reindex_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Embedding-index coverage for the active model (indexed / total)."""
     return reindex_status(db, provider=get_embedding_provider(db=db))
+
+
+def _batch_field_work_ids(db: Session, field: str, scope: str) -> list:
+    """Work ids to (re)process for a batch keyword/topic run (issue 12).
+
+    ``scope='all'`` returns every current (non-merged) paper; ``scope='missing'`` returns only those
+    whose ``keywords``/``topics`` list is empty/NULL. Filtered in Python so the empty-JSONB-list check
+    is portable across SQLite (tests) and Postgres (prod)."""
+    rows = db.execute(
+        select(Work.id, getattr(Work, field)).where(Work.merged_into_id.is_(None))
+    ).all()
+    if scope == "all":
+        return [wid for wid, _ in rows]
+    return [wid for wid, value in rows if not value]  # None or empty list == "missing"
+
+
+class BatchExtractRequest(BaseModel):
+    # 'missing' only touches papers lacking the field; 'all' re-extracts/replaces for every paper.
+    scope: Literal["all", "missing"] = "missing"
+
+
+@router.get("/ai/keyword-topic-status")
+def keyword_topic_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
+    """Per-paper keyword/topic coverage (issue 12): total papers and how many lack each."""
+    rows = db.execute(select(Work.keywords, Work.topics).where(Work.merged_into_id.is_(None))).all()
+    total = len(rows)
+    return {
+        "total": total,
+        "keywords_missing": sum(1 for kw, _ in rows if not kw),
+        "topics_missing": sum(1 for _, tp in rows if not tp),
+    }
+
+
+def _run_batch(db: Session, owner: User, *, field: str, scope: str, enqueue, event: str) -> dict:
+    ids = _batch_field_work_ids(db, field, scope)
+    queued = sum(1 for wid in ids if enqueue(wid) is not None)
+    if ids and queued == 0:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Background queue unavailable — no jobs could be enqueued",
+        )
+    record_event(
+        db,
+        event,
+        actor_user_id=owner.id,
+        entity_type="ai_config",
+        details={"scope": scope, "eligible": len(ids), "queued": queued},
+    )
+    db.commit()
+    return {"scope": scope, "eligible": len(ids), "queued": queued}
+
+
+@router.post("/ai/keywords/batch", status_code=status.HTTP_202_ACCEPTED)
+def batch_keywords_endpoint(
+    payload: BatchExtractRequest, db: Session = DB_DEP, owner: User = ADMIN_DEP
+) -> dict:
+    """Queue per-paper keyword extraction across the library (issue 12): ``all`` or ``missing`` only."""
+    from app.workers.queue import enqueue_keywords
+
+    return _run_batch(
+        db,
+        owner,
+        field="keywords",
+        scope=payload.scope,
+        enqueue=enqueue_keywords,
+        event="ai.batch_keywords_requested",
+    )
+
+
+@router.post("/ai/topics/batch", status_code=status.HTTP_202_ACCEPTED)
+def batch_topics_endpoint(
+    payload: BatchExtractRequest, db: Session = DB_DEP, owner: User = ADMIN_DEP
+) -> dict:
+    """Queue per-paper topic-term extraction across the library (issue 12): ``all`` or ``missing``."""
+    from app.workers.queue import enqueue_topics
+
+    return _run_batch(
+        db,
+        owner,
+        field="topics",
+        scope=payload.scope,
+        enqueue=enqueue_topics,
+        event="ai.batch_topics_requested",
+    )
 
 
 def _active_capability_status(config: dict, providers: dict) -> dict:

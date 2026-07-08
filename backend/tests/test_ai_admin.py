@@ -321,3 +321,65 @@ def test_lexical_rebuild_endpoint_owner_only(client, auth_headers):
     r = client.post("/api/v1/admin/ai/lexical-rebuild", headers=auth_headers("owner"))
     assert r.status_code == 202
     assert r.json()["status"] in ("rebuilt", "queued")
+
+
+def test_keyword_topic_status_counts_missing(client, auth_headers, db):
+    """Issue 12: coverage status reports total papers and how many lack keywords/topics."""
+    from app.models.work import Work
+
+    db.add_all(
+        [
+            Work(canonical_title="has kw", keywords=["a"], topics=[]),
+            Work(canonical_title="no kw", keywords=[], topics=["t"]),
+            Work(canonical_title="empty", keywords=[], topics=[]),
+        ]
+    )
+    db.commit()
+    r = client.get("/api/v1/admin/ai/keyword-topic-status", headers=auth_headers("owner"))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 3
+    assert body["keywords_missing"] == 2  # "no kw" + "empty"
+    assert body["topics_missing"] == 2  # "has kw" + "empty"
+
+
+def test_batch_keywords_missing_only_enqueues_the_gap(client, auth_headers, db, monkeypatch):
+    """Issue 12: scope='missing' queues only papers lacking keywords; 'all' queues every paper."""
+    from app.models.work import Work
+    from app.workers import queue as queue_mod
+
+    with_kw = Work(canonical_title="with", keywords=["x"])
+    without_kw = Work(canonical_title="without", keywords=[])
+    db.add_all([with_kw, without_kw])
+    db.commit()
+    enqueued: list = []
+    monkeypatch.setattr(queue_mod, "enqueue_keywords", lambda wid: enqueued.append(str(wid)) or "j")
+
+    r = client.post(
+        "/api/v1/admin/ai/keywords/batch", headers=auth_headers("owner"), json={"scope": "missing"}
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert body["eligible"] == 1 and body["queued"] == 1
+    assert enqueued == [str(without_kw.id)]
+
+
+def test_batch_keywords_all_scope_and_owner_only(client, auth_headers, db, monkeypatch):
+    from app.models.work import Work
+    from app.workers import queue as queue_mod
+
+    db.add_all([Work(canonical_title="a", keywords=["x"]), Work(canonical_title="b", keywords=[])])
+    db.commit()
+    monkeypatch.setattr(queue_mod, "enqueue_keywords", lambda wid: "j")
+    r = client.post(
+        "/api/v1/admin/ai/keywords/batch", headers=auth_headers("owner"), json={"scope": "all"}
+    )
+    assert r.status_code == 202
+    assert r.json()["eligible"] == 2  # every current paper
+    # Non-admin is rejected.
+    assert (
+        client.post(
+            "/api/v1/admin/ai/keywords/batch", headers=auth_headers("editor"), json={"scope": "all"}
+        ).status_code
+        == 403
+    )

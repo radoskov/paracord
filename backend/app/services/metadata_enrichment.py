@@ -16,7 +16,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx2 as httpx
 from lxml import etree
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.metadata import MetadataAssertion
@@ -375,6 +375,13 @@ def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str
             _apply_field(work, field_name, value, meta.source)
             promoted.append(field_name)
     return promoted
+
+
+def apply_external_metadata(db: Session, work: Work, meta: ExternalMetadata) -> list[str]:
+    """Record assertions for an externally-supplied record (e.g. a Find-on-web result, issue 9) and
+    promote trusted fields — the same provenance path enrichment uses, so a non-trusted source stays
+    a reviewable candidate the user selects with "Use this" rather than silently overwriting."""
+    return _store_external(db, work, meta)
 
 
 def enrich_work(
