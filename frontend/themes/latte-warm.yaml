@@ -37,7 +37,7 @@ tokens:
     warning: "#8a5f10"
     warning-bg: "#fbeecf"
     warning-border: "#f0d69a"
-    danger: "#c4142f"
+    danger: "#fe5670" #fe5670 c4142f
     danger-bg: "#fbdfe3"
     danger-border: "#f0aebb"
     info: "#1a5fd0"

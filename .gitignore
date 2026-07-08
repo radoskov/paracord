@@ -79,3 +79,5 @@ frontend/dist.stale-root/
 
 # Consolidated stale documentation (workplans, design docs, audit sources, pre-merge runbooks) — 2026-07-08
 documentation_archive.zip
+
+show_git_log.sh
