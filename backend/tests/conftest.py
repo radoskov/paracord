@@ -32,13 +32,26 @@ def default_password() -> str:
 
 
 @pytest.fixture()
-def session_factory():
-    """In-memory SQLite shared across threads (TestClient runs requests off-thread)."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def session_factory(request, tmp_path_factory):
+    """In-memory SQLite shared across threads (TestClient runs requests off-thread).
+
+    A test marked ``@pytest.mark.concurrent_db`` instead gets a file-based SQLite with the default
+    connection pool, so genuinely-parallel requests each check out their own connection. The shared
+    in-memory ``StaticPool`` is a single handle and cannot service true concurrency — SQLite raises
+    ``bad parameter or other API misuse`` — which is a harness artifact, not product behaviour.
+    """
+    if request.node.get_closest_marker("concurrent_db"):
+        db_path = tmp_path_factory.mktemp("concurrent-db") / "test.db"
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+        )
+    else:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine, autocommit=False, autoflush=False)
     engine.dispose()
