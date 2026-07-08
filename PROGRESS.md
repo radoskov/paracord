@@ -9,6 +9,53 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_7 — extraction/dedup, viz, library & metadata UX (2026-07-08)
+
+Implemented the "ready to build" items from `docs/WORKPLAN_2026-07-08_batch7.md` (the triage doc,
+intentionally uncommitted). Deferred by owner decision: **4** (agent reconcile — not reproducible),
+**7** (OCR reader text — bigger, separate), **8 Tier 2** (venue abbreviation matching), **5i**
+(co-citation plain-string hash — unlocated, low priority), and the broader **1a** instability.
+
+- **1a** — agent-initiated `offer_teleport` now reuses the `index_only` stub Work via
+  `AgentFile.work_id` (mirrors `complete_teleport`/`extract_and_index`) instead of creating a
+  duplicate (`backend/app/services/agent_files.py`).
+- **1b** — extraction (`assert_field`) + enrichment (`_store_external`) skip inserting a
+  MetadataAssertion when an identical (work, field, source, value) row already exists (reuse it),
+  ending the "same value duplicated every run" growth.
+- **1c** — `enqueue_enrichment/embedding/chunking/topics/keywords` now use deterministic per-work
+  job ids + in-flight skip (like extraction), so a manual re-run can't race the auto-chain and make
+  results vary (`backend/app/workers/queue.py`).
+- **6** — `extract_pdf_job`/`enrich_work_job` catch a narrowed `uq_works_doi` `IntegrityError`,
+  roll back, mark the file failed (clearing the owed marker → no D7 retry loop), record a
+  `metadata.doi_conflict` audit event, and surface a clear message instead of a raw SQL crash.
+- **11** — GROBID venue+year for the *primary* paper are now mined from the TEI header monograph
+  (`ParsedPaper.venue/year`, `parse_tei`, promoted in `store_parsed_extraction`). `Work.venue`
+  already existed; only extraction was missing.
+- **5b/5d/5h/5j** — viz gains a `keyword_similarity_to_focus` axis, colour-by-venue and
+  colour-by-year (discrete per-year), and size-by-year (`visualization.py`, `VisualizationsPage`).
+- **5a/5c/5e** — reference graph: 0-lane and n/a-lane each drawn as a labelled `markLine`; tooltip
+  `confine`; explicit Y-axis tick formatters. Tick formatters also extended to temporal-map
+  non-year axes and embedding-cluster PCA axes.
+- **5f** — manual X/Y min/max view-range inputs on the temporal map (empty = auto), so a corrupt
+  outlier year no longer stretches the plot.
+- **5g** — clicking an external reference node jumps to Import and prefills the batch-import box
+  with `"Title (year)"` via a new `pendingImportText` store; the ref-graph node payload now carries
+  `venue`/`doi`.
+- **9** — Find-on-web results gain a "Use metadata" action → `POST
+  /works/{id}/find-on-web/apply-metadata` records the values as reviewable `web_find:*` candidate
+  assertions (non-trusted → user promotes via "Use this"; arXiv id backfilled).
+- **10** — the References tab "in library" badge is a button that opens the resolved paper.
+- **3** — the library selection toolbar folds Delete/Re-extract/Extract-keywords/Extract-topics/
+  Enrich into an action dropdown + Go (Put-into/Set-status kept separate), plus "Set metadata from
+  best source" → `POST /works/bulk-apply-metadata` (prefers GROBID, skips locked fields).
+- **12** — AI & Models batch keyword/topic extraction: `POST /admin/ai/keywords|topics/batch`
+  (`all`/`missing`) + `GET /admin/ai/keyword-topic-status`, reusing the existing per-work RQ jobs.
+
+No schema/migration changes (venue/year columns already existed). Every item shipped with tests;
+backend fast tier + the touched slow suites (extraction/visualization/reference_graph) + full
+frontend suite (233) + frontend build all green. See
+`docs/agent_handoffs/2026-07-08-issue-batch-7.md`.
+
 ## Viz help + duplicates sub-tabs (2026-07-08)
 
 Two small UX features on `main` (not pushed). Frontend-only; `npm run build` clean, full Vitest
