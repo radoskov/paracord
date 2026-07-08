@@ -96,6 +96,7 @@ AXIS_LABELS: dict[str, str] = {
     "citation_velocity": "Citation velocity",
     "similarity_to_focus": "Similarity to focus",
     "topic_similarity_to_focus": "Topic similarity to focus",
+    "keyword_similarity_to_focus": "Keyword similarity to focus",
 }
 
 DEFAULT_X_AXIS = "year"
@@ -281,6 +282,37 @@ def _topic_similarity_axis(
     return (values, None)
 
 
+def _keyword_similarity_axis(
+    works: list[Work], ctx: _AxisContext
+) -> tuple[dict[uuid.UUID, float | None], str | None]:
+    """Jaccard overlap of ``Work.keywords`` vs the focus paper's keywords (issue 5b).
+
+    Mirrors :func:`_topic_similarity_axis` but over keywords, which are populated automatically at
+    extraction time (no separate topic-modeling run needed)."""
+    if ctx.focus_work_id is None:
+        return (
+            {w.id: None for w in works},
+            "Keyword-similarity axis unavailable: pick a focus paper first.",
+        )
+    focus = ctx.focus_work
+    focus_kw = {str(t).casefold() for t in (focus.keywords or [])} if focus else set()
+    if not focus_kw:
+        return (
+            {w.id: None for w in works},
+            "Keyword-similarity axis unavailable: the focus paper has no keywords yet. Extract it "
+            "(or Extract keywords) first, then rebuild.",
+        )
+    values: dict[uuid.UUID, float | None] = {}
+    for work in works:
+        terms = {str(t).casefold() for t in (work.keywords or [])}
+        if not terms:
+            values[work.id] = None
+            continue
+        union = focus_kw | terms
+        values[work.id] = round(len(focus_kw & terms) / len(union), 4) if union else None
+    return (values, None)
+
+
 def _axis_values(
     db: Session, key: str, works: list[Work], ctx: _AxisContext
 ) -> tuple[dict[uuid.UUID, float | None], str | None]:
@@ -312,6 +344,8 @@ def _axis_values(
         return _similarity_axis(db, works, ctx)
     if key == "topic_similarity_to_focus":
         return _topic_similarity_axis(works, ctx)
+    if key == "keyword_similarity_to_focus":
+        return _keyword_similarity_axis(works, ctx)
     raise ValueError(f"Unknown axis: {key}")
 
 
@@ -320,6 +354,8 @@ def _size_value(work: Work, size_by: str, degree: dict[str, int]) -> float | Non
         return None
     if size_by == "citation_count":
         return float(work.citation_count) if work.citation_count is not None else None
+    if size_by == "year":  # issue 5j: size by recency
+        return float(work.year) if work.year is not None else None
     return float(degree.get(str(work.id), 0))  # local_degree default
 
 
@@ -328,6 +364,10 @@ def _color_group(work: Work, color_by: str) -> str | None:
         return None
     if color_by == "work_type":
         return work.work_type or "unknown"
+    if color_by == "year":  # issue 5h: one discrete colour per distinct publication year
+        return str(work.year) if work.year is not None else "unknown"
+    if color_by == "venue":  # issue 5d: group/colour by venue (raw string; normalization is future)
+        return work.venue or "unknown"
     return work.reading_status or "unread"  # status default
 
 

@@ -112,6 +112,47 @@ def test_reference_graph_selectable_y_metrics(client, auth_headers, db) -> None:
     assert node["topic_similarity"] == round(1 / 3, 4)
 
 
+def test_reference_graph_nodes_carry_venue_and_doi(client, auth_headers, db) -> None:
+    """5d/5g: nodes expose venue (local: resolved work's venue) and doi for colour-by-venue and the
+    click-to-import prefill."""
+    base = Work(canonical_title="Base", normalized_title="base", year=2020, venue="NeurIPS")
+    cited = Work(
+        canonical_title="Cited", normalized_title="cited", year=2015, venue="ICRA", doi="10.1/c"
+    )
+    db.add_all([base, cited])
+    db.flush()
+    db.add_all(
+        [
+            Reference(
+                citing_work_id=base.id,
+                resolved_work_id=cited.id,
+                title="Cited",
+                doi="10.1/c",
+                resolution_status="resolved",
+            ),
+            Reference(
+                citing_work_id=base.id,
+                title="Some External Paper",
+                doi="10.1/ext",
+                year=2011,
+            ),
+        ]
+    )
+    db.commit()
+
+    data = client.get(
+        f"/api/v1/works/{base.id}/reference-graph", headers=auth_headers("editor")
+    ).json()
+    base_node = next(n for n in data["nodes"] if n["kind"] == "base")
+    assert base_node["venue"] == "NeurIPS"
+    local = next(n for n in data["nodes"] if n["label"] == "Cited")
+    assert local["venue"] == "ICRA"  # from the resolved work
+    assert local["doi"] == "10.1/c"
+    external = next(n for n in data["nodes"] if n["label"] == "Some External Paper")
+    assert external["venue"] is None  # references don't store a venue column
+    assert external["doi"] == "10.1/ext"
+
+
 def test_reference_graph_local_ref_to_ref_edges_opt_in(client, auth_headers, db) -> None:
     """include_ref_edges adds a citation edge between two resolved-local references when one cites
     the other."""

@@ -115,6 +115,8 @@ def build_reference_graph(
             "citation_count": None,
             "local_degree": None,
             "topic_similarity": None,
+            "venue": work.venue,  # 5d: colour-by-venue
+            "doi": work.doi,
         }
     ]
 
@@ -129,12 +131,16 @@ def build_reference_graph(
     citation_by_work: dict[uuid.UUID, int | None] = {}
     topics_by_work: dict[uuid.UUID, list] = {}
     degree_by_work: dict[uuid.UUID, int] = {}
+    venue_by_work: dict[uuid.UUID, str | None] = {}
     if local_work_ids:
-        for wid, cc, topics in db.execute(
-            select(Work.id, Work.citation_count, Work.topics).where(Work.id.in_(local_work_ids))
+        for wid, cc, topics, venue in db.execute(
+            select(Work.id, Work.citation_count, Work.topics, Work.venue).where(
+                Work.id.in_(local_work_ids)
+            )
         ).all():
             citation_by_work[wid] = cc
             topics_by_work[wid] = list(topics or [])
+            venue_by_work[wid] = venue
         degree_stmt = (
             select(Reference.resolved_work_id, func.count(distinct(Reference.citing_work_id)))
             .where(Reference.resolved_work_id.in_(local_work_ids))
@@ -173,6 +179,10 @@ def build_reference_graph(
             "citation_count": citation_by_work.get(wid) if wid else None,
             "local_degree": degree_by_work.get(wid, 0) if wid else None,
             "topic_similarity": _topic_similarity(wid) if wid else None,
+            # 5d colour-by-venue (local: resolved work's venue; external refs don't store one) and
+            # 5g click-to-import prefill data.
+            "venue": venue_by_work.get(wid) if wid else None,
+            "doi": ref.doi,
         }
         nodes.append(node)
         if wid:

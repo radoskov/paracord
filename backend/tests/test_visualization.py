@@ -200,6 +200,75 @@ def test_topic_similarity_to_focus_jaccard(db_session) -> None:
     assert _node_by_id(payload, far.id).x == 0.0
 
 
+def test_keyword_similarity_to_focus_jaccard(db_session) -> None:
+    """5b: keyword-similarity axis is a Jaccard overlap of Work.keywords vs the focus paper."""
+    actor = _owner(db_session)
+    focus = Work(
+        canonical_title="F", normalized_title="f", year=2016, keywords=["nlp", "attention"]
+    )
+    near = Work(canonical_title="Near", normalized_title="near", year=2017, keywords=["nlp", "rnn"])
+    far = Work(canonical_title="Far", normalized_title="far", year=2018, keywords=["biology"])
+    db_session.add_all([focus, near, far])
+    db_session.commit()
+
+    payload = get_viz(
+        db_session,
+        actor,
+        "temporal_map",
+        VizScope(type="library"),
+        {"x_axis": "keyword_similarity_to_focus", "y_axis": "year", "focus_work_id": focus.id},
+    )
+    assert _node_by_id(payload, near.id).x == pytest.approx(1 / 3, abs=1e-4)
+    assert _node_by_id(payload, far.id).x == 0.0
+    # The axis is advertised in the shared option set.
+    assert "keyword_similarity_to_focus" in {opt["key"] for opt in payload.axis_options}
+
+
+def test_keyword_similarity_axis_unavailable_without_focus(db_session) -> None:
+    actor = _owner(db_session)
+    work = Work(canonical_title="S", normalized_title="s", year=2015, keywords=["x"])
+    db_session.add(work)
+    db_session.commit()
+    payload = get_viz(
+        db_session,
+        actor,
+        "temporal_map",
+        VizScope(type="library"),
+        {"x_axis": "keyword_similarity_to_focus", "y_axis": "year"},
+    )
+    assert _node_by_id(payload, work.id).x is None
+    assert any("unavailable" in n.lower() and "focus" in n.lower() for n in payload.notes)
+
+
+def test_size_by_year_and_color_by_venue_and_year(db_session) -> None:
+    """5j size-by-year; 5d colour-by-venue; 5h colour-by-year (discrete per-year)."""
+    actor = _owner(db_session)
+    work = Work(
+        canonical_title="E",
+        normalized_title="e",
+        year=2015,
+        venue="ICRA",
+        reading_status="reading",
+    )
+    db_session.add(work)
+    db_session.commit()
+
+    by_year_size = get_viz(
+        db_session, actor, "temporal_map", VizScope(type="library"), {"size_by": "year"}
+    )
+    assert _node_by_id(by_year_size, work.id).size == 2015.0
+
+    by_venue = get_viz(
+        db_session, actor, "temporal_map", VizScope(type="library"), {"color_by": "venue"}
+    )
+    assert _node_by_id(by_venue, work.id).color_group == "ICRA"
+
+    by_year_color = get_viz(
+        db_session, actor, "temporal_map", VizScope(type="library"), {"color_by": "year"}
+    )
+    assert _node_by_id(by_year_color, work.id).color_group == "2015"
+
+
 def test_encodings_size_and_color(db_session) -> None:
     actor = _owner(db_session)
     work = Work(
