@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   import { ApiClient, type CurrentUser } from '../api/client';
   import { currentUser } from '../lib/session';
+  import { DEFAULT_SECTION_WEIGHTS, SECTION_BUCKETS } from '../lib/viz/referenceGraph';
   import {
     activeThemeId,
     allThemeOptions,
@@ -166,6 +169,44 @@
         'The single, permanent account: everything an admin can do, plus manage admins. Cannot be disabled, deleted or role-changed.',
     },
   };
+
+  // B7: reference-graph section weights (how heavily a citation counts by the section it appears in).
+  let refWeights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
+  let refWeightsMsg = '';
+  const WEIGHT_LABELS: Record<string, string> = {
+    abstract: 'Abstract',
+    introduction: 'Introduction',
+    related: 'Related work',
+    methods: 'Methods',
+    results: 'Results / experiments',
+    other: 'Other',
+  };
+
+  onMount(async () => {
+    try {
+      const prefs = await client.getPreferences();
+      if (prefs.citation_section_weights) {
+        refWeights = { ...DEFAULT_SECTION_WEIGHTS, ...prefs.citation_section_weights };
+      }
+    } catch {
+      // keep defaults
+    }
+  });
+
+  async function saveRefWeights(): Promise<void> {
+    refWeightsMsg = '';
+    try {
+      const prefs = await client.getPreferences();
+      await client.putPreferences({ ...prefs, citation_section_weights: refWeights });
+      refWeightsMsg = 'Weights saved.';
+    } catch (error) {
+      refWeightsMsg = errorMessage(error);
+    }
+  }
+
+  function resetRefWeights(): void {
+    refWeights = { ...DEFAULT_SECTION_WEIGHTS };
+  }
 </script>
 
 {#if me}
@@ -282,6 +323,35 @@
       {#if themeErr}<p class="danger">{themeErr}</p>{/if}
     </section>
 
+    <section class="card refweights">
+      <h2>Reference-graph weights</h2>
+      <p class="muted">
+        In a paper’s <strong>Reference graph</strong>, each reference is sized by how heavily the
+        paper cites it — a citation counts more when it appears in an important section. Tune the
+        per-section weights here.
+      </p>
+      <div class="weights-grid">
+        {#each SECTION_BUCKETS as bucket (bucket)}
+          <label>
+            {WEIGHT_LABELS[bucket] ?? bucket}
+            <input
+              type="number"
+              min="0"
+              max="20"
+              step="0.5"
+              bind:value={refWeights[bucket]}
+              data-testid={`refweight-${bucket}`}
+            />
+          </label>
+        {/each}
+      </div>
+      <div class="row">
+        <button type="button" on:click={saveRefWeights} title="Save your reference-graph section weights">Save weights</button>
+        <button type="button" class="secondary" on:click={resetRefWeights} title="Reset to the default weights">Reset to defaults</button>
+      </div>
+      {#if refWeightsMsg}<p class="muted">{refWeightsMsg}</p>{/if}
+    </section>
+
     <section class="card roles">
       <h2>Roles &amp; access</h2>
       <div class="role-card">
@@ -298,6 +368,26 @@
 {/if}
 
 <style>
+  .weights-grid {
+    display: grid;
+    gap: 0.4rem 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    margin: 0.4rem 0 0.6rem;
+  }
+  .weights-grid label {
+    display: flex;
+    flex-direction: column;
+    font-size: 0.82rem;
+    gap: 0.15rem;
+  }
+  .weights-grid input {
+    width: 5rem;
+  }
+  .refweights .row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
   .profile {
     align-items: start;
     display: grid;

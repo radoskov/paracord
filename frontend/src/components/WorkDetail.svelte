@@ -33,6 +33,7 @@
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
+  import ReferenceGraphModal from './ReferenceGraphModal.svelte';
   import ShelfPicker from './ShelfPicker.svelte';
 
   export let client: ApiClient;
@@ -66,6 +67,7 @@
 
   // Find-on-web (#5 / v2): picker modal state.
   let showFindModal = false;
+  let showRefGraph = false;
   let searching = false;
   let findResults: WebCandidate[] = [];
   let degradedSources: string[] = [];
@@ -965,6 +967,8 @@
           title={canModify
             ? 'Generate an AI summary of this paper (uses the configured summary model; stored and regeneratable)'
             : INSUFFICIENT_ROLE}>{summaries.length ? 'Regenerate summary' : 'Summarise'}</button>
+        <button type="button" class="secondary" on:click={() => (showRefGraph = true)}
+          title="Show a weighted citation graph of this paper's references (year × how heavily each is cited)">Reference graph</button>
       </div>
       {#if canModify && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
       {#if canModify && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
@@ -1273,6 +1277,10 @@
     </details>
   {/if}
 </div>
+
+{#if showRefGraph}
+  <ReferenceGraphModal {client} workId={work.id} onClose={() => (showRefGraph = false)} />
+{/if}
 
 {#if showFindModal}
   <Modal title="Find on web" wide onClose={() => (showFindModal = false)}>

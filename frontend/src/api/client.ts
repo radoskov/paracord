@@ -872,6 +872,25 @@ export interface LibraryColumnPrefs {
 
 export interface UserPreferences {
   library_columns?: LibraryColumnPrefs;
+  // B7: per-user section weights for the reference graph's node sizing (bucket → weight).
+  citation_section_weights?: Record<string, number>;
+}
+
+export interface ReferenceGraphNode {
+  id: string;
+  label: string;
+  year: number | null;
+  kind: "base" | "local" | "external";
+  resolved_work_id: string | null;
+  section_counts: Record<string, number>;
+  mention_count: number;
+  weighted: number;
+}
+
+export interface ReferenceGraph {
+  base_work_id: string;
+  nodes: ReferenceGraphNode[];
+  edges: { source: string; target: string }[];
 }
 
 export interface IdentifierImportResponse {
@@ -1250,6 +1269,16 @@ export class ApiClient {
     await this.request<void>(`/api/v1/admin/themes/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  }
+
+  async referenceGraph(
+    workId: string,
+    opts: { includeRefEdges?: boolean } = {},
+  ): Promise<ReferenceGraph> {
+    const q = opts.includeRefEdges ? "?include_ref_edges=true" : "";
+    return this.request<ReferenceGraph>(
+      `/api/v1/works/${workId}/reference-graph${q}`,
+    );
   }
 
   async getPreferences(): Promise<UserPreferences> {
