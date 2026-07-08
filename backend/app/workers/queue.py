@@ -73,11 +73,12 @@ def extraction_job_id(file_id) -> str:
     return f"extract-{file_id}"
 
 
-def _live_extraction_job_id(conn, job_id: str) -> str | None:
-    """Return ``job_id`` if an extraction job with that id is still in flight, else None.
+def _live_job_id(conn, job_id: str) -> str | None:
+    """Return ``job_id`` if a job with that id is still in flight, else None.
 
     Only a genuinely-missing job (``NoSuchJobError``) yields None-without-raising; a dead Redis
-    connection propagates so the caller reports the enqueue as failed.
+    connection propagates so the caller reports the enqueue as failed. A terminal (finished/failed)
+    job also yields None, so a legitimate re-run re-enqueues with the same deterministic id.
     """
     from rq.exceptions import NoSuchJobError
     from rq.job import Job
@@ -101,7 +102,7 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     job_id = extraction_job_id(file_id)
     try:
         queue = get_queue()
-        existing = _live_extraction_job_id(queue.connection, job_id)
+        existing = _live_job_id(queue.connection, job_id)
         if existing is not None:
             return existing
         job = queue.enqueue(EXTRACT_JOB, str(file_id), force_ocr, job_id=job_id)
@@ -111,54 +112,50 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
         return None
 
 
+def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
+    """Best-effort enqueue of a per-work job under a deterministic id ``{prefix}-{work_id}``.
+
+    Like extraction (D7), a stable id makes a re-enqueue of an already in-flight job for the same
+    work a no-op instead of a duplicate — so a manual re-run racing the auto-chain (extract →
+    enrich → chunk → embed) can't spawn two concurrent jobs whose interleaved writes make results
+    vary run-to-run (issue 1c). A terminal prior job (finished/failed) does not block a fresh run.
+    Never raises: a missing/unreachable Redis must not break the caller.
+    """
+    job_id = f"{prefix}-{work_id}"
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        return queue.enqueue(job_func, str(work_id), job_id=job_id).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue %s for work %s: %s", prefix, work_id, exc)
+        return None
+
+
 def enqueue_enrichment(work_id) -> str | None:
     """Best-effort enqueue of an external metadata-enrichment job. Returns job id, or None."""
-    try:
-        job = get_queue().enqueue(ENRICH_JOB, str(work_id))
-        return job.id
-    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
-        logger.warning("Could not enqueue enrichment for work %s: %s", work_id, exc)
-        return None
+    return _enqueue_work_job(ENRICH_JOB, "enrich", work_id)
 
 
 def enqueue_embedding(work_id) -> str | None:
     """Best-effort enqueue of an embedding-index job (keeps embeddings off the search read path)."""
-    try:
-        job = get_queue().enqueue(EMBED_JOB, str(work_id))
-        return job.id
-    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
-        logger.warning("Could not enqueue embedding for work %s: %s", work_id, exc)
-        return None
+    return _enqueue_work_job(EMBED_JOB, "embed", work_id)
 
 
 def enqueue_chunking(work_id) -> str | None:
     """Best-effort enqueue of a passage-chunking job (populates work_chunks for semantic search)."""
-    try:
-        job = get_queue().enqueue(CHUNK_JOB, str(work_id))
-        return job.id
-    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
-        logger.warning("Could not enqueue chunking for work %s: %s", work_id, exc)
-        return None
+    return _enqueue_work_job(CHUNK_JOB, "chunk", work_id)
 
 
 def enqueue_topics(work_id) -> str | None:
     """Best-effort enqueue of a per-paper topic-modeling job. Returns the job id, or None."""
-    try:
-        job = get_queue().enqueue(TOPIC_JOB, str(work_id))
-        return job.id
-    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
-        logger.warning("Could not enqueue topics for work %s: %s", work_id, exc)
-        return None
+    return _enqueue_work_job(TOPIC_JOB, "topic", work_id)
 
 
 def enqueue_keywords(work_id) -> str | None:
     """Best-effort enqueue of a per-paper keyword-extraction job. Returns the job id, or None."""
-    try:
-        job = get_queue().enqueue(KEYWORDS_JOB, str(work_id))
-        return job.id
-    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
-        logger.warning("Could not enqueue keywords for work %s: %s", work_id, exc)
-        return None
+    return _enqueue_work_job(KEYWORDS_JOB, "keywords", work_id)
 
 
 def enqueue_duplicate_scan() -> str | None:
@@ -180,7 +177,7 @@ def enqueue_bm25_rebuild() -> str | None:
     """
     try:
         queue = get_queue()
-        existing = _live_extraction_job_id(queue.connection, BM25_REBUILD_JOB_ID)
+        existing = _live_job_id(queue.connection, BM25_REBUILD_JOB_ID)
         if existing is not None:
             return existing
         return queue.enqueue(BM25_REBUILD_JOB, job_id=BM25_REBUILD_JOB_ID).id

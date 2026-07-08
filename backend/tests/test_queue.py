@@ -15,6 +15,51 @@ def test_enqueue_extraction_is_best_effort_without_redis(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_enqueue_work_jobs_are_best_effort_without_redis(monkeypatch) -> None:
+    """1c: the per-work enqueue helpers also fail open (None) when Redis is unreachable."""
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6390/0")
+    get_settings.cache_clear()
+    wid = "00000000-0000-0000-0000-000000000000"
+    try:
+        assert queue.enqueue_enrichment(wid) is None
+        assert queue.enqueue_embedding(wid) is None
+        assert queue.enqueue_chunking(wid) is None
+        assert queue.enqueue_topics(wid) is None
+        assert queue.enqueue_keywords(wid) is None
+    finally:
+        get_settings.cache_clear()
+
+
+class _FakeQueue:
+    def __init__(self) -> None:
+        self.connection = object()
+        self.enqueued: list[tuple] = []
+
+    def enqueue(self, func, *args, job_id=None, **kw):
+        self.enqueued.append((func, args, job_id))
+        return type("J", (), {"id": job_id})()
+
+
+def test_enqueue_work_job_uses_deterministic_id_and_skips_when_in_flight(monkeypatch) -> None:
+    """1c: a per-work enqueue uses a stable ``{prefix}-{work_id}`` id and is a no-op while a job
+    with that id is already in flight (so a manual re-run can't race the auto-chain)."""
+    wid = "11111111-1111-1111-1111-111111111111"
+
+    fake = _FakeQueue()
+    monkeypatch.setattr(queue, "get_queue", lambda: fake)
+    # No live job → enqueues under the deterministic id.
+    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, _jid: None)
+    assert queue.enqueue_enrichment(wid) == f"enrich-{wid}"
+    assert fake.enqueued == [(queue.ENRICH_JOB, (wid,), f"enrich-{wid}")]
+
+    # A live job with the same id → skip the enqueue, return the existing id.
+    fake2 = _FakeQueue()
+    monkeypatch.setattr(queue, "get_queue", lambda: fake2)
+    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, jid: jid)
+    assert queue.enqueue_keywords(wid) == f"keywords-{wid}"
+    assert fake2.enqueued == []  # not enqueued a second time
+
+
 def test_order_jobs_newest_first_active_above_terminal_and_recent_on_top() -> None:
     """Item 9: active jobs on top, then terminal, most-recent first within each band."""
     jobs = [
