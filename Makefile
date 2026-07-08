@@ -343,7 +343,7 @@ e2e-install: ## Install the Playwright E2E deps + Chromium browser (needs networ
 e2e: ## Run the Playwright end-to-end browser tests. Requires the dev stack up (make up).
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/ensure_e2e_user.py
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/configure_e2e_rate_limits.py enable
-	sleep 6	
+	sleep 6
 	cd e2e && npx playwright test
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/configure_e2e_rate_limits.py reset
 
@@ -351,7 +351,7 @@ e2e: ## Run the Playwright end-to-end browser tests. Requires the dev stack up (
 e2e-list: ## Run the Playwright end-to-end browser tests. Requires the dev stack up (make up).
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/ensure_e2e_user.py
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/configure_e2e_rate_limits.py enable
-	sleep 6	
+	sleep 6
 	cd e2e && bash -o pipefail -c 'npx playwright test --reporter=list 2>&1 | perl -pe "s/\r/\n/g; s/\e\[[0-9;?]*[ABCDGJKHf]//g"'
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/configure_e2e_rate_limits.py reset
 
