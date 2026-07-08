@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, and_, exists, inspect, or_, select
+from sqlalchemy import Select, and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import Role, role_at_least
@@ -42,27 +42,19 @@ from app.models.group import GroupGrant, GroupMembership
 from app.models.organization import Rack, Shelf, ShelfWork
 from app.models.user import User
 from app.models.work import Work
+from app.utils.table_presence import table_present
 
 # Access levels for which everyone can SEE without a grant.
 _OPEN_OR_VISIBLE = ("open", "visible")
 
-# Per-engine memo of whether the Phase H group tables exist. Narrow service-level unit-test schemas
-# create only the tables they need and may omit ``group_memberships`` / ``group_grants``; the grant
-# lookups must then behave as "no groups, no grants" rather than erroring. Mirrors the resilient
-# probe in ``app.services.web_find_settings``.
-_GROUP_TABLES_PRESENT: dict[int, bool] = {}
-
 
 def _group_tables_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
-    if key not in _GROUP_TABLES_PRESENT:
-        # Reflect on the session's live connection (see groups._groups_table_present rationale).
-        inspector = inspect(db.connection())
-        _GROUP_TABLES_PRESENT[key] = inspector.has_table(
-            GroupMembership.__tablename__
-        ) and inspector.has_table(GroupGrant.__tablename__)
-    return _GROUP_TABLES_PRESENT[key]
+    """Whether the Phase H group tables exist. Narrow service-level unit-test schemas create only
+    the tables they need and may omit ``group_memberships`` / ``group_grants``; the grant lookups
+    must then behave as "no groups, no grants" rather than erroring."""
+    return table_present(db, GroupMembership.__tablename__) and table_present(
+        db, GroupGrant.__tablename__
+    )
 
 
 def is_admin_or_owner(user: User) -> bool:

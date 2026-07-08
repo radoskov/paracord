@@ -90,11 +90,10 @@ def db_session(tmp_path):
             WebFindSettings.__table__,
         ],
     )
-    # Reset the per-engine table-presence memo so the policy probe sees this fresh schema.
-    web_find_settings_mod = __import__(
-        "app.services.web_find_settings", fromlist=["_TABLE_PRESENT"]
-    )
-    web_find_settings_mod._TABLE_PRESENT.clear()
+    # Reset the shared table-presence memo so the policy probe reflects this fresh schema.
+    from app.utils.table_presence import clear_cache
+
+    clear_cache()
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     with session_local() as session:
         yield session

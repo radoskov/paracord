@@ -13,26 +13,16 @@ import uuid
 from dataclasses import asdict, dataclass
 from urllib.parse import urlsplit
 
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.ai import AI_CONFIG_SINGLETON_ID, AIConfig
-
-# Per-engine memo of whether the ``ai_config`` table exists (narrow unit-test schemas omit it).
-_TABLE_PRESENT: dict[int, bool] = {}
+from app.utils.table_presence import table_present
 
 
 def _ai_config_table_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
-    if key not in _TABLE_PRESENT:
-        # Inspect the session's own connection rather than the engine: inspecting the engine checks
-        # out a fresh connection and (on SQLite/StaticPool) issues a ROLLBACK that would discard the
-        # caller's uncommitted rows. Using the session connection keeps the caller's transaction
-        # (and any pending flush) intact.
-        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(AIConfig.__tablename__)
-    return _TABLE_PRESENT[key]
+    """Whether the ``ai_config`` table exists (narrow unit-test schemas omit it)."""
+    return table_present(db, AIConfig.__tablename__)
 
 
 # Fields an owner may set via the API, and the known/allowed values for the enum-like ones.

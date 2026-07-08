@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.group import (
@@ -30,27 +30,17 @@ from app.models.group import (
 from app.models.organization import Rack, Shelf
 from app.models.user import User
 from app.services.audit import record_event
+from app.utils.table_presence import table_present
 
 
 class GroupError(ValueError):
     """Raised for invalid group operations (mapped to HTTP 400/409 by the endpoints)."""
 
 
-# Per-engine memo of whether the ``groups`` table exists. Narrow unit-test schemas (and the
-# server-console bootstrap before migrations) may not have the Phase H tables; the lifecycle hooks
-# must then no-op rather than blow up the caller's transaction. Mirrors web_find_settings.
-_TABLE_PRESENT: dict[int, bool] = {}
-
-
 def _groups_table_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
-    if key not in _TABLE_PRESENT:
-        # Reflect on the session's LIVE connection (not a fresh one): inspecting the engine opens
-        # a separate connection which, under a SQLite StaticPool single-connection test setup, can
-        # disrupt the caller's in-flight transaction (silently dropping pending inserts).
-        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(Group.__tablename__)
-    return _TABLE_PRESENT[key]
+    """Whether the Phase H ``groups`` table exists (narrow unit-test schemas / pre-migration may
+    omit it; the lifecycle hooks then no-op rather than crash the caller's transaction)."""
+    return table_present(db, Group.__tablename__)
 
 
 # --------------------------------------------------------------------------------------------------

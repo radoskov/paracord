@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.models.web_find_settings import (
@@ -25,22 +24,16 @@ from app.models.web_find_settings import (
     WEB_FIND_SETTINGS_SINGLETON_ID,
     WebFindSettings,
 )
+from app.utils.table_presence import table_present
 
 # The allowed download-policy modes (the conservative default is the first / DEFAULT_DOWNLOAD_POLICY).
 DOWNLOAD_POLICIES = ("restricted", "careful", "unrestricted")
 
-# Per-engine memo of whether the ``web_find_settings`` table exists (narrow unit-test schemas
-# omit it). Mirrors the probe in ``app.services.ai_config``: a read helper must never provoke +
-# roll back an error inside the caller's transaction.
-_TABLE_PRESENT: dict[int, bool] = {}
-
 
 def _table_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
-    if key not in _TABLE_PRESENT:
-        _TABLE_PRESENT[key] = inspect(bind).has_table(WebFindSettings.__tablename__)
-    return _TABLE_PRESENT[key]
+    """Whether the ``web_find_settings`` table exists (narrow unit-test schemas omit it); a read
+    helper must never provoke + roll back an error inside the caller's transaction."""
+    return table_present(db, WebFindSettings.__tablename__)
 
 
 def get_download_policy(db: Session) -> str:

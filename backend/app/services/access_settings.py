@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.models.access_settings import (
@@ -19,21 +18,12 @@ from app.models.access_settings import (
     DEFAULT_ACCESS_LEVEL,
     AccessSettings,
 )
-
-# Per-engine memo of whether the ``access_settings`` table exists (narrow unit-test schemas omit
-# it). Mirrors the probe in ``app.services.web_find_settings``.
-_TABLE_PRESENT: dict[int, bool] = {}
+from app.utils.table_presence import table_present
 
 
 def _table_present(db: Session) -> bool:
-    key = id(db.get_bind())
-    if key not in _TABLE_PRESENT:
-        # Inspect the session's own connection, not the engine: inspecting the engine checks out a
-        # fresh connection and (on SQLite/StaticPool) issues a ROLLBACK that would discard the
-        # caller's uncommitted rows — corrupting, e.g., an in-progress import batch. (Mirrors the
-        # fix in ai_config._ai_config_table_present.)
-        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(AccessSettings.__tablename__)
-    return _TABLE_PRESENT[key]
+    """Whether the ``access_settings`` table exists (narrow unit-test schemas omit it)."""
+    return table_present(db, AccessSettings.__tablename__)
 
 
 def get_default_access_level(db: Session) -> str:

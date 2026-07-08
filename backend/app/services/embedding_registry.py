@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 
-from sqlalchemy import func, inspect, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ from app.services.embeddings import (
     cached_provider,
     evict_cached_providers,
 )
+from app.utils.table_presence import table_present
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,9 @@ MAX_EMBEDDING_MODELS = 8
 # top of slugify, which is the sole source of column names).
 _SAFE_COLUMN = re.compile(r"^vec_[a-z0-9_]+$")
 
-_TABLE_PRESENT: dict[int, bool] = {}
-
-
 def _table_present(db: Session) -> bool:
-    key = id(db.get_bind())
-    if key not in _TABLE_PRESENT:
-        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(
-            EmbeddingModelRegistry.__tablename__
-        )
-    return _TABLE_PRESENT[key]
+    """Whether the ``embedding_model_registry`` table exists (narrow unit-test schemas omit it)."""
+    return table_present(db, EmbeddingModelRegistry.__tablename__)
 
 
 def _is_postgres(db: Session) -> bool:

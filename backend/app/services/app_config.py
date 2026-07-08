@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -24,6 +23,7 @@ from app.models.app_config import (
     APP_CONFIG_SINGLETON_ID,
     AppConfig,
 )
+from app.utils.table_presence import table_present
 
 
 class BatchTooLargeError(Exception):
@@ -37,18 +37,9 @@ class BatchTooLargeError(Exception):
         )
 
 
-# Per-engine memo of whether the ``app_config`` table exists (narrow unit-test schemas omit it).
-_TABLE_PRESENT: dict[int, bool] = {}
-
-
 def _app_config_table_present(db: Session) -> bool:
-    bind = db.get_bind()
-    key = id(bind)
-    if key not in _TABLE_PRESENT:
-        # Inspect the session's own connection rather than the engine (see ai_config for why): this
-        # keeps the caller's uncommitted rows and pending flush intact.
-        _TABLE_PRESENT[key] = inspect(db.connection()).has_table(AppConfig.__tablename__)
-    return _TABLE_PRESENT[key]
+    """Whether the ``app_config`` table exists (narrow unit-test schemas omit it)."""
+    return table_present(db, AppConfig.__tablename__)
 
 
 def effective_max_papers_per_page(db: Session, *, settings: Settings | None = None) -> int:
