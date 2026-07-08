@@ -546,6 +546,9 @@ def queue_status(limit: int = 25) -> dict:
             # D7 queue-health fields (semaphore): explicit, self-describing names alongside the
             # legacy ``available``/``workers`` keys the UI already reads.
             "redis_reachable": True,
+            # E1: whether the deployment requires Redis (fail-closed). The UI shows a red
+            # "limits unavailable" banner when this is true while ``redis_reachable`` is false.
+            "require_redis": get_settings().production_require_redis,
             "worker_count": worker_count,
             "queued": counts["queued"],
             "workers": worker_count,
@@ -557,6 +560,7 @@ def queue_status(limit: int = 25) -> dict:
             "available": False,
             "error": str(exc),
             "redis_reachable": False,
+            "require_redis": get_settings().production_require_redis,
             "worker_count": 0,
             "queued": 0,
             "workers": 0,

@@ -75,7 +75,8 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
-        """Shared Redis rate limiting (D1). Fails open — a dead Redis never blocks requests."""
+        """Shared Redis rate limiting (D1). Fails open by default; fails closed with 503 when
+        ``PARACORD_PRODUCTION_REQUIRE_REDIS`` is set and Redis is unreachable (E1)."""
         if is_websocket_or_exempt(request):
             return await call_next(request)
         scheme, _, raw_token = (request.headers.get("authorization") or "").partition(" ")
@@ -83,6 +84,17 @@ def create_app() -> FastAPI:
         ip = request.client.host if request.client else None
         decision = rate_limit.check(token=token, ip=ip)
         if not decision.allowed:
+            if decision.scope == "unavailable":
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": (
+                            "Rate limiting is unavailable (Redis unreachable) and the server "
+                            "requires it; retry shortly."
+                        )
+                    },
+                    headers={"Retry-After": str(decision.retry_after)},
+                )
             return JSONResponse(
                 status_code=429,
                 content={

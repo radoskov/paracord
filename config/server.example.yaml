@@ -46,6 +46,11 @@ services:
   redis_url_env: REDIS_URL
   grobid_url_env: GROBID_URL
   ollama_url_env: OLLAMA_URL
+  # E1: rate limiting + queue-capacity fail OPEN when Redis is unreachable (correct for
+  # single-user — a dead Redis must never take the API down). Set the env var
+  # PARACORD_PRODUCTION_REQUIRE_REDIS=true on a LAN/production deployment to fail CLOSED instead:
+  # Redis-dependent requests are rejected with 503 while Redis is down and the admin Jobs view
+  # shows a red "limits unavailable" status. Read from the environment, not this file.
 
 # External metadata enrichment. Outbound calls carry only bibliographic identifiers
 # (titles, authors, DOIs, arXiv IDs, raw reference strings) and are audit-logged.

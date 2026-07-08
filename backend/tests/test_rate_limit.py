@@ -115,6 +115,35 @@ def test_fails_open_when_client_raises(monkeypatch):
     assert rate_limit.check(token=None, ip="10.0.0.1", now=1.0).allowed is True
 
 
+# --- E1: opt-in fail-closed (PARACORD_PRODUCTION_REQUIRE_REDIS) --------------
+
+
+def test_fails_closed_when_require_redis_and_redis_unreachable(monkeypatch):
+    monkeypatch.setattr(rate_limit, "_redis", lambda: None)
+    monkeypatch.setattr(rate_limit, "_require_redis", lambda: True)
+    decision = rate_limit.check(token=None, ip="10.0.0.1", now=1.0)
+    assert decision.allowed is False
+    assert decision.scope == "unavailable"
+
+
+def test_fails_closed_when_client_raises_and_require_redis(monkeypatch):
+    monkeypatch.setattr(rate_limit, "_redis", lambda: _BrokenRedis())
+    monkeypatch.setattr(rate_limit, "_effective_limits", lambda: (1, 1))
+    monkeypatch.setattr(rate_limit, "_require_redis", lambda: True)
+    decision = rate_limit.check(token=None, ip="10.0.0.1", now=1.0)
+    assert decision.allowed is False
+    assert decision.scope == "unavailable"
+
+
+def test_middleware_returns_503_when_require_redis_and_redis_down(client, monkeypatch):
+    monkeypatch.setattr(rate_limit, "_redis", lambda: None)
+    monkeypatch.setattr(rate_limit, "_require_redis", lambda: True)
+    resp = client.get("/api/v1/auth/me")  # not exempt
+    assert resp.status_code == 503
+    assert "Retry-After" in resp.headers
+    assert "detail" in resp.json()
+
+
 def test_middleware_returns_429_with_retry_after(client, monkeypatch):
     fake = _FakeRedis()
     monkeypatch.setattr(rate_limit, "_redis", lambda: fake)

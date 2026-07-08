@@ -49,6 +49,22 @@ def test_assert_capacity_allows_when_depth_unmeasurable(db, monkeypatch):
     assert_queue_has_capacity(db)  # fail-open: no exception
 
 
+def test_assert_capacity_fails_closed_when_require_redis_and_unmeasurable(db, monkeypatch):
+    """E1: with PARACORD_PRODUCTION_REQUIRE_REDIS set, an unmeasurable queue rejects with 503."""
+    from app.services.queue_capacity import assert_queue_has_capacity
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(queue, "pending_queue_depth", lambda: None)
+    monkeypatch.setenv("PARACORD_PRODUCTION_REQUIRE_REDIS", "true")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(HTTPException) as exc:
+            assert_queue_has_capacity(db)
+        assert exc.value.status_code == 503
+    finally:
+        get_settings.cache_clear()
+
+
 def test_assert_capacity_rejects_when_at_cap(db, monkeypatch):
     from app.services.queue_capacity import assert_queue_has_capacity
     from fastapi import HTTPException

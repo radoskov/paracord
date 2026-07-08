@@ -7,7 +7,9 @@ A Redis fixed-window counter enforced as ASGI middleware. Two scopes are checked
 
 State lives in Redis so the ceilings are shared across API workers. When Redis is unreachable the
 limiter **fails open** (allows the request) — a dead Redis must never take the API down. Unit tests
-run without Redis and therefore exercise the fail-open path unchanged.
+run without Redis and therefore exercise the fail-open path unchanged. A LAN/production deployment
+can flip this to **fail closed** by setting ``PARACORD_PRODUCTION_REQUIRE_REDIS`` (E1): a Redis
+outage then yields the ``"unavailable"`` scope, which the middleware returns as HTTP 503.
 
 The editable ceilings come from the owner-managed ``app_config`` singleton (per-client and global
 requests per minute), read through a short in-process TTL cache so a healthy Redis path doesn't add
@@ -48,8 +50,15 @@ class RateLimitDecision:
     """Outcome of a rate-limit check."""
 
     allowed: bool
-    scope: str | None = None  # "client" | "global" | None
+    scope: str | None = None  # "client" | "global" | "unavailable" | None
     retry_after: int = 0
+
+
+def _require_redis() -> bool:
+    """Whether Redis-backed limits must fail CLOSED when Redis is unreachable (E1)."""
+    from app.core.config import get_settings
+
+    return get_settings().production_require_redis
 
 
 def is_exempt(path: str) -> bool:
@@ -143,10 +152,16 @@ def check(
     The per-client counter is incremented first: if it exceeds its ceiling the request is rejected
     without touching the global counter, so a single noisy client can't inflate the global window.
     """
+    now = time.time() if now is None else now
     client = _redis()
     if client is None:
+        # Redis down: fail open (default) or, when the deployment opts in, fail closed with a
+        # distinct "unavailable" scope the middleware maps to 503 (E1).
+        if _require_redis():
+            return RateLimitDecision(
+                allowed=False, scope="unavailable", retry_after=_retry_after(now)
+            )
         return RateLimitDecision(allowed=True)
-    now = time.time() if now is None else now
     try:
         per_client_limit, global_limit = _effective_limits()
         client_key = f"client:{_client_id(token=token, ip=ip)}"
@@ -155,7 +170,12 @@ def check(
         if _incr_window(client, "global", now=now) > global_limit:
             return RateLimitDecision(allowed=False, scope="global", retry_after=_retry_after(now))
         return RateLimitDecision(allowed=True)
-    except Exception as exc:  # noqa: BLE001 - fail open: allow the request
+    except Exception as exc:  # noqa: BLE001 - Redis errored mid-check
+        if _require_redis():
+            logger.warning("Rate limit: check failed (%s); rejecting (require-redis)", exc)
+            return RateLimitDecision(
+                allowed=False, scope="unavailable", retry_after=_retry_after(now)
+            )
         logger.warning("Rate limit: check failed (%s); allowing request", exc)
         return RateLimitDecision(allowed=True)
 

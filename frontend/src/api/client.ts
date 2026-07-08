@@ -1189,6 +1189,9 @@ export interface QueueStatus {
   redis_reachable?: boolean;
   worker_count?: number;
   queued?: number;
+  // E1: true when the server requires Redis (fail-closed). With redis_reachable=false this means
+  // rate/queue limits are unavailable and Redis-dependent requests are being rejected with 503.
+  require_redis?: boolean;
 }
 
 export class ApiClient {

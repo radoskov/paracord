@@ -74,6 +74,24 @@ describe('JobsPage queue-health semaphore (D7)', () => {
     expect(el.className).toContain('semaphore-red');
     expect(el.textContent).toContain('offline');
   });
+
+  it('shows RED "limits unavailable" when Redis is unreachable and required (E1)', async () => {
+    const status: QueueStatus = {
+      available: false,
+      redis_reachable: false,
+      require_redis: true,
+      worker_count: 0,
+      queued: 0,
+      workers: 0,
+      counts: { queued: 0, started: 0, finished: 0, failed: 0, scheduled: 0, deferred: 0 },
+      jobs: [],
+    };
+    const client = { getJobs: vi.fn().mockResolvedValue(status) };
+    render(JobsPage, { client: client as never });
+    const el = await screen.findByTestId('queue-health');
+    expect(el.className).toContain('semaphore-red');
+    expect(el.textContent).toContain('limits unavailable');
+  });
 });
 
 describe('JobsPage admin queue/worker controls (D39)', () => {

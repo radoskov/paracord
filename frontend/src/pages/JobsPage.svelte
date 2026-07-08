@@ -45,7 +45,11 @@
     : !reachable
       ? {
           color: 'red',
-          text: "Processing queue offline (Redis unreachable) — imports won't be processed until it's back",
+          // E1: when the server requires Redis (fail-closed), an outage also means rate/queue
+          // limits are unavailable and Redis-dependent requests are being rejected with 503.
+          text: status.require_redis
+            ? 'Rate & queue limits unavailable (Redis unreachable) — this server requires Redis, so imports and other requests are being rejected (503) until it is back'
+            : "Processing queue offline (Redis unreachable) — imports won't be processed until it's back",
         }
       : workerCount === 0
         ? { color: 'yellow', text: `Queue reachable but no workers running · ${queued} queued` }
