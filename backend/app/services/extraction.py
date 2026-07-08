@@ -127,6 +127,20 @@ def store_parsed_extraction(
         promoted.append("doi")
     assert_field("doi", parsed.doi, canonical=doi_canonical)
 
+    # Issue 11: promote the paper's own venue/year mined from the TEI header when GROBID supplies
+    # them and the field is still empty (never overwriting a user-confirmed / already-set value).
+    venue_canonical = bool(promotable and parsed.venue and not work.venue)
+    if venue_canonical:
+        work.venue = parsed.venue
+        promoted.append("venue")
+    assert_field("venue", parsed.venue, canonical=venue_canonical)
+
+    year_canonical = bool(promotable and parsed.year and not work.year)
+    if year_canonical:
+        work.year = parsed.year
+        promoted.append("year")
+    assert_field("year", str(parsed.year) if parsed.year else None, canonical=year_canonical)
+
     if parsed.authors:
         assert_field("authors", "; ".join(parsed.authors), canonical=False)
 

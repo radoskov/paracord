@@ -42,6 +42,11 @@ class ParsedPaper:
     title: str | None = None
     abstract: str | None = None
     doi: str | None = None
+    # Issue 11: the primary paper's own venue (journal/conference) and publication year, mined from
+    # the TEI header's monograph like references already are. GROBID often can't fill these, but when
+    # it does they populate the first-class Work.venue / Work.year fields directly from extraction.
+    venue: str | None = None
+    year: int | None = None
     authors: list[str] = field(default_factory=list)
     references: list[ParsedReference] = field(default_factory=list)
     citation_mentions: list[ParsedCitationMention] = field(default_factory=list)
@@ -183,6 +188,18 @@ def parse_tei(tei_xml: str) -> ParsedPaper:
     paper.title = _text(root.find(".//t:teiHeader//t:titleStmt/t:title", TEI_NS))
     paper.abstract = _text(root.find(".//t:profileDesc/t:abstract", TEI_NS))
     paper.doi = _text(root.find('.//t:teiHeader//t:idno[@type="DOI"]', TEI_NS))
+
+    # The paper's own venue/year live in the header's source monograph (the analytic title stays the
+    # paper title; the monograph is the journal/conference). GROBID often omits these — that's fine.
+    source_bibl = root.find(".//t:teiHeader//t:sourceDesc//t:biblStruct", TEI_NS)
+    if source_bibl is not None:
+        paper.venue = _text(source_bibl.find(".//t:monogr/t:title", TEI_NS))
+        paper.year = _year(
+            _first(
+                source_bibl.find(".//t:monogr//t:imprint//t:date", TEI_NS),
+                source_bibl.find(".//t:monogr//t:date", TEI_NS),
+            )
+        )
 
     for pers in root.findall(".//t:teiHeader//t:sourceDesc//t:author/t:persName", TEI_NS):
         forenames = " ".join(_text(f) or "" for f in pers.findall("t:forename", TEI_NS)).strip()

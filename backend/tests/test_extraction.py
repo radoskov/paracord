@@ -56,6 +56,8 @@ def test_parse_tei_extracts_title_abstract_doi_authors_references() -> None:
     assert parsed.title == "Attention Is All You Need"
     assert parsed.abstract.startswith("We propose the Transformer")
     assert parsed.doi == "10.5555/transformer"
+    assert parsed.venue == "Advances in Neural Information Processing Systems"
+    assert parsed.year == 2017
     assert parsed.authors == ["Ashish Vaswani", "Noam Shazeer"]
     assert len(parsed.references) == 2
     assert len(parsed.citation_mentions) == 2
@@ -130,11 +132,13 @@ def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) ->
     summary = store_parsed_extraction(db_session, work=work, parsed=parse_tei(FIXTURE))
     db_session.commit()
 
-    assert set(summary["promoted"]) == {"title", "abstract", "doi"}
+    assert set(summary["promoted"]) == {"title", "abstract", "doi", "venue", "year"}
     assert work.canonical_title == "Attention Is All You Need"
     assert work.canonical_metadata_source == "grobid"
     assert work.abstract.startswith("We propose")
     assert work.doi == "10.5555/transformer"
+    assert work.venue == "Advances in Neural Information Processing Systems"
+    assert work.year == 2017
     assert (
         db_session.scalar(select(Reference).where(Reference.citing_work_id == work.id)) is not None
     )
