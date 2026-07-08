@@ -1090,6 +1090,21 @@
         "title": "BatchCommitRequest",
         "type": "object"
       },
+      "BatchExtractRequest": {
+        "properties": {
+          "scope": {
+            "default": "missing",
+            "enum": [
+              "all",
+              "missing"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "title": "BatchExtractRequest",
+        "type": "object"
+      },
       "BatchPreviewRequest": {
         "properties": {
           "engine": {
@@ -1261,6 +1276,28 @@
           "file"
         ],
         "title": "Body_upload_work_file_api_v1_works__work_id__files_post",
+        "type": "object"
+      },
+      "BulkApplyMetadataRequest": {
+        "properties": {
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "work_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Work Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "work_ids",
+          "field_name"
+        ],
+        "title": "BulkApplyMetadataRequest",
         "type": "object"
       },
       "ChangePasswordRequest": {
@@ -6736,6 +6773,92 @@
         "title": "WebFindAllowedHostOut",
         "type": "object"
       },
+      "WebFindApplyMetadataRequest": {
+        "description": "A Find-on-web result's metadata to record as candidate assertions (issue 9).",
+        "properties": {
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstract"
+          },
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
+          "authors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "source": {
+            "default": "web",
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "title": "WebFindApplyMetadataRequest",
+        "type": "object"
+      },
       "WebFindDownloadItem": {
         "properties": {
           "arxiv_id": {
@@ -8294,6 +8417,122 @@
         ]
       }
     },
+    "/api/v1/admin/ai/keyword-topic-status": {
+      "get": {
+        "description": "Per-paper keyword/topic coverage (issue 12): total papers and how many lack each.",
+        "operationId": "keyword_topic_status_endpoint_api_v1_admin_ai_keyword_topic_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Keyword Topic Status Endpoint Api V1 Admin Ai Keyword Topic Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Keyword Topic Status Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/keywords/batch": {
+      "post": {
+        "description": "Queue per-paper keyword extraction across the library (issue 12): ``all`` or ``missing`` only.",
+        "operationId": "batch_keywords_endpoint_api_v1_admin_ai_keywords_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchExtractRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Keywords Endpoint Api V1 Admin Ai Keywords Batch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Keywords Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
     "/api/v1/admin/ai/lexical-rebuild": {
       "post": {
         "description": "Manually rebuild the lexical (BM25F+) index. Enqueues a background rebuild when a worker queue\nis available; otherwise (SQLite dev / Redis down) rebuilds synchronously so the button still\ntakes effect. The index also self-rebuilds when the corpus changes — this is the explicit knob.",
@@ -8793,6 +9032,69 @@
           }
         },
         "summary": "Ai Status Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/topics/batch": {
+      "post": {
+        "description": "Queue per-paper topic-term extraction across the library (issue 12): ``all`` or ``missing``.",
+        "operationId": "batch_topics_endpoint_api_v1_admin_ai_topics_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchExtractRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Topics Endpoint Api V1 Admin Ai Topics Batch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Topics Endpoint",
         "tags": [
           "admin",
           "ai"
@@ -17146,6 +17448,77 @@
         ]
       }
     },
+    "/api/v1/works/bulk-apply-metadata": {
+      "post": {
+        "description": "Set one metadata field from the best available source across many selected papers (issue 3).\n\nFor each selected paper independently, promote the preferred assertion for ``field_name``\n(GROBID value preferred, else current canonical, else most recent) to canonical and apply it —\nthe same effect as clicking \"Use this\" per paper. Papers with the field already user-confirmed\n(locked) are skipped so a bulk action never silently overwrites a corrected value (AGENTS.md\nrule 5); papers the caller can't modify, or with no assertion for the field, are skipped too.",
+        "operationId": "bulk_apply_best_metadata_api_v1_works_bulk_apply_metadata_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkApplyMetadataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "title": "Response Bulk Apply Best Metadata Api V1 Works Bulk Apply Metadata Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Apply Best Metadata",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/from-reference/{reference_id}": {
       "post": {
         "description": "Create a library work from an unresolved citation reference (SPEC §8.9 import-missing-ref).\n\nIdempotent: if the reference already resolves to a work, that work is returned. The new work is\nowned by the actor (``created_by_user_id``) so a contributor may later edit their own import.",
@@ -18340,6 +18713,80 @@
           }
         },
         "summary": "Find On Web Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/find-on-web/apply-metadata": {
+      "post": {
+        "description": "Record a Find-on-web result's metadata as candidate assertions for review (issue 9).\n\nAdds the fetched values under a ``web_find:<source>`` provenance source through the same path as\nexternal enrichment: a non-trusted source never silently overwrites, so the values surface as\ncandidates the user promotes with \"Use this\". Returns the refreshed per-field review so the paper\nview can show the new candidates immediately. arXiv id (which has no review row) backfills any\nempty, unlocked ``arxiv_id``.",
+        "operationId": "find_on_web_apply_metadata_endpoint_api_v1_works__work_id__find_on_web_apply_metadata_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebFindApplyMetadataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FieldReview"
+                  },
+                  "title": "Response Find On Web Apply Metadata Endpoint Api V1 Works  Work Id  Find On Web Apply Metadata Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Find On Web Apply Metadata Endpoint",
         "tags": [
           "works"
         ]
