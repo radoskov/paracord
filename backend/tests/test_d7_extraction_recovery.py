@@ -250,3 +250,63 @@ def test_worker_clears_marker_on_failure(worker_env, monkeypatch) -> None:
     assert file.status == "extract_failed"
     assert file.extraction_requested_at is None  # marker means "still owed", not "ever failed"
     session.close()
+
+
+def _doi_integrity_error():
+    """A synthetic SQLAlchemy IntegrityError shaped like a psycopg uq_works_doi unique violation."""
+    from sqlalchemy.exc import IntegrityError
+
+    class _Diag:
+        constraint_name = "uq_works_doi"
+        message_detail = "Key (doi)=(10.1/dup) already exists."
+
+    class _Orig(Exception):
+        diag = _Diag()
+
+    return IntegrityError("UPDATE works SET doi=...", {}, _Orig("duplicate key"))
+
+
+def test_worker_handles_doi_conflict_on_extract(worker_env, monkeypatch) -> None:
+    """Issue 6: a uq_works_doi collision during extraction is a handled terminal state — the file is
+    marked failed (marker cleared so no D7 retry loop), an audit event is recorded, and the job
+    raises a concise message instead of a raw SQL dump."""
+    from app.models.audit import AuditEvent
+    from app.workers.jobs import _DOI_CONFLICT_MESSAGE, extract_pdf_job
+
+    def _conflict(*_a, **_k):
+        raise _doi_integrity_error()
+
+    monkeypatch.setattr("app.services.extraction.extract_and_store", _conflict)
+    fid = _seed_owed_file(worker_env)
+    with pytest.raises(RuntimeError, match="already belongs to another paper"):
+        extract_pdf_job(str(fid))
+    session = worker_env()
+    file = session.get(File, fid)
+    assert file.status == "extract_failed"
+    assert file.extraction_requested_at is None  # terminal → not re-swept
+    event = session.query(AuditEvent).filter(AuditEvent.event_type == "metadata.doi_conflict").first()
+    assert event is not None
+    assert event.details["phase"] == "extract"
+    assert _DOI_CONFLICT_MESSAGE  # message constant is defined/non-empty
+    session.close()
+
+
+def test_non_doi_integrity_error_still_raises_raw(worker_env, monkeypatch) -> None:
+    """A different constraint violation must NOT be swallowed as a DOI conflict — it surfaces."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.workers.jobs import extract_pdf_job
+
+    class _Orig(Exception):
+        diag = type("D", (), {"constraint_name": "some_other_uq", "message_detail": "x"})()
+
+    def _conflict(*_a, **_k):
+        raise IntegrityError("INSERT ...", {}, _Orig("other"))
+
+    monkeypatch.setattr("app.services.extraction.extract_and_store", _conflict)
+    fid = _seed_owed_file(worker_env)
+    with pytest.raises(IntegrityError):
+        extract_pdf_job(str(fid))
+    session = worker_env()
+    assert session.get(File, fid).status == "extract_failed"
+    session.close()

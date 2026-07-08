@@ -31,6 +31,48 @@ def _record_job_event(event_type: str, job_name: str, *, error: str | None = Non
         logger.warning("job audit event %s failed for %s", event_type, job_name, exc_info=True)
 
 
+def _doi_conflict_detail(exc: Exception) -> str | None:
+    """Return the Postgres DETAIL string if ``exc`` is a ``uq_works_doi`` unique violation, else None.
+
+    Used to recognise the specific "this DOI already belongs to another paper" collision (issue 6)
+    so it can be handled with a clear message instead of crashing the job — without swallowing other
+    integrity errors, which must still surface loudly.
+    """
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    if getattr(diag, "constraint_name", None) != "uq_works_doi":
+        return None
+    return getattr(diag, "message_detail", None) or "DOI already exists on another paper"
+
+
+def _record_doi_conflict(*, entity_type: str, entity_id: str, detail: str, phase: str) -> None:
+    """Persist a ``metadata.doi_conflict`` audit event (own session, best-effort, fail-open)."""
+    from app.db.session import SessionLocal
+    from app.services.audit import record_event
+
+    try:
+        with SessionLocal() as db:
+            record_event(
+                db,
+                "metadata.doi_conflict",
+                entity_type=entity_type,
+                entity_id=entity_id,
+                details={"phase": phase, "detail": detail[:500]},
+            )
+            db.commit()
+    except Exception:  # noqa: BLE001 - audit is best-effort; never break the job
+        logger.warning("doi_conflict audit failed for %s %s", entity_type, entity_id, exc_info=True)
+
+
+# User-facing message for the DOI-collision terminal state (issue 6): a re-extract/enrich tried to
+# assign a DOI that already belongs to a different paper (usually a duplicate). Kept short so the
+# Jobs tab shows something actionable instead of a raw SQLAlchemy/psycopg stack dump.
+_DOI_CONFLICT_MESSAGE = (
+    "This paper's DOI already belongs to another paper in the library (likely a duplicate). "
+    "Resolve the duplicate, then retry extraction."
+)
+
+
 def _audited_job[JobT: Callable[..., Any]](func: JobT) -> JobT:
     """Emit ``job.started`` / ``job.completed`` / ``job.failed`` audit events around a job (§7.6)."""
     job_name = func.__name__
@@ -57,6 +99,7 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
     import uuid
 
     from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
 
     from app.core.config import get_settings
     from app.db.session import SessionLocal
@@ -73,35 +116,51 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
         file = db.get(File, uuid.UUID(str(file_id)))
         if file is None:
             return
+
+        def _mark_failed() -> None:
+            # Persist a durable failure marker (so the UI can show extraction never succeeded) and
+            # clear the owed-extraction marker: this is a terminal outcome, not "still owed" (D7), so
+            # the recovery sweep must not re-enqueue a file that already failed. Roll back first: the
+            # session may hold a half-applied extraction / a failed transaction that must not commit.
+            db.rollback()
+            f = db.get(File, uuid.UUID(str(file_id)))
+            if f is not None:
+                f.status = "extract_failed"
+                f.extraction_requested_at = None
+                db.commit()
+
         try:
+            # NOTE: the whole write path — extract, status update, and commit — is inside the try so
+            # a deferred flush (e.g. the DOI unique-violation, issue 6) is caught here rather than
+            # surfacing unguarded after the block and reverting extraction_requested_at (poison loop).
             extract_and_store(
                 db,
                 file=file,
                 fetch_tei=client.process_fulltext_document_sync,
                 force_ocr=force_ocr,
             )
-        except Exception:
-            # Persist a durable failure marker (so the UI can show extraction never succeeded)
-            # before letting RQ record the job as failed. Roll back first: the session may hold a
-            # half-applied extraction (or be in a failed transaction), which must not be committed.
-            db.rollback()
-            file = db.get(File, uuid.UUID(str(file_id)))
-            if file is not None:
-                file.status = "extract_failed"
-                # Clear the owed-extraction marker: this is a terminal outcome, not "still owed"
-                # (D7). The marker means "we haven't attempted a terminal extraction yet", so the
-                # recovery sweep must not re-enqueue a file that already failed.
-                file.extraction_requested_at = None
-                db.commit()
+            file.status = "extracted"
+            file.extraction_requested_at = None  # terminal success — no longer owed (D7)
+            link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
+            work_id = str(link.work_id) if link else None
+            # For index_and_extract uploads, discard the PDF now that extraction is stored —
+            # only the Work, references and preview remain (SPEC §32.4).
+            discard_after_extract(db, file=file, settings=settings)
+            db.commit()
+        except IntegrityError as exc:
+            detail = _doi_conflict_detail(exc)
+            _mark_failed()
+            if detail is not None:
+                # Handled terminal state: record a clear audit event and re-raise a concise message
+                # (not the raw SQL dump). requested_at is already cleared, so no D7 retry loop.
+                _record_doi_conflict(
+                    entity_type="file", entity_id=str(file_id), detail=detail, phase="extract"
+                )
+                raise RuntimeError(_DOI_CONFLICT_MESSAGE) from None
             raise
-        file.status = "extracted"
-        file.extraction_requested_at = None  # terminal success — no longer owed (D7)
-        link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
-        work_id = str(link.work_id) if link else None
-        # For index_and_extract uploads, discard the PDF now that extraction is stored —
-        # only the Work, references and preview remain (SPEC §32.4).
-        discard_after_extract(db, file=file, settings=settings)
-        db.commit()
+        except Exception:
+            _mark_failed()
+            raise
     # Chain external enrichment (best-effort; no-op when the work has no DOI/arXiv id).
     if work_id:
         enqueue_enrichment(work_id)
@@ -115,6 +174,8 @@ def enrich_work_job(work_id: str) -> dict | None:
     failed run (e.g. arXiv down but Crossref fine, D8) is visible in the RQ job result.
     """
     import uuid
+
+    from sqlalchemy.exc import IntegrityError
 
     from app.core.config import get_settings
     from app.db.session import SessionLocal
@@ -130,6 +191,18 @@ def enrich_work_job(work_id: str) -> dict | None:
         try:
             result = enrich_work(db, work, settings=get_settings())
             db.commit()
+        except IntegrityError as exc:
+            # A DOI from an external source collided with another paper's DOI (issue 6). Enrichment
+            # is best-effort and not swept by D7, so this is non-fatal: roll back, record a clear
+            # audit event, and let the paper keep the data it already had (chunk/embed still run).
+            detail = _doi_conflict_detail(exc)
+            db.rollback()
+            if detail is None:
+                raise
+            _record_doi_conflict(
+                entity_type="work", entity_id=str(work_id), detail=detail, phase="enrich"
+            )
+            result = {"error": "doi_conflict", "detail": _DOI_CONFLICT_MESSAGE}
         finally:
             # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
             # unit), then (re)index embeddings — both off the search read path. Runs even when
