@@ -264,10 +264,13 @@ def test_enrich_work_is_idempotent(db_session) -> None:
     enrich_work(db_session, work, settings=_settings(), arxiv_fetcher=fetch)
     db_session.commit()
     count1 = db_session.scalar(select(func.count()).select_from(MetadataAssertion))
+    ids1 = set(db_session.scalars(select(MetadataAssertion.id)).all())
     enrich_work(db_session, work, settings=_settings(), arxiv_fetcher=fetch)
     db_session.commit()
     count2 = db_session.scalar(select(func.count()).select_from(MetadataAssertion))
     assert count1 == count2
+    # 1b: identical re-enrich reuses the same rows (no id/timestamp churn), not delete+reinsert.
+    assert set(db_session.scalars(select(MetadataAssertion.id)).all()) == ids1
 
 
 def test_enrich_work_without_identifier_is_noop(db_session) -> None:

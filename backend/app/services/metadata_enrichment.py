@@ -16,7 +16,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx2 as httpx
 from lxml import etree
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models.metadata import MetadataAssertion
@@ -324,15 +324,23 @@ def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str
         if value in (None, ""):
             continue
         value = str(value)
-        # Idempotent: replace any prior assertion for this (field, source).
-        db.execute(
-            delete(MetadataAssertion).where(
-                MetadataAssertion.entity_type == "work",
-                MetadataAssertion.entity_id == work.id,
-                MetadataAssertion.field_name == field_name,
-                MetadataAssertion.source == meta.source,
+        # Dedup (issue 1b) + idempotent replace: keep an existing assertion whose value is
+        # byte-identical to the incoming one (no id/timestamp churn) and drop every other prior row
+        # for this (field, source) — stale-value rows and legacy duplicates alike.
+        prior = list(
+            db.scalars(
+                select(MetadataAssertion).where(
+                    MetadataAssertion.entity_type == "work",
+                    MetadataAssertion.entity_id == work.id,
+                    MetadataAssertion.field_name == field_name,
+                    MetadataAssertion.source == meta.source,
+                )
             )
         )
+        same = next((a for a in prior if a.value == value), None)
+        for a in prior:
+            if a is not same:
+                db.delete(a)
         field_locked = work.user_confirmed or field_name in confirmed
         promote = field_name in PROMOTABLE_FIELDS and should_replace_canonical_field(
             meta.source, field_name, field_locked
@@ -347,17 +355,22 @@ def _store_external(db: Session, work: Work, meta: ExternalMetadata) -> list[str
                 )
                 .values(selected_as_canonical=False)
             )
-        db.add(
-            MetadataAssertion(
-                entity_type="work",
-                entity_id=work.id,
-                field_name=field_name,
-                value=value,
-                source=meta.source,
-                confidence=0.9,
-                selected_as_canonical=promote,
+        if same is not None:
+            same.selected_as_canonical = promote
+            same.confidence = 0.9
+            same.retrieved_at = datetime.now(UTC)
+        else:
+            db.add(
+                MetadataAssertion(
+                    entity_type="work",
+                    entity_id=work.id,
+                    field_name=field_name,
+                    value=value,
+                    source=meta.source,
+                    confidence=0.9,
+                    selected_as_canonical=promote,
+                )
             )
-        )
         if promote:
             _apply_field(work, field_name, value, meta.source)
             promoted.append(field_name)

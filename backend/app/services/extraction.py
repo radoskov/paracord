@@ -77,6 +77,23 @@ def store_parsed_extraction(
     def assert_field(field_name: str, value: str | None, *, canonical: bool) -> None:
         if not value:
             return
+        # Dedup (issue 1b): a re-extract that yields the same value for the same (work, field,
+        # source) must not create an identical duplicate assertion. Reuse the existing row (keeping
+        # its canonical flag in sync) and only insert when the value actually changed.
+        existing = db.scalar(
+            select(MetadataAssertion).where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == work.id,
+                MetadataAssertion.field_name == field_name,
+                MetadataAssertion.source == source,
+                MetadataAssertion.value == value,
+            )
+        )
+        if existing is not None:
+            if canonical and not existing.selected_as_canonical:
+                existing.selected_as_canonical = True
+            existing.retrieved_at = datetime.now(UTC)
+            return
         db.add(
             MetadataAssertion(
                 entity_type="work",

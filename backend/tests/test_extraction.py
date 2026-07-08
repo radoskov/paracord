@@ -184,6 +184,31 @@ def test_store_parsed_extraction_is_idempotent(db_session) -> None:
     assert len(db_session.scalars(select(CitationMention)).all()) == 2
 
 
+def test_store_parsed_extraction_does_not_duplicate_identical_assertions(db_session) -> None:
+    """1b: re-extracting a file whose GROBID output is unchanged must not add duplicate
+    same-value MetadataAssertion rows for the same (work, field, source)."""
+    work = Work(canonical_title="x", normalized_title="x", canonical_metadata_source="filename")
+    db_session.add(work)
+    db_session.commit()
+    store_parsed_extraction(db_session, work=work, parsed=parse_tei(FIXTURE))
+    db_session.commit()
+    first = db_session.scalars(
+        select(MetadataAssertion).where(
+            MetadataAssertion.entity_id == work.id, MetadataAssertion.field_name == "title"
+        )
+    ).all()
+    assert len(first) == 1
+    store_parsed_extraction(db_session, work=work, parsed=parse_tei(FIXTURE))
+    db_session.commit()
+    again = db_session.scalars(
+        select(MetadataAssertion).where(
+            MetadataAssertion.entity_id == work.id, MetadataAssertion.field_name == "title"
+        )
+    ).all()
+    assert len(again) == 1  # same value → reused, not duplicated
+    assert again[0].id == first[0].id
+
+
 def test_extract_and_store_uses_fetcher_location_and_audits(db_session, tmp_path: Path) -> None:
     work = Work(canonical_title="f", normalized_title="f", canonical_metadata_source="filename")
     file = File(sha256="a" * 64, size_bytes=10, mime_type="application/pdf")
