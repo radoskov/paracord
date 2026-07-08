@@ -1324,6 +1324,35 @@ Progress notes:
   tab, 5 weighted per-paper reference graph, 6 stored per-paper AI summary) are deferred to owner
   discussion (workplan §B). See `docs/agent_handoffs/2026-07-07-issue-batch-6-all-clear.md`.
 
+- issue_batch_6 "needs discussion" build-out (2026-07-07/08): after validating all §B decisions with
+  the owner (recorded in `docs/WORKPLAN_2026-07-07_batch6.md`, plus design docs
+  `docs/PAPER_REFERENCE_GRAPH_DESIGN.md` and `docs/B6_SPEC_index_only_stub_and_agent_help.md` — all
+  three intentionally uncommitted working docs), implemented all eight. **B8** — a Summarise/
+  Regenerate action in the paper view over the existing per-work summary machinery; new
+  `summary_type='auto'` resolves server-side to the configured provider (`02a73a2`). **B5** — the
+  lexical-index status self-refreshes against the current corpus (`cache_info(db)` + a `stale` flag)
+  and a manual `POST /ai/lexical-rebuild` + "Rebuild index" button, fixing the "warm — 1 papers"
+  staleness (`ce6d149`). **B2** — the viz "not indexed" notice now splits into reindexable vs
+  needs-a-PDF (no chunks) via a structured `reindex_hint`, listing the file-less papers to open
+  (`40677b7`). **B3** — temporal-map citation edges default ON with a configurable per-graph edge
+  limit that suppresses + notes above the threshold (`71e95b9`). **B4** — overlapping temporal-map
+  points collapse into one count-badged marker with an enterable tooltip listing each paper + open
+  links (`582b5d8`). **B1** — visualization help: per-view description, an "About this view" popup,
+  and a top-right "Visualization types" overview with requirements, from a data module `vizHelp.ts`
+  (`04f50aa`). **B6** — `index_only` "Scan & push" now creates a promotable server paper stub
+  (`AgentFile.work_id`, migration 0054; extract/teleport enrich it; deleting it drops the agent file
+  so Reconcile un-indexes locally) gated by an agent "create library stubs" toggle; plus an agent
+  Help tab and a "not extracted" library badge (`4832fd4`, `3be5015`, `0ab853d`). **B7** — a per-paper
+  weighted reference graph: `GET /works/{id}/reference-graph` (section-classifier + local/external
+  split + per-section mention counts), a paper-view modal renderer (year × section-weighted
+  citations, base highlighted, no-year lane, base→ref star + optional local ref→ref edges), and
+  editable section weights in Profile applied client-side (`8d4b785`, `d7fd2d5`). Every item shipped
+  with tests; gate run after each + a final full gate. Migration 0054 applied to the live DB;
+  api/worker/frontend images rebuilt (pgvector + echarts 6 baked from the earlier round).
+  **Known v1 scope note:** the reference graph's Y axis is the section-weighted mention count only;
+  the design's "selectable Y" (topic / citation count) is a documented follow-up. See
+  `docs/agent_handoffs/2026-07-08-issue-batch-6-needs-discussion-buildout.md`.
+
 ## Next milestone: M1 core library, organization, and files
 
 See `ROADMAP.md` / `SPECIFICATION.md` §20 for the full plan. The local agent and teleport
