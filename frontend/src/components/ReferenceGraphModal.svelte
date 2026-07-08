@@ -5,7 +5,12 @@
   import Modal from './Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen } from '../lib/selection';
-  import { DEFAULT_SECTION_WEIGHTS, buildReferenceGraphOption } from '../lib/viz/referenceGraph';
+  import {
+    DEFAULT_SECTION_WEIGHTS,
+    REFERENCE_Y_AXES,
+    buildReferenceGraphOption,
+    yValueFor,
+  } from '../lib/viz/referenceGraph';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -15,6 +20,12 @@
   let graph: ReferenceGraph | null = null;
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
+  let yAxis = 'weighted';
+
+  // How many reference nodes have no value for the current Y axis (→ the dashed "n/a" lane).
+  $: naCount = graph
+    ? graph.nodes.filter((n) => n.kind !== 'base' && yValueFor(n, yAxis, weights) == null).length
+    : 0;
   let loading = true;
   let message = '';
   let container: HTMLDivElement | null = null;
@@ -63,15 +74,15 @@
           }
         });
       }
-      chart.setOption(buildReferenceGraphOption(graph, weights, $activeVizTheme), true);
+      chart.setOption(buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis }), true);
       chartError = false;
     } catch {
       chartError = true;
     }
   }
 
-  // Re-style on theme change without refetching.
-  $: if ($activeVizTheme && chart && graph) void render();
+  // Re-render on theme or Y-axis change (both are pure client-side restyles — no refetch).
+  $: if (chart && graph && (yAxis || $activeVizTheme)) void render();
 
   function toggleRefEdges(): void {
     includeRefEdges = !includeRefEdges;
@@ -89,13 +100,21 @@
 
 <Modal title="Reference graph" wide {onClose}>
   <div class="rg-controls">
+    <label title="What the vertical axis plots for each reference">
+      Y axis
+      <select bind:value={yAxis} data-testid="rg-y-axis">
+        {#each REFERENCE_Y_AXES as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
+      </select>
+    </label>
     <label title="Also draw citation links between the in-library references that cite each other">
       <input type="checkbox" checked={includeRefEdges} on:change={toggleRefEdges} data-testid="rg-ref-edges" />
       Local reference-to-reference edges
     </label>
     <span class="muted"
-      >Node size = section-weighted citations (edit the weights in Profile). Blue-highlighted node is
-      this paper.</span
+      >X = year · node size = section-weighted citations (weights in Profile) · the highlighted node
+      is this paper.{#if naCount > 0}
+        {naCount} reference{naCount === 1 ? '' : 's'} have no value for this axis (dashed, on the
+        “n/a” lane).{/if}</span
     >
   </div>
   {#if message}<p class="msg" role="status">{message}</p>{/if}

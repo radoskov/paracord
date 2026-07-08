@@ -73,11 +73,72 @@ function escapeHtml(s: string): string {
   );
 }
 
+export interface YAxisOption {
+  key: string;
+  label: string;
+  axisName: string;
+}
+
+// Selectable Y axes (B7 v2). X stays year; weighted mentions is the default. citations/topic/degree
+// are local-only — external (or missing) nodes fall to the "n/a" lane.
+export const REFERENCE_Y_AXES: YAxisOption[] = [
+  {
+    key: "weighted",
+    label: "Weighted citations (default)",
+    axisName: "Weighted citations",
+  },
+  {
+    key: "mentions",
+    label: "Mention count",
+    axisName: "Times cited by this paper",
+  },
+  {
+    key: "citations",
+    label: "Citation count",
+    axisName: "Global citation count",
+  },
+  {
+    key: "topic",
+    label: "Topic similarity to this paper",
+    axisName: "Topic similarity",
+  },
+  {
+    key: "degree",
+    label: "Local citation degree",
+    axisName: "In-library citations",
+  },
+];
+
+/** The Y value for a node under the chosen axis, or null when it has none (→ the "n/a" lane). */
+export function yValueFor(
+  node: ReferenceGraphNode,
+  yAxis: string,
+  weights: Record<string, number>,
+): number | null {
+  switch (yAxis) {
+    case "mentions":
+      return node.mention_count ?? 0;
+    case "citations":
+      return node.citation_count ?? null;
+    case "topic":
+      return node.topic_similarity ?? null;
+    case "degree":
+      return node.local_degree ?? null;
+    default:
+      return weightedSize(node.section_counts, weights);
+  }
+}
+
 export function buildReferenceGraphOption(
   graph: ReferenceGraph,
   weights: Record<string, number>,
   theme: VizTheme,
+  opts: { yAxis?: string } = {},
 ): EChartsOptionLike {
+  const yAxisKey = opts.yAxis ?? "weighted";
+  const axisName =
+    REFERENCE_Y_AXES.find((o) => o.key === yAxisKey)?.axisName ??
+    "Weighted citations";
   const { x, noYearX } = xCoords(graph.nodes);
   const weightedById = new Map<string, number>();
   for (const n of graph.nodes) {
@@ -88,10 +149,22 @@ export function buildReferenceGraphOption(
   }
   const sizeFor = sizer([...weightedById.values()]);
 
-  // Y = section-weighted mention count (headline metric); base sits at the top for prominence.
-  const maxWeighted = Math.max(1, ...[...weightedById.values()]);
+  // Node SIZE is always the weighted mention count ("how heavily cited"); the Y axis is selectable.
+  const refNodes = graph.nodes.filter((n) => n.kind !== "base");
+  const yById = new Map<string, number | null>();
+  for (const n of refNodes) yById.set(n.id, yValueFor(n, yAxisKey, weights));
+  const real = [...yById.values()].filter((v): v is number => v != null);
+  const maxY = real.length ? Math.max(...real) : 1;
+  const minY = real.length ? Math.min(...real) : 0;
+  const span = Math.max(1, maxY - minY);
+  const naY = minY - span * 0.18 - 0.5; // baseline "n/a" lane, below every real value
+  const baseY = maxY + span * 0.15 + 0.5; // base paper pinned above the data
+
+  const isNa = (n: ReferenceGraphNode) =>
+    n.kind !== "base" && yById.get(n.id) == null;
+  const hasNa = refNodes.some(isNa);
   const yFor = (n: ReferenceGraphNode) =>
-    n.kind === "base" ? maxWeighted * 1.15 : (weightedById.get(n.id) ?? 0);
+    n.kind === "base" ? baseY : (yById.get(n.id) ?? naY);
 
   const point = (n: ReferenceGraphNode) => ({
     value: [x.get(n.id), yFor(n)],
@@ -99,6 +172,17 @@ export function buildReferenceGraphOption(
     node: n,
     symbolSize:
       n.kind === "base" ? BASE_SYMBOL : sizeFor(weightedById.get(n.id) ?? 0),
+    // A node with no value for this axis gets a dashed outline so it reads as "n/a", not zero.
+    ...(isNa(n)
+      ? {
+          itemStyle: {
+            borderType: "dashed",
+            borderColor: theme.text,
+            borderWidth: 1.5,
+            opacity: 0.65,
+          },
+        }
+      : {}),
   });
 
   // One series per node kind so the legend reads local / external / this paper, each its own colour.
@@ -190,12 +274,19 @@ export function buildReferenceGraphOption(
     },
     yAxis: {
       type: "value",
-      name: "Weighted citations",
+      name: axisName,
       nameLocation: "middle",
       nameGap: 40,
       scale: true,
       axisLine: { lineStyle: { color: theme.axisLine } },
       splitLine: { lineStyle: { color: theme.splitLine } },
+      // Label the baseline "n/a" lane so it doesn't read as a real value on this axis.
+      axisLabel: hasNa
+        ? {
+            formatter: (v: number) =>
+              Math.abs(v - naY) < 1e-9 ? "n/a" : String(v),
+          }
+        : undefined,
     },
     dataZoom: [
       { type: "inside", xAxisIndex: 0 },

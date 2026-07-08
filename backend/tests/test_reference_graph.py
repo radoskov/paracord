@@ -61,6 +61,55 @@ def test_reference_graph_splits_local_external_with_section_counts(
     assert by_label["External Ref"]["section_counts"] == {"related": 1}
     # base → each reference (star), 2 references.
     assert sum(1 for e in data["edges"] if e["source"] == str(base.id)) == 2
+    # v2 selectable-Y metrics: present (possibly null) on every node; null for the external ref.
+    assert by_label["External Ref"]["citation_count"] is None
+    assert by_label["External Ref"]["topic_similarity"] is None
+    assert set(by_label["Local Cited"]) >= {"citation_count", "local_degree", "topic_similarity"}
+
+
+def test_reference_graph_selectable_y_metrics(client, auth_headers, db) -> None:
+    """B7 v2: local reference nodes carry citation_count, local_degree and topic_similarity to the
+    base paper; external nodes leave them null (rendered on the 'n/a' lane)."""
+    base = Work(
+        canonical_title="Base", normalized_title="base", year=2020, topics=["nlp", "attention"]
+    )
+    cited = Work(
+        canonical_title="Cited",
+        normalized_title="cited",
+        year=2015,
+        citation_count=42,
+        topics=["nlp", "rnn"],
+    )
+    other = Work(canonical_title="Other citer", normalized_title="other citer", year=2019)
+    db.add_all([base, cited, other])
+    db.flush()
+    db.add_all(
+        [
+            Reference(
+                citing_work_id=base.id,
+                resolved_work_id=cited.id,
+                title="Cited",
+                resolution_status="resolved",
+            ),
+            # A second in-library paper also cites "cited" → its local degree is 2.
+            Reference(
+                citing_work_id=other.id,
+                resolved_work_id=cited.id,
+                title="Cited",
+                resolution_status="resolved",
+            ),
+        ]
+    )
+    db.commit()
+
+    data = client.get(
+        f"/api/v1/works/{base.id}/reference-graph", headers=auth_headers("editor")
+    ).json()
+    node = next(n for n in data["nodes"] if n["label"] == "Cited")
+    assert node["citation_count"] == 42
+    assert node["local_degree"] == 2  # base + other both cite it
+    # {nlp, attention} vs {nlp, rnn}: |∩|=1, |∪|=3 → 1/3.
+    assert node["topic_similarity"] == round(1 / 3, 4)
 
 
 def test_reference_graph_local_ref_to_ref_edges_opt_in(client, auth_headers, db) -> None:

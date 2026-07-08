@@ -885,6 +885,10 @@ export interface ReferenceGraphNode {
   section_counts: Record<string, number>;
   mention_count: number;
   weighted: number;
+  // Selectable-Y metrics (B7 v2); null for external refs / when unavailable.
+  citation_count?: number | null;
+  local_degree?: number | null;
+  topic_similarity?: number | null;
 }
 
 export interface ReferenceGraph {

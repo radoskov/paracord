@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.models.citation import CitationMention, Reference
@@ -112,29 +112,71 @@ def build_reference_graph(
             "section_counts": {},
             "mention_count": 0,
             "weighted": 0.0,
+            "citation_count": None,
+            "local_degree": None,
+            "topic_similarity": None,
         }
     ]
+
+    def _is_local(ref: Reference) -> bool:
+        return ref.resolved_work_id is not None and (
+            visible_ids is None or ref.resolved_work_id in visible_ids
+        )
+
+    # Per-local-work metrics for the selectable Y axes (B7 v2): global citation count, in-library
+    # citation degree, and topic similarity to the base paper. Null for external references.
+    local_work_ids = {ref.resolved_work_id for ref in references if _is_local(ref)}
+    citation_by_work: dict[uuid.UUID, int | None] = {}
+    topics_by_work: dict[uuid.UUID, list] = {}
+    degree_by_work: dict[uuid.UUID, int] = {}
+    if local_work_ids:
+        for wid, cc, topics in db.execute(
+            select(Work.id, Work.citation_count, Work.topics).where(Work.id.in_(local_work_ids))
+        ).all():
+            citation_by_work[wid] = cc
+            topics_by_work[wid] = list(topics or [])
+        degree_stmt = (
+            select(Reference.resolved_work_id, func.count(distinct(Reference.citing_work_id)))
+            .where(Reference.resolved_work_id.in_(local_work_ids))
+            .group_by(Reference.resolved_work_id)
+        )
+        if visible_ids is not None:
+            degree_stmt = degree_stmt.where(Reference.citing_work_id.in_(visible_ids))
+        for wid, deg in db.execute(degree_stmt).all():
+            degree_by_work[wid] = int(deg)
+
+    base_topics = {str(t).casefold() for t in (work.topics or [])}
+
+    def _topic_similarity(wid: uuid.UUID) -> float | None:
+        terms = {str(t).casefold() for t in topics_by_work.get(wid, [])}
+        if not base_topics or not terms:
+            return None
+        union = base_topics | terms
+        return round(len(base_topics & terms) / len(union), 4) if union else None
 
     # Map a resolved-local work id → its reference node id, for the optional ref→ref edge pass.
     work_to_ref_node: dict[uuid.UUID, str] = {}
     for ref in references:
-        is_local = ref.resolved_work_id is not None and (
-            visible_ids is None or ref.resolved_work_id in visible_ids
-        )
+        is_local = _is_local(ref)
         counts = dict(counts_by_ref.get(ref.id, {}))
+        wid = ref.resolved_work_id if is_local else None
         node = {
             "id": str(ref.id),
             "label": ref.title or ref.raw_citation or "Untitled reference",
             "year": ref.year,
             "kind": "local" if is_local else "external",
-            "resolved_work_id": str(ref.resolved_work_id) if is_local else None,
+            "resolved_work_id": str(wid) if wid else None,
             "section_counts": counts,
             "mention_count": sum(counts.values()),
             "weighted": round(_weighted(counts, DEFAULT_SECTION_WEIGHTS), 3),
+            # Selectable-Y metrics (null for external / when unavailable).
+            "citation_count": citation_by_work.get(wid) if wid else None,
+            "local_degree": degree_by_work.get(wid, 0) if wid else None,
+            "topic_similarity": _topic_similarity(wid) if wid else None,
         }
         nodes.append(node)
-        if is_local:
-            work_to_ref_node[ref.resolved_work_id] = node["id"]
+        if wid:
+            work_to_ref_node[wid] = node["id"]
 
     # base → reference (the "this paper cites it" star).
     edges: list[dict] = [{"source": base_id, "target": str(ref.id)} for ref in references]
