@@ -1442,6 +1442,17 @@ export class ApiClient {
     return this.request(`/api/v1/works/${workId}/keywords`, { method: "POST" });
   }
 
+  // Bulk "set one metadata field from the best available source" across selected papers (issue 3).
+  async bulkApplyMetadata(
+    workIds: string[],
+    fieldName: string,
+  ): Promise<{ field_name: string; applied: number; skipped: number }> {
+    return this.request(`/api/v1/works/bulk-apply-metadata`, {
+      method: "POST",
+      body: { work_ids: workIds, field_name: fieldName },
+    });
+  }
+
   async listWorkFiles(workId: string): Promise<WorkFile[]> {
     return this.request<WorkFile[]>(`/api/v1/works/${workId}/files`);
   }

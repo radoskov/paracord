@@ -72,6 +72,10 @@
   let batchStatus: ReadingStatus | '' = '';
   let showBatchPutInto = false;
   let batchPutIntoShelfId = '';
+  // Bulk-action dropdown (issue 3): one action + Go, keeping the toolbar uncluttered. "Set metadata"
+  // reveals a field picker for the best-source apply.
+  let batchAction = '';
+  let batchMetaField = 'title';
 
   // New-paper dialog
   let showNew = false;
@@ -517,23 +521,53 @@
     });
   }
 
-  async function batchReextract(): Promise<void> {
+  // A per-work batch action (re-extract / keywords / topics / enrich): run `op` over the selection
+  // with bounded concurrency and report how many succeeded vs failed.
+  async function runWorkBatch(
+    op: (id: string) => Promise<unknown>,
+    verb: string,
+  ): Promise<void> {
     const ids = [...selectedIds];
     await run(async () => {
-      // Gather every attached file across the selected papers (bounded concurrency), then queue
-      // extraction for each file (also bounded) instead of N×M serial round-trips.
-      const fileIds: string[] = [];
-      await runBatched(ids, async (id) => {
-        for (const file of await client.listWorkFiles(id)) fileIds.push(file.id);
-      });
-      const failed = await runBatched(fileIds, (fileId) => client.extractFile(fileId));
-      const queued = fileIds.length - failed;
+      const failed = await runBatched(ids, op);
+      const ok = ids.length - failed;
       message = failed
-        ? `Queued ${queued} extraction(s); ${failed} failed (queue unavailable?).`
-        : queued
-          ? `Queued ${queued} extraction(s) — watch the Jobs tab.`
-          : 'Nothing to extract: the selected papers have no attached files.';
+        ? `Queued ${verb} for ${ok} paper(s); ${failed} failed (queue unavailable?).`
+        : `Queued ${verb} for ${ok} paper(s) — watch the Jobs tab.`;
     });
+  }
+
+  async function batchApplyMetadata(): Promise<void> {
+    const ids = [...selectedIds];
+    const field = batchMetaField;
+    await run(async () => {
+      const res = await client.bulkApplyMetadata(ids, field);
+      message =
+        `Set ${field} from the best source on ${res.applied} paper(s)` +
+        (res.skipped ? `; skipped ${res.skipped} (locked / no candidate).` : '.');
+      await loadWorks();
+    });
+  }
+
+  // Dispatch the selected bulk action + Go (issue 3). Per-work extraction uses the tidy
+  // /works/{id}/extract endpoint (queues every attached file) rather than looping files client-side.
+  async function batchGo(): Promise<void> {
+    switch (batchAction) {
+      case 'reextract':
+        return runWorkBatch((id) => client.extractWork(id), 're-extraction');
+      case 'keywords':
+        return runWorkBatch((id) => client.keywordsWork(id), 'keyword extraction');
+      case 'topics':
+        return runWorkBatch((id) => client.topicWork(id), 'topic extraction');
+      case 'enrich':
+        return runWorkBatch((id) => client.enrichWork(id), 'enrichment');
+      case 'apply-metadata':
+        return batchApplyMetadata();
+      case 'delete':
+        return batchDelete();
+      default:
+        return;
+    }
   }
 
   async function batchSetStatus(): Promise<void> {
@@ -764,10 +798,31 @@
       {#if selectedIds.length > 0}
         <div class="batch">
           <strong>{selectedIds.length} selected</strong>
-          <button type="button" class="secondary danger-btn" on:click={batchDelete} disabled={loading || !canModifySelected}
-            title={canModifySelected ? 'Delete the selected papers (their files stay in the library)' : batchHint}>Delete</button>
-          <button type="button" class="secondary" on:click={batchReextract} disabled={loading || !canModifySelected}
-            title={canModifySelected ? 'Queue GROBID extraction for every attached file of the selected papers' : batchHint}>Re-extract</button>
+          <label class="inline">Action
+            <select bind:value={batchAction} disabled={loading || !canModifySelected}
+              title={canModifySelected ? 'Choose a bulk action to run on the selected papers' : batchHint}>
+              <option value="">…</option>
+              <option value="reextract">Re-extract</option>
+              <option value="keywords">Extract keywords</option>
+              <option value="topics">Extract topics</option>
+              <option value="enrich">Enrich (DOI/arXiv)</option>
+              <option value="apply-metadata">Set metadata from best source</option>
+              <option value="delete">Delete</option>
+            </select>
+          </label>
+          {#if batchAction === 'apply-metadata'}
+            <label class="inline">Field
+              <select bind:value={batchMetaField} disabled={loading || !canModifySelected}
+                title="Which field to set from the best available source (GROBID preferred)">
+                {#each ['title', 'abstract', 'year', 'venue', 'doi'] as f}
+                  <option value={f}>{f}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
+          <button type="button" class="secondary" on:click={batchGo}
+            disabled={loading || !canModifySelected || !batchAction}
+            title={canModifySelected ? 'Run the chosen action on the selected papers' : batchHint}>Go</button>
           <button type="button" class="secondary" on:click={() => (showBatchPutInto = true)}
             disabled={loading || !$canManageStructure}
             title={$canManageStructure ? 'Add all selected papers to a shelf' : INSUFFICIENT_ROLE}>Put all into…</button>
@@ -1119,11 +1174,6 @@
     gap: 0.5rem;
     margin-top: 0.6rem;
     padding: 0.45rem 0.6rem;
-  }
-
-  .danger-btn {
-    border-color: var(--status-danger-border);
-    color: var(--status-danger);
   }
 
   .link {
