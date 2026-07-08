@@ -284,7 +284,9 @@ def test_worker_handles_doi_conflict_on_extract(worker_env, monkeypatch) -> None
     file = session.get(File, fid)
     assert file.status == "extract_failed"
     assert file.extraction_requested_at is None  # terminal → not re-swept
-    event = session.query(AuditEvent).filter(AuditEvent.event_type == "metadata.doi_conflict").first()
+    event = (
+        session.query(AuditEvent).filter(AuditEvent.event_type == "metadata.doi_conflict").first()
+    )
     assert event is not None
     assert event.details["phase"] == "extract"
     assert _DOI_CONFLICT_MESSAGE  # message constant is defined/non-empty
@@ -293,9 +295,8 @@ def test_worker_handles_doi_conflict_on_extract(worker_env, monkeypatch) -> None
 
 def test_non_doi_integrity_error_still_raises_raw(worker_env, monkeypatch) -> None:
     """A different constraint violation must NOT be swallowed as a DOI conflict — it surfaces."""
-    from sqlalchemy.exc import IntegrityError
-
     from app.workers.jobs import extract_pdf_job
+    from sqlalchemy.exc import IntegrityError
 
     class _Orig(Exception):
         diag = type("D", (), {"constraint_name": "some_other_uq", "message_detail": "x"})()
