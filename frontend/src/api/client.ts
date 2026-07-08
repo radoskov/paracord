@@ -1529,6 +1529,28 @@ export class ApiClient {
     );
   }
 
+  // Record a find-on-web result's metadata as reviewable candidate assertions (issue 9). Returns
+  // the refreshed per-field review so the caller can show the new candidates immediately.
+  async applyWebCandidateMetadata(
+    workId: string,
+    candidate: WebCandidate,
+  ): Promise<FieldReview[]> {
+    return this.request<FieldReview[]>(
+      `/api/v1/works/${workId}/find-on-web/apply-metadata`,
+      {
+        method: "POST",
+        body: {
+          source: candidate.source,
+          title: candidate.title,
+          authors: candidate.authors,
+          year: candidate.year,
+          doi: candidate.doi,
+          arxiv_id: candidate.arxiv_id,
+        },
+      },
+    );
+  }
+
   async listWorkReferences(workId: string): Promise<ReferenceRecord[]> {
     return this.request<ReferenceRecord[]>(
       `/api/v1/works/${workId}/references`,

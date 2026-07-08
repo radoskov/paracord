@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Work } from '../api/client';
@@ -64,5 +64,26 @@ describe('WorkDetail citation count (Track C P1)', () => {
     const block = screen.getByTestId('citation-count');
     expect(block.textContent).toContain('—');
     expect(block.textContent).not.toContain('via');
+  });
+
+  it('an "in library" reference is a clickable link that navigates to the paper (issue 10)', async () => {
+    const client = makeClient();
+    client.listWorkReferences = vi.fn().mockResolvedValue([
+      {
+        id: 'r1',
+        title: 'Resolved Reference',
+        raw_citation: null,
+        doi: null,
+        arxiv_id: null,
+        year: 2015,
+        resolved_work_id: 'w-target',
+      },
+    ]);
+    const onSelectWork = vi.fn();
+    render(WorkDetail, { client: client as never, work: makeWork(), onSelectWork });
+
+    const badge = await screen.findByRole('button', { name: /in library/i });
+    await fireEvent.click(badge);
+    await waitFor(() => expect(onSelectWork).toHaveBeenCalledWith('w-target'));
   });
 });

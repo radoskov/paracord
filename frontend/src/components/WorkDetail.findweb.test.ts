@@ -299,6 +299,26 @@ describe('WorkDetail find-on-web picker (v2)', () => {
     expect(downloadWebCandidates).toHaveBeenCalledTimes(1);
   });
 
+  it('applies a candidate’s metadata as reviewable assertions (issue 9)', async () => {
+    const applyWebCandidateMetadata = vi.fn().mockResolvedValue([]);
+    const client = makeClient({ applyWebCandidateMetadata });
+    render(WorkDetail, { client: client as never, work: WORK });
+
+    await fireEvent.click(screen.getByRole('button', { name: /find on web/i }));
+    await screen.findByText(/Deep Residual Learning for Image Recognition/);
+
+    const useBtns = screen.getAllByRole('button', { name: /use metadata/i }) as HTMLButtonElement[];
+    await fireEvent.click(useBtns[0]);
+
+    await waitFor(() =>
+      expect(applyWebCandidateMetadata).toHaveBeenCalledWith(
+        'w1',
+        expect.objectContaining({ candidate_id: 'c1', title: expect.any(String) }),
+      ),
+    );
+    expect(await screen.findByText(/Metadata added/)).toBeTruthy();
+  });
+
   it('falls back to the non-streaming search if streaming errors', async () => {
     const client = makeClient({
       streamFindOnWeb: vi.fn().mockRejectedValue(new Error('no stream')),

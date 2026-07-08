@@ -179,6 +179,10 @@
   async function refreshOpenWork(): Promise<void> {
     try {
       const fresh = await client.getWork(work.id);
+      // Staleness guard (issue 2): a background job-poll refetch must never clobber a value the
+      // user just applied (e.g. "Use this" on the title) with an in-flight, older read. Only apply
+      // when the server copy is at least as new as the one we already hold.
+      if (fresh.updated_at && work.updated_at && fresh.updated_at < work.updated_at) return;
       onUpdated(fresh);
       await loadDetail(fresh, false);
     } catch {
@@ -541,6 +545,28 @@
   function recordResult(r: WebFindDownloadResult): void {
     downloadStatus = { ...downloadStatus, [r.candidate_id]: r };
     saveFindWebCache();
+  }
+
+  // Per-candidate "apply metadata" state (issue 9): 'applying' | 'applied'.
+  let metadataStatus: Record<string, 'applying' | 'applied'> = {};
+
+  async function applyCandidateMetadata(cand: WebCandidate): Promise<void> {
+    metadataStatus = { ...metadataStatus, [cand.candidate_id]: 'applying' };
+    try {
+      // Adds the fetched values as candidate assertions; they surface in the metadata-review
+      // section below for the user to promote with "Use this" (no silent overwrite).
+      await client.applyWebCandidateMetadata(work.id, cand);
+      metadataStatus = { ...metadataStatus, [cand.candidate_id]: 'applied' };
+      // Refresh the paper: loadDetail re-fetches the metadata reviews (showing the new candidates)
+      // and the header reflects any auto-filled arXiv id.
+      const fresh = await client.getWork(work.id);
+      onUpdated(fresh);
+      await loadDetail(fresh, false);
+    } catch (err) {
+      message = err instanceof Error ? err.message : 'Could not apply metadata';
+      const { [cand.candidate_id]: _dropped, ...rest } = metadataStatus;
+      metadataStatus = rest;
+    }
   }
 
   async function downloadSelected(): Promise<void> {
@@ -1229,7 +1255,11 @@
               {ref.year ?? ''}{ref.doi ? ` · doi:${ref.doi}` : ''}{ref.arxiv_id
                 ? ` · arXiv:${ref.arxiv_id}`
                 : ''}
-              {#if ref.resolved_work_id}<span class="ref-badge">in library</span>{/if}
+              {#if ref.resolved_work_id}<button
+                  type="button"
+                  class="ref-badge ref-badge-link"
+                  on:click={() => onSelectWork(ref.resolved_work_id)}
+                  title="Open this paper in the library">in library</button>{/if}
             </small>
             <div class="ref-actions">
               {#if locatableReferenceIds.has(ref.id)}
@@ -1395,6 +1425,20 @@
                   {#if cand.resolved_url || cand.landing_url}
                     {@const viewUrl = cand.resolved_url ?? (cand.landing_url as string)}
                     <a href={viewUrl} target="_blank" rel="noopener noreferrer" title={`Open ${viewUrl} in a new tab`}>View ↗</a>
+                  {/if}
+                  {#if canModify}
+                    <button
+                      type="button"
+                      class="link"
+                      disabled={metadataStatus[cand.candidate_id] === 'applying'}
+                      on:click={() => applyCandidateMetadata(cand)}
+                      title="Add this result's title/authors/year/DOI as metadata candidates you can then choose from below">
+                      {metadataStatus[cand.candidate_id] === 'applying'
+                        ? 'Applying…'
+                        : metadataStatus[cand.candidate_id] === 'applied'
+                          ? '✓ Metadata added'
+                          : 'Use metadata'}
+                    </button>
                   {/if}
                 </div>
                 {#if !cand.pdf_url && (cand.resolved_url || cand.landing_url)}
@@ -2002,6 +2046,18 @@
     font-size: 0.68rem;
     margin-left: 0.3rem;
     padding: 0.03rem 0.3rem;
+  }
+
+  /* Clickable "in library" badge (issue 10) — navigates to the resolved paper. */
+  .ref-badge-link {
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.68rem;
+  }
+
+  .ref-badge-link:hover {
+    text-decoration: underline;
   }
 
   .ref-actions {
