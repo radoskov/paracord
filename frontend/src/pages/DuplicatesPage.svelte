@@ -16,6 +16,13 @@
 
   let candidates: DuplicateCandidate[] = [];
   let statusFilter: DuplicateCandidateStatus | '' = 'open';
+  // Two sub-tabs (#2): real duplicate/version pairs vs "multi-work file" candidates. The latter are
+  // mostly false positives (a PDF that merely looks like it bundles several papers) and, mixed in,
+  // they bury the largely-correct duplicate results — so they get their own tab to triage apart.
+  let activeTab: 'duplicates' | 'multiwork' = 'duplicates';
+  $: multiworkCandidates = candidates.filter((c) => c.candidate_type === 'multiwork_file');
+  $: dupeCandidates = candidates.filter((c) => c.candidate_type !== 'multiwork_file');
+  $: shownCandidates = activeTab === 'multiwork' ? multiworkCandidates : dupeCandidates;
   let splitDrafts: Record<string, string> = {};
   // Per-candidate chosen base (the surviving canonical paper, "merge INTO"); the other work is the
   // merge-from source. The double-arrow control swaps them. Defaults to the suggested target.
@@ -205,16 +212,53 @@
       </div>
     </div>
     {#if message}<p class="muted">{message}</p>{/if}
-    <p class="muted">
-      Candidates are grouped by signal (same DOI/arXiv, fuzzy title, identical file, or a file that
-      looks like it holds several papers). Choose how to resolve each one — nothing is deleted.
-    </p>
 
-    {#if candidates.length === 0}
-      <p class="empty">No candidates for this filter. Try “Scan now”, or switch the status filter.</p>
+    <div class="subtabs" role="tablist" aria-label="Candidate kind">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === 'duplicates'}
+        class:active={activeTab === 'duplicates'}
+        on:click={() => (activeTab = 'duplicates')}
+        data-testid="dup-tab-duplicates"
+        title="Same-DOI/arXiv, fuzzy-title and identical-file pairs — likely the same paper"
+      >
+        Duplicates <span class="count">{dupeCandidates.length}</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === 'multiwork'}
+        class:active={activeTab === 'multiwork'}
+        on:click={() => (activeTab = 'multiwork')}
+        data-testid="dup-tab-multiwork"
+        title="Files that look like they bundle several papers — mostly false positives, triaged separately"
+      >
+        Multi-work files <span class="count">{multiworkCandidates.length}</span>
+      </button>
+    </div>
+
+    {#if activeTab === 'duplicates'}
+      <p class="muted">
+        Likely-same papers grouped by signal (same DOI/arXiv, fuzzy title, or identical file). Choose
+        how to resolve each one — nothing is deleted.
+      </p>
+    {:else}
+      <p class="muted">
+        Files that look like they hold several papers. These are mostly false positives, so review
+        them here on their own — split a file into separate papers, or keep it as-is. Nothing is
+        deleted.
+      </p>
+    {/if}
+
+    {#if shownCandidates.length === 0}
+      <p class="empty">
+        {#if activeTab === 'multiwork'}No multi-work file candidates for this filter.{:else}No
+          duplicate candidates for this filter.{/if} Try “Scan now”, or switch the status filter.
+      </p>
     {:else}
       <div class="cands">
-        {#each candidates as c (c.id)}
+        {#each shownCandidates as c (c.id)}
           <article>
             <header>
               <div>
@@ -301,6 +345,40 @@
   .controls {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .subtabs {
+    border-bottom: 1px solid var(--border-normal);
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.6rem 0 0.2rem;
+  }
+
+  .subtabs button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--ink-muted);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    margin-bottom: -1px;
+    padding: 0.4rem 0.7rem;
+  }
+
+  .subtabs button.active {
+    border-bottom-color: var(--accent-primary);
+    color: var(--ink-strong);
+  }
+
+  .subtabs .count {
+    background: var(--surface-sunken);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-left: 0.3rem;
+    padding: 0.05rem 0.4rem;
   }
 
   .cands {

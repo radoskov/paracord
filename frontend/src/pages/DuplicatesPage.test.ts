@@ -117,3 +117,56 @@ describe('DuplicatesPage merge/link/swap (Batch D)', () => {
     );
   });
 });
+
+describe('DuplicatesPage duplicates vs multi-work file sub-tabs (#2)', () => {
+  beforeEach(() => {
+    currentUser.set({ id: 'u', username: 'ed', role: 'editor' } as never);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function multiworkCandidate(): DuplicateCandidate {
+    return workCandidate({
+      id: 'cand-mw',
+      candidate_type: 'multiwork_file',
+      entity_a_type: 'file',
+      entity_a_id: 'file-a',
+      entity_b_type: 'file',
+      entity_b_id: 'file-a',
+      entity_a_label: 'bundle.pdf',
+      entity_b_label: 'bundle.pdf',
+      suggested_target_work_id: null,
+    });
+  }
+
+  it('shows only duplicate candidates on the Duplicates tab and multi-work ones on their own tab', async () => {
+    const client = makeClient({
+      listDuplicateCandidates: vi.fn().mockResolvedValue([workCandidate(), multiworkCandidate()]),
+    });
+    render(DuplicatesPage, { client: client as never });
+
+    // Default tab = Duplicates: the work pair shows, the multi-work file does not.
+    await screen.findByText('Paper A');
+    expect(screen.queryByText('bundle.pdf')).toBeNull();
+    // Counts on each sub-tab.
+    expect(screen.getByTestId('dup-tab-duplicates').textContent).toContain('1');
+    expect(screen.getByTestId('dup-tab-multiwork').textContent).toContain('1');
+
+    // Switch to the multi-work tab: the file shows, the duplicate pair is hidden.
+    await fireEvent.click(screen.getByTestId('dup-tab-multiwork'));
+    await screen.findByText('bundle.pdf');
+    expect(screen.queryByText('Paper A')).toBeNull();
+    expect(screen.getByText(/Split this file into separate papers/)).toBeTruthy();
+  });
+
+  it('shows a tab-specific empty message when a sub-tab has no candidates', async () => {
+    const client = makeClient({
+      listDuplicateCandidates: vi.fn().mockResolvedValue([workCandidate()]),
+    });
+    render(DuplicatesPage, { client: client as never });
+    await screen.findByText('Paper A');
+    await fireEvent.click(screen.getByTestId('dup-tab-multiwork'));
+    expect(await screen.findByText(/No multi-work file candidates/)).toBeTruthy();
+  });
+});
