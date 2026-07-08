@@ -50,7 +50,6 @@ class Agent(Base):
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True, index=True
     )
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Per-agent privileges (SPEC §32.8). Least-privilege for permanent storage (teleport off);
     # indexing, transient extract, being-requested, and visibility are on by default.
