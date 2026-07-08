@@ -1,9 +1,11 @@
 # PaRacORD — Audit (merged)
 
-**Consolidated & status-verified 2026-07-08.** The single register of **known technical issues**
-(security, correctness, performance, hygiene). Merges the former `AUDIT.md` (D-IDs), `AUDIT_EXT.md`
-(2026-07-08 extended audit; its net-new items are the **E-series** below), and
-`ARCHIVED_AUDIT_LOG.md` (resolved tail). Product/architecture **choices** are not issues — they live
+**Consolidated & status-verified 2026-07-08; AUDIT_EXT fully folded in 2026-07-09.** The single
+register of **known technical issues** (security, correctness, performance, hygiene). Merges the
+former `AUDIT.md` (D-IDs), `AUDIT_EXT.md` (2026-07-08 extended audit; its net-new items are the
+**E-series** below, and its narrative context is preserved in **Appendix A**), and
+`ARCHIVED_AUDIT_LOG.md` (resolved tail). The standalone `AUDIT_EXT.md` was removed on 2026-07-09 —
+**this is now the only audit file.** Product/architecture **choices** are not issues — they live
 at the end of [`WORKPLAN.md`](WORKPLAN.md); build tasks that resolve an open issue are in
 `WORKPLAN.md` and cross-reference the IDs here.
 
@@ -126,3 +128,70 @@ original documents are in `documentation_archive.zip` and the earlier gitignored
   recommendation, not a defect — worth adopting, but it isn't in the issue table.
 - The two audits agreed on severity throughout; AUDIT_EXT's risks are a superset framing of the
   already-fixed D-items, with E1–E6 as the net-new content.
+
+---
+
+## Appendix A — Extended-audit narrative (folded from `AUDIT_EXT.md`, 2026-07-08)
+
+The issue table above captures every actionable finding from the extended audit as the D-/E-series.
+This appendix preserves the extended audit's *non-issue narrative* — the positive assessment, the
+security strengths that back the "weighted accordingly" scale note, and the testing/roadmap framing —
+so nothing was lost when `AUDIT_EXT.md` was removed. Scope of the extended audit: backend, agent,
+frontend, Docker/Compose/CI, runbooks, roadmap/spec alignment, security, robustness, performance, UX.
+
+### A.1 Overall assessment
+PaRacORD is substantially beyond a scaffold: real FastAPI backend, local-agent implementation,
+Svelte/Vite frontend, Playwright E2E suite, dev + prod Docker targets, migration-parity tests,
+OpenAPI-freshness check, and a broad backend/agent/frontend test suite. The server/agent split
+matches the intended security model (the server stores opaque agent file IDs and does not browse
+arbitrary workstation paths). The engineering challenge has shifted from "can this be built?" to
+"can it stay comprehensible, testable, and safe as features accumulate?"
+
+### A.2 Security strengths (context for the scale note)
+No guest role; owner/admin/librarian/editor/contributor/reader ladder. Bcrypt passwords with
+over-72-byte rejection. User sessions store token *hashes*, not raw bearers; agent tokens treated
+equivalently. Auth deps check active sessions + disabled users. Owner immutability tested. File
+streaming + extraction share one root-validating resolver that validates the *original* location
+before serving a derived OCR file (closes a bypass class). Agent manifests use opaque IDs + display
+aliases, never raw local paths. Auth/stream/import/admin/file actions are increasingly auditable
+with a redirectable sink for tests. Pre-commit/CI secret scanning is wired.
+
+### A.3 Spec areas still maturing (not defects — tracked as D38/E-series or WORKPLAN items)
+Reader citation-context provenance end-to-end (TEI mention → DB context → PDF coordinate → overlay
+hitbox); cached/explainable rack/shelf citation summaries with scope toggles; a high-confidence
+duplicate merge/version/split review UX with reversible ops; consistent "why this value" metadata
+provenance display; explicit OCR-unavailable messaging + slow/E2E tests; real-world BibTeX/RIS/CSL
+round-trip validation; a production deployment guide (TLS/reverse proxy, backup policy, restore
+drills, non-loopback LAN exposure — see D3/M2).
+
+### A.4 Testing audit
+The suite is strong (backend API/service, agent, Vitest, Playwright E2E, migration parity, OpenAPI
+checks, marker-separated slow/safety targets). Recommended additions were captured in
+[`testing/EXT_TEST_BATTERY.md`](testing/EXT_TEST_BATTERY.md) and
+[`testing/EXT_TEST_DESIGN_REVIEW.md`](testing/EXT_TEST_DESIGN_REVIEW.md): access-policy governance
+tests, file-path-resolver priority/derived-OCR-bypass tests, queue fail-open/closed semantics,
+agent path-contract tests (prefix collision, symlink escape, normalized in-root), safety tests for
+file/derived isolation + invalid-agent-token rejection, reading-mode resilience, and an E2E
+search→open→export flow using retry-style assertions rather than fixed sleeps.
+
+### A.5 Prioritized roadmap (as framed by the extended audit)
+- **Immediate / low risk:** run the new test battery + `make ready-full`/`make test-safety` before
+  pushing; refresh stale docs to the current Makefile/Compose/marker scheme; add Redis-unreachable
+  warnings in production-like mode (**E1**); add a processing-health indicator (queue/worker/Redis/
+  GROBID/Ollama); add explanatory empty states.
+- **Next feature-complete pass:** citation-context overlay acceptance tests on fixture TEI
+  coordinates; materialized citation-summary caching (**O2/D38**); guided duplicate/version UX
+  (**E6**); agent request/teleport audit views; import-batch recovery UI (retry extraction/
+  enrichment/topics — **M3/E4**).
+- **Before first personal-use release:** decide the migration squash (open discussion); document +
+  drill backup/restore; pin/verify GROBID/Ollama/Node/Python/base-image versions; run
+  `make ready-full`/`test-safety`/`e2e` + a prod-smoke target; verify a BibTeX/RIS/CSL round-trip.
+- **Before sharing with others:** harden prod deploy (reverse proxy/TLS, headers, non-root
+  containers, explicit secrets, read-only mounts — **D3/M2/E5**); admin UI for rate-limit/queue
+  policy + fail-open/closed modes (**E1**); DB backup scheduling + restore UI/runbook; onboarding +
+  multi-user access-grant docs (**E6**); performance testing for 5k works / 50k refs / 10k files.
+
+### A.6 Process recommendation (not an issue)
+**AUDIT_EXT S5** — add a *new-endpoint access-control checklist* to `AGENTS.md`: list endpoint → list
+filter; single-object read → can-see; mutation → can-modify; admin action → require admin/owner;
+file action → file resolver. Worth adopting; not a defect, so it is not in the issue table.
