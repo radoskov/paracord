@@ -14,7 +14,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-
 from app.models.app_config import (
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
     _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN,

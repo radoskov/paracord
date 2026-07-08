@@ -12,11 +12,11 @@ import sys
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.services.app_config import update_rate_limits
 from app.models.app_config import (
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
     _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN,
 )
+from app.services.app_config import update_rate_limits
 
 DEFAULT_PER_CLIENT = _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN
 DEFAULT_GLOBAL = _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN
@@ -29,9 +29,10 @@ def _refuse_production() -> None:
     settings = get_settings()
     environment = settings.environment.lower()
 
-    if environment not in {"development", "test"} and os.environ.get(
-        "ALLOW_PRODUCTION_E2E_RATE_LIMIT_CONFIG"
-    ) != "1":
+    if (
+        environment not in {"development", "test"}
+        and os.environ.get("ALLOW_PRODUCTION_E2E_RATE_LIMIT_CONFIG") != "1"
+    ):
         raise SystemExit(
             "Refusing to modify rate limits outside development/test. "
             f"PARACORD_ENV={settings.environment!r}"
