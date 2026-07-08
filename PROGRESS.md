@@ -1349,9 +1349,15 @@ Progress notes:
   editable section weights in Profile applied client-side (`8d4b785`, `d7fd2d5`). Every item shipped
   with tests; gate run after each + a final full gate. Migration 0054 applied to the live DB;
   api/worker/frontend images rebuilt (pgvector + echarts 6 baked from the earlier round).
-  **Known v1 scope note:** the reference graph's Y axis is the section-weighted mention count only;
-  the design's "selectable Y" (topic / citation count) is a documented follow-up. See
-  `docs/agent_handoffs/2026-07-08-issue-batch-6-needs-discussion-buildout.md`.
+  See `docs/agent_handoffs/2026-07-08-issue-batch-6-needs-discussion-buildout.md`.
+- B7 extended — **selectable Y axis** for the reference graph (2026-07-08): the endpoint now emits per
+  local node `citation_count`, `local_degree`, and `topic_similarity` to the base paper, and the modal
+  has a Y-axis picker — weighted mentions (default), mention count, citation count, topic similarity,
+  local citation degree. Local-only axes park external/unresolved nodes on a labelled "n/a" lane drawn
+  with a dashed outline (not a zero) + a count note; X stays year (`62b8071`). Also fixed a recurring
+  local-dev flake: `pdfjs-dist` was optimized on-demand so the reader E2E journeys intermittently 504'd
+  under the parallel run — added it to Vite `optimizeDeps.include` alongside the chart libs (`b24e2bc`).
+  Final full gate green: bare `pytest` 1093 / frontend 209 / e2e 32.
 
 ## Next milestone: M1 core library, organization, and files
 
