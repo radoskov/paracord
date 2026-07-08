@@ -845,7 +845,11 @@
 
 <div class="detail">
   <div class="bar">
-    <h2>{form.canonical_title || 'Untitled paper'}</h2>
+    <h2>{form.canonical_title || 'Untitled paper'}
+      {#if work.canonical_metadata_source === 'agent_index_only'}
+        <span class="stub-badge" title="Indexed by the local agent but not yet extracted — attach/extract or teleport to fill in metadata and text">not extracted</span>
+      {/if}
+    </h2>
     <div class="bar-actions">
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
@@ -1494,6 +1498,18 @@
     font-size: 1.05rem;
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  .stub-badge {
+    background: var(--status-warning-bg);
+    border-radius: 6px;
+    color: var(--status-warning);
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
   }
 
 

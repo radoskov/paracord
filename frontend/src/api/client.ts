@@ -31,6 +31,8 @@ export interface Work {
   venue: string | null;
   year: number | null;
   reading_status: ReadingStatus;
+  // Origin marker; "agent_index_only" on a not-yet-extracted local-agent stub (B6).
+  canonical_metadata_source?: string | null;
   // The file to open by default (the "main" file); null falls back to the first attached file.
   main_file_id?: string | null;
   confirmed_fields?: string[];

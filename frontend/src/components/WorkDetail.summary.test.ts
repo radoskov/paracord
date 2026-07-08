@@ -88,6 +88,17 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     ).toBeNull();
   });
 
+  it("badges an un-extracted local-agent stub as 'not extracted' (B6)", async () => {
+    const client = makeClient([]);
+    render(WorkDetail, {
+      client: client as never,
+      work: makeWork({
+        canonical_metadata_source: "agent_index_only",
+      } as never),
+    });
+    expect(await screen.findByText("not extracted")).toBeTruthy();
+  });
+
   it("generates a summary from the paper view and shows it (B8)", async () => {
     const createSummary = vi.fn().mockResolvedValue(makeSummary());
     // No summary at first; after generating, the reload returns one.
