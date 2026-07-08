@@ -1300,6 +1300,30 @@ def list_work_references(
     ]
 
 
+@router.get("/{work_id}/reference-graph")
+def get_reference_graph(
+    work_id: uuid.UUID,
+    include_ref_edges: bool = False,
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> dict:
+    """Weighted reference graph for a paper (B7): the base paper + one node per reference, coloured
+    local vs external, carrying per-section mention counts so the client can size nodes by the
+    caller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges."""
+    from app.services.reference_graph import build_reference_graph
+
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    return build_reference_graph(
+        db,
+        work,
+        visible_ids=access.visible_work_ids(db, actor),
+        include_ref_edges=include_ref_edges,
+    )
+
+
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])
 def get_work_citation_contexts(
     work_id: uuid.UUID,

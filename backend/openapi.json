@@ -18905,6 +18905,78 @@
         ]
       }
     },
+    "/api/v1/works/{work_id}/reference-graph": {
+      "get": {
+        "description": "Weighted reference graph for a paper (B7): the base paper + one node per reference, coloured\nlocal vs external, carrying per-section mention counts so the client can size nodes by the\ncaller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges.",
+        "operationId": "get_reference_graph_api_v1_works__work_id__reference_graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_ref_edges",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Ref Edges",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Reference Graph Api V1 Works  Work Id  Reference Graph Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reference Graph",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}/references": {
       "get": {
         "description": "Return the parsed bibliography (extracted references) for a work.",
