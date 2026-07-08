@@ -559,6 +559,47 @@ def test_offer_teleport_stores_file_and_work(client, db) -> None:
     assert row.file_id is not None
 
 
+def test_offer_teleport_reuses_index_only_stub(client, db) -> None:
+    """1a: an agent-initiated teleport of a previously index_only file enriches its existing stub
+    paper in place rather than creating a second Work (mirrors complete_teleport)."""
+    from app.core.config import get_settings
+    from app.models.agent import AgentFile
+    from app.models.work import Work
+    from sqlalchemy import func, select
+
+    agent, headers = _agent_with_token(db, can_teleport=True)
+    # 1) Scan the file as index_only → creates a single stub Work linked via AgentFile.work_id.
+    item = {
+        "local_file_id": "t1",
+        "sha256": _PDF_SHA,
+        "size_bytes": len(_PDF),
+        "virtual_path": "papers/attention_is_all_you_need.pdf",
+        "import_action": "index_only",
+    }
+    client.post("/api/v1/agents/manifest", headers=headers, json={"items": [item]})
+    stub_id = db.scalar(select(AgentFile.work_id).where(AgentFile.local_file_id == "t1"))
+    assert stub_id is not None
+    assert db.scalar(select(func.count()).select_from(Work)) == 1
+
+    # 2) Offer-teleport the same file → must reuse the stub, not create a duplicate.
+    with (
+        _patch("app.services.storage.get_settings", return_value=get_settings()),
+        _patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            "/api/v1/agents/files/t1/offer-teleport",
+            headers=headers,
+            files={"file": ("attention_is_all_you_need.pdf", _io.BytesIO(_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    db.expire_all()
+    assert db.scalar(select(func.count()).select_from(Work)) == 1  # no duplicate
+    stub = db.get(Work, stub_id)
+    assert stub.canonical_metadata_source == "teleport"  # promoted in place, marker cleared
+    row = db.scalar(select(AgentFile).where(AgentFile.local_file_id == "t1"))
+    assert row.file_id is not None
+
+
 def test_agent_me_and_source_removed(client, db) -> None:
     from app.models.agent import AgentFile
 

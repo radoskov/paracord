@@ -336,17 +336,25 @@ def offer_teleport(
     )
     has_link = db.scalar(select(FileWorkLink.id).where(FileWorkLink.file_id == file.id)) is not None
     if not has_link:
-        title = storage._title_from_filename(Path(name))
-        raw_arxiv = storage._arxiv_id_from_filename(Path(name))
-        work = Work(
-            canonical_title=title,
-            normalized_title=normalize_title(title),
-            canonical_metadata_source="teleport",
-            arxiv_id=raw_arxiv,
-            arxiv_base_id=arxiv_base_id(raw_arxiv),
-        )
-        db.add(work)
-        db.flush()
+        # B6: an agent-initiated teleport of a previously index_only file must enrich its existing
+        # stub paper rather than create a duplicate (mirrors complete_teleport) — reuse the linked
+        # stub Work when present, only creating a fresh Work when the file was never scanned.
+        stub = db.get(Work, agent_file.work_id) if agent_file.work_id else None
+        if stub is not None:
+            stub.canonical_metadata_source = "teleport"  # clears the "not extracted" marker
+            work = stub
+        else:
+            title = storage._title_from_filename(Path(name))
+            raw_arxiv = storage._arxiv_id_from_filename(Path(name))
+            work = Work(
+                canonical_title=title,
+                normalized_title=normalize_title(title),
+                canonical_metadata_source="teleport",
+                arxiv_id=raw_arxiv,
+                arxiv_base_id=arxiv_base_id(raw_arxiv),
+            )
+            db.add(work)
+            db.flush()
         db.add(FileWorkLink(file_id=file.id, work_id=work.id, user_confirmed=False))
         place_on_default_if_loose(db, work.id)  # no free-floating papers (#1)
 
