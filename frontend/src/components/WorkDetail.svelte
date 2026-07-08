@@ -855,12 +855,12 @@
     <div class="bar-actions">
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
+      <button type="button" class="secondary small" on:click={() => (showRefGraph = true)}
+        title="Show a weighted citation graph of this paper's references (year × how heavily each is cited)">Reference graph</button>
       {#if work.has_reversible_shadow}
         <button type="button" class="secondary small" on:click={unmergePaper} disabled={loading || !canModify}
           title={canModify ? 'Undo the most recent merge into this paper (restores the merged paper)' : INSUFFICIENT_ROLE}>Unmerge</button>
       {/if}
-      <button type="button" class="secondary small danger-btn" on:click={deletePaper} disabled={loading || !canModify}
-        title={canModify ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
     </div>
   </div>
@@ -931,9 +931,13 @@
         <label>arXiv id<input bind:value={form.arxiv_id} placeholder="1706.03762" /></label>
       </div>
       <label>Abstract<textarea bind:value={form.abstract} rows="4"></textarea></label>
-      <div class="actions">
+      <div class="actions actions-top">
         <button type="submit" disabled={loading || !canModify}
           title={canModify ? 'Save edits to this paper’s details' : INSUFFICIENT_ROLE}>Save changes</button>
+        <button type="button" class="secondary find-on-web" on:click={findOnWeb} disabled={loading || !canModify}
+          title={canModify
+            ? 'Search legitimate scholarly sources for this paper’s PDF and attach it'
+            : INSUFFICIENT_ROLE}>Find on web</button>
       </div>
       <div class="actions">
         <button type="button" class="secondary" on:click={enrich} disabled={loading || !canModify || (!form.doi && !form.arxiv_id)}
@@ -948,10 +952,6 @@
             : hasReadableFile
               ? 'Run GROBID extraction on this paper’s PDFs (text, references, citations)'
               : 'Attach a PDF to extract'}>Extract</button>
-        <button type="button" class="secondary" on:click={findOnWeb} disabled={loading || !canModify}
-          title={canModify
-            ? 'Search legitimate scholarly sources for this paper’s PDF and attach it'
-            : INSUFFICIENT_ROLE}>Find on web</button>
         <button type="button" class="secondary" on:click={topic} disabled={loading || !canModify}
           title={canModify
             ? 'Extract representative topic terms for this paper'
@@ -967,8 +967,10 @@
           title={canModify
             ? 'Generate an AI summary of this paper (uses the configured summary model; stored and regeneratable)'
             : INSUFFICIENT_ROLE}>{summaries.length ? 'Regenerate summary' : 'Summarise'}</button>
-        <button type="button" class="secondary" on:click={() => (showRefGraph = true)}
-          title="Show a weighted citation graph of this paper's references (year × how heavily each is cited)">Reference graph</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary danger-btn" on:click={deletePaper} disabled={loading || !canModify}
+          title={canModify ? 'Delete this paper (files are kept)' : INSUFFICIENT_ROLE}>Delete</button>
       </div>
       {#if canModify && !form.doi && !form.arxiv_id}<p class="hintline">Add a DOI or arXiv id to enable “Enrich”.</p>{/if}
       {#if canModify && !hasReadableFile}<p class="hintline">Attach a PDF (Files section) to enable “Extract”.</p>{/if}
@@ -1498,6 +1500,7 @@
   .bar {
     align-items: center;
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: space-between;
   }
@@ -1547,7 +1550,17 @@
 
   .actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .actions button,
+  .bar-actions button {
+    white-space: nowrap;
+  }
+
+  .actions-top {
+    justify-content: space-between;
   }
 
   .reviews {

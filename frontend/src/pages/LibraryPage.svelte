@@ -113,6 +113,61 @@
   $: sortOrder = columnPrefs.sort.order;
   $: visibleColumns = visibleColumnDefs(columnPrefs);
 
+  // Draggable divider between the paper list and paper view columns, persisted per-browser (the
+  // table's own column widths live in lib/columns.ts — this is the outer list/detail split).
+  const LIST_COL_PCT_KEY = 'paracord.library.listColPct';
+  const DEFAULT_LIST_COL_PCT = 52.4; // matches the previous fixed 1.1fr / 1fr grid ratio
+  let listColPct = loadListColPct();
+  let layoutEl: HTMLElement;
+  let draggingSplitter = false;
+
+  function loadListColPct(): number {
+    try {
+      const stored = Number(localStorage.getItem(LIST_COL_PCT_KEY));
+      if (Number.isFinite(stored) && stored >= 25 && stored <= 75) return stored;
+    } catch {
+      /* localStorage unavailable (private mode) — fall back to the default */
+    }
+    return DEFAULT_LIST_COL_PCT;
+  }
+
+  function saveListColPct(pct: number): void {
+    try {
+      localStorage.setItem(LIST_COL_PCT_KEY, String(pct));
+    } catch {
+      /* non-fatal — the in-memory value still applies for this session */
+    }
+  }
+
+  function startSplitterDrag(event: MouseEvent): void {
+    event.preventDefault();
+    draggingSplitter = true;
+    window.addEventListener('mousemove', onSplitterDrag);
+    window.addEventListener('mouseup', stopSplitterDrag);
+  }
+
+  function onSplitterDrag(event: MouseEvent): void {
+    if (!draggingSplitter || !layoutEl) return;
+    const rect = layoutEl.getBoundingClientRect();
+    listColPct = Math.min(75, Math.max(25, ((event.clientX - rect.left) / rect.width) * 100));
+  }
+
+  function stopSplitterDrag(): void {
+    if (!draggingSplitter) return;
+    draggingSplitter = false;
+    window.removeEventListener('mousemove', onSplitterDrag);
+    window.removeEventListener('mouseup', stopSplitterDrag);
+    saveListColPct(listColPct);
+  }
+
+  function nudgeSplitter(event: KeyboardEvent): void {
+    if (event.key === 'ArrowLeft') listColPct = Math.max(25, listColPct - 2);
+    else if (event.key === 'ArrowRight') listColPct = Math.min(75, listColPct + 2);
+    else return;
+    event.preventDefault();
+    saveListColPct(listColPct);
+  }
+
   // Default sort direction when a user first clicks a column: newest/highest-first for date/numeric
   // columns, A→Z for text columns.
   const DESC_FIRST: WorkSortKey[] = ['added_at', 'updated_at', 'year'];
@@ -194,6 +249,8 @@
   onDestroy(() => {
     if (savePrefsTimer) clearTimeout(savePrefsTimer);
     if (flashTimer) clearTimeout(flashTimer);
+    window.removeEventListener('mousemove', onSplitterDrag);
+    window.removeEventListener('mouseup', stopSplitterDrag);
   });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
@@ -567,7 +624,7 @@
   }
 </script>
 
-<section class="layout">
+<section class="layout" bind:this={layoutEl} style="grid-template-columns: {listColPct}% 6px 1fr;">
   <div class="list-col">
     <div class="card">
       <form class="filters" on:submit|preventDefault={reload}>
@@ -810,6 +867,21 @@
     {/if}
   </div>
 
+  <!-- svelte-ignore a11y-no-noninteractive-tabindex -- draggable resize handle: WAI-ARIA separator pattern requires it to be focusable so arrow keys can also resize it -->
+  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -- same: mouse drag + arrow-key resize on a role="separator" div -->
+  <div
+    class="splitter"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize the paper list and paper view columns"
+    aria-valuenow={Math.round(listColPct)}
+    aria-valuemin={25}
+    aria-valuemax={75}
+    tabindex="0"
+    on:mousedown={startSplitterDrag}
+    on:keydown={nudgeSplitter}
+  ></div>
+
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
@@ -871,9 +943,12 @@
 <style>
   .layout {
     align-items: stretch;
+    /* ~5% wider than the page's default 96rem section cap, so the list + paper view columns get
+       more room on wide screens; grid-template-columns (list % / splitter / detail) is set inline
+       from the draggable-splitter state below. */
+    max-width: 100.8rem;
     display: grid;
-    gap: 1rem;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 0;
     /* Fill the viewport below the header/hint so each column scrolls on its own. The header wraps
        to a variable number of rows, so subtract its measured height (--app-header-h, published by
        App.svelte) plus the tab-hint + content padding (~3rem); fall back to a fixed guess before
@@ -888,6 +963,7 @@
     gap: 1rem;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
+    padding-right: 1rem;
   }
 
   .list-scroll {
@@ -898,6 +974,22 @@
   .detail-col {
     min-height: 0;
     overflow-y: auto;
+    padding-left: 1rem;
+  }
+
+  .splitter {
+    align-self: stretch;
+    background: var(--border-normal);
+    border-radius: 3px;
+    cursor: col-resize;
+    justify-self: center;
+    width: 6px;
+  }
+
+  .splitter:hover,
+  .splitter:focus-visible {
+    background: var(--accent-primary);
+    outline: none;
   }
 
   .filters {
@@ -1067,8 +1159,20 @@
 
   @media (max-width: 1000px) {
     .layout {
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr !important;
       height: auto;
+    }
+
+    .splitter {
+      display: none;
+    }
+
+    .list-col {
+      padding-right: 0;
+    }
+
+    .detail-col {
+      padding-left: 0;
     }
 
     .list-scroll,
