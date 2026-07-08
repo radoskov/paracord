@@ -128,7 +128,7 @@ export const REFERENCE_GRAPH_HELP = {
   refEdges:
     "“Local reference-to-reference edges”: when on, also draws citation links between the in-library references that cite one another — not just from this paper out to each reference — revealing how your cited works build on each other. Off by default because it needs those references' own extracted citations.",
   naLane:
-    "References with no value for the chosen Y axis are drawn with a dashed outline on a separate “n/a” lane below the real values, so they stay visible instead of being misread as zero.",
+    "References with no value for the chosen Y axis (e.g. an external reference with no citation count) sit on a dashed “n/a” lane below the data, marked with a line so they aren't misread as zero. A separate solid “0” line marks genuine zero values when any occur, so 0 and “no data” stay distinct.",
 } as const;
 
 /** The Y value for a node under the chosen axis, or null when it has none (→ the "n/a" lane). */
@@ -155,9 +155,10 @@ export function buildReferenceGraphOption(
   graph: ReferenceGraph,
   weights: Record<string, number>,
   theme: VizTheme,
-  opts: { yAxis?: string } = {},
+  opts: { yAxis?: string; colorBy?: string } = {},
 ): EChartsOptionLike {
   const yAxisKey = opts.yAxis ?? "weighted";
+  const colorBy = opts.colorBy ?? "kind";
   const axisName =
     REFERENCE_Y_AXES.find((o) => o.key === yAxisKey)?.axisName ??
     "Weighted citations";
@@ -207,28 +208,65 @@ export function buildReferenceGraphOption(
       : {}),
   });
 
-  // One series per node kind so the legend reads local / external / this paper, each its own colour.
-  const kinds: {
-    key: "base" | "local" | "external";
-    name: string;
-    color: string;
-  }[] = [
-    { key: "base", name: "This paper", color: theme.axisLine },
-    { key: "local", name: "In library", color: theme.text },
-    { key: "external", name: "External", color: theme.splitLine },
-  ];
   const palette = theme.categorical ?? [];
-  const series: Record<string, unknown>[] = kinds.map((k, i) => ({
-    type: "scatter",
-    name: k.name,
-    color:
-      k.key === "base"
-        ? (palette[2] ?? k.color)
-        : (palette[i % Math.max(1, palette.length)] ?? k.color),
-    data: graph.nodes.filter((n) => n.kind === k.key).map(point),
-    emphasis: { focus: "series" },
-    z: k.key === "base" ? 3 : 2,
-  }));
+  let series: Record<string, unknown>[];
+  if (colorBy === "venue") {
+    // 5d: one series (colour) per distinct venue. External refs without a venue group under
+    // "unknown". Node shape/size are unchanged; only the colour grouping differs.
+    const venueOf = (n: ReferenceGraphNode) => n.venue || "unknown";
+    const venues = [...new Set(graph.nodes.map(venueOf))];
+    series = venues.map((v, i) => ({
+      type: "scatter",
+      name: v,
+      color: palette[i % Math.max(1, palette.length)] ?? theme.text,
+      data: graph.nodes.filter((n) => venueOf(n) === v).map(point),
+      emphasis: { focus: "series" },
+      z: 2,
+    }));
+  } else {
+    // Default: one series per node kind so the legend reads local / external / this paper.
+    const kinds: {
+      key: "base" | "local" | "external";
+      name: string;
+      color: string;
+    }[] = [
+      { key: "base", name: "This paper", color: theme.axisLine },
+      { key: "local", name: "In library", color: theme.text },
+      { key: "external", name: "External", color: theme.splitLine },
+    ];
+    series = kinds.map((k, i) => ({
+      type: "scatter",
+      name: k.name,
+      color:
+        k.key === "base"
+          ? (palette[2] ?? k.color)
+          : (palette[i % Math.max(1, palette.length)] ?? k.color),
+      data: graph.nodes.filter((n) => n.kind === k.key).map(point),
+      emphasis: { focus: "series" },
+      z: k.key === "base" ? 3 : 2,
+    }));
+  }
+
+  // 5a: mark the special lanes with a persistent thick line + label so they can't be misread. A
+  // "0" line whenever any real node actually sits at zero on this axis, and an "n/a" line for the
+  // missing-value lane — either or both may show. Attached to the first series so it renders once
+  // without adding a legend entry.
+  const markLineData: Record<string, unknown>[] = [];
+  if (real.includes(0)) {
+    markLineData.push({ name: "0", yAxis: 0, lineStyle: { type: "solid" } });
+  }
+  if (hasNa) {
+    markLineData.push({ name: "n/a", yAxis: naY, lineStyle: { type: "dashed" } });
+  }
+  if (series.length && markLineData.length) {
+    series[0].markLine = {
+      symbol: "none",
+      silent: true,
+      lineStyle: { color: theme.text, width: 2, opacity: 0.7 },
+      label: { show: true, position: "end", color: theme.text, formatter: "{b}" },
+      data: markLineData,
+    };
+  }
 
   const coordById = new Map<string, [number, number]>();
   for (const n of graph.nodes)
@@ -260,6 +298,8 @@ export function buildReferenceGraphOption(
     legend: { top: 0, textStyle: { color: theme.text } },
     tooltip: {
       trigger: "item",
+      // 5c: clamp the tooltip inside the chart box so a node near the modal edge doesn't overflow.
+      confine: true,
       backgroundColor: theme.tooltipBg,
       borderColor: theme.tooltipBg,
       textStyle: { color: theme.tooltipText },
@@ -302,13 +342,17 @@ export function buildReferenceGraphOption(
       scale: true,
       axisLine: { lineStyle: { color: theme.axisLine } },
       splitLine: { lineStyle: { color: theme.splitLine } },
-      // Label the baseline "n/a" lane so it doesn't read as a real value on this axis.
-      axisLabel: hasNa
-        ? {
-            formatter: (v: number) =>
-              Math.abs(v - naY) < 1e-9 ? "n/a" : String(v),
+      // 5e: always format Y ticks (not only when there's an n/a lane): count-like axes round to
+      // integers, weighted/topic show up to 2 decimals, and the n/a-lane tick is labelled "n/a".
+      axisLabel: {
+        formatter: (v: number) => {
+          if (hasNa && Math.abs(v - naY) < 1e-9) return "n/a";
+          if (["mentions", "citations", "degree"].includes(yAxisKey)) {
+            return String(Math.round(v));
           }
-        : undefined,
+          return Number.isInteger(v) ? String(v) : v.toFixed(2);
+        },
+      },
     },
     dataZoom: [
       { type: "inside", xAxisIndex: 0 },

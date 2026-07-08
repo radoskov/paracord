@@ -16,15 +16,32 @@ const MIN_SYMBOL = 8;
 const MAX_SYMBOL = 38;
 const DEFAULT_SYMBOL = 12;
 
-// A year axis must show whole years (2019, 2020, …) — not the fractional, thousands-separated ticks
-// ECharts' value axis produces by default (2,019 / 2,019.2). Applied to whichever axis is bound to
-// the `year` key.
-function yearAxisExtras(key: string | undefined): Record<string, unknown> {
-  if (key !== "year") return {};
-  return {
-    minInterval: 1,
-    axisLabel: { formatter: (v: number) => String(Math.round(v)) },
-  };
+// Explicit tick formatting per axis key (issue 5e): a year axis shows whole years (2019, 2020 — not
+// ECharts' default fractional, thousands-separated 2,019 / 2,019.2); count-like axes round to
+// integers; similarity/velocity axes show 2 decimals. Without this, several axes fall back to
+// ECharts' defaults and can render blank or unhelpful ticks.
+const _INTEGER_AXES = new Set(["citation_count", "local_degree"]);
+const _DECIMAL_AXES = new Set([
+  "citation_velocity",
+  "similarity_to_focus",
+  "topic_similarity_to_focus",
+  "keyword_similarity_to_focus",
+]);
+
+function axisExtras(key: string | undefined): Record<string, unknown> {
+  if (key === "year") {
+    return {
+      minInterval: 1,
+      axisLabel: { formatter: (v: number) => String(Math.round(v)) },
+    };
+  }
+  if (key && _INTEGER_AXES.has(key)) {
+    return { axisLabel: { formatter: (v: number) => String(Math.round(v)) } };
+  }
+  if (key && _DECIMAL_AXES.has(key)) {
+    return { axisLabel: { formatter: (v: number) => v.toFixed(2) } };
+  }
+  return {};
 }
 
 // Nodes plottable on both axes (a null on either axis means "unavailable" → excluded from the plot).
@@ -207,7 +224,7 @@ export const temporalMapRenderer: VizRenderer = {
         nameLocation: "middle",
         nameGap: 28,
         scale: true,
-        ...yearAxisExtras(payload.axes?.x.key),
+        ...axisExtras(payload.axes?.x.key),
         axisLine: { lineStyle: { color: theme.axisLine } },
         splitLine: { lineStyle: { color: theme.splitLine } },
       },
@@ -217,7 +234,7 @@ export const temporalMapRenderer: VizRenderer = {
         nameLocation: "middle",
         nameGap: 40,
         scale: true,
-        ...yearAxisExtras(payload.axes?.y.key),
+        ...axisExtras(payload.axes?.y.key),
         axisLine: { lineStyle: { color: theme.axisLine } },
         splitLine: { lineStyle: { color: theme.splitLine } },
       },

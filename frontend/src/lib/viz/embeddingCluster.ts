@@ -94,6 +94,8 @@ export const embeddingClusterRenderer: VizRenderer = {
         nameLocation: 'middle',
         nameGap: 28,
         scale: true,
+        // 5e: PCA/UMAP components are floats — format ticks to 2 decimals rather than ECharts' default.
+        axisLabel: { formatter: (v: number) => v.toFixed(2) },
         axisLine: { lineStyle: { color: theme.axisLine } },
         splitLine: { lineStyle: { color: theme.splitLine } },
       },
@@ -103,6 +105,7 @@ export const embeddingClusterRenderer: VizRenderer = {
         nameLocation: 'middle',
         nameGap: 40,
         scale: true,
+        axisLabel: { formatter: (v: number) => v.toFixed(2) },
         axisLine: { lineStyle: { color: theme.axisLine } },
         splitLine: { lineStyle: { color: theme.splitLine } },
       },

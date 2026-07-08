@@ -64,11 +64,14 @@
   const SIZE_OPTIONS = [
     ['local_degree', 'Local citation degree'],
     ['citation_count', 'Citation count'],
+    ['year', 'Publication year'], // 5j
     ['none', 'Uniform'],
   ];
   const COLOR_OPTIONS = [
     ['status', 'Reading status'],
     ['work_type', 'Work type'],
+    ['year', 'Publication year'], // 5h (one colour per distinct year)
+    ['venue', 'Venue'], // 5d
     ['none', 'None'],
   ];
 
@@ -79,7 +82,19 @@
     { key: 'citation_velocity', label: 'Citation velocity' },
     { key: 'similarity_to_focus', label: 'Similarity to focus' },
     { key: 'topic_similarity_to_focus', label: 'Topic similarity to focus' },
+    { key: 'keyword_similarity_to_focus', label: 'Keyword similarity to focus' }, // 5b
   ];
+
+  // 5f: optional manual axis view-range (min/max) overriding ECharts auto-range. Empty = auto. A
+  // corrupt outlier (e.g. year 2695) no longer stretches the whole plot once a max is set.
+  let xMin = '';
+  let xMax = '';
+  let yMin = '';
+  let yMax = '';
+  const _num = (s: string): number | undefined => {
+    const n = Number(s);
+    return s.trim() !== '' && Number.isFinite(n) ? n : undefined;
+  };
 
   // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
   // the axis / color / edge controls do not apply — only the size encoding and node cap do.
@@ -179,6 +194,14 @@
         });
       }
       chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
+      // 5f: apply the manual axis view-range on top of the built option (temporal map only — the
+      // scatter view with value axes). A merge setOption keeps everything else; `null` = auto.
+      if (isTemporal) {
+        chart.setOption({
+          xAxis: { min: _num(xMin) ?? null, max: _num(xMax) ?? null },
+          yAxis: { min: _num(yMin) ?? null, max: _num(yMax) ?? null },
+        });
+      }
       chart.off('click');
       chart.on('click', (params: { data?: { name?: string } }) => {
         if (params.data?.name) openPaper(params.data.name);
@@ -320,6 +343,19 @@
           <select bind:value={yAxis} on:change={reloadIfLoaded} data-testid="viz-y-axis" title="The value plotted on the vertical axis — year, citation count, local degree, velocity, or similarity to a focus paper">
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
           </select>
+        </label>
+        <!-- 5f: manual view-range so a bad outlier (e.g. year 2695) can't stretch the plot. Empty = auto. -->
+        <label class="range">X range
+          <input type="number" bind:value={xMin} on:change={() => void render()} placeholder="min"
+            data-testid="viz-x-min" title="Minimum X shown (blank = auto)" />
+          <input type="number" bind:value={xMax} on:change={() => void render()} placeholder="max"
+            data-testid="viz-x-max" title="Maximum X shown (blank = auto)" />
+        </label>
+        <label class="range">Y range
+          <input type="number" bind:value={yMin} on:change={() => void render()} placeholder="min"
+            data-testid="viz-y-min" title="Minimum Y shown (blank = auto)" />
+          <input type="number" bind:value={yMax} on:change={() => void render()} placeholder="max"
+            data-testid="viz-y-max" title="Maximum Y shown (blank = auto)" />
         </label>
       {:else if isCluster}
         <label>Layout
@@ -540,6 +576,17 @@
     font-size: 0.8rem;
     font-weight: 700;
     gap: 0.2rem;
+  }
+
+  /* 5f: paired min/max number inputs sit side by side, each compact. */
+  .range {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .range input {
+    width: 4.5rem;
   }
 
   .toggle {

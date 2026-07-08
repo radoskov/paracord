@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+
   import {
     ApiClient,
     type BatchCommitDraft,
@@ -6,6 +8,7 @@
     type ImportBatch,
     type ParsedDraft,
   } from '../api/client';
+  import { pendingImportText } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
   import ShelfPicker from './ShelfPicker.svelte';
 
@@ -25,6 +28,16 @@
 
   let text = '';
   let engine: EngineKind = 'lookup';
+
+  // 5g: a reference-graph external node can prefill this box. Append the pushed citation line (on a
+  // fresh line) and clear the store so it isn't re-applied.
+  onMount(() =>
+    pendingImportText.subscribe((val) => {
+      if (!val) return;
+      text = text.trim() ? `${text.replace(/\s*$/, '')}\n${val}` : val;
+      pendingImportText.set(null);
+    }),
+  );
   let rows: Row[] = [];
   let degraded = false;
   let grobidUnavailable = false;

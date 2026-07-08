@@ -184,4 +184,70 @@ describe("buildReferenceGraphOption", () => {
       .symbolSize;
     expect(local).toBeGreaterThan(external);
   });
+
+  it("marks an n/a lane with a labelled markLine when a node has no value (5a)", () => {
+    const option = buildReferenceGraphOption(graph, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "citations", // external ref → null → n/a lane
+    });
+    const series = option.series as Array<{ markLine?: { data: Array<{ name: string }> } }>;
+    const lanes = series.flatMap((s) => s.markLine?.data ?? []);
+    expect(lanes.some((d) => d.name === "n/a")).toBe(true);
+  });
+
+  it("marks a 0 lane with a labelled markLine when a node genuinely sits at zero (5a)", () => {
+    const withZero: ReferenceGraph = {
+      ...graph,
+      nodes: [
+        graph.nodes[0],
+        // A reference with no recorded mentions → mention_count 0 on the "mentions" axis.
+        {
+          id: "z1",
+          label: "Zero ref",
+          year: 2012,
+          kind: "external",
+          resolved_work_id: null,
+          section_counts: {},
+          mention_count: 0,
+          weighted: 0,
+        },
+      ],
+    };
+    const option = buildReferenceGraphOption(withZero, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "mentions",
+    });
+    const series = option.series as Array<{ markLine?: { data: Array<{ name: string }> } }>;
+    const lanes = series.flatMap((s) => s.markLine?.data ?? []);
+    expect(lanes.some((d) => d.name === "0")).toBe(true);
+  });
+
+  it("confines the tooltip inside the chart box (5c)", () => {
+    const option = buildReferenceGraphOption(graph, DEFAULT_SECTION_WEIGHTS, theme);
+    expect((option.tooltip as { confine?: boolean }).confine).toBe(true);
+  });
+
+  it("formats count Y-axis ticks as integers (5e)", () => {
+    const option = buildReferenceGraphOption(graph, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "mentions",
+    });
+    const fmt = (option.yAxis as { axisLabel: { formatter: (v: number) => string } }).axisLabel
+      .formatter;
+    expect(fmt(3)).toBe("3");
+  });
+
+  it("colours by venue when colorBy=venue (5d)", () => {
+    const venued: ReferenceGraph = {
+      ...graph,
+      nodes: graph.nodes.map((n) =>
+        n.kind === "local" ? { ...n, venue: "ICRA" } : n,
+      ),
+    };
+    const option = buildReferenceGraphOption(venued, DEFAULT_SECTION_WEIGHTS, theme, {
+      colorBy: "venue",
+    });
+    const names = (option.series as Array<{ name: string }>).map((s) => s.name);
+    expect(names).toContain("ICRA");
+    expect(names).toContain("unknown"); // refs without a venue group here
+    // The kind legend names are no longer the series grouping.
+    expect(names).not.toContain("In library");
+  });
 });

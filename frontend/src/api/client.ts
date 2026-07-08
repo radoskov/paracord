@@ -889,6 +889,9 @@ export interface ReferenceGraphNode {
   citation_count?: number | null;
   local_degree?: number | null;
   topic_similarity?: number | null;
+  // 5d colour-by-venue (local: resolved work's venue) + 5g click-to-import prefill data.
+  venue?: string | null;
+  doi?: string | null;
 }
 
 export interface ReferenceGraph {

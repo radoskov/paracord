@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
 
-  import type { ApiClient, ReferenceGraph } from '../api/client';
+  import type { ApiClient, ReferenceGraph, ReferenceGraphNode } from '../api/client';
   import Modal from './Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
-  import { pendingLibraryOpen } from '../lib/selection';
+  import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
   import {
     DEFAULT_SECTION_WEIGHTS,
     REFERENCE_GRAPH_HELP,
@@ -22,6 +22,7 @@
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
   let yAxis = 'weighted';
+  let colorBy = 'kind';
   let showHelp = false;
 
   // How many reference nodes have no value for the current Y axis (→ the dashed "n/a" lane).
@@ -34,6 +35,13 @@
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let chart: any = null;
   let chartError = false;
+
+  // Build a free-text citation line for the batch-import box from an external reference (5g):
+  // "Title (year)" — the user refines it and picks from the import search results.
+  function citationLine(node: ReferenceGraphNode): string {
+    const title = node.label?.trim() || 'Untitled reference';
+    return node.year != null ? `${title} (${node.year})` : title;
+  }
 
   async function loadWeights(): Promise<void> {
     try {
@@ -67,24 +75,35 @@
       };
       if (!chart) {
         chart = echarts.init(container);
-        chart.on('click', (params: { data?: { node?: { resolved_work_id: string | null } } }) => {
-          const id = params.data?.node?.resolved_work_id;
-          if (id) {
-            pendingLibraryOpen.set(id);
+        chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
+          const node = params.data?.node;
+          if (!node || node.kind === 'base') return;
+          if (node.resolved_work_id) {
+            // In-library reference → open it in the Library tab.
+            pendingLibraryOpen.set(node.resolved_work_id);
             if (typeof window !== 'undefined') window.location.hash = '#library';
+            onClose();
+          } else {
+            // 5g: external reference → jump to Import and prefill the batch-import box with a
+            // citation line the user can adjust before searching.
+            pendingImportText.set(citationLine(node));
+            if (typeof window !== 'undefined') window.location.hash = '#import';
             onClose();
           }
         });
       }
-      chart.setOption(buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis }), true);
+      chart.setOption(
+        buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis, colorBy }),
+        true,
+      );
       chartError = false;
     } catch {
       chartError = true;
     }
   }
 
-  // Re-render on theme or Y-axis change (both are pure client-side restyles — no refetch).
-  $: if (chart && graph && (yAxis || $activeVizTheme)) void render();
+  // Re-render on theme, Y-axis, or colour change (all pure client-side restyles — no refetch).
+  $: if (chart && graph && (yAxis || colorBy || $activeVizTheme)) void render();
 
   function toggleRefEdges(): void {
     includeRefEdges = !includeRefEdges;
@@ -106,6 +125,13 @@
       Y axis
       <select bind:value={yAxis} data-testid="rg-y-axis">
         {#each REFERENCE_Y_AXES as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
+      </select>
+    </label>
+    <label title="How node colour is grouped">
+      Colour
+      <select bind:value={colorBy} data-testid="rg-color-by">
+        <option value="kind">Kind (this paper / in library / external)</option>
+        <option value="venue">Venue</option>
       </select>
     </label>
     <label title="Also draw citation links between the in-library references that cite each other">
