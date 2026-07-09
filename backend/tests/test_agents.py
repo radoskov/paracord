@@ -686,6 +686,68 @@ def test_index_only_stub_suppressed_when_toggle_off(client, db) -> None:
     assert db.scalar(select(func.count()).select_from(Work)) == 0
 
 
+def test_index_only_manifest_reuses_existing_file_by_hash(client, db) -> None:
+    """Issue 6: an index_only scan of content whose File already exists (e.g. a prior teleport
+    already promoted to its real title) must attach to that Work, not mint a filename-titled
+    duplicate paper alongside the properly-titled one."""
+    from app.core.config import get_settings
+    from app.models.agent import AgentFile
+    from app.models.file import FileWorkLink
+    from app.models.work import Work
+    from sqlalchemy import func, select
+
+    agent, headers = _agent_with_token(db, can_teleport=True)
+
+    # 1) The content already exists on the server under a properly-extracted title (simulates a
+    # prior teleport/manual upload followed by extraction, or a different agent's earlier push).
+    # offer_teleport links the Work via FileWorkLink, not AgentFile.work_id (that field is only
+    # ever set by the index_only stub path being tested below).
+    with (
+        _patch("app.services.storage.get_settings", return_value=get_settings()),
+        _patch("app.services.storage._extract_pdf_preview", return_value=_PREVIEW),
+    ):
+        r = client.post(
+            "/api/v1/agents/files/existing1/offer-teleport",
+            headers=headers,
+            files={"file": ("attention_is_all_you_need.pdf", _io.BytesIO(_PDF), "application/pdf")},
+        )
+    assert r.status_code == 201
+    db.expire_all()
+    existing_row = db.scalar(select(AgentFile).where(AgentFile.local_file_id == "existing1"))
+    existing_file_id = existing_row.file_id
+    assert existing_file_id is not None
+    existing_work_id = db.scalar(
+        select(FileWorkLink.work_id).where(FileWorkLink.file_id == existing_file_id)
+    )
+    work = db.get(Work, existing_work_id)
+    work.canonical_title = "Attention Is All You Need"
+    work.canonical_metadata_source = "extraction"
+    db.commit()
+
+    # 2) A fresh manifest entry — never scanned before by this (or any) agent file row — reports
+    # the identical content (same sha256) as index_only. Before the fix this always minted a
+    # second, filename-titled stub Work.
+    item = {
+        "local_file_id": "new-scan-1",
+        "sha256": _PDF_SHA,
+        "size_bytes": len(_PDF),
+        "virtual_path": "papers/attention_is_all_you_need.pdf",
+        "import_action": "index_only",
+    }
+    assert (
+        client.post("/api/v1/agents/manifest", headers=headers, json={"items": [item]}).status_code
+        == 202
+    )
+    db.expire_all()
+
+    assert db.scalar(select(func.count()).select_from(Work)) == 1  # no duplicate Work
+    new_row = db.scalar(select(AgentFile).where(AgentFile.local_file_id == "new-scan-1"))
+    assert new_row.work_id == existing_work_id
+    assert new_row.file_id == existing_file_id
+    work = db.get(Work, existing_work_id)
+    assert work.canonical_title == "Attention Is All You Need"  # untouched, not reverted
+
+
 def test_deleting_stub_removes_agent_file(client, auth_headers, db) -> None:
     """B6/Q4: deleting the stub paper on the server drops the linked agent file, so it vanishes from
     the agent's server view (a reverse-sync Reconcile then un-indexes it locally)."""

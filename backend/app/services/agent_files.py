@@ -45,6 +45,11 @@ def ingest_manifest(db: Session, *, agent: Agent, items: list, create_stubs: boo
     minimal library "stub" paper (filename title, no PDF, ``source='agent_index_only'``) linked via
     ``AgentFile.work_id`` — visible in the library and promotable later via Extract/Teleport. The
     link makes it idempotent: a re-scan never creates a second stub.
+
+    Issue 6: before minting that stub, checks whether a ``File`` with the same sha256 already
+    exists (a manual upload, a completed teleport, or another agent's scan of the same content) —
+    if so, links this row to that File's existing Work instead of creating a filename-titled
+    duplicate paper alongside the properly-titled one.
     """
     from app.services.app_config import enforce_batch_limit
 
@@ -84,19 +89,44 @@ def ingest_manifest(db: Session, *, agent: Agent, items: list, create_stubs: boo
             row.updated_at = now
         # B6: create a promotable stub for an index_only entry that doesn't already have one.
         if create_stubs and item.import_action == "index_only" and row.work_id is None:
-            title = _stub_title(item)
-            work = Work(
-                canonical_title=title,
-                normalized_title=normalize_title(title),
-                # Origin marker the UI badges as "not extracted"; cleared on extract/teleport.
-                canonical_metadata_source="agent_index_only",
-                created_by_user_id=agent.created_by_user_id,
+            # Issue 6: the content may already be in the library (manual upload, a completed
+            # teleport, or another agent's scan) even though *this* AgentFile row has never
+            # seen a stub — check by hash before minting a filename-titled duplicate. Every
+            # other stub-creation path here (complete_teleport/offer_teleport/extract_and_index)
+            # already goes through `storage._ensure_managed_file`, which dedups by sha256; this
+            # is the one path that never pushes bytes, so it needs its own explicit hash lookup.
+            existing_file = db.scalar(select(File).where(File.sha256 == item.sha256))
+            existing_link = (
+                db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == existing_file.id))
+                if existing_file is not None
+                else None
             )
-            db.add(work)
-            db.flush()
-            row.work_id = work.id
-            place_on_default_if_loose(db, work.id, actor_id=agent.created_by_user_id)
-            stubs_created += 1
+            if existing_link is not None:
+                row.file_id = existing_file.id
+                row.work_id = existing_link.work_id
+            else:
+                title = _stub_title(item)
+                work = Work(
+                    canonical_title=title,
+                    normalized_title=normalize_title(title),
+                    # Origin marker the UI badges as "not extracted"; cleared on extract/teleport.
+                    canonical_metadata_source="agent_index_only",
+                    created_by_user_id=agent.created_by_user_id,
+                )
+                db.add(work)
+                db.flush()
+                row.work_id = work.id
+                if existing_file is not None:
+                    # A File row exists for this hash but was never linked to a Work (should not
+                    # normally happen) — attach it rather than leaving it orphaned.
+                    row.file_id = existing_file.id
+                    db.add(
+                        FileWorkLink(
+                            file_id=existing_file.id, work_id=work.id, user_confirmed=False
+                        )
+                    )
+                place_on_default_if_loose(db, work.id, actor_id=agent.created_by_user_id)
+                stubs_created += 1
     record_event(
         db,
         "agent.manifest_received",
