@@ -53,7 +53,7 @@
   let selected: Work | null = null;
 
   let search = '';
-  let searchMode: 'metadata' | 'semantic' = 'metadata';
+  let searchMode: 'metadata' | 'semantic' | 'hybrid' = 'metadata';
   // Phase B2: true when the last semantic search silently fell back to the built-in baseline
   // embedder (a heavier provider was configured but unavailable).
   let semanticDegraded = false;
@@ -388,11 +388,14 @@
 
   async function loadWorks(): Promise<void> {
     await run(async () => {
-      if (searchMode === 'semantic' && search.trim()) {
-        // Rank by semantic similarity, then intersect with the active structured filters. Semantic
-        // results are capped at the ranked set (50), so request a full page for the intersection.
+      if (searchMode !== 'metadata' && search.trim()) {
+        // Rank by semantic similarity (or lexical+semantic RRF fusion for "both"), then intersect
+        // with the active structured filters. Ranked results are capped at 50, so request a full
+        // page for the intersection.
         const [ranked, filtered] = await Promise.all([
-          client.semanticSearch(search.trim(), 50),
+          searchMode === 'hybrid'
+            ? client.search(search.trim(), 'hybrid', 50)
+            : client.semanticSearch(search.trim(), 50),
           client.listWorks({ ...structuredQuery(), perPage: 500 }),
         ]);
         semanticDegraded = ranked.degraded === true;
@@ -405,8 +408,11 @@
         totalWorks = works.length;
         if (works.length === 0 && ranked.items.length === 0) {
           message =
-            'No semantic matches. Embeddings are built on first search; if this stays empty, ' +
-            'no papers have indexable text yet.';
+            searchMode === 'hybrid'
+              ? 'No matches. Embeddings are built on first search; if this stays empty, no ' +
+                'papers have indexable text yet.'
+              : 'No semantic matches. Embeddings are built on first search; if this stays empty, ' +
+                'no papers have indexable text yet.';
         }
       } else {
         semanticDegraded = false;
@@ -665,7 +671,7 @@
         <div class="search-row">
           <input
             bind:value={search}
-            placeholder={searchMode === 'semantic'
+            placeholder={searchMode !== 'metadata'
               ? 'Describe the topic / keywords…'
               : 'Search… e.g. transformer author:doe year:>=2020 has:pdf tag:ml'}
             aria-label="Search"
@@ -673,6 +679,7 @@
           <select bind:value={searchMode} title="Search mode" aria-label="Search mode">
             <option value="metadata">metadata</option>
             <option value="semantic">semantic</option>
+            <option value="hybrid">both</option>
           </select>
           <button type="submit" disabled={loading} title="Apply search and filters">Search</button>
         </div>
@@ -725,6 +732,8 @@
             on:click={saveCurrentFilter}
             title="Save the current search and filters as a reusable saved filter"
           >Save current filter</button>
+          <button type="button" class="secondary" on:click={resetFilters}
+            title="Clear the search box and all filters">Reset</button>
           {#if savedFilters.length > 0}
             <span class="saved-chips" aria-label="Delete saved filters">
               {#each savedFilters as filter (filter.id)}
@@ -773,8 +782,6 @@
                 >{field}</button>
               {/each}
             </span>
-            <button type="button" class="secondary" on:click={resetFilters}
-              title="Clear the search box and all filters">Reset</button>
           </div>
         {/if}
       </form>
@@ -1049,7 +1056,20 @@
 
   .filters {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.4rem;
+  }
+
+  /* Compact controls for the search/filter/action panel only (not a global button resize) —
+     smaller than the app default but still comfortably legible/clickable. */
+  .filters :global(button),
+  .filters :global(select),
+  .filters :global(input),
+  .bar-actions :global(button),
+  .batch :global(button),
+  .batch :global(select) {
+    min-height: 1.9rem;
+    padding: 0.28rem 0.55rem;
+    font-size: 0.85rem;
   }
 
   .search-row {
@@ -1098,8 +1118,8 @@
     border-radius: 6px;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
-    padding: 0.5rem 0.6rem;
+    gap: 0.45rem;
+    padding: 0.4rem 0.6rem;
   }
 
   .inline {
@@ -1143,7 +1163,7 @@
     align-items: center;
     display: flex;
     justify-content: space-between;
-    margin-top: 0.6rem;
+    margin-top: 0.45rem;
   }
 
   .bar-actions {
@@ -1171,9 +1191,9 @@
     border-radius: 6px;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.6rem;
-    padding: 0.45rem 0.6rem;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
+    padding: 0.35rem 0.55rem;
   }
 
   .link {

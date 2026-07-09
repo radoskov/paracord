@@ -25,14 +25,14 @@ class SavedFilterParams(BaseModel):
 
 class SavedFilterCreate(BaseModel):
     name: str
-    search_mode: Literal["metadata", "semantic"] = "metadata"
+    search_mode: Literal["metadata", "semantic", "hybrid"] = "metadata"
     query_text: str | None = None
     params: SavedFilterParams = SavedFilterParams()
 
 
 class SavedFilterUpdate(BaseModel):
     name: str | None = None
-    search_mode: Literal["metadata", "semantic"] | None = None
+    search_mode: Literal["metadata", "semantic", "hybrid"] | None = None
     query_text: str | None = None
     params: SavedFilterParams | None = None
 

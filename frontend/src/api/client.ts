@@ -847,7 +847,7 @@ export interface SavedFilterParams {
 export interface SavedFilter {
   id: string;
   name: string;
-  search_mode: "metadata" | "semantic";
+  search_mode: "metadata" | "semantic" | "hybrid";
   query_text: string | null;
   params: SavedFilterParams;
   created_at: string;
@@ -856,7 +856,7 @@ export interface SavedFilter {
 
 export interface SavedFilterCreate {
   name: string;
-  search_mode?: "metadata" | "semantic";
+  search_mode?: "metadata" | "semantic" | "hybrid";
   query_text?: string | null;
   params?: SavedFilterParams;
 }

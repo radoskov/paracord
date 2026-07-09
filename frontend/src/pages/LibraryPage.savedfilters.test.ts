@@ -27,6 +27,8 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       .mockResolvedValue({ items: [], total: 0, page: 1, pages: 1, per_page: 100 }),
     createSavedFilter: vi.fn().mockResolvedValue({ ...SAVED, id: 'sf-2', name: 'New filter' }),
     deleteSavedFilter: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockResolvedValue({ query: '', mode: 'hybrid', items: [] }),
+    semanticSearch: vi.fn().mockResolvedValue({ query: '', items: [] }),
     ...overrides,
   };
 }
@@ -90,5 +92,22 @@ describe('LibraryPage saved filters (Phase B7)', () => {
         expect.objectContaining({ q: 'transformer', readingStatus: 'unread', missing: ['doi'] }),
       ),
     );
+  });
+
+  it('"both" search mode calls the unified hybrid search endpoint', async () => {
+    const client = makeClient();
+    render(LibraryPage, { client: client as never });
+    await waitFor(() => expect(client.listWorks).toHaveBeenCalled());
+
+    const modeSelect = screen.getByLabelText('Search mode') as HTMLSelectElement;
+    await fireEvent.change(modeSelect, { target: { value: 'hybrid' } });
+    const searchInput = screen.getByLabelText('Search') as HTMLInputElement;
+    await fireEvent.input(searchInput, { target: { value: 'attention' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() =>
+      expect(client.search).toHaveBeenCalledWith('attention', 'hybrid', 50),
+    );
+    expect(client.semanticSearch).not.toHaveBeenCalled();
   });
 });
