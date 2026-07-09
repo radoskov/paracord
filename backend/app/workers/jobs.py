@@ -9,6 +9,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from app.services.doi_conflict import conflict_message, doi_conflict_detail, doi_from_detail
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,20 +33,6 @@ def _record_job_event(event_type: str, job_name: str, *, error: str | None = Non
         logger.warning("job audit event %s failed for %s", event_type, job_name, exc_info=True)
 
 
-def _doi_conflict_detail(exc: Exception) -> str | None:
-    """Return the Postgres DETAIL string if ``exc`` is a ``uq_works_doi`` unique violation, else None.
-
-    Used to recognise the specific "this DOI already belongs to another paper" collision (issue 6)
-    so it can be handled with a clear message instead of crashing the job — without swallowing other
-    integrity errors, which must still surface loudly.
-    """
-    orig = getattr(exc, "orig", None)
-    diag = getattr(orig, "diag", None)
-    if getattr(diag, "constraint_name", None) != "uq_works_doi":
-        return None
-    return getattr(diag, "message_detail", None) or "DOI already exists on another paper"
-
-
 def _record_doi_conflict(*, entity_type: str, entity_id: str, detail: str, phase: str) -> None:
     """Persist a ``metadata.doi_conflict`` audit event (own session, best-effort, fail-open)."""
     from app.db.session import SessionLocal
@@ -62,15 +50,6 @@ def _record_doi_conflict(*, entity_type: str, entity_id: str, detail: str, phase
             db.commit()
     except Exception:  # noqa: BLE001 - audit is best-effort; never break the job
         logger.warning("doi_conflict audit failed for %s %s", entity_type, entity_id, exc_info=True)
-
-
-# User-facing message for the DOI-collision terminal state (issue 6): a re-extract/enrich tried to
-# assign a DOI that already belongs to a different paper (usually a duplicate). Kept short so the
-# Jobs tab shows something actionable instead of a raw SQLAlchemy/psycopg stack dump.
-_DOI_CONFLICT_MESSAGE = (
-    "This paper's DOI already belongs to another paper in the library (likely a duplicate). "
-    "Resolve the duplicate, then retry extraction."
-)
 
 
 def _audited_job[JobT: Callable[..., Any]](func: JobT) -> JobT:
@@ -148,15 +127,17 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
             discard_after_extract(db, file=file, settings=settings)
             db.commit()
         except IntegrityError as exc:
-            detail = _doi_conflict_detail(exc)
+            detail = doi_conflict_detail(exc)
             _mark_failed()
             if detail is not None:
                 # Handled terminal state: record a clear audit event and re-raise a concise message
-                # (not the raw SQL dump). requested_at is already cleared, so no D7 retry loop.
+                # (not the raw SQL dump) that names the offending DOI and the paper that holds it.
+                # requested_at is already cleared, so no D7 retry loop. _mark_failed committed, so
+                # the session is clean for the existing-paper lookup inside conflict_message.
                 _record_doi_conflict(
                     entity_type="file", entity_id=str(file_id), detail=detail, phase="extract"
                 )
-                raise RuntimeError(_DOI_CONFLICT_MESSAGE) from None
+                raise RuntimeError(conflict_message(db, doi=doi_from_detail(detail))) from None
             raise
         except Exception:
             _mark_failed()
@@ -195,14 +176,14 @@ def enrich_work_job(work_id: str) -> dict | None:
             # A DOI from an external source collided with another paper's DOI (issue 6). Enrichment
             # is best-effort and not swept by D7, so this is non-fatal: roll back, record a clear
             # audit event, and let the paper keep the data it already had (chunk/embed still run).
-            detail = _doi_conflict_detail(exc)
+            detail = doi_conflict_detail(exc)
             db.rollback()
             if detail is None:
                 raise
             _record_doi_conflict(
                 entity_type="work", entity_id=str(work_id), detail=detail, phase="enrich"
             )
-            result = {"error": "doi_conflict", "detail": _DOI_CONFLICT_MESSAGE}
+            result = {"error": "doi_conflict", "detail": conflict_message(db, doi=doi_from_detail(detail))}
         finally:
             # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
             # unit), then (re)index embeddings — both off the search read path. Runs even when

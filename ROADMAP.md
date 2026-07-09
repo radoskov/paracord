@@ -128,3 +128,14 @@ agent (M5) and the heavier analytical layers (M6–M7) before final hardening (M
   prod-smoke`.
 - Performance — fuzzy-dedup blocking + background full-scan (H3).
 - Remaining: full E2E suite, CSL citeproc styles, pgvector (H7), and the C3/C4 FK/JSONB migration.
+
+## Known future gaps
+
+- **DOI collision across visibility boundaries.** A paper's DOI is globally unique
+  (`uq_works_doi`). Extraction / manual edit / metadata-apply now fail closed on a collision with a
+  clear message naming the offending DOI and the paper that holds it (batch 8, issue 3). But once
+  shelves/racks carry visibility permissions, a user could be blocked from adding a DOI-colliding
+  paper to a shelf they *can* see because the conflicting paper lives on a shelf they *can't* — and
+  the fail-closed message would then name a paper they aren't allowed to know exists. Resolving this
+  needs a policy decision (permission-aware conflict message, or a cross-visibility "someone already
+  has this DOI" mediation flow) — out of scope for batch 8, tracked here.

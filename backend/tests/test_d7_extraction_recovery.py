@@ -283,15 +283,17 @@ def test_worker_handles_doi_conflict_on_extract(worker_env, monkeypatch) -> None
     marked failed (marker cleared so no D7 retry loop), an audit event is recorded, and the job
     raises a concise message instead of a raw SQL dump."""
     from app.models.audit import AuditEvent
-    from app.workers.jobs import _DOI_CONFLICT_MESSAGE, extract_pdf_job
+    from app.workers.jobs import extract_pdf_job
 
     def _conflict(*_a, **_k):
         raise _doi_integrity_error()
 
     monkeypatch.setattr("app.services.extraction.extract_and_store", _conflict)
     fid = _seed_owed_file(worker_env)
-    with pytest.raises(RuntimeError, match="already belongs to another paper"):
+    # The message names the offending DOI (issue 3) alongside the "belongs to another paper" text.
+    with pytest.raises(RuntimeError, match="already belongs to another paper") as excinfo:
         extract_pdf_job(str(fid))
+    assert "Offending DOI: 10.1/dup" in str(excinfo.value)
     session = worker_env()
     file = session.get(File, fid)
     assert file.status == "extract_failed"
@@ -301,7 +303,6 @@ def test_worker_handles_doi_conflict_on_extract(worker_env, monkeypatch) -> None
     )
     assert event is not None
     assert event.details["phase"] == "extract"
-    assert _DOI_CONFLICT_MESSAGE  # message constant is defined/non-empty
     session.close()
 
 

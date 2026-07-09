@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFi
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import Select, and_, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user, require_contributor
@@ -32,6 +33,7 @@ from app.services import access
 from app.services.app_config import effective_max_papers_per_page
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
+from app.services.doi_conflict import message_from_exception
 from app.services.duplicate_resolution import (
     has_reversible_shadow,
     linked_work_ids,
@@ -76,6 +78,24 @@ DB_DEP = Depends(get_db)
 # contributors, see/modify for everyone) is enforced in the body via ``access.can_modify_work``.
 CONTRIBUTOR_DEP = Depends(require_contributor)
 AUTH_DEP = Depends(require_authenticated_user)
+
+
+def _commit_or_doi_409(db: Session) -> None:
+    """Commit, translating a ``uq_works_doi`` collision into a clear 409 instead of a raw 500.
+
+    A manual edit / metadata-apply that assigns a paper a DOI already held by a *different* paper
+    fails at commit with an ``IntegrityError`` (issue 3). Any other integrity error is re-raised
+    unchanged so genuine bugs still surface. On a DOI collision the transaction is rolled back and a
+    message naming the offending DOI + the paper that holds it is returned as HTTP 409.
+    """
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        message = message_from_exception(db, exc)  # None → not a DOI collision
+        if message is None:
+            raise
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message) from None
 
 
 def _guard_modify_work(db: Session, actor: User, work: Work) -> None:
@@ -1030,7 +1050,7 @@ def update_work(
             entity_id=str(work.id),
             details={"fields": sorted(updates.keys())},
         )
-    db.commit()
+    _commit_or_doi_409(db)
     db.refresh(work)
     return work
 
@@ -2196,7 +2216,7 @@ def find_on_web_apply_metadata_endpoint(
         entity_id=str(work_id),
         details={"source": meta.source},
     )
-    db.commit()
+    _commit_or_doi_409(db)
     return _work_field_reviews(db, work)
 
 
@@ -2289,7 +2309,7 @@ def select_metadata_assertion(
     # Picking a canonical value locks that one field (SPEC §8.12), not the whole work.
     work.confirmed_fields = sorted(set(work.confirmed_fields or []) | {assertion.field_name})
     work.updated_at = datetime.now(UTC)
-    db.commit()
+    _commit_or_doi_409(db)
     db.refresh(work)
     return work
 
@@ -2378,7 +2398,7 @@ def bulk_apply_best_metadata(
             entity_id="bulk",
             details={"field": payload.field_name, "applied": applied, "skipped": skipped},
         )
-    db.commit()
+    _commit_or_doi_409(db)
     return {"field_name": payload.field_name, "applied": applied, "skipped": skipped}
 
 
@@ -2430,7 +2450,7 @@ def delete_metadata_assertion(
             if field_name in _PROMOTABLE_FIELDS:
                 _apply_assertion_to_work(work, field_name, replacement.value, replacement.source)
     work.updated_at = datetime.now(UTC)
-    db.commit()
+    _commit_or_doi_409(db)
     db.refresh(work)
     return work
 
