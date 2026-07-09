@@ -18,8 +18,9 @@
   import VisualizationsPage from './pages/VisualizationsPage.svelte';
   import CitationSummaryPage from './pages/CitationSummaryPage.svelte';
   import { currentUser } from './lib/session';
+  import { deriveJobsBadge } from './lib/jobsHealth';
   import { loadCustomThemes, reconcileTheme } from './lib/theme/store';
-  import type { UserRole } from './api/client';
+  import type { QueueStatus, UserRole } from './api/client';
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
@@ -61,6 +62,27 @@
   // once. Reset on logout/reload is intentional.
   let visited = new Set<string>();
   $: if (token && active) visited = new Set(visited).add(active);
+
+  // Nav Jobs-tab badge (issue 4): a lightweight queue poll that runs on every tab (independent of
+  // the Jobs page's own poll, which is paused while that tab is hidden) so the dot + queued count
+  // stay live wherever the user is. Only polls when signed in and the role can actually see Jobs.
+  let jobsStatus: QueueStatus | null = null;
+  $: canSeeJobs = visibleTabs.some((tab) => tab.id === 'jobs');
+  $: jobsBadge = deriveJobsBadge(jobsStatus);
+  async function pollJobsBadge(): Promise<void> {
+    if (!token || !canSeeJobs) return;
+    try {
+      jobsStatus = await client.getJobs(1); // counts come back regardless of the list limit
+    } catch {
+      jobsStatus = null; // grey dot — status unknown
+    }
+  }
+  // Poll once as soon as the signed-in role can see Jobs (avoids a blank dot until the first tick).
+  let jobsPolledFor = '';
+  $: if (token && canSeeJobs && jobsPolledFor !== token) {
+    jobsPolledFor = token;
+    void pollJobsBadge();
+  }
 
   // A 401 on an authenticated call means the session ended server-side (expired, signed out, or the
   // account was disabled). Force a clean logout and explain why, on the next interaction.
@@ -133,10 +155,12 @@
       headerResizeObserver = new ResizeObserver(() => measureHeader());
       headerResizeObserver.observe(headerEl);
     }
+    const jobsTimer = setInterval(() => void pollJobsBadge(), 20000);
     return () => {
       window.removeEventListener('hashchange', onHash);
       window.removeEventListener('keydown', onKeydown);
       if (headerResizeObserver) headerResizeObserver.disconnect();
+      clearInterval(jobsTimer);
     };
   });
 
@@ -224,7 +248,13 @@
         <nav aria-label="Sections">
           {#each visibleTabs as tab}
             {#if tab.id !== 'profile'}
-              <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.hint}>{tab.label}</a>
+              <a href={`#${tab.id}`} class:active={active === tab.id} title={tab.id === 'jobs' ? jobsBadge.title : tab.hint}>
+                {tab.label}{#if tab.id === 'jobs'}<span
+                    class="jobs-dot jobs-dot-{jobsBadge.color}"
+                    data-testid="jobs-nav-dot"
+                    aria-hidden="true"
+                  ></span>{#if jobsBadge.queued > 0}<span class="jobs-count" data-testid="jobs-nav-count">[{jobsBadge.queued}]</span>{/if}{/if}
+              </a>
             {/if}
           {/each}
           <!-- User-menu chip: the Profile link and the signed-in name grouped as one unit. -->
@@ -428,6 +458,39 @@
   nav a.active {
     background: var(--accent-primary);
     color: var(--ink-inverse);
+  }
+
+  /* Jobs-tab status dot (issue 4): mirrors the Jobs page semaphore colours, plus blue for
+     in-progress work; the [N] count shows how many jobs are queued. */
+  .jobs-dot {
+    border-radius: 50%;
+    display: inline-block;
+    height: 0.5rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+    width: 0.5rem;
+  }
+  .jobs-dot-green {
+    background: var(--status-success);
+  }
+  .jobs-dot-yellow {
+    background: var(--status-warning);
+  }
+  .jobs-dot-red {
+    background: var(--status-danger);
+  }
+  .jobs-dot-blue {
+    background: var(--status-info);
+  }
+  .jobs-dot-grey {
+    background: var(--ink-muted);
+    opacity: 0.5;
+  }
+  .jobs-count {
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-left: 0.2rem;
+    vertical-align: middle;
   }
 
   .signout {
