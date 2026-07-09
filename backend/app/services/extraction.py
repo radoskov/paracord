@@ -24,7 +24,7 @@ from app.services.ai_config import get_ai_config
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path, save_derived_ocr_pdf
 from app.services.keyword_extraction import extract_keywords
-from app.services.tei_parser import ParsedPaper, extract_body_text, parse_tei
+from app.services.tei_parser import ParsedPaper, extract_body_text, extract_sections, parse_tei
 from app.utils.normalization import normalize_title
 
 # fetch_tei takes the PDF path and returns raw TEI XML (the GROBID call, injected for testing).
@@ -149,7 +149,14 @@ def store_parsed_extraction(
     body_text = (extract_body_text(raw_tei_xml) if raw_tei_xml else "") or ""
     keyword_source = " ".join(part for part in (parsed.abstract, body_text) if part)
     if keyword_source:
-        work.keywords = extract_keywords(keyword_source, top_k=12)
+        # Boost phrases that also appear in the title / abstract / section headings (issue 8).
+        headings = (
+            " ".join(label for label, _ in extract_sections(raw_tei_xml) if label)
+            if raw_tei_xml
+            else ""
+        )
+        boost = " ".join(part for part in (work.canonical_title, parsed.abstract, headings) if part)
+        work.keywords = extract_keywords(keyword_source, top_k=12, boost_text=boost)
     if file is not None:
         file.text_layer_quality = _text_layer_quality(body_text, parsed.abstract, file.page_count)
 

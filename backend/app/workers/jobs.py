@@ -342,13 +342,14 @@ def keywords_work_job(work_id: str) -> None:
     from app.models.citation import RawTeiDocument
     from app.models.work import Work
     from app.services.keyword_extraction import extract_keywords
-    from app.services.tei_parser import extract_body_text
+    from app.services.tei_parser import extract_body_text, extract_sections
 
     with SessionLocal() as db:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
         body = ""
+        headings = ""
         tei = db.scalar(
             select(RawTeiDocument)
             .where(RawTeiDocument.work_id == work.id)
@@ -356,8 +357,11 @@ def keywords_work_job(work_id: str) -> None:
         )
         if tei is not None:
             body = extract_body_text(tei.tei_xml) or ""
+            headings = " ".join(label for label, _ in extract_sections(tei.tei_xml) if label)
         source = " ".join(part for part in (work.canonical_title, work.abstract, body) if part)
-        work.keywords = extract_keywords(source, top_k=12)
+        # Boost phrases that also appear in the title / abstract / section headings (issue 8).
+        boost = " ".join(part for part in (work.canonical_title, work.abstract, headings) if part)
+        work.keywords = extract_keywords(source, top_k=12, boost_text=boost)
         db.commit()
 
 

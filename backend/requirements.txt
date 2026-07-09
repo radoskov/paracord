@@ -23,6 +23,11 @@ lxml>=5.2
 numpy>=1.26
 scipy>=1.11
 citeproc-py>=0.8  # hard dep: renders the "styled" citation export from bundled CSL styles (Phase B4)
+# YAKE keyphrase scorer (SPEC §8.15.1, issue 8): statistical single-document keyword extraction,
+# fused with the RAKE scorer. Light pure-Python deps (click/jellyfish/networkx/numpy/segtok/
+# tabulate) — no ML frameworks/model downloads. keyword_extraction guards the import and degrades
+# to RAKE-only if it is ever absent, so this is safe to treat as a default dep.
+yake>=0.4.8
 PyYAML>=6.0
 PyMuPDF>=1.24
 # OCR pre-step (Phase B5, ocr_backend=ocrmypdf): drives the `ocrmypdf` CLI (installed in the base
