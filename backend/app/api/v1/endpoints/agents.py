@@ -116,7 +116,7 @@ def upload_teleport_content(
     pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Uploaded file exceeds 200 MB limit",
         )
     if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
@@ -162,7 +162,7 @@ def upload_for_extraction(
     pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Uploaded file exceeds 200 MB limit",
         )
     if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
@@ -317,7 +317,7 @@ def offer_teleport(
     pdf_bytes = file.file.read(_MAX_UPLOAD_BYTES + 1)
     if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="Uploaded file exceeds 200 MB limit",
         )
     if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":

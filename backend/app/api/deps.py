@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies."""
 
 from collections.abc import Callable
+from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -14,7 +15,7 @@ from app.services.auth import get_active_session, hash_token
 
 
 def require_authenticated_user(
-    authorization: str | None = Header(default=None),
+    authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> User:
     """Return the current authenticated user or reject the request."""
@@ -136,7 +137,7 @@ def require_owner(user: User = Depends(require_authenticated_user)) -> User:
 
 
 def require_agent_token(
-    authorization: str | None = Header(default=None),
+    authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> Agent:
     """Return the authenticated approved agent or reject with 401."""

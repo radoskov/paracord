@@ -29,3 +29,14 @@ markers = [
     "safety: deeper adversarial security / attack-robustness / web-stability probes (Batch S). Deselected from BOTH `make test` and `make test-full`; run the battery on its own with `make test-safety` or `pytest -m safety`.",
     "concurrent_db: needs a real per-thread-connection DB (file-based SQLite, not the shared in-memory StaticPool) so genuinely-parallel requests each get their own connection instead of racing one shared handle. Used by the queue-cap concurrency probe.",
 ]
+filterwarnings = [
+    # FastAPI 0.139/pydantic 2.13: analyze_param() unconditionally sets `field_info.alias =
+    # param_name` for every non-Annotated body/query/header parameter (fastapi/dependencies/
+    # utils.py:analyze_param), which trips this pydantic warning the first time each route's
+    # state is lazily populated. It fires for virtually every `payload: SomeSchema` endpoint in
+    # the app (confirmed via login, imports/bibtex) — an upstream FastAPI-internal artifact, not
+    # a bug in our own field declarations. Converting every endpoint to Annotated wrappers would
+    # be a sweeping, disproportionate refactor to silence a cosmetic warning; ignore narrowly by
+    # exact category instead of a bare blanket ignore.
+    "ignore::pydantic.warnings.UnsupportedFieldAttributeWarning",
+]

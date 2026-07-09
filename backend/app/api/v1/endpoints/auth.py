@@ -1,5 +1,7 @@
 """Authentication endpoints."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -137,7 +139,7 @@ def update_me(
 def change_own_password(
     payload: ChangePasswordRequest,
     request: Request,
-    authorization: str | None = Header(default=None),
+    authorization: Annotated[str | None, Header()] = None,
     user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str | int]:
@@ -170,7 +172,7 @@ def change_own_password(
 @router.post("/logout")
 def logout(
     request: Request,
-    authorization: str | None = Header(default=None),
+    authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     """Invalidate the current session/token."""
