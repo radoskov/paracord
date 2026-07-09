@@ -8,6 +8,41 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **"Both" (hybrid) mode in the Library search.** The Library search-mode dropdown gains a **both**
+  option that runs the existing unified hybrid engine (BM25F+ lexical fused with dense semantic via
+  Reciprocal Rank Fusion) instead of metadata-only or semantic-only. `SavedFilter.search_mode` now
+  accepts `hybrid` (`frontend/src/pages/LibraryPage.svelte`, `client.ts`,
+  `backend/app/schemas/saved_filter.py`).
+- **Live status indicator on the Jobs nav tab.** A lightweight 20s poll drives a semaphore dot next
+  to the "Jobs" tab — red/yellow/green (mirroring the Jobs page) plus **blue** when jobs are running
+  or queued, with a `[N]` queued-count badge. Shared derivation in `frontend/src/lib/jobsHealth.ts`.
+- **Keyword extraction overhaul (YAKE + RAKE).** `keyword_extraction` now fuses a YAKE statistical
+  keyphrase scorer (new light guarded dependency) with the RAKE scorer via Reciprocal Rank Fusion,
+  then filters over-long/content-word-free/mostly-stopword phrases, trims boundary stop words, boosts
+  phrases echoed in the title/abstract/section headings, and de-duplicates near-identical phrasings.
+  An optional `corpus_idf` rerank + `build_corpus_idf` helper enable a future library-wide TF-IDF
+  pass. Degrades to RAKE-only if YAKE is unavailable.
+
+### Changed / Fixed
+
+- **Agent "Scan & push" no longer creates duplicate papers for files already in the library.**
+  `agent_files.ingest_manifest` now looks up an existing `File` by SHA-256 before minting a
+  filename-titled `index_only` stub Work, linking to that file's existing (properly-titled) Work
+  instead — closing the one ingestion path that skipped the hash-dedup every other path used.
+- **DOI-collision errors now name the offending DOI and the paper that holds it.** Extraction and
+  enrichment keep failing closed on a `uq_works_doi` collision (which prevents duplicate
+  accumulation) but emit a clear message via the new shared `app.services.doi_conflict` module.
+  Four endpoints that previously returned a raw 500 on a colliding DOI — `PATCH /works/{id}`,
+  metadata select/bulk-apply/delete, and find-on-web apply-metadata — now return a clean 409.
+- **Library filter panel.** The "Reset" button moved out of the collapsible "More filters" to sit
+  beside "Save current filter" (it resets everything, so it shouldn't be hidden); the
+  search/filter/action controls were compacted (scoped sizing, not a global button resize) to
+  reclaim vertical space for the paper list.
+- **Test-suite warnings silenced.** `authorization` header params converted to `Annotated`;
+  `HTTP_413_REQUEST_ENTITY_TOO_LARGE` → `HTTP_413_CONTENT_TOO_LARGE`; the FastAPI-internal pydantic
+  `UnsupportedFieldAttributeWarning` narrowly ignored in `pyproject.toml`. Safety suite now runs
+  warning-free.
+
 - **Visualization axis help + reference-graph help modal.** The temporal map's "About this view"
   popup now explains each X/Y axis option (what it is and how to read it), and the per-paper
   reference graph gains a "ⓘ Help" button documenting its layout, every Y-axis option, and the
