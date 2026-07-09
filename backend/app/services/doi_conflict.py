@@ -22,7 +22,9 @@ _DETAIL_DOI_RE = re.compile(r"\(doi\)=\(([^)]*)\)")
 
 # Leading + trailing halves of the message; the offending DOI and existing-paper title (when known)
 # are spliced in between so the actionable identifiers come before the "resolve it" instruction.
-_MESSAGE_HEAD = "This paper's DOI already belongs to another paper in the library (likely a duplicate)."
+_MESSAGE_HEAD = (
+    "This paper's DOI already belongs to another paper in the library (likely a duplicate)."
+)
 _MESSAGE_TAIL = "Resolve the duplicate, then retry."
 
 

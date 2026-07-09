@@ -7,8 +7,6 @@ DB — the recognition path is exercised with a synthetic ``IntegrityError`` sha
 mirroring ``test_d7_extraction_recovery``.
 """
 
-from sqlalchemy.exc import IntegrityError
-
 from app.models.work import Work
 from app.services.doi_conflict import (
     conflict_message,
@@ -16,6 +14,7 @@ from app.services.doi_conflict import (
     doi_from_detail,
     message_from_exception,
 )
+from sqlalchemy.exc import IntegrityError
 
 
 def _doi_integrity_error(detail: str = "Key (doi)=(10.1/dup) already exists."):
@@ -58,7 +57,13 @@ def test_conflict_message_names_offending_doi(db) -> None:
 
 
 def test_conflict_message_names_existing_paper_title(db) -> None:
-    db.add(Work(canonical_title="The Real Owner Paper", normalized_title="the real owner paper", doi="10.1/dup"))
+    db.add(
+        Work(
+            canonical_title="The Real Owner Paper",
+            normalized_title="the real owner paper",
+            doi="10.1/dup",
+        )
+    )
     db.commit()
     msg = conflict_message(db, doi="10.1/dup")
     assert "The Real Owner Paper" in msg

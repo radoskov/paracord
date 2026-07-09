@@ -48,15 +48,105 @@ _MAX_STOPWORD_RATIO = 0.5
 
 _STOPWORDS = frozenset(
     [
-        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in",
-        "into", "is", "it", "its", "of", "on", "or", "that", "the", "their", "then", "there",
-        "these", "this", "to", "was", "were", "which", "with", "we", "our", "those", "they",
-        "them", "he", "she", "his", "her", "you", "your", "i", "but", "not", "can", "will",
-        "may", "also", "such", "using", "used", "use", "based", "both", "than", "been", "being",
-        "more", "most", "could", "would", "should", "about", "between", "over", "under", "across",
-        "after", "before", "via", "per", "each", "any", "all", "some", "other", "many", "new",
-        "given", "however", "thus", "therefore", "while", "where", "when", "how", "what", "who",
-        "whose", "whom", "if", "so", "because", "although", "though", "within", "without",
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "has",
+        "have",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "their",
+        "then",
+        "there",
+        "these",
+        "this",
+        "to",
+        "was",
+        "were",
+        "which",
+        "with",
+        "we",
+        "our",
+        "those",
+        "they",
+        "them",
+        "he",
+        "she",
+        "his",
+        "her",
+        "you",
+        "your",
+        "i",
+        "but",
+        "not",
+        "can",
+        "will",
+        "may",
+        "also",
+        "such",
+        "using",
+        "used",
+        "use",
+        "based",
+        "both",
+        "than",
+        "been",
+        "being",
+        "more",
+        "most",
+        "could",
+        "would",
+        "should",
+        "about",
+        "between",
+        "over",
+        "under",
+        "across",
+        "after",
+        "before",
+        "via",
+        "per",
+        "each",
+        "any",
+        "all",
+        "some",
+        "other",
+        "many",
+        "new",
+        "given",
+        "however",
+        "thus",
+        "therefore",
+        "while",
+        "where",
+        "when",
+        "how",
+        "what",
+        "who",
+        "whose",
+        "whom",
+        "if",
+        "so",
+        "because",
+        "although",
+        "though",
+        "within",
+        "without",
     ]
 )
 
@@ -64,7 +154,9 @@ _STOPWORDS = frozenset(
 def _content_words(text: str) -> list[str]:
     """Lower-cased content tokens (drops stop words and 1-2 char tokens)."""
     return [
-        w for w in _SPLIT.split((text or "").lower()) if _WORD.fullmatch(w) and w not in _STOPWORDS and len(w) >= 3
+        w
+        for w in _SPLIT.split((text or "").lower())
+        if _WORD.fullmatch(w) and w not in _STOPWORDS and len(w) >= 3
     ]
 
 
@@ -204,7 +296,6 @@ def extract_keywords(
     ``boost_text`` (title + abstract + section headings) lifts phrases that also appear there.
     ``corpus_idf`` (from :func:`build_corpus_idf`) optionally reranks by term rarity across a corpus.
     """
-    import math
 
     cleaned = " ".join((text or "").split())
     if not cleaned:

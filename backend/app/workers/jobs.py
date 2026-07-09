@@ -183,7 +183,10 @@ def enrich_work_job(work_id: str) -> dict | None:
             _record_doi_conflict(
                 entity_type="work", entity_id=str(work_id), detail=detail, phase="enrich"
             )
-            result = {"error": "doi_conflict", "detail": conflict_message(db, doi=doi_from_detail(detail))}
+            result = {
+                "error": "doi_conflict",
+                "detail": conflict_message(db, doi=doi_from_detail(detail)),
+            }
         finally:
             # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
             # unit), then (re)index embeddings — both off the search read path. Runs even when
