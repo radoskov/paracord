@@ -9,6 +9,37 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_8 (2026-07-09)
+
+Eight owner-reported items (test warnings, library UX, extraction robustness, jobs status, agent
+dedup, search modes, keyword quality) on `main` (not pushed). Plan:
+`docs/WORKPLAN_2026-07-09_batch8.md`; handoff: `docs/agent_handoffs/2026-07-09-issue-batch-8.md`. One
+commit per logical chunk; verified in the API + frontend containers.
+
+- **6 (critical) — agent scan&push duplicate papers.** `ingest_manifest` now looks up an existing
+  `File` by sha256 before minting a filename-titled `index_only` stub Work; when the content is
+  already in the library it links the `AgentFile` to that File's existing Work instead of creating a
+  duplicate. Closes the one ingestion path that never went through the hash-deduped
+  `_ensure_managed_file`.
+- **3 — DOI collision.** Kept the fail-closed behavior (prevents duplicate accumulation); extracted a
+  shared `app.services.doi_conflict` module so the message now names the offending DOI + the paper
+  that holds it, and wrapped 4 previously-500ing endpoints (`update_work`, select/bulk-apply/delete
+  metadata assertion, find-on-web apply) to return a clean 409. Cross-visibility caveat recorded in
+  `ROADMAP.md`.
+- **8 — keyword extraction overhaul.** YAKE (new light dep, guarded import) + RAKE fused via RRF, then
+  phrase filtering (>4 words / no content word / mostly-stopword), boundary stop-word trimming,
+  title/abstract/heading boosting, and plural-aware near-duplicate dedup. Optional corpus-IDF rerank
+  (`build_corpus_idf`) for a future library-wide pass. api+worker images rebuilt.
+- **4 — Jobs nav badge.** A 20s poll drives a semaphore dot next to the Jobs tab (red/yellow/green +
+  blue when running/queued) with a `[N]` queued count; shared `lib/jobsHealth` helper.
+- **7 — "both" search mode.** Library dropdown gains "both", wired to the existing unified hybrid
+  (BM25F+ / dense RRF) `/search` endpoint; `SavedFilter.search_mode` widened to include `hybrid`.
+- **2 / 5 — library filter panel.** Reset moved out of "More filters" next to Save current filter;
+  scoped `.compact` sizing reclaims vertical space without a global button resize.
+- **1 — test warnings.** `authorization` headers → `Annotated`; `HTTP_413_REQUEST_ENTITY_TOO_LARGE`
+  → `HTTP_413_CONTENT_TOO_LARGE`; the FastAPI-internal pydantic alias warning narrowly ignored in
+  `pyproject.toml`. Safety suite now 0 warnings (was 3).
+
 ## Easy-audit-items batch + CI fix (2026-07-09)
 
 Self-contained audit items that needed no owner decision, plus an owner-reported CI regression, on
@@ -25,7 +56,7 @@ the frontend container (Vitest + `npm run build`).
   `WeakKeyDictionary`-backed `app.utils.table_presence` helper (purged on engine GC). Regression
   test added. Full fast backend suite green (671 passed).
 - **AUDIT E2 — parser-level PDF validation.** `storage.probe_pdf_openable` opens uploaded bytes with
-  PyMuPDF and fails closed on encrypted/page-less/unparseable PDFs, wired into all five upload
+  PyMuPDF and fails closed on encrypted/page-less/unparsable PDFs, wired into all five upload
   handlers after the `%PDF` header check so invalid bytes never reach GROBID/OCR. Unit + upload-abuse
   tests; upload happy-path tests now send real openable PDFs.
 - **AUDIT E1 — Redis fail-closed option.** `PARACORD_PRODUCTION_REQUIRE_REDIS` (default off): when
