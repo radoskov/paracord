@@ -302,7 +302,7 @@
       <div hidden={active !== 'library'}><LibraryPage {client} /></div>
     {/if}
     {#if visited.has('search')}
-      <div hidden={active !== 'search'}><SearchPage {client} /></div>
+      <div hidden={active !== 'search'}><SearchPage {client} visible={active === 'search'} /></div>
     {/if}
     {#if visited.has('import')}
       <div hidden={active !== 'import'}><ImportPage {client} /></div>
@@ -314,7 +314,7 @@
       <div hidden={active !== 'racks'}><RacksPage {client} /></div>
     {/if}
     {#if visited.has('tags')}
-      <div hidden={active !== 'tags'}><TagsPage {client} /></div>
+      <div hidden={active !== 'tags'}><TagsPage {client} visible={active === 'tags'} /></div>
     {/if}
     {#if visited.has('duplicates')}
       <div hidden={active !== 'duplicates'}><DuplicatesPage {client} /></div>

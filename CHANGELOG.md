@@ -8,6 +8,10 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Popups and tabs focus their main input.** Opening "Put into a shelf", "Move file to another
+  paper", or "Merge…" now places the cursor in the popup's main field; switching to the Search or Tags
+  tab focuses its main input. The **Move file** picker is pre-filled with the current paper's title so
+  likely destinations show immediately. New reusable `focusOnMount` Svelte action. Batch 10, issue 6.
 - **Multi-PDF import with an extraction preview.** The Import tab's PDF card now accepts several PDFs
   at once — each becomes its own paper. **Preview & choose** extracts every PDF *before* creating any
   record, shows the parsed title/authors/year/DOI and any collisions (same PDF, same DOI, same title),

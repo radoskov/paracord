@@ -1,17 +1,32 @@
 <script lang="ts">
   // A small typeahead for choosing another paper (issue 4: move-file target / merge source).
   // Debounced metadata search via listWorks; excludes the current paper; emits the pick via onSelect.
+  import { onMount } from 'svelte';
+
   import { ApiClient, type Work } from '../api/client';
+  import { focusOnMount } from '../lib/focus';
 
   export let client: ApiClient;
   export let excludeId: string | null = null;
   export let placeholder = 'Search papers by title, DOI, or identifier…';
   export let onSelect: (work: Work) => void = () => {};
+  // Focus the input when mounted (a modal opening) — batch10 #6.
+  export let autofocusInput = false;
+  // Seed the search box (e.g. the current paper's title for the move-file picker) and search it.
+  export let initialQuery = '';
 
   let query = '';
   let results: Work[] = [];
   let searching = false;
   let debounce: ReturnType<typeof setTimeout> | null = null;
+
+  onMount(() => {
+    const seed = initialQuery.trim();
+    if (seed.length >= 2) {
+      query = initialQuery;
+      void run(seed);
+    }
+  });
 
   function onInput(): void {
     if (debounce) clearTimeout(debounce);
@@ -47,6 +62,7 @@
     type="text"
     bind:value={query}
     on:input={onInput}
+    use:focusOnMount={{ enabled: autofocusInput, select: true }}
     {placeholder}
     aria-label={placeholder} />
   {#if searching}

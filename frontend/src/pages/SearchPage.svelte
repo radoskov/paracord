@@ -15,6 +15,17 @@
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+  // Set by App when the Search tab is showing; used to focus the query box on tab entry (#6).
+  export let visible = true;
+
+  let queryInput: HTMLInputElement | undefined;
+  let wasVisible = false;
+  $: if (visible && !wasVisible) {
+    wasVisible = true;
+    queueMicrotask(() => queryInput?.focus());
+  } else if (!visible) {
+    wasVisible = false;
+  }
 
   let query = '';
   let mode: SearchMode = 'hybrid';
@@ -138,6 +149,7 @@
 
     <form on:submit|preventDefault={runSearch} class="row">
       <input
+        bind:this={queryInput}
         bind:value={query}
         placeholder="e.g. attention mechanisms for translation"
         aria-label="Search query"

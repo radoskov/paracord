@@ -6,6 +6,17 @@
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+  // Set by App when the Tags tab is showing; focuses the new-tag name box on tab entry (#6).
+  export let visible = true;
+
+  let nameInput: HTMLInputElement | undefined;
+  let wasVisible = false;
+  $: if (visible && !wasVisible) {
+    wasVisible = true;
+    queueMicrotask(() => nameInput?.focus());
+  } else if (!visible) {
+    wasVisible = false;
+  }
 
   let tags: Tag[] = [];
   let newTagName = '';
@@ -102,7 +113,7 @@
       their pages). Here you create and review the available tags.
     </p>
     <form on:submit|preventDefault={createTag} class="new-tag">
-      <input bind:value={newTagName} placeholder="Tag name" aria-label="Tag name" />
+      <input bind:this={nameInput} bind:value={newTagName} placeholder="Tag name" aria-label="Tag name" />
       <input bind:value={newTagColor} placeholder="#color (optional)" aria-label="Tag colour" />
       <input bind:value={newTagDescription} placeholder="Description (optional)" aria-label="Tag description" />
       <button type="submit" disabled={!newTagName.trim() || loading}

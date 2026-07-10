@@ -1393,7 +1393,8 @@
       Move <strong>{moveFile.original_filename ?? 'this file'}</strong> to another paper. It will be
       detached from this one — pick the destination:
     </p>
-    <WorkPicker {client} excludeId={work.id} onSelect={doMove}
+    <WorkPicker {client} excludeId={work.id} onSelect={doMove} autofocusInput
+      initialQuery={work.canonical_title ?? ''}
       placeholder="Search the destination paper by title, DOI, or identifier…" />
   </Modal>
 {/if}
@@ -1406,7 +1407,7 @@
         files, tags, shelves, references and metadata move here; it becomes a hidden shadow you can
         Unmerge later.
       </p>
-      <WorkPicker {client} excludeId={work.id} onSelect={selectMergeSource}
+      <WorkPicker {client} excludeId={work.id} onSelect={selectMergeSource} autofocusInput
         placeholder="Search the paper to merge in…" />
     {:else}
       <p class="modal-lead">
@@ -1628,7 +1629,7 @@
 {#if showPutInto}
   <Modal title="Put into a shelf" onClose={() => (showPutInto = false)}>
     <div class="putinto">
-      <ShelfPicker {client} bind:value={putIntoShelfId} modifiableOnly excludeDefault />
+      <ShelfPicker {client} bind:value={putIntoShelfId} modifiableOnly excludeDefault autofocus />
       <div class="putinto-actions">
         <button type="button" class="secondary" on:click={() => (showPutInto = false)}
           title="Close without adding">Cancel</button>

@@ -2,8 +2,11 @@
   import { onMount } from 'svelte';
 
   import { ApiClient, type Shelf } from '../api/client';
+  import { focusOnMount } from '../lib/focus';
 
   export let client: ApiClient;
+  // Focus the shelf select on mount (when opened inside a popup) — batch10 #6.
+  export let autofocus = false;
   // Two-way bound: the selected shelf id, or '' for "no shelf".
   export let value = '';
   export let label = 'Add to shelf';
@@ -53,7 +56,7 @@
         {disabled}
       />
     {/if}
-    <select bind:value {disabled} aria-label={label}>
+    <select bind:value {disabled} aria-label={label} use:focusOnMount={autofocus}>
       <option value="">No shelf</option>
       {#each filtered as shelf (shelf.id)}
         <option value={shelf.id}>{shelf.name}</option>

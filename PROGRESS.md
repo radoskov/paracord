@@ -32,6 +32,9 @@ logical chunk; verified in the API + frontend containers.
   `list_works` enriched via `_batch_library_columns` (4 grouped queries/page: files→count+status+
   text-layer, tags, conflict probe over metadata_assertions). Frontend: 4 registry columns (hidden by
   default), `PaperTable` render branches + badge-token→chip mapping. ✅ done.
+- **6 — popup/tab autofocus + Move default title.** New `focusOnMount` action; ShelfPicker (Put into),
+  WorkPicker (Move/Merge) autofocus their main field; Move picker seeded with the paper title; Search &
+  Tags tabs focus their input on tab entry (edge-triggered on the new `visible` prop). ✅ done.
 - **1 — multi-PDF staging import (extract-first preview + "import directly").** New staging model
   (`import_staging_batches`/`items`, migration 0056) + `import_staging` service: stage → record-free
   extract (worker `extract_staging_item_job`, inline fallback when the queue is down) → collision
