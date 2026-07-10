@@ -9,6 +9,23 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_10 (2026-07-10)
+
+Five owner-requested features (multi-PDF import, duplicates preview + open-in-paper-view,
+best-source "all", editable authors in Details, new library columns). Plan:
+`docs/WORKPLAN_2026-07-10_batch10.md` (design forks resolved by owner); handoff:
+`docs/agent_handoffs/2026-07-10-issue-batch-10.md`. On `main` (not pushed). One commit per
+logical chunk; verified in the API + frontend containers.
+
+- **3 — "Set metadata from best source" → "all fields".** `field_name: "all"` on
+  `POST /works/bulk-apply-metadata` promotes the best assertion for every promotable field
+  (per-field helper `_promote_best_field`), a paper counting as applied if ≥1 field was set;
+  locked fields still skipped. Frontend: "all fields" picker option + adjusted toast. ✅ done.
+- **4 — editable authors in the Details panel.** _pending._
+- **2 — duplicates preview fix + open both papers in the paper view.** _pending._
+- **5 — new library columns (file count, topics, badges incl. conflicts, tags).** _pending._
+- **1 — multi-PDF staging import (extract-first preview + "import directly").** _pending._
+
 ## issue_batch_9 (2026-07-10)
 
 Four more owner-reported items (reconcile false-positive, Jobs tab, find-on-web counter,

@@ -2456,7 +2456,41 @@ def _choose_best_assertion(assertions: list[MetadataAssertion]) -> MetadataAsser
 
 class BulkApplyMetadataRequest(BaseModel):
     work_ids: list[uuid.UUID]
-    field_name: str  # one of _PROMOTABLE_FIELDS
+    field_name: str  # one of _PROMOTABLE_FIELDS, or "all" for every promotable field
+
+
+def _promote_best_field(db: Session, work: Work, field_name: str) -> bool:
+    """Promote the preferred assertion for ``field_name`` on ``work`` to canonical and apply it.
+
+    Returns True if a value was applied, False if skipped (field locked/confirmed or no assertion).
+    Caller is responsible for the modify-permission guard and the commit.
+    """
+    if field_name in set(work.confirmed_fields or []):
+        return False  # locked/confirmed — never clobber in bulk
+    assertions = list(
+        db.scalars(
+            select(MetadataAssertion).where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id == work.id,
+                MetadataAssertion.field_name == field_name,
+            )
+        ).all()
+    )
+    if not assertions:
+        return False
+    chosen = _choose_best_assertion(assertions)
+    db.execute(
+        update(MetadataAssertion)
+        .where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.entity_id == work.id,
+            MetadataAssertion.field_name == field_name,
+        )
+        .values(selected_as_canonical=False)
+    )
+    chosen.selected_as_canonical = True
+    _apply_assertion_to_work(work, field_name, chosen.value, chosen.source)
+    return True
 
 
 @router.post("/bulk-apply-metadata")
@@ -2465,19 +2499,22 @@ def bulk_apply_best_metadata(
     db: Session = DB_DEP,
     actor: User = CONTRIBUTOR_DEP,
 ) -> dict[str, int | str]:
-    """Set one metadata field from the best available source across many selected papers (issue 3).
+    """Set metadata from the best available source across many selected papers (issue 3).
 
-    For each selected paper independently, promote the preferred assertion for ``field_name``
-    (GROBID value preferred, else current canonical, else most recent) to canonical and apply it —
-    the same effect as clicking "Use this" per paper. Papers with the field already user-confirmed
-    (locked) are skipped so a bulk action never silently overwrites a corrected value (AGENTS.md
-    rule 5); papers the caller can't modify, or with no assertion for the field, are skipped too.
+    ``field_name`` is one of the promotable fields, or ``"all"`` to run every promotable field.
+    For each selected paper independently, promote the preferred assertion (GROBID value preferred,
+    else current canonical, else most recent) to canonical and apply it — the same effect as clicking
+    "Use this" per paper. Fields already user-confirmed (locked) are skipped so a bulk action never
+    silently overwrites a corrected value (AGENTS.md rule 5); papers the caller can't modify, or with
+    no assertion for a field, are skipped too. With ``"all"``, a paper counts as applied if at least
+    one of its fields was promoted.
     """
-    if payload.field_name not in _PROMOTABLE_FIELDS:
+    if payload.field_name != "all" and payload.field_name not in _PROMOTABLE_FIELDS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"field_name must be one of {sorted(_PROMOTABLE_FIELDS)}",
+            detail=f"field_name must be 'all' or one of {sorted(_PROMOTABLE_FIELDS)}",
         )
+    fields = sorted(_PROMOTABLE_FIELDS) if payload.field_name == "all" else [payload.field_name]
     applied = 0
     skipped = 0
     for work_id in payload.work_ids:
@@ -2490,35 +2527,15 @@ def bulk_apply_best_metadata(
         except HTTPException:
             skipped += 1  # not the caller's to modify
             continue
-        if payload.field_name in set(work.confirmed_fields or []):
-            skipped += 1  # locked/confirmed — never clobber in bulk
-            continue
-        assertions = list(
-            db.scalars(
-                select(MetadataAssertion).where(
-                    MetadataAssertion.entity_type == "work",
-                    MetadataAssertion.entity_id == work_id,
-                    MetadataAssertion.field_name == payload.field_name,
-                )
-            ).all()
-        )
-        if not assertions:
+        applied_any = False
+        for field in fields:
+            if _promote_best_field(db, work, field):
+                applied_any = True
+        if applied_any:
+            work.updated_at = datetime.now(UTC)
+            applied += 1
+        else:
             skipped += 1
-            continue
-        chosen = _choose_best_assertion(assertions)
-        db.execute(
-            update(MetadataAssertion)
-            .where(
-                MetadataAssertion.entity_type == "work",
-                MetadataAssertion.entity_id == work_id,
-                MetadataAssertion.field_name == payload.field_name,
-            )
-            .values(selected_as_canonical=False)
-        )
-        chosen.selected_as_canonical = True
-        _apply_assertion_to_work(work, payload.field_name, chosen.value, chosen.source)
-        work.updated_at = datetime.now(UTC)
-        applied += 1
     if applied:
         record_event(
             db,

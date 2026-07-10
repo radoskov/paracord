@@ -91,4 +91,21 @@ describe('LibraryPage bulk-action dropdown (issue 3)', () => {
       expect(client.bulkApplyMetadata).toHaveBeenCalledWith(['w1', 'w2'], 'venue'),
     );
   });
+
+  it('"Set metadata from best source" supports an "all fields" option', async () => {
+    const client = makeClient();
+    render(LibraryPage, { client: client as never });
+    await waitFor(() => expect(screen.getByText('Paper One')).toBeTruthy());
+    await selectAll();
+
+    const action = screen.getByRole('combobox', { name: /action/i });
+    await fireEvent.change(action, { target: { value: 'apply-metadata' } });
+    const field = await screen.findByRole('combobox', { name: /field/i });
+    await fireEvent.change(field, { target: { value: 'all' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+
+    await waitFor(() =>
+      expect(client.bulkApplyMetadata).toHaveBeenCalledWith(['w1', 'w2'], 'all'),
+    );
+  });
 });

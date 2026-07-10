@@ -179,3 +179,38 @@ def test_bulk_apply_rejects_non_promotable_field(client, db, make_user):
         json={"work_ids": [str(w.id)], "field_name": "keywords"},
     )
     assert r.status_code == 400
+
+
+def test_bulk_apply_all_promotes_every_field(client, db, make_user):
+    """Issue (batch10 #3): field_name="all" promotes the best assertion for every promotable field,
+    skips locked fields per-paper, and counts a paper applied if at least one field was set."""
+    editor = make_user("md-bulk-all", role="editor")
+    # Paper 1: assertions for several fields; venue is locked → title/abstract/year/doi apply.
+    w1 = _work(db, title="stub1")
+    _assertion(db, w1, field="title", value="Best Title", source="grobid")
+    _assertion(db, w1, field="abstract", value="Best Abstract", source="grobid")
+    _assertion(db, w1, field="year", value="2021", source="crossref")
+    _assertion(db, w1, field="doi", value="10.1/x", source="crossref")
+    _assertion(db, w1, field="venue", value="Should Not Win", source="grobid")
+    w1.confirmed_fields = ["venue"]
+    w1.venue = "Locked Venue"
+    # Paper 2: no assertions at all → skipped (nothing applied).
+    w2 = _work(db, title="stub2")
+    db.commit()
+
+    r = client.post(
+        "/api/v1/works/bulk-apply-metadata",
+        headers=_headers(db, editor),
+        json={"work_ids": [str(w1.id), str(w2.id)], "field_name": "all"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["field_name"] == "all"
+    assert body["applied"] == 1 and body["skipped"] == 1
+    db.expunge_all()
+    got = db.get(Work, w1.id)
+    assert got.canonical_title == "Best Title"
+    assert got.abstract == "Best Abstract"
+    assert got.year == 2021
+    assert got.doi == "10.1/x"
+    assert got.venue == "Locked Venue"  # locked field untouched

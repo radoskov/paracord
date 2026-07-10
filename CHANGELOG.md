@@ -8,6 +8,11 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **"Set metadata from best source" gains an "all fields" option.** The Library bulk action can now
+  promote the best available assertion for *every* promotable field (title/abstract/year/venue/doi)
+  in one go, not just a single chosen field. `field_name: "all"` on
+  `POST /works/bulk-apply-metadata` loops the per-field promotion; locked/user-confirmed fields are
+  still skipped per-paper so corrected values are never clobbered (AGENTS rule 5). Batch 10, issue 3.
 - **Move a PDF between papers, and merge two arbitrary papers.** The paper detail gains a "Move…"
   action on each attached file (re-points its link to another paper via
   `POST /works/{id}/files/{file_id}/move`) and a "Merge…" action that folds any other paper into

@@ -548,8 +548,9 @@
     const field = batchMetaField;
     await run(async () => {
       const res = await client.bulkApplyMetadata(ids, field);
+      const what = field === 'all' ? 'all fields' : field;
       message =
-        `Set ${field} from the best source on ${res.applied} paper(s)` +
+        `Set ${what} from the best source on ${res.applied} paper(s)` +
         (res.skipped ? `; skipped ${res.skipped} (locked / no candidate).` : '.');
       await loadWorks();
     });
@@ -821,6 +822,7 @@
             <label class="inline">Field
               <select bind:value={batchMetaField} disabled={loading || !canModifySelected}
                 title="Which field to set from the best available source (GROBID preferred)">
+                <option value="all">all fields</option>
                 {#each ['title', 'abstract', 'year', 'venue', 'doi'] as f}
                   <option value={f}>{f}</option>
                 {/each}
