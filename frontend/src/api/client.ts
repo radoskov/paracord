@@ -588,6 +588,50 @@ export interface ImportBatch {
   extraction_queued?: boolean;
 }
 
+// A reference to an existing paper a staged PDF collides with (same PDF / DOI / title).
+export interface StagingDuplicateRef {
+  work_id: string;
+  title: string | null;
+}
+
+// One staged PDF in a multi-import batch (batch10 #1).
+export interface StagingItem {
+  id: string;
+  filename: string;
+  sha256: string | null;
+  status: string; // pending | extracting | extracted | extract_failed | committed | skipped
+  error: string | null;
+  parsed: {
+    title?: string | null;
+    authors?: string[];
+    year?: number | null;
+    doi?: string | null;
+    venue?: string | null;
+    abstract?: string | null;
+  } | null;
+  duplicates: Partial<Record<"same_pdf" | "same_doi" | "same_title", StagingDuplicateRef[]>> | null;
+  created_work_id: string | null;
+}
+
+export interface StagingBatch {
+  id: string;
+  mode: "preview" | "direct";
+  status: string; // extracting | ready | committed | cancelled
+  target_shelf_id: string | null;
+  created_at: string;
+  updated_at: string;
+  items: StagingItem[];
+  extraction_queued: boolean;
+}
+
+export interface StagingCommitResult {
+  batch_id: string;
+  created: number;
+  skipped: number;
+  created_work_ids: string[];
+  warnings: string[];
+}
+
 export interface CitationContext {
   id: string;
   reference_id: string;
@@ -2071,6 +2115,53 @@ export class ApiClient {
       throw new Error(detail);
     }
     return response.json() as Promise<ImportBatch>;
+  }
+
+  // Multi-PDF staging import (batch10 #1): upload N PDFs, each extracted before any paper is
+  // created. `mode` "preview" returns a batch to review + commit; "direct" auto-creates non-blocked
+  // papers. Multipart, so it uses raw fetch (like uploadPdf) rather than the JSON request helper.
+  async uploadPdfsMulti(
+    files: File[],
+    mode: "preview" | "direct" = "preview",
+    targetShelfId?: string | null,
+  ): Promise<StagingBatch> {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    form.append("mode", mode);
+    if (targetShelfId) form.append("target_shelf_id", targetShelfId);
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/v1/imports/upload-multi`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      let detail = `Upload failed: ${response.status}`;
+      try {
+        detail = (await response.json()).detail ?? detail;
+      } catch {
+        /* keep status message */
+      }
+      throw new Error(detail);
+    }
+    return response.json() as Promise<StagingBatch>;
+  }
+
+  async getStagingBatch(batchId: string): Promise<StagingBatch> {
+    return this.request<StagingBatch>(`/api/v1/imports/staging/${batchId}`, {
+      timeoutMs: 15000,
+    });
+  }
+
+  async commitStagingBatch(
+    batchId: string,
+    payload: { auto?: boolean; decisions?: { item_id: string; action: "accept" | "skip" }[] },
+  ): Promise<StagingCommitResult> {
+    return this.request<StagingCommitResult>(`/api/v1/imports/staging/${batchId}/commit`, {
+      method: "POST",
+      body: { auto: payload.auto ?? false, decisions: payload.decisions ?? [] },
+    });
   }
 
   async importByIdentifier(

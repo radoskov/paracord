@@ -8,6 +8,15 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Multi-PDF import with an extraction preview.** The Import tab's PDF card now accepts several PDFs
+  at once — each becomes its own paper. **Preview & choose** extracts every PDF *before* creating any
+  record, shows the parsed title/authors/year/DOI and any collisions (same PDF, same DOI, same title),
+  and lets you pick which papers to create. **Import directly** creates them immediately, skipping any
+  PDF whose content or DOI already exists, or whose extraction failed, with a per-file note. A single
+  bad PDF never fails the batch. New `POST /imports/upload-multi`, `GET /imports/staging/{id}`,
+  `POST /imports/staging/{id}/commit`, backed by `import_staging_batches`/`import_staging_items` and a
+  record-free `extract_staging_item_job` worker (commit applies the stored TEI without re-running
+  GROBID). Batch 10, issue 1.
 - **New Library columns: Files, Topics, Badges, Tags.** The Library table gains four opt-in columns
   (hidden by default; enable them in the Columns picker): file count, per-paper topics, applied tags
   (colour-tinted), and status **badges** (extracted / extraction failed / not extracted / poor text /

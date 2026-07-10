@@ -1250,6 +1250,44 @@
         "title": "Body_upload_pdf_api_v1_imports_upload_post",
         "type": "object"
       },
+      "Body_upload_pdfs_multi_api_v1_imports_upload_multi_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "mode": {
+            "default": "preview",
+            "enum": [
+              "preview",
+              "direct"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "target_shelf_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Shelf Id"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_pdfs_multi_api_v1_imports_upload_multi_post",
+        "type": "object"
+      },
       "Body_upload_teleport_content_api_v1_agents_teleports__local_file_id__content_post": {
         "properties": {
           "file": {
@@ -5509,6 +5547,232 @@
           "local_file_ids"
         ],
         "title": "SourceRemovedRequest",
+        "type": "object"
+      },
+      "StagingBatchRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "extraction_queued": {
+            "default": true,
+            "title": "Extraction Queued",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StagingItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_shelf_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Shelf Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mode",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "StagingBatchRead",
+        "type": "object"
+      },
+      "StagingCommitRequest": {
+        "properties": {
+          "auto": {
+            "default": false,
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "decisions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StagingDecision"
+            },
+            "title": "Decisions",
+            "type": "array"
+          }
+        },
+        "title": "StagingCommitRequest",
+        "type": "object"
+      },
+      "StagingCommitResponse": {
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "created_work_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Created Work Ids",
+            "type": "array"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_id",
+          "created",
+          "skipped"
+        ],
+        "title": "StagingCommitResponse",
+        "type": "object"
+      },
+      "StagingDecision": {
+        "properties": {
+          "action": {
+            "enum": [
+              "accept",
+              "skip"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "item_id": {
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "action"
+        ],
+        "title": "StagingDecision",
+        "type": "object"
+      },
+      "StagingItemRead": {
+        "properties": {
+          "created_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created Work Id"
+          },
+          "duplicates": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicates"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parsed": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsed"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "status"
+        ],
+        "title": "StagingItemRead",
         "type": "object"
       },
       "SummaryCreate": {
@@ -14392,6 +14656,136 @@
         ]
       }
     },
+    "/api/v1/imports/staging/{batch_id}": {
+      "get": {
+        "description": "Return a staging batch and its items (owner/admin only) — poll this for extraction progress.",
+        "operationId": "get_staging_batch_api_v1_imports_staging__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Staging Batch",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/staging/{batch_id}/commit": {
+      "post": {
+        "description": "Create papers for the accepted staged items (or auto-accept all non-blocked ones).",
+        "operationId": "commit_staging_batch_api_v1_imports_staging__batch_id__commit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagingCommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingCommitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Commit Staging Batch",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
     "/api/v1/imports/teleport": {
       "post": {
         "description": "Request a teleport of an agent-indexed file to the managed library (user-authorised).\n\nMarks the manifest entry as requested; the agent then pushes the bytes to\n``/agents/teleports/{local_file_id}/content``.",
@@ -14511,6 +14905,66 @@
           }
         },
         "summary": "Upload Pdf",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/upload-multi": {
+      "post": {
+        "description": "Upload several PDFs at once; each is extracted **before** any paper record is created.\n\nEach PDF is stored content-addressed and extracted for preview (title/authors/year/DOI plus\ndetected collisions with existing papers). In ``preview`` mode the caller then chooses which to\ncreate via ``/staging/{id}/commit``; in ``direct`` mode every extracted, non-colliding paper is\ncreated automatically (a same-PDF or same-DOI collision, or a failed extraction, is skipped with\na message). A single bad PDF never fails the batch.\n\nExtraction runs on the background worker; if the queue is unavailable it runs inline so the flow\nstill completes. Poll ``GET /staging/{id}`` until ``status == \"ready\"`` (preview) / ``committed``.",
+        "operationId": "upload_pdfs_multi_api_v1_imports_upload_multi_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_pdfs_multi_api_v1_imports_upload_multi_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Pdfs Multi",
         "tags": [
           "imports"
         ]

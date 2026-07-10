@@ -148,6 +148,58 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
 
 
 @_audited_job
+def extract_staging_item_job(item_id: str) -> None:
+    """Record-free GROBID extraction for one staged multi-import PDF (batch10 #1).
+
+    Extracts the staged PDF and records the parsed metadata + TEI + collisions on the item (no Work
+    yet). When this completes the last item of its batch, the batch flips to ``ready``; a
+    ``direct``-mode batch then auto-commits (accept extracted, non-blocked items) in the same step.
+    """
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.core.config import get_settings
+    from app.db.session import SessionLocal
+    from app.models.import_staging import ImportStagingBatch, ImportStagingItem
+    from app.models.user import User
+    from app.services import import_staging
+    from app.services.grobid_client import GrobidClient
+
+    settings = get_settings()
+    client = GrobidClient(settings.grobid_url, settings=settings)
+    commit_summary = None
+    with SessionLocal() as db:
+        item = db.get(ImportStagingItem, uuid.UUID(str(item_id)))
+        if item is None:
+            return
+        import_staging.extract_staging_item(
+            db, item=item, fetch_tei=client.process_fulltext_document_sync, settings=settings
+        )
+        batch = db.get(ImportStagingBatch, item.batch_id)
+        actor = db.get(User, batch.created_by_user_id) if batch else None
+        if (
+            batch is not None
+            and actor is not None
+            and import_staging.finalize_if_ready(db, batch)
+            and batch.mode == "direct"
+        ):
+            items = list(
+                db.scalars(
+                    select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)
+                ).all()
+            )
+            decisions = import_staging.auto_decisions(items)
+            commit_summary = import_staging.commit_staging(
+                db, actor=actor, batch=batch, decisions=decisions, settings=settings
+            )
+        db.commit()
+    # Post-commit background jobs run outside the session (they read committed rows).
+    if commit_summary is not None:
+        import_staging.enqueue_post_commit_jobs(commit_summary)
+
+
+@_audited_job
 def enrich_work_job(work_id: str) -> dict | None:
     """Enrich a work from external metadata sources (arXiv/Crossref), then (re)index its embedding.
 

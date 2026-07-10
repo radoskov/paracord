@@ -32,7 +32,13 @@ logical chunk; verified in the API + frontend containers.
   `list_works` enriched via `_batch_library_columns` (4 grouped queries/page: files→count+status+
   text-layer, tags, conflict probe over metadata_assertions). Frontend: 4 registry columns (hidden by
   default), `PaperTable` render branches + badge-token→chip mapping. ✅ done.
-- **1 — multi-PDF staging import (extract-first preview + "import directly").** _pending._
+- **1 — multi-PDF staging import (extract-first preview + "import directly").** New staging model
+  (`import_staging_batches`/`items`, migration 0056) + `import_staging` service: stage → record-free
+  extract (worker `extract_staging_item_job`, inline fallback when the queue is down) → collision
+  detect (same PDF/DOI/title) → commit (applies stored TEI, no GROBID re-run). Endpoints
+  `POST /imports/upload-multi`, `GET /imports/staging/{id}`, `POST /imports/staging/{id}/commit`.
+  Direct mode auto-accepts extracted, non-blocked items (blocks on same PDF or DOI). Frontend: Import
+  tab multi-file card + preview table + commit. ✅ done.
 
 ## issue_batch_9 (2026-07-10)
 

@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
-  import { ApiClient, type ServerImportRoot, type Source } from '../api/client';
+  import {
+    ApiClient,
+    type ServerImportRoot,
+    type Source,
+    type StagingBatch,
+    type StagingItem,
+  } from '../api/client';
   import BatchImport from '../components/BatchImport.svelte';
   import ShelfPicker from '../components/ShelfPicker.svelte';
   import { isOwner } from '../lib/session';
@@ -24,7 +30,6 @@
   let newSourceName = '';
   let newSourceAlias = '';
   let selectedSourceId = '';
-  let uploadFile: File | null = null;
   let identifierValue = '';
   let bibtexContent = '';
   let risContent = '';
@@ -91,15 +96,92 @@
     });
   }
 
-  async function upload(): Promise<void> {
-    if (!uploadFile) return;
-    const file = uploadFile;
+  // ---- Multi-PDF import (batch10 #1): extract before storing, preview, then choose. ----
+  let multiFiles: File[] = [];
+  let staging: StagingBatch | null = null;
+  let accept: Record<string, boolean> = {};
+  let commitResult: { created: number; skipped: number; warnings: string[] } | null = null;
+
+  const BLOCKING = ['same_pdf', 'same_doi'] as const;
+  function itemBlocked(item: StagingItem): string | null {
+    for (const sig of BLOCKING) if (item.duplicates?.[sig]?.length) return sig;
+    return null;
+  }
+  function dupWarnings(item: StagingItem): string[] {
+    const d = item.duplicates ?? {};
+    const out: string[] = [];
+    if (d.same_pdf?.length) out.push('same PDF already in library');
+    if (d.same_doi?.length) out.push('same DOI as an existing paper');
+    if (d.same_title?.length) out.push('same title as an existing paper');
+    return out;
+  }
+
+  function resetMulti(): void {
+    multiFiles = [];
+    staging = null;
+    accept = {};
+    commitResult = null;
+  }
+
+  // Seed the accept map: check extracted, non-blocked items by default.
+  function seedAccept(batch: StagingBatch): void {
+    const next: Record<string, boolean> = {};
+    for (const item of batch.items) {
+      next[item.id] = item.status === 'extracted' && !itemBlocked(item);
+    }
+    accept = next;
+  }
+
+  async function pollStaging(batchId: string): Promise<StagingBatch> {
+    // Extraction usually finishes in-request (inline) but may run on the worker; poll until ready.
+    for (let i = 0; i < 40; i += 1) {
+      const batch = await client.getStagingBatch(batchId);
+      if (batch.status !== 'extracting') return batch;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return client.getStagingBatch(batchId);
+  }
+
+  async function startMultiImport(mode: 'preview' | 'direct'): Promise<void> {
+    if (!multiFiles.length) return;
+    commitResult = null;
     await run(async () => {
-      const batch = await client.uploadPdf(file, uploadShelfId || null);
-      uploadFile = null;
-      const queued = batch.extraction_queued !== false;
-      message = `Uploaded “${file.name}” (batch ${batch.status})${queued ? '; extraction queued' : ''}`;
-      if (!queued) warning = EXTRACTION_QUEUE_WARNING;
+      let batch = await client.uploadPdfsMulti(multiFiles, mode, uploadShelfId || null);
+      if (batch.status === 'extracting') batch = await pollStaging(batch.id);
+      staging = batch;
+      if (batch.status === 'committed') {
+        // Direct mode: the server already created papers; summarise from the items.
+        const created = batch.items.filter((i) => i.created_work_id).length;
+        const skipped = batch.items.filter((i) => i.status === 'skipped').length;
+        commitResult = {
+          created,
+          skipped,
+          warnings: batch.items
+            .filter((i) => i.status === 'skipped' || i.status === 'extract_failed')
+            .map((i) => `${i.filename}: ${i.error ?? dupWarnings(i).join(', ') ?? 'skipped'}`),
+        };
+        message = `Imported ${created} paper(s)${skipped ? `; skipped ${skipped}` : ''}.`;
+        multiFiles = [];
+      } else {
+        seedAccept(batch);
+        if (!batch.extraction_queued) warning = EXTRACTION_QUEUE_WARNING;
+      }
+    });
+  }
+
+  async function commitPreview(): Promise<void> {
+    if (!staging) return;
+    const batchId = staging.id;
+    const decisions = staging.items.map((i) => ({
+      item_id: i.id,
+      action: (accept[i.id] ? 'accept' : 'skip') as 'accept' | 'skip',
+    }));
+    await run(async () => {
+      const result = await client.commitStagingBatch(batchId, { decisions });
+      commitResult = result;
+      message = `Created ${result.created} paper(s)${result.skipped ? `; skipped ${result.skipped}` : ''}.`;
+      staging = await client.getStagingBatch(batchId);
+      multiFiles = [];
     });
   }
 
@@ -152,15 +234,83 @@
   {#if message}<p class="muted msg">{message}</p>{/if}
   {#if warning}<p class="msg warn-msg" role="alert">⚠ {warning}</p>{/if}
 
-  <div class="card">
-    <h2>Upload a PDF</h2>
-    <p class="muted">Store a PDF in the managed library; GROBID extraction runs in the background.</p>
-    <input type="file" accept=".pdf,application/pdf"
-      on:change={(e) => (uploadFile = e.currentTarget.files?.[0] ?? null)} aria-label="PDF file" />
+  <div class="card wide-card">
+    <h2>Upload PDFs</h2>
+    <p class="muted">
+      Add one or more PDFs — each becomes its own paper. <strong>Preview &amp; choose</strong>
+      extracts every PDF first, shows the metadata and any collisions, and lets you pick which papers
+      to create. <strong>Import directly</strong> creates them straight away (a duplicate PDF/DOI or a
+      failed extraction is skipped with a note). GROBID extraction runs in the background.
+    </p>
+    <input type="file" accept=".pdf,application/pdf" multiple
+      on:change={(e) => (multiFiles = Array.from(e.currentTarget.files ?? []))}
+      aria-label="PDF files" />
     <ShelfPicker {client} bind:value={uploadShelfId} label="Add to shelf (optional)" />
-    <button type="button" on:click={upload} disabled={!uploadFile || loading}
-      title={uploadFile ? 'Upload the chosen PDF' : 'Choose a PDF file first'}>Upload PDF</button>
-    {#if !uploadFile}<p class="hintline">Choose a PDF to enable “Upload PDF”.</p>{/if}
+    <div class="row">
+      <button type="button" on:click={() => startMultiImport('preview')}
+        disabled={!multiFiles.length || loading}
+        title={multiFiles.length ? 'Extract and preview before creating papers' : 'Choose PDF(s) first'}
+        >Preview &amp; choose</button>
+      <button type="button" class="secondary" on:click={() => startMultiImport('direct')}
+        disabled={!multiFiles.length || loading}
+        title={multiFiles.length ? 'Create papers directly (skips duplicates/errors)' : 'Choose PDF(s) first'}
+        >Import directly</button>
+    </div>
+    {#if multiFiles.length}<p class="hintline">{multiFiles.length} file(s) selected.</p>{/if}
+
+    {#if staging && staging.status !== 'committed'}
+      <div class="preview-table" role="table" aria-label="Extraction preview">
+        <div class="preview-head" role="row">
+          <span>Create</span><span>File / title</span><span>Details</span><span>Status</span>
+        </div>
+        {#each staging.items as item (item.id)}
+          {@const blocked = itemBlocked(item)}
+          {@const warns = dupWarnings(item)}
+          <div class="preview-row" role="row">
+            <span role="cell">
+              <input type="checkbox" bind:checked={accept[item.id]}
+                disabled={item.status !== 'extracted'} aria-label={`Create paper from ${item.filename}`} />
+            </span>
+            <span role="cell">
+              <strong>{item.parsed?.title || item.filename}</strong>
+              <span class="muted small">{item.filename}</span>
+            </span>
+            <span role="cell" class="small">
+              {#if item.parsed?.authors?.length}<span>{item.parsed.authors.slice(0, 4).join('; ')}</span>{/if}
+              {#if item.parsed?.year}<span> · {item.parsed.year}</span>{/if}
+              {#if item.parsed?.doi}<span> · doi:{item.parsed.doi}</span>{/if}
+              {#each warns as w}<span class="dup">⚠ {w}</span>{/each}
+            </span>
+            <span role="cell" class="small">
+              {#if item.status === 'extract_failed'}<span class="dup">extraction failed{item.error ? `: ${item.error}` : ''}</span>
+              {:else if blocked}<span class="dup">blocked ({blocked.replace('_', ' ')})</span>
+              {:else}{item.status}{/if}
+            </span>
+          </div>
+        {/each}
+      </div>
+      {#if staging.status === 'extracting'}
+        <p class="hintline">Extracting… this updates automatically.</p>
+      {:else}
+        <div class="row">
+          <button type="button" on:click={commitPreview} disabled={loading}
+            title="Create the checked papers">Create selected papers</button>
+          <button type="button" class="secondary" on:click={resetMulti} disabled={loading}>Cancel</button>
+        </div>
+      {/if}
+    {/if}
+
+    {#if commitResult}
+      <div class="commit-result">
+        <p class="msg">Created {commitResult.created} paper(s){commitResult.skipped ? `; skipped ${commitResult.skipped}` : ''}.</p>
+        {#if commitResult.warnings.length}
+          <ul class="warn-list">
+            {#each commitResult.warnings as w}<li>{w}</li>{/each}
+          </ul>
+        {/if}
+        <button type="button" class="secondary" on:click={resetMulti}>Import more</button>
+      </div>
+    {/if}
   </div>
 
   <div class="card">
@@ -317,5 +467,63 @@
 
   textarea {
     resize: vertical;
+  }
+
+  /* The multi-PDF card spans the full grid so its preview table has room. */
+  .wide-card {
+    grid-column: 1 / -1;
+  }
+
+  .small {
+    color: var(--ink-muted);
+    font-size: 0.8rem;
+  }
+
+  .preview-table {
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    margin-top: 0.75rem;
+    overflow: hidden;
+  }
+
+  .preview-head,
+  .preview-row {
+    align-items: start;
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: 3.5rem minmax(0, 2fr) minmax(0, 3fr) 8rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .preview-head {
+    background: var(--surface-sunken);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .preview-row {
+    border-top: 1px solid var(--border-normal);
+  }
+
+  .preview-row strong {
+    display: block;
+  }
+
+  .dup {
+    color: var(--status-warning);
+    display: inline-block;
+    margin-right: 0.4rem;
+  }
+
+  .warn-list {
+    color: var(--status-warning);
+    font-size: 0.85rem;
+    margin: 0.25rem 0;
+    padding-left: 1.2rem;
+  }
+
+  .commit-result {
+    margin-top: 0.75rem;
   }
 </style>

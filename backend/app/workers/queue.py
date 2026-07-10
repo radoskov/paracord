@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 QUEUE_NAME = "paracord"
 EXTRACT_JOB = "app.workers.jobs.extract_pdf_job"
+STAGE_EXTRACT_JOB = "app.workers.jobs.extract_staging_item_job"
 ENRICH_JOB = "app.workers.jobs.enrich_work_job"
 EMBED_JOB = "app.workers.jobs.embed_work_job"
 CHUNK_JOB = "app.workers.jobs.chunk_work_job"
@@ -109,6 +110,24 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue extraction for file %s: %s", file_id, exc)
+        return None
+
+
+def enqueue_staging_extraction(item_id) -> str | None:
+    """Best-effort enqueue of a record-free extraction for a staged multi-import PDF (batch10 #1).
+
+    Deterministic id ``stage-extract-{item_id}`` so a re-enqueue of an in-flight item is a no-op.
+    Never raises: callers fall back to inline extraction when this returns None (queue unavailable).
+    """
+    job_id = f"stage-extract-{item_id}"
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        return queue.enqueue(STAGE_EXTRACT_JOB, str(item_id), job_id=job_id).id
+    except Exception as exc:  # noqa: BLE001 - best effort; caller extracts inline on None
+        logger.warning("Could not enqueue staging extraction for item %s: %s", item_id, exc)
         return None
 
 

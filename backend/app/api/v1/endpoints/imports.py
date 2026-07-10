@@ -15,10 +15,11 @@ from app.core.config import get_settings
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.agent import Agent
+from app.models.import_staging import ImportStagingBatch, ImportStagingItem
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.schemas.agent import TeleportRequest
-from app.services import agent_files, batch_import
+from app.services import agent_files, batch_import, import_staging
 from app.services.bibliography_import import import_csl, import_ris
 from app.services.bibtex import import_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
@@ -33,7 +34,7 @@ from app.services.storage import (
     probe_pdf_openable,
 )
 from app.utils.normalization import normalize_title
-from app.workers.queue import enqueue_extraction
+from app.workers.queue import enqueue_extraction, enqueue_staging_extraction
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -267,6 +268,205 @@ def upload_pdf(
     db.refresh(batch)
     batch.extraction_queued = enqueue_extraction(file_obj.id) is not None
     return batch
+
+
+# ---------------------------------------------------------------------------
+# Multi-PDF staging import (batch10 #1): extract before storing records.
+# ---------------------------------------------------------------------------
+
+
+class StagingItemRead(BaseModel):
+    id: uuid.UUID
+    filename: str
+    sha256: str | None = None
+    status: str
+    error: str | None = None
+    # Preview metadata parsed from TEI ({title, authors, year, doi, venue, abstract}).
+    parsed: dict | None = None
+    # Detected collisions ({same_pdf|same_doi|same_title: [{work_id, title}]}).
+    duplicates: dict | None = None
+    created_work_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}  # tei_xml is intentionally not exposed
+
+
+class StagingBatchRead(BaseModel):
+    id: uuid.UUID
+    mode: str
+    status: str
+    target_shelf_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    items: list[StagingItemRead] = []
+    # False when extraction jobs could not be queued AND could not run inline (rare).
+    extraction_queued: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class StagingDecision(BaseModel):
+    item_id: uuid.UUID
+    action: Literal["accept", "skip"]
+
+
+class StagingCommitRequest(BaseModel):
+    # When True, the server decides (accept every extracted, non-blocked item; skip the rest).
+    auto: bool = False
+    decisions: list[StagingDecision] = []
+
+
+class StagingCommitResponse(BaseModel):
+    batch_id: uuid.UUID
+    created: int
+    skipped: int
+    created_work_ids: list[uuid.UUID] = []
+    warnings: list[str] = []
+
+
+def _staging_items(db: Session, batch_id: uuid.UUID) -> list[ImportStagingItem]:
+    return list(
+        db.scalars(
+            select(ImportStagingItem)
+            .where(ImportStagingItem.batch_id == batch_id)
+            .order_by(ImportStagingItem.created_at, ImportStagingItem.id)
+        ).all()
+    )
+
+
+def _staging_read(
+    db: Session, batch: ImportStagingBatch, *, extraction_queued: bool = True
+) -> StagingBatchRead:
+    items = [StagingItemRead.model_validate(i) for i in _staging_items(db, batch.id)]
+    return StagingBatchRead.model_validate(batch).model_copy(
+        update={"items": items, "extraction_queued": extraction_queued}
+    )
+
+
+def _require_own_staging_batch(db: Session, batch_id: uuid.UUID, actor: User) -> ImportStagingBatch:
+    from app.services import access
+
+    batch = db.get(ImportStagingBatch, batch_id)
+    if batch is None or (
+        not access.is_admin_or_owner(actor) and batch.created_by_user_id != actor.id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import batch not found")
+    return batch
+
+
+@router.post("/upload-multi", response_model=StagingBatchRead, status_code=status.HTTP_201_CREATED)
+def upload_pdfs_multi(
+    files: list[UploadFile],
+    mode: Literal["preview", "direct"] = Form(default="preview"),
+    target_shelf_id: uuid.UUID | None = Form(default=None),
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> StagingBatchRead:
+    """Upload several PDFs at once; each is extracted **before** any paper record is created.
+
+    Each PDF is stored content-addressed and extracted for preview (title/authors/year/DOI plus
+    detected collisions with existing papers). In ``preview`` mode the caller then chooses which to
+    create via ``/staging/{id}/commit``; in ``direct`` mode every extracted, non-colliding paper is
+    created automatically (a same-PDF or same-DOI collision, or a failed extraction, is skipped with
+    a message). A single bad PDF never fails the batch.
+
+    Extraction runs on the background worker; if the queue is unavailable it runs inline so the flow
+    still completes. Poll ``GET /staging/{id}`` until ``status == "ready"`` (preview) / ``committed``.
+    """
+    settings = get_settings()
+    assert_queue_has_capacity(db)
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No files were uploaded"
+        )
+    if len(files) > import_staging.MAX_STAGING_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"At most {import_staging.MAX_STAGING_FILES} files per batch",
+        )
+    uploads: list[tuple[str, bytes]] = []
+    for upload in files:
+        data = upload.file.read(import_staging._MAX_UPLOAD_BYTES + 1)
+        uploads.append((upload.filename or "upload.pdf", data))
+
+    batch = import_staging.stage_pdfs(
+        db,
+        actor=actor,
+        uploads=uploads,
+        mode=mode,
+        target_shelf_id=target_shelf_id,
+        settings=settings,
+    )
+    db.commit()  # persist batch + items so the worker can find them before we enqueue
+
+    # Schedule extraction for each staged item: prefer the worker; fall back to inline when the
+    # queue is unavailable (keeps dev/tests and Redis-down deployments working).
+    pending = [i for i in _staging_items(db, batch.id) if i.status == "pending"]
+    inline_items: list[ImportStagingItem] = []
+    for item in pending:
+        if enqueue_staging_extraction(item.id) is None:
+            inline_items.append(item)
+    extraction_queued = True
+    if inline_items:
+        from app.services.grobid_client import GrobidClient
+
+        client = GrobidClient(settings.grobid_url, settings=settings)
+        for item in inline_items:
+            import_staging.extract_staging_item(
+                db, item=item, fetch_tei=client.process_fulltext_document_sync, settings=settings
+            )
+        extraction_queued = False
+
+    # If everything finished inline, finalize now; direct mode auto-commits in the same request.
+    commit_summary = None
+    if import_staging.finalize_if_ready(db, batch) and batch.mode == "direct":
+        decisions = import_staging.auto_decisions(_staging_items(db, batch.id))
+        commit_summary = import_staging.commit_staging(
+            db, actor=actor, batch=batch, decisions=decisions, settings=settings
+        )
+    db.commit()
+    if commit_summary is not None:
+        import_staging.enqueue_post_commit_jobs(commit_summary)
+
+    db.refresh(batch)
+    return _staging_read(db, batch, extraction_queued=extraction_queued)
+
+
+@router.get("/staging/{batch_id}", response_model=StagingBatchRead)
+def get_staging_batch(
+    batch_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> StagingBatchRead:
+    """Return a staging batch and its items (owner/admin only) — poll this for extraction progress."""
+    batch = _require_own_staging_batch(db, batch_id, actor)
+    return _staging_read(db, batch)
+
+
+@router.post("/staging/{batch_id}/commit", response_model=StagingCommitResponse)
+def commit_staging_batch(
+    batch_id: uuid.UUID,
+    payload: StagingCommitRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> StagingCommitResponse:
+    """Create papers for the accepted staged items (or auto-accept all non-blocked ones)."""
+    batch = _require_own_staging_batch(db, batch_id, actor)
+    if batch.status == "committed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This batch was already committed"
+        )
+    if payload.auto:
+        decisions = import_staging.auto_decisions(_staging_items(db, batch.id))
+    else:
+        decisions = [{"item_id": str(d.item_id), "action": d.action} for d in payload.decisions]
+    summary = import_staging.commit_staging(db, actor=actor, batch=batch, decisions=decisions)
+    db.commit()
+    import_staging.enqueue_post_commit_jobs(summary)
+    return StagingCommitResponse(
+        batch_id=batch.id,
+        created=summary["created"],
+        skipped=summary["skipped"],
+        created_work_ids=[uuid.UUID(w) for w in summary["created_work_ids"]],
+        warnings=summary["warnings"],
+    )
 
 
 class IdentifierImportCreate(BaseModel):

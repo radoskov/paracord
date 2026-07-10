@@ -579,6 +579,20 @@ def import_uploaded_pdf(
     return batch, file, created_file
 
 
+def stage_managed_file(
+    db: Session, *, filename: str, pdf_bytes: bytes, settings: Settings | None = None
+) -> tuple[File, bool]:
+    """Store PDF bytes content-addressed and ensure a File + Location, WITHOUT minting a Work.
+
+    Used by the multi-PDF staging import (batch10 #1): the PDF is persisted immediately (dedup-safe
+    by SHA-256) so it can be extracted for preview and later linked to a Work on commit — but no
+    ``Work``/``FileWorkLink`` is created here. Returns ``(file, created_file)``.
+    """
+    return _ensure_managed_file(
+        db, filename=filename, pdf_bytes=pdf_bytes, settings=settings or get_settings()
+    )
+
+
 def attach_uploaded_pdf_to_work(
     db: Session,
     *,
