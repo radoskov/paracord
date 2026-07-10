@@ -18,6 +18,22 @@
   let auto = true;
   let timer: ReturnType<typeof setInterval> | null = null;
   let filter = 'all';
+  // `loaded` flips true once the first refresh settles (success OR failure) so "Loading…" only
+  // shows before the first response, never permanently. `loading` guards against overlapping polls
+  // stacking up (the 4s timer must not fire a second request while one is still in flight).
+  let loaded = false;
+  let loading = false;
+
+  // Defensive normalisation: a payload missing `counts`/`jobs` (older server, or a partial/error
+  // response with available:true) must never let the template throw during render — a thrown error
+  // mid-render freezes the mounted tab so it looks unclickable. Coerce to always-safe shapes.
+  function normalize(s: QueueStatus): QueueStatus {
+    return {
+      ...s,
+      counts: s.counts ?? {},
+      jobs: Array.isArray(s.jobs) ? s.jobs : [],
+    };
+  }
 
   // Pause the auto-refresh timer when the tab is hidden; resume (and refresh once) when shown.
   let wasVisible = true;
@@ -120,11 +136,19 @@
   }
 
   async function refresh(): Promise<void> {
+    if (loading) return; // don't stack overlapping polls behind an in-flight request
+    loading = true;
     try {
-      status = await client.getJobs(40);
+      status = normalize(await client.getJobs(40));
       message = '';
     } catch (error) {
+      // Keep the last-good `status` so the tab stays interactive and shows the error line, rather
+      // than blanking back to "Loading…". Only a failed *first* load (status still null) falls
+      // through to the load-failed placeholder below.
       message = errorMessage(error);
+    } finally {
+      loaded = true;
+      loading = false;
     }
   }
 
@@ -181,22 +205,29 @@
         <div class="counts">
           <button type="button" class="count count-all" class:active={filter === 'all'} on:click={() => (filter = 'all')}
             title="Show jobs of every status">
-            <span class="n">{status.jobs.length}</span>
+            <span class="n">{status.jobs?.length ?? 0}</span>
             <span class="k">all</span>
           </button>
           {#each COUNT_ORDER as key (key)}
             <button type="button" class="count count-{key}" class:active={filter === key} on:click={() => setFilter(key)}
               title={`Show only ${key} jobs`}>
-              <span class="n">{status.counts[key] ?? 0}</span>
+              <span class="n">{status.counts?.[key] ?? 0}</span>
               <span class="k">{key}</span>
             </button>
           {/each}
         </div>
 
-        {#if status.jobs.length === 0}
+        {#if (status.jobs?.length ?? 0) === 0}
           <p class="empty">No recent jobs. Import a PDF or click Enrich on a paper to create one.</p>
         {:else if visibleJobs.length === 0}
-          <p class="empty">No <strong>{filter}</strong> jobs in the recent window. <button type="button" class="linkish" on:click={() => (filter = 'all')} title="Show jobs of every status">Show all</button></p>
+          <p class="empty">
+            {#if (status.counts?.[filter] ?? 0) > 0}
+              {status.counts[filter]} <strong>{filter}</strong> job{status.counts[filter] === 1 ? '' : 's'} in the queue registry, but none are in the recent window — they may be older than the list or already cleared. Use <em>Clean</em> to clear finished/failed history.
+            {:else}
+              No <strong>{filter}</strong> jobs in the recent window.
+            {/if}
+            <button type="button" class="linkish" on:click={() => (filter = 'all')} title="Show jobs of every status">Show all</button>
+          </p>
         {:else}
           <ul class="jobs">
             {#each visibleJobs as job (job.id)}
@@ -223,6 +254,11 @@
           </ul>
         {/if}
       {/if}
+    {:else if loaded}
+      <p class="empty warn">
+        Couldn’t load the background jobs list.
+        <button type="button" class="linkish" on:click={refresh} title="Try loading the job list again">Retry</button>
+      </p>
     {:else}
       <p class="empty">Loading…</p>
     {/if}

@@ -2413,7 +2413,11 @@ export class ApiClient {
   }
 
   async getJobs(limit = 25): Promise<QueueStatus> {
-    return this.request<QueueStatus>(`/api/v1/jobs?limit=${limit}`);
+    // 15s timeout: this is polled on a timer, so a stalled request must reject (and be retried on
+    // the next tick) rather than hang and pile up behind subsequent polls.
+    return this.request<QueueStatus>(`/api/v1/jobs?limit=${limit}`, {
+      timeoutMs: 15000,
+    });
   }
 
   async clearJobs(
@@ -2778,7 +2782,14 @@ export class ApiClient {
 
   private async request<T>(
     path: string,
-    options: { method?: string; body?: unknown; auth?: boolean } = {},
+    options: {
+      method?: string;
+      body?: unknown;
+      auth?: boolean;
+      // Abort the request after this many ms. Used by polling calls (e.g. getJobs) so a stalled
+      // network request rejects instead of hanging forever and stacking behind the next poll.
+      timeoutMs?: number;
+    } = {},
   ): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (options.body !== undefined)
@@ -2786,11 +2797,18 @@ export class ApiClient {
     if (options.auth !== false && this.token)
       headers.Authorization = `Bearer ${this.token}`;
 
+    const signal =
+      options.timeoutMs &&
+      typeof AbortSignal !== "undefined" &&
+      typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(options.timeoutMs)
+        : undefined;
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: options.method ?? "GET",
       headers,
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal,
     });
 
     if (!response.ok) {

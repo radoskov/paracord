@@ -154,6 +154,74 @@ describe('JobsPage admin queue/worker controls (D39)', () => {
   });
 });
 
+describe('JobsPage robustness (issue 2 — freeze / stuck-loading)', () => {
+  afterEach(() => {
+    currentUser.set(null);
+    vi.restoreAllMocks();
+  });
+
+  it('shows a Retry (not a permanent "Loading…") when the first load fails, and recovers on retry', async () => {
+    const getJobs = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue(makeStatus([job({ id: 'ok', task: 'recovered' })]));
+    const client = { getJobs };
+    render(JobsPage, { client: client as never });
+
+    // First load failed → the load-failed placeholder with a Retry button, not "Loading…".
+    const retry = await screen.findByRole('button', { name: /retry/i });
+    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(screen.getByText(/network down/)).toBeTruthy();
+
+    await fireEvent.click(retry);
+    expect(await screen.findByText('recovered')).toBeTruthy();
+  });
+
+  it('does not throw when the payload is missing counts/jobs (available but partial)', async () => {
+    // A partial/older payload with available:true but no counts/jobs must not crash the render
+    // (an unguarded status.counts[...] / status.jobs.length used to freeze the tab).
+    const partial = { available: true, workers: 1 } as unknown as QueueStatus;
+    const client = { getJobs: vi.fn().mockResolvedValue(partial) };
+    render(JobsPage, { client: client as never });
+
+    // It renders the counts grid (all = 0) and the empty-jobs note without throwing.
+    expect(await screen.findByText('No recent jobs. Import a PDF or click Enrich on a paper to create one.')).toBeTruthy();
+    const allBtn = screen.getByTitle('Show jobs of every status') as HTMLElement;
+    expect(allBtn.textContent).toContain('0');
+  });
+
+  it('keeps the last-good job list visible when a later refresh fails', async () => {
+    const getJobs = vi
+      .fn()
+      .mockResolvedValueOnce(makeStatus([job({ id: 'a', task: 'still-here' })]))
+      .mockRejectedValue(new Error('transient blip'));
+    const client = { getJobs };
+    render(JobsPage, { client: client as never });
+
+    expect(await screen.findByText('still-here')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    // Error surfaces, but the previously-loaded job stays on screen (tab stays interactive).
+    expect(await screen.findByText(/transient blip/)).toBeTruthy();
+    expect(screen.getByText('still-here')).toBeTruthy();
+  });
+
+  it('explains a positive filter count with no jobs in the recent window', async () => {
+    // The "1 failed but the list shows none" case: the count comes from the queue registry while
+    // the list is the recent window — surface that instead of a bare "no jobs".
+    const status: QueueStatus = {
+      ...makeStatus([job({ id: 'f1', task: 'done-job', status: 'finished' })]),
+      counts: { queued: 0, started: 0, finished: 1, failed: 2, scheduled: 0, deferred: 0 },
+    };
+    const client = { getJobs: vi.fn().mockResolvedValue(status) };
+    render(JobsPage, { client: client as never });
+
+    await screen.findByText('done-job');
+    await fireEvent.click(screen.getByTitle('Show only failed jobs'));
+    expect(await screen.findByText(/in the queue registry, but none are in the recent window/)).toBeTruthy();
+  });
+});
+
 describe('JobsPage newest-first (Phase L, item 9)', () => {
   it('renders jobs in the order the API returns them (newest-first)', async () => {
     // The backend supplies newest-first order; the page must preserve it (no reversal/resort).
