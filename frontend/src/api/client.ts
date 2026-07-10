@@ -412,6 +412,34 @@ export interface CitationSummaryParams {
   limit?: number;
 }
 
+// Venue/author aggregation over a citation-summary scope (batch10 #7).
+export interface VenueStat {
+  name: string;
+  count: number;
+  pct: number;
+  year_min: number | null;
+  year_max: number | null;
+  variants: string[];
+}
+
+export interface AuthorStat {
+  name: string;
+  count: number;
+  pct: number;
+  variants: string[];
+}
+
+export interface VenueAuthorSummary {
+  scope_work_count: number;
+  venues: VenueStat[];
+  authors: AuthorStat[];
+  papers_without_venue: number;
+  papers_without_authors: number;
+  distinct_venue_count: number;
+  distinct_author_count: number;
+  notes: string[];
+}
+
 export type ExportScopeType =
   | "work"
   | "shelf"
@@ -2851,6 +2879,20 @@ export class ApiClient {
     for (const id of params.workIds ?? []) query.append("work_ids", id);
     if (params.limit != null) query.set("limit", String(params.limit));
     return this.request<CitationSummary>(`/api/v1/citations/summary?${query}`);
+  }
+
+  /** Venue + author aggregation for a scope (batch10 #7). */
+  async venueAuthorSummary(
+    params: CitationSummaryParams = {},
+  ): Promise<VenueAuthorSummary> {
+    const query = new URLSearchParams();
+    query.set("scope_type", params.scopeType ?? "library");
+    if (params.scopeId) query.set("scope_id", params.scopeId);
+    for (const id of params.workIds ?? []) query.append("work_ids", id);
+    if (params.limit != null) query.set("limit", String(params.limit));
+    return this.request<VenueAuthorSummary>(
+      `/api/v1/citations/venue-author-summary?${query}`,
+    );
   }
 
   /** On-demand preview of an external cited-but-missing reference (Track C C1; identifier-only). */

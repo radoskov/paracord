@@ -32,6 +32,11 @@ logical chunk; verified in the API + frontend containers.
   `list_works` enriched via `_batch_library_columns` (4 grouped queries/page: files→count+status+
   text-layer, tags, conflict probe over metadata_assertions). Frontend: 4 registry columns (hidden by
   default), `PaperTable` render branches + badge-token→chip mapping. ✅ done.
+- **7 — citation summary venue + author sub-tabs.** New `venue_author_summary` service +
+  `GET /citations/venue-author-summary` (reuses `_scope_works`, SEE-clamped). Basic dedup: venues by
+  case/punct-insensitive key, authors by last+first-initial; merged spellings surfaced as `variants`.
+  Frontend: Overview/Venues/Authors sub-tabs in CitationSummaryPage with stat tables. External venue
+  metadata deferred (free-text venue, no identifier). ✅ done.
 - **6 — popup/tab autofocus + Move default title.** New `focusOnMount` action; ShelfPicker (Put into),
   WorkPicker (Move/Merge) autofocus their main field; Move picker seeded with the paper title; Search &
   Tags tabs focus their input on tab entry (edge-triggered on the new `visible` prop). ✅ done.

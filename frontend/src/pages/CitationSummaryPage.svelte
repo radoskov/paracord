@@ -11,6 +11,7 @@
     type Rack,
     type RankedWork,
     type Shelf,
+    type VenueAuthorSummary,
     type Work,
   } from '../api/client';
   import Modal from '../components/Modal.svelte';
@@ -34,6 +35,10 @@
   let busy = false;
   let message = '';
   let importing = '';
+
+  // Sub-tabs (batch10 #7): Overview (the citation analytics) + Venues + Authors aggregations.
+  let subtab: 'overview' | 'venues' | 'authors' = 'overview';
+  let venueAuthor: VenueAuthorSummary | null = null;
 
   // A paper opened directly in the paper view (WorkDetail modal) — the same action the search tab
   // uses (C2). Distinct from the title click, which jumps to the Library tab.
@@ -91,11 +96,13 @@
         workIds = $selectedPaperIds;
       }
       currentWorkIds = workIds;
-      summary = await client.citationSummary({
-        scopeType,
-        scopeId: scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null,
-        workIds,
-      });
+      const scopeIdArg = scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null;
+      const [summaryResult, venueAuthorResult] = await Promise.all([
+        client.citationSummary({ scopeType, scopeId: scopeIdArg, workIds }),
+        client.venueAuthorSummary({ scopeType, scopeId: scopeIdArg, workIds }),
+      ]);
+      summary = summaryResult;
+      venueAuthor = venueAuthorResult;
       previews = {};
       decisions = await client.getWorklist();
     } catch (error) {
@@ -309,6 +316,19 @@
 
   {#if summary}
     <div class="card">
+      <div class="subtabs" role="tablist">
+        <button type="button" role="tab" aria-selected={subtab === 'overview'}
+          class:active={subtab === 'overview'} on:click={() => (subtab = 'overview')}
+          data-testid="cs-tab-overview">Overview</button>
+        <button type="button" role="tab" aria-selected={subtab === 'venues'}
+          class:active={subtab === 'venues'} on:click={() => (subtab = 'venues')}
+          data-testid="cs-tab-venues">Venues{#if venueAuthor} ({venueAuthor.distinct_venue_count}){/if}</button>
+        <button type="button" role="tab" aria-selected={subtab === 'authors'}
+          class:active={subtab === 'authors'} on:click={() => (subtab = 'authors')}
+          data-testid="cs-tab-authors">Authors{#if venueAuthor} ({venueAuthor.distinct_author_count}){/if}</button>
+      </div>
+
+      {#if subtab === 'overview'}
       {#if summary.notes.length > 0}
         <ul class="notes" data-testid="summary-notes">
           {#each summary.notes as note (note)}<li>{note}</li>{/each}
@@ -557,6 +577,72 @@
           {/if}
         </div>
       </div>
+      {:else if subtab === 'venues'}
+        {#if venueAuthor}
+          <p class="meta">
+            {venueAuthor.distinct_venue_count} distinct venue(s) across {venueAuthor.scope_work_count}
+            paper(s){#if venueAuthor.papers_without_venue}; {venueAuthor.papers_without_venue} without a
+            recorded venue{/if}.
+          </p>
+          {#if venueAuthor.venues.length === 0}
+            <p class="empty">No venues recorded for these papers.</p>
+          {:else}
+            <table class="stat-table" data-testid="venue-table">
+              <thead><tr><th>Venue</th><th class="num">Papers</th><th class="num">Share</th><th>Years</th></tr></thead>
+              <tbody>
+                {#each venueAuthor.venues as v (v.name)}
+                  <tr>
+                    <td>
+                      <strong>{v.name}</strong>
+                      {#if v.variants.length > 1}
+                        <span class="variants" title={`Merged spellings: ${v.variants.join(', ')}`}
+                          >+{v.variants.length - 1} spelling(s)</span>
+                      {/if}
+                    </td>
+                    <td class="num">{v.count}</td>
+                    <td class="num">{v.pct}%</td>
+                    <td>{v.year_min ? (v.year_min === v.year_max ? v.year_min : `${v.year_min}–${v.year_max}`) : '—'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <p class="hintline">Venues are grouped case- and punctuation-insensitively; abbreviations
+              and full names are not merged.</p>
+          {/if}
+        {/if}
+      {:else if subtab === 'authors'}
+        {#if venueAuthor}
+          <p class="meta">
+            {venueAuthor.distinct_author_count} distinct author(s) across {venueAuthor.scope_work_count}
+            paper(s){#if venueAuthor.papers_without_authors}; {venueAuthor.papers_without_authors} without
+            recorded authors{/if}.
+          </p>
+          {#if venueAuthor.authors.length === 0}
+            <p class="empty">No authors recorded for these papers.</p>
+          {:else}
+            <table class="stat-table" data-testid="author-table">
+              <thead><tr><th>Author</th><th class="num">Papers</th><th class="num">Share</th></tr></thead>
+              <tbody>
+                {#each venueAuthor.authors as a (a.name)}
+                  <tr>
+                    <td>
+                      <strong>{a.name}</strong>
+                      {#if a.variants.length > 1}
+                        <span class="variants" title={`Merged name forms: ${a.variants.join(', ')}`}
+                          >+{a.variants.length - 1} form(s)</span>
+                      {/if}
+                    </td>
+                    <td class="num">{a.count}</td>
+                    <td class="num">{a.pct}%</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            <p class="hintline">Authors are grouped by last name + first initial (so "Vaswani, A." and
+              "Ashish Vaswani" count once).</p>
+          {/if}
+        {/if}
+      {/if}
     </div>
   {/if}
 </section>
@@ -607,6 +693,59 @@
 
   .meta {
     margin: 0 0 0.8rem;
+  }
+
+  .subtabs {
+    border-bottom: 1px solid var(--border-normal);
+    display: flex;
+    gap: 0.25rem;
+    margin: 0 0 0.8rem;
+  }
+
+  .subtabs button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--ink-muted);
+    cursor: pointer;
+    font: inherit;
+    padding: 0.4rem 0.7rem;
+  }
+
+  .subtabs button.active {
+    border-bottom-color: var(--accent, var(--status-info));
+    color: var(--ink-normal);
+    font-weight: 600;
+  }
+
+  .stat-table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .stat-table th,
+  .stat-table td {
+    border-bottom: 1px solid var(--border-normal);
+    padding: 0.4rem 0.5rem;
+    text-align: left;
+  }
+
+  .stat-table th {
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  .stat-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .variants {
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    margin-left: 0.35rem;
   }
 
   .controls {

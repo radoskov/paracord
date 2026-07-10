@@ -974,6 +974,37 @@
         "title": "AppConfigUpdate",
         "type": "object"
       },
+      "AuthorStatModel": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pct": {
+            "title": "Pct",
+            "type": "number"
+          },
+          "variants": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "pct"
+        ],
+        "title": "AuthorStatModel",
+        "type": "object"
+      },
       "BatchCommitDraft": {
         "properties": {
           "abstract": {
@@ -6737,6 +6768,116 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VenueAuthorSummaryResponse": {
+        "properties": {
+          "authors": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorStatModel"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "distinct_author_count": {
+            "title": "Distinct Author Count",
+            "type": "integer"
+          },
+          "distinct_venue_count": {
+            "title": "Distinct Venue Count",
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "papers_without_authors": {
+            "title": "Papers Without Authors",
+            "type": "integer"
+          },
+          "papers_without_venue": {
+            "title": "Papers Without Venue",
+            "type": "integer"
+          },
+          "scope_work_count": {
+            "title": "Scope Work Count",
+            "type": "integer"
+          },
+          "venues": {
+            "items": {
+              "$ref": "#/components/schemas/VenueStatModel"
+            },
+            "title": "Venues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scope_work_count",
+          "venues",
+          "authors",
+          "papers_without_venue",
+          "papers_without_authors",
+          "distinct_venue_count",
+          "distinct_author_count",
+          "notes"
+        ],
+        "title": "VenueAuthorSummaryResponse",
+        "type": "object"
+      },
+      "VenueStatModel": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pct": {
+            "title": "Pct",
+            "type": "number"
+          },
+          "variants": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Variants",
+            "type": "array"
+          },
+          "year_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Max"
+          },
+          "year_min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Min"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "pct"
+        ],
+        "title": "VenueStatModel",
         "type": "object"
       },
       "VizAxisModel": {
@@ -13113,6 +13254,124 @@
           }
         },
         "summary": "Get Citation Summary",
+        "tags": [
+          "citations"
+        ]
+      }
+    },
+    "/api/v1/citations/venue-author-summary": {
+      "get": {
+        "description": "Aggregate the venues and authors of the scope's papers (batch10 #7).\n\nSame scope + access rules as ``/summary``: the caller must SEE the scope container, and the\naggregation is clamped to their visible works. Read-only.",
+        "operationId": "get_venue_author_summary_api_v1_citations_venue_author_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "default": "library",
+              "enum": [
+                "library",
+                "shelf",
+                "rack",
+                "search_result",
+                "selected_papers",
+                "import_batch",
+                "saved_filter"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VenueAuthorSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Venue Author Summary",
         "tags": [
           "citations"
         ]

@@ -8,6 +8,14 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Venue & Author sub-tabs in the Citation Summary.** The Citation Summary tab now has
+  **Overview / Venues / Authors** sub-tabs. Venues shows where the scope's papers are typically
+  published (paper count, share, year range) and Authors shows the most frequent authors — each with
+  basic dedup (venues grouped case/punctuation-insensitively; authors by last name + first initial, so
+  "Vaswani, A." and "Ashish Vaswani" count once), surfacing merged spellings/forms. New
+  `GET /citations/venue-author-summary` over the same scope + access rules as the summary. Batch 10,
+  issue 7. (Live external venue-metadata enrichment is deferred — venue is free text with no reliable
+  identifier to look up.)
 - **Popups and tabs focus their main input.** Opening "Put into a shelf", "Move file to another
   paper", or "Merge…" now places the cursor in the popup's main field; switching to the Search or Tags
   tab focuses its main input. The **Move file** picker is pre-filled with the current paper's title so

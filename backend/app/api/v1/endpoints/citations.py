@@ -34,6 +34,7 @@ from app.services.saved_filters import (
     get_owned_saved_filter,
     resolve_saved_filter_work_ids,
 )
+from app.services.venue_author_summary import venue_author_summary
 
 # Missing-list export (Track C C3b) pulls the full missing set, not just the on-screen top rows.
 MISSING_EXPORT_LIMIT = 1000
@@ -146,6 +147,87 @@ def get_citation_summary(
         computed_at=summary.computed_at,
         version=summary.version,
         notes=summary.notes,
+    )
+
+
+class VenueStatModel(BaseModel):
+    name: str
+    count: int
+    pct: float
+    year_min: int | None = None
+    year_max: int | None = None
+    variants: list[str] = []
+
+
+class AuthorStatModel(BaseModel):
+    name: str
+    count: int
+    pct: float
+    variants: list[str] = []
+
+
+class VenueAuthorSummaryResponse(BaseModel):
+    scope_work_count: int
+    venues: list[VenueStatModel]
+    authors: list[AuthorStatModel]
+    papers_without_venue: int
+    papers_without_authors: int
+    distinct_venue_count: int
+    distinct_author_count: int
+    notes: list[str]
+
+
+def _resolve_summary_scope(
+    db: Session,
+    actor: User,
+    scope_type: _ScopeType,
+    scope_id: uuid.UUID | None,
+    work_ids: list[uuid.UUID] | None,
+) -> SummaryScope:
+    """Shared scope resolution (SEE check + saved-filter expansion) for the summary endpoints."""
+    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    resolved_work_ids = work_ids
+    if scope_type == "saved_filter":
+        if scope_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
+            )
+        saved = get_owned_saved_filter(db, actor, scope_id)
+        if saved is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+        resolved_work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    return SummaryScope(type=scope_type, id=scope_id, work_ids=resolved_work_ids)
+
+
+@router.get("/venue-author-summary", response_model=VenueAuthorSummaryResponse)
+def get_venue_author_summary(
+    scope_type: _ScopeType = Query("library"),
+    scope_id: uuid.UUID | None = Query(None),
+    work_ids: list[uuid.UUID] | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> VenueAuthorSummaryResponse:
+    """Aggregate the venues and authors of the scope's papers (batch10 #7).
+
+    Same scope + access rules as ``/summary``: the caller must SEE the scope container, and the
+    aggregation is clamped to their visible works. Read-only.
+    """
+    scope = _resolve_summary_scope(db, actor, scope_type, scope_id, work_ids)
+    try:
+        result = venue_author_summary(db, actor, scope, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return VenueAuthorSummaryResponse(
+        scope_work_count=result.scope_work_count,
+        venues=[VenueStatModel(**vars(v)) for v in result.venues],
+        authors=[AuthorStatModel(**vars(a)) for a in result.authors],
+        papers_without_venue=result.papers_without_venue,
+        papers_without_authors=result.papers_without_authors,
+        distinct_venue_count=result.distinct_venue_count,
+        distinct_author_count=result.distinct_author_count,
+        notes=result.notes,
     )
 
 

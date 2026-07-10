@@ -47,6 +47,16 @@ function makeClient(over: Record<string, unknown> = {}) {
     listShelves: vi.fn().mockResolvedValue([]),
     listRacks: vi.fn().mockResolvedValue([]),
     citationSummary: vi.fn().mockResolvedValue(baseSummary()),
+    venueAuthorSummary: vi.fn().mockResolvedValue({
+      scope_work_count: 0,
+      venues: [],
+      authors: [],
+      papers_without_venue: 0,
+      papers_without_authors: 0,
+      distinct_venue_count: 0,
+      distinct_author_count: 0,
+      notes: [],
+    }),
     getWorklist: vi.fn().mockResolvedValue({}),
     externalPreview: vi.fn(),
     setWorklistDecision: vi.fn(),
@@ -129,6 +139,40 @@ describe("CitationSummaryPage enrichments (Track C)", () => {
       expect(screen.getByText(/dominant sequence transduction/)).toBeTruthy(),
     );
     expect(screen.getByText("NeurIPS", { exact: false })).toBeTruthy();
+  });
+
+  it("shows Venue and Author sub-tabs with aggregated stats (batch10 #7)", async () => {
+    const client = makeClient({
+      venueAuthorSummary: vi.fn().mockResolvedValue({
+        scope_work_count: 3,
+        venues: [
+          { name: "NeurIPS", count: 2, pct: 66.7, year_min: 2019, year_max: 2021, variants: ["NeurIPS", "neurips"] },
+          { name: "ICML", count: 1, pct: 33.3, year_min: 2020, year_max: 2020, variants: ["ICML"] },
+        ],
+        authors: [
+          { name: "Vaswani, A.", count: 2, pct: 66.7, variants: ["Vaswani, A.", "Ashish Vaswani"] },
+        ],
+        papers_without_venue: 0,
+        papers_without_authors: 1,
+        distinct_venue_count: 2,
+        distinct_author_count: 1,
+        notes: [],
+      }),
+    });
+    render(CitationSummaryPage, { client: client as never });
+    await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
+    await summarize();
+
+    await fireEvent.click(await screen.findByTestId("cs-tab-venues"));
+    const venueTable = await screen.findByTestId("venue-table");
+    expect(venueTable.textContent).toContain("NeurIPS");
+    expect(venueTable.textContent).toContain("2019–2021");
+    expect(venueTable.textContent).toContain("ICML");
+
+    await fireEvent.click(screen.getByTestId("cs-tab-authors"));
+    const authorTable = await screen.findByTestId("author-table");
+    expect(authorTable.textContent).toContain("Vaswani, A.");
+    expect(authorTable.textContent).toContain("form(s)"); // merged variants surfaced
   });
 
   it("shows a graceful message when no preview is available (C1)", async () => {
