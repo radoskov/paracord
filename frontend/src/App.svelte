@@ -461,26 +461,33 @@
   }
 
   /* Jobs-tab status dot (issue 4): mirrors the Jobs page semaphore colours, plus blue for
-     in-progress work; the [N] count shows how many jobs are queued. */
+     in-progress work; the [N] count shows how many jobs are queued. Slightly enlarged with a soft
+     glow ("shine"), and green/blue lightened + the blue leaned toward cyan so the two read apart at
+     a glance (issue 2). --dot-glow drives a per-colour halo via box-shadow. */
   .jobs-dot {
     border-radius: 50%;
     display: inline-block;
-    height: 0.5rem;
-    margin-left: 0.35rem;
+    height: 0.62rem;
+    margin-left: 0.4rem;
     vertical-align: middle;
-    width: 0.5rem;
+    width: 0.62rem;
+    box-shadow: 0 0 5px 1px var(--dot-glow, transparent);
   }
   .jobs-dot-green {
-    background: var(--status-success);
+    background: color-mix(in srgb, var(--status-success) 72%, white);
+    --dot-glow: color-mix(in srgb, var(--status-success) 55%, transparent);
   }
   .jobs-dot-yellow {
     background: var(--status-warning);
+    --dot-glow: color-mix(in srgb, var(--status-warning) 55%, transparent);
   }
   .jobs-dot-red {
     background: var(--status-danger);
+    --dot-glow: color-mix(in srgb, var(--status-danger) 55%, transparent);
   }
   .jobs-dot-blue {
-    background: var(--status-info);
+    background: color-mix(in srgb, color-mix(in srgb, var(--status-info) 82%, cyan) 68%, white);
+    --dot-glow: color-mix(in srgb, var(--status-info) 55%, transparent);
   }
   .jobs-dot-grey {
     background: var(--ink-muted);
