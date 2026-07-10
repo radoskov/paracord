@@ -3472,6 +3472,71 @@
         "title": "MembershipAdd",
         "type": "object"
       },
+      "MergePaperPreview": {
+        "properties": {
+          "base_work_id": {
+            "format": "uuid",
+            "title": "Base Work Id",
+            "type": "string"
+          },
+          "conflict_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflict Fields",
+            "type": "array"
+          },
+          "file_count": {
+            "title": "File Count",
+            "type": "integer"
+          },
+          "fill_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fill Fields",
+            "type": "array"
+          },
+          "incoming_reference_count": {
+            "title": "Incoming Reference Count",
+            "type": "integer"
+          },
+          "source_work_id": {
+            "format": "uuid",
+            "title": "Source Work Id",
+            "type": "string"
+          },
+          "will_flatten": {
+            "title": "Will Flatten",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_work_id",
+          "source_work_id",
+          "fill_fields",
+          "conflict_fields",
+          "file_count",
+          "incoming_reference_count",
+          "will_flatten"
+        ],
+        "title": "MergePaperPreview",
+        "type": "object"
+      },
+      "MergePaperRequest": {
+        "properties": {
+          "source_work_id": {
+            "format": "uuid",
+            "title": "Source Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_work_id"
+        ],
+        "title": "MergePaperRequest",
+        "type": "object"
+      },
       "MergePreview": {
         "properties": {
           "base_work_id": {
@@ -3680,6 +3745,20 @@
           "model"
         ],
         "title": "ModelRef",
+        "type": "object"
+      },
+      "MoveFileRequest": {
+        "properties": {
+          "target_work_id": {
+            "format": "uuid",
+            "title": "Target Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_work_id"
+        ],
+        "title": "MoveFileRequest",
         "type": "object"
       },
       "NeighborhoodEdgeRead": {
@@ -18643,6 +18722,86 @@
         ]
       }
     },
+    "/api/v1/works/{work_id}/files/{file_id}/move": {
+      "post": {
+        "description": "Move an attached PDF from one paper to another (issue 4).\n\nRe-points the file's ``FileWorkLink`` from the source paper to the target: the target gains the\nfile, the source loses it. The content-addressed ``File`` bytes are untouched. If the file was\nthe source's main file that pointer is cleared; if the target has no main file yet, the moved\nfile becomes it. Lets a user consolidate two records (e.g. a stub + a fully-extracted paper)\nwithout deleting and re-uploading the PDF. Requires modify rights on *both* papers.",
+        "operationId": "move_work_file_api_v1_works__work_id__files__file_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkFileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Work File",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}/find-on-web": {
       "post": {
         "description": "Search legitimate scholarly sources for candidate matches for a paper (#5).\n\nRead-only egress: never stores anything and never fails the whole search when a source is\ndown — a degraded source is reported in ``degraded_sources``. Returns a (possibly empty)\nranked candidate list.",
@@ -19075,6 +19234,146 @@
           }
         },
         "summary": "Set Main File",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/merge": {
+      "post": {
+        "description": "Merge another paper INTO this one (issue 4), reusing the duplicate-resolution merge.\n\nFills this paper's empty fields from the source, records differing values as conflicts, moves\nthe source's files/tags/shelves/references/annotations here, and hides the source as a reversible\nshadow (undo via ``/unmerge``). This exposes the existing merge for any two papers, not only\nduplicate-scan candidates. Requires modify rights on both.",
+        "operationId": "merge_paper_api_v1_works__work_id__merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergePaperRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Paper",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/merge-preview": {
+      "get": {
+        "description": "Preview merging ``source_work_id`` INTO this paper (issue 4) — read-only, no changes.",
+        "operationId": "merge_paper_preview_api_v1_works__work_id__merge_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergePaperPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Paper Preview",
         "tags": [
           "works"
         ]

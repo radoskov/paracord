@@ -37,6 +37,8 @@ from app.services.doi_conflict import message_from_exception
 from app.services.duplicate_resolution import (
     has_reversible_shadow,
     linked_work_ids,
+    merge_preview,
+    merge_works,
     unmerge_work,
 )
 from app.services.file_paths import (
@@ -913,6 +915,77 @@ def unmerge_paper(
     )
 
 
+class MergePaperRequest(BaseModel):
+    source_work_id: uuid.UUID
+
+
+class MergePaperPreview(BaseModel):
+    base_work_id: uuid.UUID
+    source_work_id: uuid.UUID
+    fill_fields: list[str]
+    conflict_fields: list[str]
+    file_count: int
+    incoming_reference_count: int
+    will_flatten: bool
+
+
+def _merge_pair(
+    db: Session, actor: User, base_id: uuid.UUID, source_id: uuid.UUID
+) -> tuple[Work, Work]:
+    """Resolve + permission-check the (base, source) papers for an arbitrary merge (issue 4)."""
+    if base_id == source_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot merge a paper into itself"
+        )
+    base = db.get(Work, base_id)
+    if base is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, base)
+    source = db.get(Work, source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source paper not found")
+    _guard_modify_work(db, actor, source)
+    return base, source
+
+
+@router.get("/{work_id}/merge-preview", response_model=MergePaperPreview)
+def merge_paper_preview(
+    work_id: uuid.UUID,
+    source_work_id: uuid.UUID = Query(...),
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> MergePaperPreview:
+    """Preview merging ``source_work_id`` INTO this paper (issue 4) — read-only, no changes."""
+    base, source = _merge_pair(db, actor, work_id, source_work_id)
+    return MergePaperPreview(**merge_preview(db, base=base, source=source))
+
+
+@router.post("/{work_id}/merge", response_model=WorkRead)
+def merge_paper(
+    work_id: uuid.UUID,
+    payload: MergePaperRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> WorkRead:
+    """Merge another paper INTO this one (issue 4), reusing the duplicate-resolution merge.
+
+    Fills this paper's empty fields from the source, records differing values as conflicts, moves
+    the source's files/tags/shelves/references/annotations here, and hides the source as a reversible
+    shadow (undo via ``/unmerge``). This exposes the existing merge for any two papers, not only
+    duplicate-scan candidates. Requires modify rights on both.
+    """
+    base, source = _merge_pair(db, actor, work_id, payload.source_work_id)
+    try:
+        merge_works(db, base=base, source=source, actor=actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(base)
+    return WorkRead.model_validate(base).model_copy(
+        update={"has_reversible_shadow": has_reversible_shadow(db, base.id)}
+    )
+
+
 @router.get("/{work_id}/shelves", response_model=list[WorkShelfMembership])
 def list_work_shelves(
     work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
@@ -1541,6 +1614,63 @@ def remove_work_file(
     if work.main_file_id == file_id:
         work.main_file_id = None
     db.commit()
+
+
+class MoveFileRequest(BaseModel):
+    target_work_id: uuid.UUID
+
+
+@router.post("/{work_id}/files/{file_id}/move", response_model=WorkFileRead)
+def move_work_file(
+    work_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: MoveFileRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> WorkFileRead:
+    """Move an attached PDF from one paper to another (issue 4).
+
+    Re-points the file's ``FileWorkLink`` from the source paper to the target: the target gains the
+    file, the source loses it. The content-addressed ``File`` bytes are untouched. If the file was
+    the source's main file that pointer is cleared; if the target has no main file yet, the moved
+    file becomes it. Lets a user consolidate two records (e.g. a stub + a fully-extracted paper)
+    without deleting and re-uploading the PDF. Requires modify rights on *both* papers.
+    """
+    if payload.target_work_id == work_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The file is already attached to this paper",
+        )
+    source = db.get(Work, work_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, source)
+    target = db.get(Work, payload.target_work_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target paper not found")
+    _guard_modify_work(db, actor, target)
+    link = _require_attached_file(db, work_id, file_id)
+
+    # If the target already links this file, dropping the source link is the whole move; otherwise
+    # re-point the existing link. Clear the work-specific version pointer (segments are file-scoped,
+    # so they stay valid across the move).
+    already_on_target = db.scalar(
+        select(FileWorkLink).where(
+            FileWorkLink.work_id == target.id, FileWorkLink.file_id == file_id
+        )
+    )
+    if already_on_target is None:
+        link.work_id = target.id
+        link.version_id = None
+    else:
+        db.delete(link)
+    if source.main_file_id == file_id:
+        source.main_file_id = None
+    if target.main_file_id is None:
+        target.main_file_id = file_id
+    db.commit()
+    file_obj = db.get(File, file_id)
+    return _file_read(db, file_obj)
 
 
 @router.get("/annotations/search", response_model=list[AnnotationRead])
