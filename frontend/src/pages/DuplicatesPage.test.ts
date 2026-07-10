@@ -48,6 +48,16 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     updateDuplicateCandidate: vi.fn().mockResolvedValue(workCandidate()),
     scanDuplicateCandidates: vi.fn().mockResolvedValue({ candidates: [], candidate_count: 0 }),
     getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+    // Opening a paper in the WorkDetail modal needs getWork + WorkDetail's load calls.
+    getWork: vi.fn().mockResolvedValue({ id: 'work-a', canonical_title: 'Paper A' }),
+    listWorkMetadata: vi.fn().mockResolvedValue([]),
+    listWorkFiles: vi.fn().mockResolvedValue([]),
+    listCitationContexts: vi.fn().mockResolvedValue([]),
+    listWorkReferences: vi.fn().mockResolvedValue([]),
+    listAnnotations: vi.fn().mockResolvedValue([]),
+    listSummaries: vi.fn().mockResolvedValue([]),
+    listTags: vi.fn().mockResolvedValue([]),
+    listWorkTags: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
@@ -115,6 +125,25 @@ describe('DuplicatesPage merge/link/swap (Batch D)', () => {
         targetWorkId: 'work-a',
       }),
     );
+  });
+
+  it('opens a paper in the paper view when its label is clicked (#2)', async () => {
+    const client = makeClient();
+    render(DuplicatesPage, { client: client as never });
+    await screen.findByText('Paper A');
+    // The base/source labels are buttons that open the WorkDetail modal.
+    await fireEvent.click(screen.getByRole('button', { name: 'Paper B' }));
+    await waitFor(() => expect(client.getWork).toHaveBeenCalledWith('work-b'));
+  });
+
+  it('shows an explicit note (not a stuck "Loading…") when the preview fails (#2)', async () => {
+    const client = makeClient({
+      getMergePreview: vi.fn().mockRejectedValue(new Error('timeout')),
+    });
+    render(DuplicatesPage, { client: client as never });
+    await screen.findByText('Paper A');
+    expect(await screen.findByText(/Preview unavailable/)).toBeTruthy();
+    expect(screen.queryByText('Loading preview…')).toBeNull();
   });
 });
 

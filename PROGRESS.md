@@ -24,7 +24,10 @@ logical chunk; verified in the API + frontend containers.
 - **4 — editable authors in the Details panel.** New `POST /works/{id}/metadata/set` writes a
   user-sourced canonical `authors` assertion + locks the field (no Work column added). Details panel
   gains an Authors input seeded from the assertion; save persists only on change. ✅ done.
-- **2 — duplicates preview fix + open both papers in the paper view.** _pending._
+- **2 — duplicates preview fix + open both papers in the paper view.** Base/merge-from labels are
+  now buttons that open the WorkDetail modal (reusing the CitationSummaryPage flow). `getMergePreview`
+  is time-bounded (15s) and a null preview now renders an explicit "Preview unavailable" note instead
+  of a permanent "Loading preview…". ✅ done.
 - **5 — new library columns (file count, topics, badges incl. conflicts, tags).** _pending._
 - **1 — multi-PDF staging import (extract-first preview + "import directly").** _pending._
 

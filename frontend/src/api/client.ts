@@ -1706,6 +1706,8 @@ export class ApiClient {
   ): Promise<MergePreview> {
     return this.request<MergePreview>(
       `/api/v1/duplicates/${candidateId}/merge-preview?base_work_id=${baseWorkId}`,
+      // Bound the request so a stalled preview can't hang the row on "Loading preview…" forever.
+      { timeoutMs: 15000 },
     );
   }
 

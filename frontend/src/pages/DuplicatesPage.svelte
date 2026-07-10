@@ -8,7 +8,10 @@
     type DuplicateCandidateStatus,
     type DuplicateSplitSegment,
     type MergePreview,
+    type Work,
   } from '../api/client';
+  import Modal from '../components/Modal.svelte';
+  import WorkDetail from '../components/WorkDetail.svelte';
   import { canEdit, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -30,6 +33,16 @@
   let previews: Record<string, MergePreview | null> = {};
   let loading = false;
   let message = '';
+  // Paper opened in the in-app paper view (WorkDetail modal) to inspect differences before merging.
+  let detailWork: Work | null = null;
+
+  async function openInPaperView(workId: string): Promise<void> {
+    try {
+      detailWork = await client.getWork(workId);
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
 
   onMount(load);
 
@@ -80,7 +93,9 @@
   }
   function mergeSummary(p: MergePreview | null | undefined): string {
     if (p === undefined) return 'Loading preview…';
-    if (p === null) return '';
+    // null = the preview request errored or timed out. Say so explicitly (and point at the paper
+    // links) rather than silently hiding the line, which read as a permanent "Loading preview…".
+    if (p === null) return 'Preview unavailable — open the papers below to compare them directly.';
     const text =
       `Merge: fills ${p.fill_fields.length} empty field(s), adds ${p.conflict_fields.length} ` +
       `conflict(s), moves ${p.file_count} file(s), hides the other as a shadow.`;
@@ -272,7 +287,9 @@
               <div class="pair">
                 <div class="side">
                   <span class="tag">Base — merge into</span>
-                  <span class="paper" title={entLabel(c, baseId(c))}>{entLabel(c, baseId(c))}</span>
+                  <button type="button" class="paper paper-link"
+                    on:click={() => openInPaperView(baseId(c))}
+                    title={`Open “${entLabel(c, baseId(c))}” in the paper view`}>{entLabel(c, baseId(c))}</button>
                 </div>
                 <button type="button" class="swap" on:click={() => swap(c)}
                   disabled={loading || !$canEdit || c.status !== 'open'}
@@ -280,7 +297,9 @@
                   title="Swap: make the other paper the surviving base">⇄</button>
                 <div class="side">
                   <span class="tag">Merge from</span>
-                  <span class="paper" title={entLabel(c, sourceId(c))}>{entLabel(c, sourceId(c))}</span>
+                  <button type="button" class="paper paper-link"
+                    on:click={() => openInPaperView(sourceId(c))}
+                    title={`Open “${entLabel(c, sourceId(c))}” in the paper view`}>{entLabel(c, sourceId(c))}</button>
                 </div>
               </div>
               {#if c.status === 'open' && mergeSummary(previews[c.id])}
@@ -327,6 +346,20 @@
     {/if}
   </div>
 </section>
+
+{#if detailWork}
+  <Modal title={detailWork.canonical_title ?? 'Paper'} wide onClose={() => (detailWork = null)}>
+    {#key detailWork.id}
+      <WorkDetail
+        {client}
+        work={detailWork}
+        onUpdated={(w) => (detailWork = w)}
+        onDeleted={() => (detailWork = null)}
+        onClose={() => (detailWork = null)}
+      />
+    {/key}
+  </Modal>
+{/if}
 
 <style>
   .head {
@@ -435,6 +468,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* The paper labels are buttons that open the full paper view for side-by-side comparison. */
+  .paper-link {
+    background: none;
+    border: none;
+    color: var(--accent, var(--text-link, inherit));
+    cursor: pointer;
+    display: block;
+    font: inherit;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+    width: 100%;
+  }
+
+  .paper-link:hover {
+    text-decoration: none;
   }
 
   .swap {

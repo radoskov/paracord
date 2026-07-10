@@ -8,6 +8,11 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Inspect both papers of a duplicate pair in the paper view.** On the Duplicates page the base and
+  merge-from labels are now clickable and open the full paper view (WorkDetail modal), so you can
+  compare the two papers before choosing which survives the merge (issue 2). The merge-preview line
+  also no longer sticks on "Loading preview…": the request is time-bounded, and a failed/timed-out
+  preview shows an explicit "Preview unavailable — open the papers below to compare" note.
 - **Editable authors in the paper Details panel.** The Details panel now shows an **Authors** field
   (seeded from the paper's `authors` metadata). Editing and saving persists it via a new
   `POST /works/{id}/metadata/set` endpoint, which records a `source="user"` canonical assertion and
