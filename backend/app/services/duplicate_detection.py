@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import File
+from app.models.file import File, FileWorkLink
 from app.models.work import Work
 from app.utils.normalization import normalize_doi, normalize_title
 
@@ -65,7 +65,49 @@ def find_work_candidates(db: Session, *, work: Work) -> list[DuplicateCandidate]
     candidates: list[DuplicateCandidate] = []
     candidates.extend(_same_doi_candidates(db, work))
     candidates.extend(_same_arxiv_candidates(db, work))
+    candidates.extend(_shared_file_candidates(db, work))
     candidates.extend(_fuzzy_title_candidates(db, work))
+    return candidates
+
+
+def _shared_file_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
+    """Flag other works attached to the SAME PDF (same File row via SHA-256 dedup).
+
+    File dedup collapses an identical PDF to one ``File`` linked to several works, which the
+    file-level detectors (which compare two distinct File rows) can't see. This detector reads
+    ``FileWorkLink`` so two papers sharing one PDF are flagged even when their title/DOI differ.
+    """
+    file_ids = db.scalars(select(FileWorkLink.file_id).where(FileWorkLink.work_id == work.id)).all()
+    if not file_ids:
+        return []
+    rows = db.execute(
+        select(FileWorkLink.work_id, File.sha256)
+        .join(File, File.id == FileWorkLink.file_id)
+        .join(Work, Work.id == FileWorkLink.work_id)
+        .where(
+            FileWorkLink.file_id.in_(file_ids),
+            FileWorkLink.work_id != work.id,
+            Work.merged_into_id.is_(None),
+        )
+    ).all()
+    candidates: list[DuplicateCandidate] = []
+    seen: set[uuid.UUID] = set()  # one candidate per work pair, even if they share several files
+    for other_id, sha in rows:
+        if other_id in seen:
+            continue
+        seen.add(other_id)
+        candidates.append(
+            _upsert_candidate(
+                db,
+                candidate_type="shared_file",
+                entity_a_type="work",
+                entity_a_id=work.id,
+                entity_b_type="work",
+                entity_b_id=other_id,
+                score=1.0,
+                signals={"sha256": sha} if sha else {},
+            )
+        )
     return candidates
 
 

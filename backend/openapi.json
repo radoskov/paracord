@@ -7836,6 +7836,11 @@
       },
       "WorkFileRead": {
         "properties": {
+          "also_in_count": {
+            "default": 0,
+            "title": "Also In Count",
+            "type": "integer"
+          },
           "content_available": {
             "default": true,
             "title": "Content Available",

@@ -8,6 +8,23 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **"Duplicate PDF" awareness when attaching a shared PDF.** Attaching a PDF that (by content hash)
+  already belongs to another paper now shows a **duplicate PDF** badge in the Files section — click it
+  to find the other paper(s) via a Library hash search. The duplicate scan also gains a **`shared_file`**
+  detector so two papers sharing one PDF are flagged in the Duplicates tab even when their title/DOI
+  differ. `WorkFileRead` gains `also_in_count`. (Attaching an already-extracted deduped PDF no longer
+  fires a misleading no-op re-extraction; proper per-paper extraction of a shared PDF is a documented
+  follow-up.) Batch 11.
+
+### Fixed
+
+- **"Ignore" on the Duplicates tab is now transient.** Ignoring a candidate no longer stamps a
+  permanent flag — it drops from the current results but **reappears on the next scan** (with an audit
+  event). **"Keep separate"** stays permanent and reviewable (filter relabeled "Kept separate";
+  reopenable). Batch 11.
+
+### Added (batch 10)
+
 - **External citing papers — see who cites a paper, and show them in the reference graph.** The paper
   view gains a **Citing papers** panel: a "Fetch citing papers" button retrieves the papers that cite
   this one from **OpenAlex** (falling back to **Semantic Scholar**) — Crossref only exposes the count,

@@ -868,6 +868,14 @@
     }
   }
 
+  // Jump to the Library and search this PDF's content hash to reveal every paper it's attached to
+  // (the hash-prefix search operator in the Library, batch10 duplicate-PDF badge).
+  function findDuplicatePapers(sha: string): void {
+    pendingLibrarySearch.set({ query: sha, mode: 'metadata' });
+    if (typeof window !== 'undefined') window.location.hash = '#library';
+    onClose();
+  }
+
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
     // Always start from a clean reader state so a re-open after close works every time — never
     // early-return on stale `showReader`/`readerUrl`/`readerFile` left over from a prior session.
@@ -1180,6 +1188,12 @@
                 <span class="fstatus fstatus-{file.status}">{fileStatusLabel(file.status)}</span>
                 {#if file.id === work.main_file_id}
                   <span class="fstatus fmain" title="This is the paper's main (default-to-open) file.">main</span>
+                {/if}
+                {#if file.also_in_count}
+                  <button type="button" class="fstatus fdup"
+                    on:click={() => findDuplicatePapers(file.sha256)}
+                    title={`This exact PDF is already attached to ${file.also_in_count} other paper(s). Click to find them in the Library (by content hash). Extraction is keyed to the file's original paper, so metadata may not populate here.`}
+                    >duplicate PDF{file.also_in_count > 1 ? ` — ${file.also_in_count} others` : ''}</button>
                 {/if}
                 {#if ocrStatus(file)}
                   {@const ocr = ocrStatus(file)}
@@ -2022,6 +2036,19 @@
   .focr {
     background: var(--surface-sunken);
     color: var(--ink-normal);
+  }
+
+  /* Clickable "duplicate PDF" badge → Library hash search. Warning-tinted, button reset. */
+  .fdup {
+    background: var(--status-warning-bg);
+    border: none;
+    color: var(--status-warning);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .fdup:hover {
+    text-decoration: underline;
   }
 
   .quick-read {

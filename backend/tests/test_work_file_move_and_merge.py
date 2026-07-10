@@ -50,6 +50,34 @@ def test_move_file_repoints_link_to_target(client, auth_headers, db):
     assert db.get(Work, target.id).main_file_id == file.id
 
 
+def test_files_report_also_in_count_for_shared_pdf(client, auth_headers, db):
+    """batch10: a deduped PDF linked to another paper reports also_in_count>0 (duplicate badge)."""
+    a = _work(db, "Paper A")
+    b = _work(db, "Paper B")
+    shared = _file(db, "f" * 64)
+    db.add_all(
+        [
+            FileWorkLink(file_id=shared.id, work_id=a.id),
+            FileWorkLink(file_id=shared.id, work_id=b.id),
+        ]
+    )
+    db.commit()
+
+    resp = client.get(f"/api/v1/works/{b.id}/files", headers=auth_headers("owner"))
+    assert resp.status_code == 200
+    files = resp.json()
+    assert len(files) == 1
+    assert files[0]["also_in_count"] == 1  # also attached to paper A
+
+    # A paper whose file is unique reports 0.
+    solo = _work(db, "Solo")
+    only = _file(db, "9" * 64)
+    db.add(FileWorkLink(file_id=only.id, work_id=solo.id))
+    db.commit()
+    solo_files = client.get(f"/api/v1/works/{solo.id}/files", headers=auth_headers("owner")).json()
+    assert solo_files[0]["also_in_count"] == 0
+
+
 def test_move_file_to_same_paper_is_400(client, auth_headers, db):
     work = _work(db, "Solo")
     file = _file(db, "b" * 64)

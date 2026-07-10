@@ -9,6 +9,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_11 (2026-07-10)
+
+Owner-reported duplicate-PDF handling issues (follow-up to batch 10). Handoff:
+`docs/agent_handoffs/2026-07-10-issue-batch-11.md`. On `main` (not pushed). Two commits.
+
+- **Double-import / wrong-owner diagnosis.** SHA-256 dedup makes an attached duplicate PDF reuse the
+  original `File` row (+ a new `FileWorkLink`); `File.status` is shared so paper B shows "extracted"
+  instantly, and `extract_and_store` resolves the target work via an unordered first `FileWorkLink`
+  (extraction.py:249) → metadata always lands on the file's original paper. **Full per-paper
+  extraction of a shared PDF is deferred** (documented); this batch delivers awareness:
+  - `WorkFileRead.also_in_count` (batched) + a clickable **"duplicate PDF"** badge in the Files
+    section that runs a Library hash search to find the other paper(s).
+  - Attaching an already-extracted deduped PDF no longer enqueues a misleading no-op re-extraction.
+  - New **`shared_file`** duplicate detector (`find_work_candidates`) flags two works sharing one
+    `File` row — closing the gap where shared-PDF pairs were only caught on DOI/title match.
+- **Dedup actions:** "Ignore" is now **transient** — deletes the candidate (audit event kept) so a
+  re-scan re-surfaces it; "Keep separate" stays permanent/reviewable/reopenable (status `rejected`,
+  UI relabeled "Kept separate"; the now-unused "Ignored" filter dropped).
+
 ## issue_batch_10 (2026-07-10)
 
 Eight owner-requested features (multi-PDF import, duplicates preview + open-in-paper-view,

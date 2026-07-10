@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from app.db.base import Base
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import File
+from app.models.file import File, FileWorkLink
 from app.models.work import Work
 from app.services.duplicate_detection import scan_duplicate_candidates, split_arxiv_id
 from sqlalchemy import create_engine, select
@@ -20,6 +20,7 @@ def db_session(tmp_path: Path):
         tables=[
             Work.__table__,
             File.__table__,
+            FileWorkLink.__table__,  # shared_file detector reads FileWorkLink (batch10 fix)
             DuplicateCandidate.__table__,
         ],
     )
@@ -149,6 +150,32 @@ def test_fuzzy_blocking_skips_different_first_token_but_keeps_same_block(db_sess
     matched_ids |= {c.entity_a_id for c in candidates if c.candidate_type == "fuzzy_title"}
     assert same_block.id in matched_ids  # same first token → compared + matched
     assert other_block.id not in matched_ids  # different first token → blocked out
+
+
+def test_shared_file_candidate_flags_works_sharing_one_pdf(db_session) -> None:
+    """Two works linked to the SAME File row (deduped PDF) are flagged even without DOI/title match."""
+    a = Work(canonical_title="Paper A", normalized_title="paper a")
+    b = Work(canonical_title="Totally Different Title", normalized_title="totally different title")
+    db_session.add_all([a, b])
+    db_session.flush()
+    shared = File(sha256="e" * 64, size_bytes=10, status="extracted")
+    db_session.add(shared)
+    db_session.flush()
+    db_session.add_all(
+        [
+            FileWorkLink(file_id=shared.id, work_id=a.id),
+            FileWorkLink(file_id=shared.id, work_id=b.id),
+        ]
+    )
+    db_session.commit()
+
+    candidates = scan_duplicate_candidates(db_session, work=a)
+    db_session.commit()
+    shared_file = [c for c in candidates if c.candidate_type == "shared_file"]
+    assert len(shared_file) == 1
+    pair = {shared_file[0].entity_a_id, shared_file[0].entity_b_id}
+    assert pair == {a.id, b.id}
+    assert shared_file[0].signals.get("sha256") == "e" * 64
 
 
 def test_split_arxiv_id_handles_versioned_and_url_forms() -> None:

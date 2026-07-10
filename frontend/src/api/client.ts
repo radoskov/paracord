@@ -718,6 +718,8 @@ export interface WorkFile {
   status: string;
   content_available: boolean;
   extraction_queued?: boolean;
+  // How many OTHER papers this exact PDF is also attached to (batch10) — drives the duplicate badge.
+  also_in_count?: number;
 }
 
 // What merging one paper into another would do (issue 4). Mirrors the backend MergePaperPreview.

@@ -1706,6 +1706,9 @@ class WorkFileRead(BaseModel):
     # False when the upload intended extraction but the queue was unreachable (Redis down); the
     # file keeps its owed marker and the recovery sweep retries (D7). True for plain file listings.
     extraction_queued: bool = True
+    # How many OTHER papers this exact PDF (same sha256) is also attached to — drives the
+    # "duplicate PDF" badge so a deduped attach is visible. Search the hash to find those papers.
+    also_in_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -1727,10 +1730,27 @@ def _file_content_available(db: Session, file: File) -> bool:
     return path.exists() and path.is_file()
 
 
-def _file_read(db: Session, file: File) -> WorkFileRead:
+def _file_read(db: Session, file: File, *, also_in_count: int = 0) -> WorkFileRead:
     return WorkFileRead.model_validate(file).model_copy(
-        update={"content_available": _file_content_available(db, file)}
+        update={
+            "content_available": _file_content_available(db, file),
+            "also_in_count": also_in_count,
+        }
     )
+
+
+def _other_work_counts(
+    db: Session, file_ids: list[uuid.UUID], this_work_id: uuid.UUID
+) -> dict[uuid.UUID, int]:
+    """For each file, count the OTHER works it is linked to (excluding ``this_work_id``). One query."""
+    if not file_ids:
+        return {}
+    rows = db.execute(
+        select(FileWorkLink.file_id, func.count())
+        .where(FileWorkLink.file_id.in_(file_ids), FileWorkLink.work_id != this_work_id)
+        .group_by(FileWorkLink.file_id)
+    ).all()
+    return {file_id: int(count) for file_id, count in rows}
 
 
 @router.get("/{work_id}/files", response_model=list[WorkFileRead])
@@ -1750,7 +1770,8 @@ def list_work_files(
             .order_by(File.created_at.desc())
         ).all()
     )
-    return [_file_read(db, file) for file in files]
+    others = _other_work_counts(db, [f.id for f in files], work_id)
+    return [_file_read(db, file, also_in_count=others.get(file.id, 0)) for file in files]
 
 
 @router.post("/{work_id}/files", response_model=WorkFileRead, status_code=status.HTTP_201_CREATED)
@@ -1786,14 +1807,24 @@ def upload_work_file(
     pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
     if pdf_error is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
-    file_obj, _created, _linked = attach_uploaded_pdf_to_work(
+    file_obj, created_file, _linked = attach_uploaded_pdf_to_work(
         db, work=work, filename=file.filename or "upload.pdf", pdf_bytes=pdf_bytes, actor=actor
     )
-    mark_extraction_requested(file_obj)  # owed marker in the same commit (D7)
+    # If this is a deduped attach of an already-extracted PDF, don't re-run extraction: the file's
+    # extraction is keyed by file id and would only (re)write the file's original paper, not this one
+    # (a known limitation, surfaced by the "duplicate PDF" badge). Skipping avoids a misleading job.
+    already_extracted = not created_file and file_obj.status == "extracted"
+    extraction_queued = True
+    if not already_extracted:
+        mark_extraction_requested(file_obj)  # owed marker in the same commit (D7)
     db.commit()
     db.refresh(file_obj)
-    extraction_queued = enqueue_extraction(file_obj.id) is not None
-    return _file_read(db, file_obj).model_copy(update={"extraction_queued": extraction_queued})
+    if not already_extracted:
+        extraction_queued = enqueue_extraction(file_obj.id) is not None
+    also_in = _other_work_counts(db, [file_obj.id], work_id).get(file_obj.id, 0)
+    return _file_read(db, file_obj, also_in_count=also_in).model_copy(
+        update={"extraction_queued": extraction_queued}
+    )
 
 
 def _require_attached_file(db: Session, work_id: uuid.UUID, file_id: uuid.UUID) -> FileWorkLink:
