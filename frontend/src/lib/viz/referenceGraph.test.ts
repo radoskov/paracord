@@ -106,6 +106,17 @@ describe("buildReferenceGraphOption", () => {
     expect(series.find((s) => s.type === "lines")?.name).toBe("Citations");
   });
 
+  it("gives the base paper and external refs distinct colours", () => {
+    const option = buildReferenceGraphOption(graph, DEFAULT_SECTION_WEIGHTS, theme);
+    const series = option.series as Array<{ name: string; color?: string }>;
+    const base = series.find((s) => s.name === "This paper")?.color;
+    const external = series.find((s) => s.name === "External")?.color;
+    const local = series.find((s) => s.name === "In library")?.color;
+    expect(base).toBeTruthy();
+    expect(base).not.toBe(external); // regression: base + external used to collide on palette[2]
+    expect(base).not.toBe(local);
+  });
+
   it('places a year-less external ref in the "no year" lane, left of the earliest year', () => {
     const option = buildReferenceGraphOption(
       graph,

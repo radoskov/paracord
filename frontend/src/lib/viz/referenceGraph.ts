@@ -225,23 +225,23 @@ export function buildReferenceGraphOption(
     }));
   } else {
     // Default: one series per node kind so the legend reads local / external / this paper.
+    // Explicit palette indices per kind (was position-based, which made "base" and "external"
+    // collide on palette[2]); base and external are kept far apart so the focal paper stands out.
     const kinds: {
       key: "base" | "local" | "external" | "citing";
       name: string;
-      color: string;
+      idx: number;
+      fallback: string;
     }[] = [
-      { key: "base", name: "This paper", color: theme.axisLine },
-      { key: "local", name: "In library", color: theme.text },
-      { key: "external", name: "External", color: theme.splitLine },
-      { key: "citing", name: "Cites this", color: theme.text },
+      { key: "base", name: "This paper", idx: 0, fallback: theme.axisLine },
+      { key: "local", name: "In library", idx: 1, fallback: theme.text },
+      { key: "external", name: "External", idx: 3, fallback: theme.splitLine },
+      { key: "citing", name: "Cites this", idx: 4, fallback: theme.text },
     ];
-    series = kinds.map((k, i) => ({
+    series = kinds.map((k) => ({
       type: "scatter",
       name: k.name,
-      color:
-        k.key === "base"
-          ? (palette[2] ?? k.color)
-          : (palette[i % Math.max(1, palette.length)] ?? k.color),
+      color: palette[k.idx % Math.max(1, palette.length)] ?? k.fallback,
       data: graph.nodes.filter((n) => n.kind === k.key).map(point),
       emphasis: { focus: "series" },
       z: k.key === "base" ? 3 : 2,

@@ -18,6 +18,9 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Fixed
 
+- **Reference-graph node colours: base vs. external are now distinct.** The current/base paper node
+  and "external" reference nodes previously resolved to the same palette colour (`palette[2]`); each
+  node kind now gets an explicit, well-separated palette index so the focal paper stands out. Batch 11.
 - **"Ignore" on the Duplicates tab is now transient.** Ignoring a candidate no longer stamps a
   permanent flag — it drops from the current results but **reappears on the next scan** (with an audit
   event). **"Keep separate"** stays permanent and reviewable (filter relabeled "Kept separate";
