@@ -76,13 +76,15 @@ def build_reference_graph(
     *,
     visible_ids: set[uuid.UUID] | None,
     include_ref_edges: bool = False,
+    include_citing: bool = False,
 ) -> dict:
     """Assemble the base paper + one node per reference, with per-bucket mention counts.
 
     ``visible_ids`` clamps which resolved references count as **local** (a resolved work the caller
     can't SEE is treated as external metadata). ``include_ref_edges`` adds citation edges between the
     resolved-local references that cite each other (a mini local citation network); base→reference
-    edges are always present.
+    edges are always present. ``include_citing`` adds the work's fetched external citing papers as
+    incoming ``kind="citing"`` nodes with edges pointing INTO the base paper (batch10 #8).
     """
     references = list(
         db.scalars(
@@ -208,5 +210,36 @@ def build_reference_graph(
                         "target": work_to_ref_node[cited_wid],
                     }
                 )
+
+    if include_citing:
+        # Incoming external citing papers (batch10 #8): one node per cached ExternalCitation, with
+        # an edge pointing INTO the base paper so the direction (they cite us) is visible.
+        from app.models.external_citation import ExternalCitation
+
+        citing = db.scalars(
+            select(ExternalCitation)
+            .where(ExternalCitation.work_id == work.id)
+            .order_by(ExternalCitation.year.desc().nullslast())
+        ).all()
+        for ec in citing:
+            node_id = f"citing:{ec.id}"
+            nodes.append(
+                {
+                    "id": node_id,
+                    "label": ec.title or "Citing paper",
+                    "year": ec.year,
+                    "kind": "citing",
+                    "resolved_work_id": None,
+                    "section_counts": {},
+                    "mention_count": 0,
+                    "weighted": 0.0,
+                    "citation_count": None,
+                    "local_degree": None,
+                    "topic_similarity": None,
+                    "venue": ec.venue,
+                    "doi": ec.doi,
+                }
+            )
+            edges.append({"source": node_id, "target": base_id})
 
     return {"base_work_id": base_id, "nodes": nodes, "edges": edges}

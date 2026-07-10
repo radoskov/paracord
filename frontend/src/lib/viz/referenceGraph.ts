@@ -226,13 +226,14 @@ export function buildReferenceGraphOption(
   } else {
     // Default: one series per node kind so the legend reads local / external / this paper.
     const kinds: {
-      key: "base" | "local" | "external";
+      key: "base" | "local" | "external" | "citing";
       name: string;
       color: string;
     }[] = [
       { key: "base", name: "This paper", color: theme.axisLine },
       { key: "local", name: "In library", color: theme.text },
       { key: "external", name: "External", color: theme.splitLine },
+      { key: "citing", name: "Cites this", color: theme.text },
     ];
     series = kinds.map((k, i) => ({
       type: "scatter",

@@ -21,6 +21,7 @@
   let graph: ReferenceGraph | null = null;
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
+  let includeCiting = false;
   let yAxis = 'weighted';
   let colorBy = 'kind';
   let showHelp = false;
@@ -58,7 +59,7 @@
     loading = true;
     message = '';
     try {
-      graph = await client.referenceGraph(workId, { includeRefEdges });
+      graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting });
       await render();
     } catch (error) {
       message = errorMessage(error);
@@ -110,6 +111,11 @@
     void loadGraph();
   }
 
+  function toggleCiting(): void {
+    includeCiting = !includeCiting;
+    void loadGraph();
+  }
+
   onMount(async () => {
     await loadWeights();
     await loadGraph();
@@ -137,6 +143,10 @@
     <label title="Also draw citation links between the in-library references that cite each other">
       <input type="checkbox" checked={includeRefEdges} on:change={toggleRefEdges} data-testid="rg-ref-edges" />
       Local reference-to-reference edges
+    </label>
+    <label title="Also show the external papers that cite this one (fetched in the paper's Citing-papers panel), as incoming nodes">
+      <input type="checkbox" checked={includeCiting} on:change={toggleCiting} data-testid="rg-citing" />
+      Show citing papers
     </label>
     <span class="muted"
       >X = year · node size = section-weighted citations (weights in Profile) · the highlighted node

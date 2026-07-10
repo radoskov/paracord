@@ -7,6 +7,7 @@
     type AnnotationCreate,
     type AppliedTag,
     type CitationContext,
+    type CitingPapersResponse,
     type FieldReview,
     type JobRecord,
     type MergePaperPreview,
@@ -246,6 +247,8 @@
     if (w.id !== loadedId) stopJobPolling();
     loadedId = w.id;
     clearReader();
+    citing = null;
+    citingLoaded = false;
     form = {
       canonical_title: w.canonical_title ?? '',
       year: w.year ? String(w.year) : '',
@@ -305,6 +308,27 @@
       await client.createSummary(work.id, 'auto');
       summaries = await client.listSummaries(work.id);
     }, 'Summary generated');
+  }
+
+  // Citing papers (batch10 #8): external papers that cite this one, fetched on demand from
+  // OpenAlex/Semantic Scholar. Loaded (cached list) on first panel open; (re)fetched via a button.
+  let citing: CitingPapersResponse | null = null;
+  let citingLoaded = false;
+  async function loadCiting(): Promise<void> {
+    if (citingLoaded) return;
+    await run(async () => {
+      citing = await client.getCitingPapers(work.id);
+      citingLoaded = true;
+    });
+  }
+  async function fetchCiting(): Promise<void> {
+    await run(async () => {
+      citing = await client.fetchCitingPapers(work.id);
+      citingLoaded = true;
+      message = citing.items.length
+        ? `Fetched ${citing.items.length} citing paper(s)${citing.source ? ` via ${citing.source}` : ''}.`
+        : 'No citing papers found (or none available from the open sources).';
+    });
   }
 
   let related: RelatedWork[] = [];
@@ -1348,6 +1372,46 @@
           </li>
         {/each}
       </ol>
+    {/if}
+  </details>
+
+  <details class="citing-block" on:toggle={(e) => e.currentTarget.open && loadCiting()}>
+    <summary>Citing papers{#if citing}{' '}({citing.items.length}{#if citing.citation_count && citing.citation_count > citing.items.length} of {citing.citation_count}{/if}){/if}</summary>
+    <p class="muted small citing-lead">
+      External papers that cite this one, fetched from OpenAlex (falling back to Semantic Scholar).
+      {#if citing?.fetched_at}
+        Showing {citing.items.length}{#if citing.citation_count && citing.citation_count > citing.items.length} of {citing.citation_count}{/if}
+        {#if citing.source}· via {citing.source}{/if} · as of {new Date(citing.fetched_at).toLocaleDateString()}
+      {/if}
+    </p>
+    <div class="ref-actions">
+      <button type="button" class="secondary small" on:click={fetchCiting}
+        disabled={loading || !canModify || (!work.doi && !work.arxiv_id)}
+        title={!canModify
+          ? INSUFFICIENT_ROLE
+          : work.doi || work.arxiv_id
+            ? 'Fetch (or refresh) the papers that cite this one'
+            : 'Needs a DOI or arXiv id to look up citing papers'}
+        >{citing && citing.items.length ? 'Refresh' : 'Fetch citing papers'}</button>
+    </div>
+    {#if citing && citing.items.length}
+      <ol class="refs">
+        {#each citing.items as c (c.id)}
+          <li class="entry-card">
+            <div class="ref-head"><span class="ref-title">{c.title ?? 'Untitled'}</span></div>
+            <small class="muted">
+              {c.authors ?? ''}{c.year ? ` · ${c.year}` : ''}{c.venue ? ` · ${c.venue}` : ''}
+              {#if c.doi}<a class="ref-badge ref-badge-link" href={`https://doi.org/${c.doi}`}
+                  target="_blank" rel="noopener noreferrer" title="Open at doi.org">doi:{c.doi}</a>{/if}
+            </small>
+          </li>
+        {/each}
+      </ol>
+    {:else if citingLoaded && !loading}
+      <p class="empty">
+        {#if !work.doi && !work.arxiv_id}Add a DOI or arXiv id to look up citing papers.
+        {:else}No citing papers fetched yet — use “Fetch citing papers”.{/if}
+      </p>
     {/if}
   </details>
 

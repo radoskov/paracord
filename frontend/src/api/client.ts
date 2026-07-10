@@ -976,7 +976,7 @@ export interface ReferenceGraphNode {
   id: string;
   label: string;
   year: number | null;
-  kind: "base" | "local" | "external";
+  kind: "base" | "local" | "external" | "citing";
   resolved_work_id: string | null;
   section_counts: Record<string, number>;
   mention_count: number;
@@ -994,6 +994,26 @@ export interface ReferenceGraph {
   base_work_id: string;
   nodes: ReferenceGraphNode[];
   edges: { source: string; target: string }[];
+}
+
+// External papers that cite a work (batch10 #8).
+export interface CitingPaper {
+  id: string;
+  source: string;
+  external_id: string | null;
+  title: string | null;
+  authors: string | null;
+  year: number | null;
+  doi: string | null;
+  venue: string | null;
+}
+
+export interface CitingPapersResponse {
+  items: CitingPaper[];
+  source: string | null;
+  fetched_at: string | null;
+  citation_count: number | null;
+  citation_count_source: string | null;
 }
 
 export interface IdentifierImportResponse {
@@ -1379,11 +1399,29 @@ export class ApiClient {
 
   async referenceGraph(
     workId: string,
-    opts: { includeRefEdges?: boolean } = {},
+    opts: { includeRefEdges?: boolean; includeCiting?: boolean } = {},
   ): Promise<ReferenceGraph> {
-    const q = opts.includeRefEdges ? "?include_ref_edges=true" : "";
+    const query = new URLSearchParams();
+    if (opts.includeRefEdges) query.set("include_ref_edges", "true");
+    if (opts.includeCiting) query.set("include_citing", "true");
+    const q = query.toString();
     return this.request<ReferenceGraph>(
-      `/api/v1/works/${workId}/reference-graph${q}`,
+      `/api/v1/works/${workId}/reference-graph${q ? `?${q}` : ""}`,
+    );
+  }
+
+  /** Cached external papers that cite this work (batch10 #8). */
+  async getCitingPapers(workId: string): Promise<CitingPapersResponse> {
+    return this.request<CitingPapersResponse>(
+      `/api/v1/works/${workId}/citing-papers`,
+    );
+  }
+
+  /** Fetch/refresh the external citing papers for a work (OpenAlex → Semantic Scholar). */
+  async fetchCitingPapers(workId: string): Promise<CitingPapersResponse> {
+    return this.request<CitingPapersResponse>(
+      `/api/v1/works/${workId}/citing-papers/fetch`,
+      { method: "POST", timeoutMs: 45000 },
     );
   }
 

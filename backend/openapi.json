@@ -1793,6 +1793,152 @@
         "title": "CitationSummaryResponse",
         "type": "object"
       },
+      "CitingPaperRead": {
+        "properties": {
+          "authors": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authors"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "source"
+        ],
+        "title": "CitingPaperRead",
+        "type": "object"
+      },
+      "CitingPapersResponse": {
+        "properties": {
+          "citation_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Count"
+          },
+          "citation_count_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Count Source"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CitingPaperRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CitingPapersResponse",
+        "type": "object"
+      },
       "ConfirmFieldRequest": {
         "properties": {
           "confirmed": {
@@ -19269,6 +19415,126 @@
         ]
       }
     },
+    "/api/v1/works/{work_id}/citing-papers": {
+      "get": {
+        "description": "Return the cached external papers that cite this work (batch10 #8). Read-only.",
+        "operationId": "get_citing_papers_api_v1_works__work_id__citing_papers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitingPapersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Citing Papers",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/citing-papers/fetch": {
+      "post": {
+        "description": "Fetch (or refresh) this work's citing papers from OpenAlex, falling back to Semantic Scholar.\n\nOn-demand and capped (batch10 #8). Needs a DOI (preferred) or arXiv id on the paper; 400 if\nneither is present. Replaces the cached list. Requires modify permission (it writes + calls out).",
+        "operationId": "fetch_citing_papers_endpoint_api_v1_works__work_id__citing_papers_fetch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitingPapersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch Citing Papers Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}/enrich": {
       "post": {
         "description": "Queue external metadata enrichment for a work (needs a DOI or arXiv id).",
@@ -20604,7 +20870,7 @@
     },
     "/api/v1/works/{work_id}/reference-graph": {
       "get": {
-        "description": "Weighted reference graph for a paper (B7): the base paper + one node per reference, coloured\nlocal vs external, carrying per-section mention counts so the client can size nodes by the\ncaller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges.",
+        "description": "Weighted reference graph for a paper (B7): the base paper + one node per reference, coloured\nlocal vs external, carrying per-section mention counts so the client can size nodes by the\ncaller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges;\n``include_citing`` adds the fetched external citing papers as incoming nodes (batch10 #8).",
         "operationId": "get_reference_graph_api_v1_works__work_id__reference_graph_get",
         "parameters": [
           {
@@ -20624,6 +20890,16 @@
             "schema": {
               "default": false,
               "title": "Include Ref Edges",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_citing",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Citing",
               "type": "boolean"
             }
           },

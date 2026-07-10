@@ -246,7 +246,14 @@ class WorkRead(BaseModel):
     model_config = {"from_attributes": True}
 
     @field_validator(
-        "confirmed_fields", "keywords", "topics", "shelves", "racks", "tags", "badges", mode="before"
+        "confirmed_fields",
+        "keywords",
+        "topics",
+        "shelves",
+        "racks",
+        "tags",
+        "badges",
+        mode="before",
     )
     @classmethod
     def _none_to_list(cls, value: object) -> object:
@@ -1514,12 +1521,14 @@ def list_work_references(
 def get_reference_graph(
     work_id: uuid.UUID,
     include_ref_edges: bool = False,
+    include_citing: bool = False,
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> dict:
     """Weighted reference graph for a paper (B7): the base paper + one node per reference, coloured
     local vs external, carrying per-section mention counts so the client can size nodes by the
-    caller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges."""
+    caller's Profile weights. ``include_ref_edges`` adds local ref→ref citation edges;
+    ``include_citing`` adds the fetched external citing papers as incoming nodes (batch10 #8)."""
     from app.services.reference_graph import build_reference_graph
 
     work = db.get(Work, work_id)
@@ -1531,7 +1540,97 @@ def get_reference_graph(
         work,
         visible_ids=access.visible_work_ids(db, actor),
         include_ref_edges=include_ref_edges,
+        include_citing=include_citing,
     )
+
+
+class CitingPaperRead(BaseModel):
+    id: uuid.UUID
+    source: str
+    external_id: str | None = None
+    title: str | None = None
+    authors: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CitingPapersResponse(BaseModel):
+    items: list[CitingPaperRead]
+    # Provenance of the cached list.
+    source: str | None = None
+    fetched_at: datetime | None = None
+    # The paper's total external citation count snapshot (may exceed the fetched/capped list).
+    citation_count: int | None = None
+    citation_count_source: str | None = None
+
+
+def _citing_papers_response(db: Session, work: Work) -> CitingPapersResponse:
+    from app.models.external_citation import ExternalCitation
+
+    rows = list(
+        db.scalars(
+            select(ExternalCitation)
+            .where(ExternalCitation.work_id == work.id)
+            .order_by(ExternalCitation.year.desc().nullslast(), ExternalCitation.title)
+        ).all()
+    )
+    return CitingPapersResponse(
+        items=[CitingPaperRead.model_validate(r) for r in rows],
+        source=rows[0].source if rows else None,
+        fetched_at=rows[0].fetched_at if rows else None,
+        citation_count=work.citation_count,
+        citation_count_source=work.citation_count_source,
+    )
+
+
+@router.get("/{work_id}/citing-papers", response_model=CitingPapersResponse)
+def get_citing_papers(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> CitingPapersResponse:
+    """Return the cached external papers that cite this work (batch10 #8). Read-only."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_see_work(db, actor, work)
+    return _citing_papers_response(db, work)
+
+
+@router.post("/{work_id}/citing-papers/fetch", response_model=CitingPapersResponse)
+def fetch_citing_papers_endpoint(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
+) -> CitingPapersResponse:
+    """Fetch (or refresh) this work's citing papers from OpenAlex, falling back to Semantic Scholar.
+
+    On-demand and capped (batch10 #8). Needs a DOI (preferred) or arXiv id on the paper; 400 if
+    neither is present. Replaces the cached list. Requires modify permission (it writes + calls out).
+    """
+    from app.services import citing_papers as cp
+
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    if not work.doi and not work.arxiv_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add a DOI or arXiv id to fetch citing papers",
+        )
+    papers, source = cp.fetch_citing_papers(doi=work.doi, arxiv=work.arxiv_id)
+    if source is not None:
+        cp.store_citing_papers(db, work=work, papers=papers, source=source)
+        record_event(
+            db,
+            "citations.citing_fetched",
+            actor_user_id=actor.id,
+            entity_type="work",
+            entity_id=str(work_id),
+            details={"source": source, "count": len(papers)},
+        )
+        db.commit()
+    return _citing_papers_response(db, work)
 
 
 @router.get("/{work_id}/citation-contexts", response_model=list[CitationContextRead])

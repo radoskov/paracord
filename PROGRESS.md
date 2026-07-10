@@ -11,11 +11,16 @@
 
 ## issue_batch_10 (2026-07-10)
 
-Five owner-requested features (multi-PDF import, duplicates preview + open-in-paper-view,
-best-source "all", editable authors in Details, new library columns). Plan:
-`docs/WORKPLAN_2026-07-10_batch10.md` (design forks resolved by owner); handoff:
-`docs/agent_handoffs/2026-07-10-issue-batch-10.md`. On `main` (not pushed). One commit per
-logical chunk; verified in the API + frontend containers.
+Eight owner-requested features (multi-PDF import, duplicates preview + open-in-paper-view,
+best-source "all", editable authors in Details, new library columns, popup/tab autofocus, citation
+summary venue/author sub-tabs, external citing papers). Plan: `docs/WORKPLAN_2026-07-10_batch10.md`
+(design forks resolved by owner); handoff: `docs/agent_handoffs/2026-07-10-issue-batch-10.md`. On
+`main` (not pushed). One commit per logical chunk; verified in the API + frontend containers.
+
+- **8 — external citing papers.** New `external_citations` table + `citing_papers` service (OpenAlex
+  `filter=cites:` → Semantic Scholar `/citations` fallback; Crossref gives count only). Endpoints
+  `GET/POST /works/{id}/citing-papers[/fetch]` (on-demand, cap 100); paper-view "Citing papers" panel;
+  reference graph gains `include_citing` → incoming `citing` nodes + a "Show citing papers" toggle. ✅ done.
 
 - **3 — "Set metadata from best source" → "all fields".** `field_name: "all"` on
   `POST /works/bulk-apply-metadata` promotes the best assertion for every promotable field
