@@ -189,6 +189,16 @@ class WorkRackRef(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkTagRef(BaseModel):
+    """A tag applied to a paper (id + name + colour; batch10 library column)."""
+
+    id: uuid.UUID
+    name: str
+    color: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class WorkRead(BaseModel):
     id: uuid.UUID
     canonical_title: str | None = None
@@ -226,10 +236,18 @@ class WorkRead(BaseModel):
     # by ``list_works`` (batched across the page); other endpoints leave these empty.
     shelves: list[WorkShelfRef] = []
     racks: list[WorkRackRef] = []
+    # Library columns (batch10): number of files attached, applied tags, and status "badges"
+    # (extraction/text-layer/conflict flags). Populated by ``list_works`` (batched across the page);
+    # other endpoints leave file_count=0 and the lists empty.
+    file_count: int = 0
+    tags: list[WorkTagRef] = []
+    badges: list[str] = []
 
     model_config = {"from_attributes": True}
 
-    @field_validator("confirmed_fields", "keywords", "topics", "shelves", "racks", mode="before")
+    @field_validator(
+        "confirmed_fields", "keywords", "topics", "shelves", "racks", "tags", "badges", mode="before"
+    )
     @classmethod
     def _none_to_list(cls, value: object) -> object:
         # Pre-migration rows have NULL for these JSONB columns; treat NULL as an empty list so the
@@ -637,6 +655,89 @@ def _batch_shelf_rack_refs(
     return work_shelves, work_racks
 
 
+# Text-layer qualities that are worth surfacing as a badge (good/unknown are unremarkable).
+_TEXT_QUALITY_BADGES = {"poor": "text_poor", "none": "text_none", "ocr_added": "ocr_added"}
+
+
+def _batch_library_columns(
+    db: Session, works: list[Work]
+) -> tuple[dict[uuid.UUID, int], dict[uuid.UUID, list[WorkTagRef]], dict[uuid.UUID, list[str]]]:
+    """Batch-load the file count, applied tags, and status badges for a page of works.
+
+    Four grouped queries total (O(1) per page, not O(n)): files-per-work (for count + status +
+    text-layer badges), applied tags, and a conflict probe over metadata assertions. Returns
+    ``(work_id -> file_count, work_id -> tags, work_id -> badges)``. Badge tokens are UI-agnostic
+    strings (``extracted``/``extract_failed``/``not_extracted``/``text_poor``/``text_none``/
+    ``ocr_added``/``conflicts``) that the frontend maps to labels + colours.
+    """
+    file_counts: dict[uuid.UUID, int] = {}
+    work_tags: dict[uuid.UUID, list[WorkTagRef]] = {}
+    badges: dict[uuid.UUID, list[str]] = {}
+    work_ids = [w.id for w in works]
+    if not work_ids:
+        return file_counts, work_tags, badges
+
+    # Files linked to each work → count + the set of statuses + text-layer qualities present.
+    statuses: dict[uuid.UUID, set[str]] = {}
+    qualities: dict[uuid.UUID, set[str]] = {}
+    file_rows = db.execute(
+        select(FileWorkLink.work_id, File.status, File.text_layer_quality)
+        .join(File, File.id == FileWorkLink.file_id)
+        .where(FileWorkLink.work_id.in_(work_ids))
+    ).all()
+    for work_id, status_, quality in file_rows:
+        file_counts[work_id] = file_counts.get(work_id, 0) + 1
+        statuses.setdefault(work_id, set()).add(status_)
+        qualities.setdefault(work_id, set()).add(quality)
+
+    # Applied tags per work (entity_type discriminator == "work").
+    tag_rows = db.execute(
+        select(TagLink.entity_id, Tag.id, Tag.name, Tag.color)
+        .join(Tag, Tag.id == TagLink.tag_id)
+        .where(TagLink.entity_type == "work", TagLink.entity_id.in_(work_ids))
+        .order_by(Tag.normalized_name)
+    ).all()
+    for entity_id, tag_id, tag_name, tag_color in tag_rows:
+        work_tags.setdefault(entity_id, []).append(
+            WorkTagRef(id=tag_id, name=tag_name, color=tag_color)
+        )
+
+    # Conflict probe: a work has a metadata conflict if any field carries ≥2 distinct values
+    # (mirrors the paper-view "conflicts" indicator). One grouped query for the whole page.
+    conflict_ids = {
+        row[0]
+        for row in db.execute(
+            select(MetadataAssertion.entity_id)
+            .where(
+                MetadataAssertion.entity_type == "work",
+                MetadataAssertion.entity_id.in_(work_ids),
+            )
+            .group_by(MetadataAssertion.entity_id, MetadataAssertion.field_name)
+            .having(func.count(func.distinct(MetadataAssertion.value)) > 1)
+        ).all()
+    }
+
+    for work in works:
+        tokens: list[str] = []
+        # A not-yet-extracted local-agent stub reads as "not extracted" regardless of file rows.
+        if work.canonical_metadata_source == "agent_index_only":
+            tokens.append("not_extracted")
+        work_statuses = statuses.get(work.id, set())
+        if "extracted" in work_statuses:
+            tokens.append("extracted")
+        if "extract_failed" in work_statuses:
+            tokens.append("extract_failed")
+        for quality in sorted(qualities.get(work.id, set())):
+            token = _TEXT_QUALITY_BADGES.get(quality)
+            if token:
+                tokens.append(token)
+        if work.id in conflict_ids:
+            tokens.append("conflicts")
+        if tokens:
+            badges[work.id] = tokens
+    return file_counts, work_tags, badges
+
+
 @router.get("", response_model=PaginatedWorks)
 def list_works(
     q: str | None = Query(default=None),
@@ -707,9 +808,16 @@ def list_works(
     )
     works = list(db.scalars(stmt).all())
     work_shelves, work_racks = _batch_shelf_rack_refs(db, actor, [w.id for w in works])
+    file_counts, work_tags, work_badges = _batch_library_columns(db, works)
     items = [
         WorkRead.model_validate(w).model_copy(
-            update={"shelves": work_shelves.get(w.id, []), "racks": work_racks.get(w.id, [])}
+            update={
+                "shelves": work_shelves.get(w.id, []),
+                "racks": work_racks.get(w.id, []),
+                "file_count": file_counts.get(w.id, 0),
+                "tags": work_tags.get(w.id, []),
+                "badges": work_badges.get(w.id, []),
+            }
         )
         for w in works
     ]

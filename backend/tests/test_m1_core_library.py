@@ -24,6 +24,7 @@ from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.citation import Reference
 from app.models.file import File, FileWorkLink, Location
+from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch, Source
 from app.models.user import User
@@ -59,6 +60,8 @@ def db_session(tmp_path: Path):
             Tag.__table__,
             TagLink.__table__,
             Reference.__table__,
+            # list_works reads metadata_assertions for the conflict badge (batch10 issue 5).
+            MetadataAssertion.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)

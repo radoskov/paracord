@@ -28,7 +28,10 @@ logical chunk; verified in the API + frontend containers.
   now buttons that open the WorkDetail modal (reusing the CitationSummaryPage flow). `getMergePreview`
   is time-bounded (15s) and a null preview now renders an explicit "Preview unavailable" note instead
   of a permanent "Loading preview…". ✅ done.
-- **5 — new library columns (file count, topics, badges incl. conflicts, tags).** _pending._
+- **5 — new library columns (file count, topics, badges incl. conflicts, tags).** `WorkRead` +
+  `list_works` enriched via `_batch_library_columns` (4 grouped queries/page: files→count+status+
+  text-layer, tags, conflict probe over metadata_assertions). Frontend: 4 registry columns (hidden by
+  default), `PaperTable` render branches + badge-token→chip mapping. ✅ done.
 - **1 — multi-PDF staging import (extract-first preview + "import directly").** _pending._
 
 ## issue_batch_9 (2026-07-10)

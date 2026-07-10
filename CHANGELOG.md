@@ -8,6 +8,11 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **New Library columns: Files, Topics, Badges, Tags.** The Library table gains four opt-in columns
+  (hidden by default; enable them in the Columns picker): file count, per-paper topics, applied tags
+  (colour-tinted), and status **badges** (extracted / extraction failed / not extracted / poor text /
+  no text layer / OCR / conflicts). `WorkRead` now carries `file_count`, `tags`, and `badges`,
+  computed with four batched queries per page (no N+1). Batch 10, issue 5.
 - **Inspect both papers of a duplicate pair in the paper view.** On the Duplicates page the base and
   merge-from labels are now clickable and open the full paper view (WorkDetail modal), so you can
   compare the two papers before choosing which survives the merge (issue 2). The merge-preview line

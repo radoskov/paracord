@@ -49,6 +49,21 @@
     return work.canonical_title?.trim() || 'Untitled paper';
   }
 
+  // Map a backend badge token to a human label + a state class (drives the chip colour). Unknown
+  // tokens fall back to the raw token with a neutral style so a new backend token never breaks.
+  const BADGE_META: Record<string, { label: string; state: string }> = {
+    extracted: { label: 'extracted', state: 'ok' },
+    extract_failed: { label: 'extraction failed', state: 'error' },
+    not_extracted: { label: 'not extracted', state: 'muted' },
+    text_poor: { label: 'poor text', state: 'warn' },
+    text_none: { label: 'no text layer', state: 'warn' },
+    ocr_added: { label: 'OCR', state: 'info' },
+    conflicts: { label: 'conflicts', state: 'warn' },
+  };
+  function badgeMeta(token: string): { label: string; state: string } {
+    return BADGE_META[token] ?? { label: token.replaceAll('_', ' '), state: 'muted' };
+  }
+
   function isActive(col: ColumnDef): boolean {
     return sortable && !!col.sortKey && col.sortKey === sortKey;
   }
@@ -157,6 +172,38 @@
               <td>{work.shelves?.length ? work.shelves.map((s) => s.name).join(', ') : '-'}</td>
             {:else if col.id === 'racks'}
               <td>{work.racks?.length ? work.racks.map((r) => r.name).join(', ') : '-'}</td>
+            {:else if col.id === 'file_count'}
+              <td class="num">{work.file_count ?? 0}</td>
+            {:else if col.id === 'topics'}
+              <td>
+                {#if work.topics?.length}
+                  <span class="keywords">
+                    {#each work.topics.slice(0, 5) as t}<span class="kw">{t}</span>{/each}
+                  </span>
+                {:else}-{/if}
+              </td>
+            {:else if col.id === 'badges'}
+              <td>
+                {#if work.badges?.length}
+                  <span class="badges">
+                    {#each work.badges as token}
+                      {@const meta = badgeMeta(token)}
+                      <span class="badge badge-{meta.state}">{meta.label}</span>
+                    {/each}
+                  </span>
+                {:else}-{/if}
+              </td>
+            {:else if col.id === 'tags'}
+              <td>
+                {#if work.tags?.length}
+                  <span class="keywords">
+                    {#each work.tags as tag}
+                      <span class="kw tag-kw" style={tag.color ? `--tag-color:${tag.color}` : ''}
+                      >{tag.name}</span>
+                    {/each}
+                  </span>
+                {:else}-{/if}
+              </td>
             {/if}
           {/each}
         </tr>
@@ -273,6 +320,59 @@
     font-size: 0.72rem;
     margin: 0;
     padding: 0.05rem 0.45rem;
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A tag chip tints its left edge with the tag's colour when one is set. */
+  .tag-kw {
+    border-left: 3px solid var(--tag-color, var(--border-normal));
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin: 0;
+  }
+
+  .badge {
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    padding: 0.05rem 0.45rem;
+    white-space: nowrap;
+  }
+
+  .badge-ok {
+    background: var(--status-success-bg);
+    border-color: var(--status-success-border);
+    color: var(--status-success);
+  }
+
+  .badge-error {
+    background: var(--status-danger-bg);
+    border-color: var(--status-danger-border);
+    color: var(--status-danger);
+  }
+
+  .badge-warn {
+    background: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: var(--status-warning);
+  }
+
+  .badge-info {
+    background: var(--status-info-bg);
+    color: var(--status-info);
+  }
+
+  .badge-muted {
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
   }
 
   .empty {

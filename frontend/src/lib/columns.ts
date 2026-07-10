@@ -3,9 +3,9 @@
 // The backend prefs file is the durable source of truth (see client.getPreferences/putPreferences);
 // localStorage is the instant, no-flash cache applied on mount before the backend reconciles.
 //
-// v1 columns are limited to what WorkRead actually returns per row: `authors` is NOT on WorkRead
-// and `has_pdf` is a filter (not a per-row field), so both are intentionally omitted. `keywords`
-// is an opt-in extra (off by default).
+// Columns are limited to what WorkRead actually returns per row. `has_pdf` is a filter (not a
+// per-row field) so it is omitted; `file_count` (batch10) covers the "does it have files" need.
+// `keywords`/`topics`/`badges`/`tags`/`shelves`/`racks` are opt-in extras (off by default).
 
 import type { WorkSortKey } from '../api/client';
 
@@ -18,7 +18,11 @@ export type ColumnId =
   | 'doi'
   | 'keywords'
   | 'shelves'
-  | 'racks';
+  | 'racks'
+  | 'file_count'
+  | 'topics'
+  | 'badges'
+  | 'tags';
 
 export interface ColumnDef {
   id: ColumnId;
@@ -42,6 +46,11 @@ export const LIBRARY_COLUMNS: ColumnDef[] = [
   { id: 'keywords', label: 'Keywords', default: false },
   { id: 'shelves', label: 'Shelves', default: false },
   { id: 'racks', label: 'Racks', default: false },
+  // batch10 columns — all opt-in (hidden by default so they don't push past the soft cap).
+  { id: 'file_count', label: 'Files', default: false },
+  { id: 'topics', label: 'Topics', default: false },
+  { id: 'badges', label: 'Badges', default: false },
+  { id: 'tags', label: 'Tags', default: false },
 ];
 
 // Soft cap on visible columns — a warning, not a hard limit (the user can override).

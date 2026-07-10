@@ -7393,6 +7393,14 @@
             ],
             "title": "Arxiv Id"
           },
+          "badges": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Badges",
+            "type": "array"
+          },
           "canonical_metadata_source": {
             "anyOf": [
               {
@@ -7485,6 +7493,11 @@
             ],
             "title": "Doi"
           },
+          "file_count": {
+            "default": 0,
+            "title": "File Count",
+            "type": "integer"
+          },
           "has_reversible_shadow": {
             "default": false,
             "title": "Has Reversible Shadow",
@@ -7545,6 +7558,14 @@
               "$ref": "#/components/schemas/WorkShelfRef"
             },
             "title": "Shelves",
+            "type": "array"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkTagRef"
+            },
+            "title": "Tags",
             "type": "array"
           },
           "topics": {
@@ -7699,6 +7720,37 @@
           "name"
         ],
         "title": "WorkTagRead",
+        "type": "object"
+      },
+      "WorkTagRef": {
+        "description": "A tag applied to a paper (id + name + colour; batch10 library column).",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "WorkTagRef",
         "type": "object"
       },
       "WorkUpdate": {

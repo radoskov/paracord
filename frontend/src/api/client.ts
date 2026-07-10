@@ -57,6 +57,19 @@ export interface Work {
   // SEE-filtered shelves/racks for the Library columns (D32); only populated by listWorks.
   shelves?: WorkRef[];
   racks?: WorkRef[];
+  // Library columns (batch10); only populated by listWorks. file_count = attached files;
+  // tags = applied tags (with colour); badges = status tokens (extracted / extract_failed /
+  // not_extracted / text_poor / text_none / ocr_added / conflicts) mapped to chips by the table.
+  file_count?: number;
+  tags?: WorkTagRef[];
+  badges?: string[];
+}
+
+// A tag applied to a paper (Library "Tags" column).
+export interface WorkTagRef {
+  id: string;
+  name: string;
+  color?: string | null;
 }
 
 // A lightweight {id, name} reference (a paper's shelf or rack in the Library columns).
