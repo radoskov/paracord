@@ -77,8 +77,10 @@
   // Live per-source progress for the streaming search ('querying' | 'done' | 'failed', + count).
   // The `SourceProgress` type is shared with the per-work find-on-web cache (#4).
   let sourceProgress: SourceProgress[] = [];
-  // Total download progress (N done / M selected) shown in the sticky bar.
+  // Download progress shown in the sticky bar: how many actually attached (ok) and how many
+  // were processed (done), out of the selected total. `done > ok` means some failed/were blocked.
   let downloadDone = 0;
+  let downloadOk = 0;
   let downloadTotal = 0;
   // Pending needs_confirmation prompt: the item + the server's reason/url, awaiting the user's call.
   let confirmPrompt: { item: WebFindDownloadItem; reason: string | null; candidateTitle: string } | null =
@@ -458,6 +460,7 @@
     downloadStatus = {};
     sourceProgress = [];
     downloadDone = 0;
+    downloadOk = 0;
     downloadTotal = 0;
     searching = true;
     message = '';
@@ -583,6 +586,7 @@
     downloading = true;
     message = '';
     downloadDone = 0;
+    downloadOk = 0;
     downloadTotal = items.length;
     let attachedAny = false;
     try {
@@ -607,7 +611,10 @@
           result = await downloadOne({ ...item, confirmed: true });
         }
         recordResult(result);
-        if (result.status === 'attached' || result.status === 'deduped') attachedAny = true;
+        if (result.status === 'attached' || result.status === 'deduped') {
+          attachedAny = true;
+          downloadOk += 1;
+        }
         downloadDone += 1;
       }
       if (attachedAny) {
@@ -1387,7 +1394,12 @@
           </div>
           <div class="bar-right">
             {#if downloading || downloadTotal > 0}
-              <span class="dl-progress" title="Downloads completed of the batch">{downloadDone}/{downloadTotal} downloaded</span>
+              <span
+                class="dl-progress"
+                class:has-failures={downloadDone > downloadOk}
+                title="PDFs successfully attached out of the batch">
+                {downloadOk}/{downloadTotal} downloaded{#if downloadDone > downloadOk} ({downloadDone - downloadOk} failed){/if}
+              </span>
             {/if}
             <button type="button" on:click={downloadSelected} disabled={downloading || selectedIds.size === 0}
               title={selectedIds.size === 0 ? 'Select at least one candidate' : 'Download selected PDFs and attach them'}>
@@ -2315,6 +2327,10 @@
     color: var(--status-info);
     font-size: 0.85rem;
     font-weight: 700;
+  }
+
+  .dl-progress.has-failures {
+    color: var(--status-danger);
   }
 
   .locations {

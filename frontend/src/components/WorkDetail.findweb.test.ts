@@ -151,8 +151,39 @@ describe('WorkDetail find-on-web picker (v2)', () => {
       ]),
     );
     expect(await screen.findByText(/Attached/)).toBeTruthy();
-    // Total progress advanced to 1/1.
+    // Total progress advanced to 1/1 (one attached out of one selected).
     expect(screen.getByText('1/1 downloaded')).toBeTruthy();
+  });
+
+  it('counts a failed (allow-list) download as 0 downloaded, not 1', async () => {
+    const downloadWebCandidates = vi.fn().mockResolvedValue({
+      results: [
+        {
+          candidate_id: 'c1',
+          status: 'error',
+          reason:
+            'Host is not on the allow-list or the known-publisher list (an owner/admin can add it, or switch to unrestricted mode)',
+          file: null,
+        },
+      ],
+    });
+    const client = makeClient({ downloadWebCandidates });
+    render(WorkDetail, { client: client as never, work: WORK });
+
+    await fireEvent.click(screen.getByRole('button', { name: /find on web/i }));
+    await screen.findByText(/Deep Residual Learning for Image Recognition/);
+
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[];
+    await fireEvent.click(checkboxes[0]);
+    await fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
+
+    // The per-row error surfaces, and the counter reflects the failure (0 attached, 1 failed) —
+    // not the old "1/1 downloaded" that treated any processed item as a success.
+    expect(await screen.findByText(/Host is not on the allow-list/)).toBeTruthy();
+    const progress = await screen.findByText(/downloaded/);
+    expect(progress.textContent).toContain('0/1 downloaded');
+    expect(progress.textContent).toContain('(1 failed)');
+    expect(progress.className).toContain('has-failures');
   });
 
   it('renders platform labels, a View link, and enables Download for any candidate with a fetchable URL (pdf, resolved, or landing)', async () => {
