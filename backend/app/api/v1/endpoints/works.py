@@ -1236,6 +1236,11 @@ class SelectAssertion(BaseModel):
     assertion_id: uuid.UUID
 
 
+class SetMetadataValue(BaseModel):
+    field_name: str
+    value: str
+
+
 class CitationContextRead(BaseModel):
     id: uuid.UUID
     reference_id: uuid.UUID
@@ -2442,6 +2447,75 @@ def select_metadata_assertion(
     _commit_or_doi_409(db)
     db.refresh(work)
     return work
+
+
+@router.post("/{work_id}/metadata/set", response_model=list[FieldReview])
+def set_metadata_value(
+    work_id: uuid.UUID,
+    payload: SetMetadataValue,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> list[FieldReview]:
+    """Set a metadata field to a user-entered value (a manual correction).
+
+    Records a ``source="user"`` assertion, promotes it to canonical, and locks the field
+    (``confirmed_fields``) so later enrichment/extraction can't silently overwrite it (AGENTS.md
+    rule 5). For a promotable Work column (title/abstract/year/venue/doi) the Work is updated too;
+    for fields with no dedicated column (e.g. ``authors``) the value lives purely as the canonical
+    assertion, which is how the UI already reads it. An empty value clears the field: existing
+    assertions are de-canonicalised and the field is unlocked (no new assertion is written).
+    """
+    field = payload.field_name.strip()
+    value = payload.value.strip()
+    if not field:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="field_name is required"
+        )
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    # A manual value always wins its field: drop any prior canonical flag for the field first.
+    db.execute(
+        update(MetadataAssertion)
+        .where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.entity_id == work_id,
+            MetadataAssertion.field_name == field,
+        )
+        .values(selected_as_canonical=False)
+    )
+    locked = set(work.confirmed_fields or [])
+    if value:
+        db.add(
+            MetadataAssertion(
+                entity_type="work",
+                entity_id=work_id,
+                field_name=field,
+                value=value,
+                source="user",
+                confidence=1.0,
+                selected_as_canonical=True,
+            )
+        )
+        if field in _PROMOTABLE_FIELDS:
+            _apply_assertion_to_work(work, field, value, "user")
+        locked.add(field)  # lock so enrichment won't clobber the manual value
+    else:
+        locked.discard(field)  # cleared → unlock; leaves the field with no canonical value
+    work.confirmed_fields = sorted(locked)
+    work.updated_at = datetime.now(UTC)
+    record_event(
+        db,
+        "metadata.value_set",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work_id),
+        details={"field": field, "cleared": not value},
+    )
+    _commit_or_doi_409(db)
+    db.refresh(work)
+    return _work_field_reviews(db, work)
 
 
 def _choose_best_assertion(assertions: list[MetadataAssertion]) -> MetadataAssertion:

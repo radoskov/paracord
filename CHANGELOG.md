@@ -8,6 +8,12 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Editable authors in the paper Details panel.** The Details panel now shows an **Authors** field
+  (seeded from the paper's `authors` metadata). Editing and saving persists it via a new
+  `POST /works/{id}/metadata/set` endpoint, which records a `source="user"` canonical assertion and
+  locks the field so enrichment/extraction can't overwrite the manual value. Authors has no dedicated
+  Work column, so it lives purely as the canonical assertion (same read path the UI already used).
+  Batch 10, issue 4.
 - **"Set metadata from best source" gains an "all fields" option.** The Library bulk action can now
   promote the best available assertion for *every* promotable field (title/abstract/year/venue/doi)
   in one go, not just a single chosen field. `field_name: "all"` on

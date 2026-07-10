@@ -5180,6 +5180,24 @@
         "title": "ServerFolderSourceCreate",
         "type": "object"
       },
+      "SetMetadataValue": {
+        "properties": {
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_name",
+          "value"
+        ],
+        "title": "SetMetadataValue",
+        "type": "object"
+      },
       "ShelfCreate": {
         "properties": {
           "access_level": {
@@ -17623,7 +17641,7 @@
     },
     "/api/v1/works/bulk-apply-metadata": {
       "post": {
-        "description": "Set one metadata field from the best available source across many selected papers (issue 3).\n\nFor each selected paper independently, promote the preferred assertion for ``field_name``\n(GROBID value preferred, else current canonical, else most recent) to canonical and apply it —\nthe same effect as clicking \"Use this\" per paper. Papers with the field already user-confirmed\n(locked) are skipped so a bulk action never silently overwrites a corrected value (AGENTS.md\nrule 5); papers the caller can't modify, or with no assertion for the field, are skipped too.",
+        "description": "Set metadata from the best available source across many selected papers (issue 3).\n\n``field_name`` is one of the promotable fields, or ``\"all\"`` to run every promotable field.\nFor each selected paper independently, promote the preferred assertion (GROBID value preferred,\nelse current canonical, else most recent) to canonical and apply it — the same effect as clicking\n\"Use this\" per paper. Fields already user-confirmed (locked) are skipped so a bulk action never\nsilently overwrites a corrected value (AGENTS.md rule 5); papers the caller can't modify, or with\nno assertion for a field, are skipped too. With ``\"all\"``, a paper counts as applied if at least\none of its fields was promoted.",
         "operationId": "bulk_apply_best_metadata_api_v1_works_bulk_apply_metadata_post",
         "parameters": [
           {
@@ -19670,6 +19688,80 @@
           }
         },
         "summary": "Select Metadata Assertion",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/metadata/set": {
+      "post": {
+        "description": "Set a metadata field to a user-entered value (a manual correction).\n\nRecords a ``source=\"user\"`` assertion, promotes it to canonical, and locks the field\n(``confirmed_fields``) so later enrichment/extraction can't silently overwrite it (AGENTS.md\nrule 5). For a promotable Work column (title/abstract/year/venue/doi) the Work is updated too;\nfor fields with no dedicated column (e.g. ``authors``) the value lives purely as the canonical\nassertion, which is how the UI already reads it. An empty value clears the field: existing\nassertions are de-canonicalised and the field is unlocked (no new assertion is written).",
+        "operationId": "set_metadata_value_api_v1_works__work_id__metadata_set_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMetadataValue"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FieldReview"
+                  },
+                  "title": "Response Set Metadata Value Api V1 Works  Work Id  Metadata Set Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Metadata Value",
         "tags": [
           "works"
         ]

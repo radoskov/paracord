@@ -54,7 +54,7 @@
   let message = '';
 
   // editable fields
-  let form = { canonical_title: '', year: '', venue: '', doi: '', arxiv_id: '', abstract: '', reading_status: 'unread' };
+  let form = { canonical_title: '', year: '', venue: '', doi: '', arxiv_id: '', abstract: '', authors: '', reading_status: 'unread' };
 
   let fields: FieldReview[] = [];
   let files: WorkFile[] = [];
@@ -103,14 +103,16 @@
   // visible paper). Gates every mutating affordance below; the server is the source of truth.
   $: canModify = canModifyWork($currentUser, work);
 
-  // Authors for the find-on-web header: the Work has no author column, so take them from the
-  // 'authors' metadata-review field (canonical value, else the selected/first assertion).
-  $: searchedAuthors = (() => {
-    const f = fields.find((x) => x.field_name === 'authors');
+  // Authors: the Work has no author column, so take them from the 'authors' metadata-review field
+  // (canonical value, else the selected/first assertion). Used by the find-on-web header and the
+  // editable Authors row in the Details panel.
+  function authorsFromFields(fs: FieldReview[]): string {
+    const f = fs.find((x) => x.field_name === 'authors');
     if (!f) return '';
     const selected = f.assertions.find((a) => a.selected_as_canonical);
     return (f.canonical_value ?? selected?.value ?? f.assertions[0]?.value ?? '').trim();
-  })();
+  }
+  $: searchedAuthors = authorsFromFields(fields);
 
   // Note counts per file (and overall) from the already-loaded annotations — no extra request.
   // Annotations with a null file_id (not bound to a specific PDF) count toward the work total and
@@ -251,6 +253,7 @@
       doi: w.doi ?? '',
       arxiv_id: w.arxiv_id ?? '',
       abstract: w.abstract ?? '',
+      authors: '',
       reading_status: w.reading_status,
     };
     await run(async () => {
@@ -266,6 +269,8 @@
           client.listWorkTags(w.id),
         ]);
     });
+    // Seed the editable Authors field from the loaded 'authors' assertion (no Work column exists).
+    form = { ...form, authors: authorsFromFields(fields) };
     // Pick up a job already in flight for this paper (e.g. extraction queued at import time).
     if (watchJobs) watchWorkJobs();
   }
@@ -282,7 +287,13 @@
         reading_status: form.reading_status as Work['reading_status'],
       });
       onUpdated(updated);
-      fields = await client.listWorkMetadata(work.id);
+      // Authors has no Work column — persist a manual change as a user-sourced 'authors' assertion.
+      // setMetadataValue returns the refreshed field list, so only re-list otherwise.
+      if (form.authors.trim() !== authorsFromFields(fields)) {
+        fields = await client.setMetadataValue(work.id, 'authors', form.authors.trim());
+      } else {
+        fields = await client.listWorkMetadata(work.id);
+      }
     }, 'Saved');
   }
 
@@ -1000,6 +1011,9 @@
     <summary>Details</summary>
     <form class="fields" on:submit|preventDefault={save}>
       <label>Title<input bind:value={form.canonical_title} /></label>
+      <label>Authors<input bind:value={form.authors}
+        placeholder="Smith, J.; Doe, A."
+        title="Authors for this paper (saved as a locked manual value; enrichment won't overwrite it)" /></label>
       <div class="two">
         <label>Year<input bind:value={form.year} inputmode="numeric" /></label>
         <label>Reading status

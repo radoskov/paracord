@@ -1430,6 +1430,20 @@ export class ApiClient {
     );
   }
 
+  // Set a metadata field to a user-entered value (manual correction). Writes a user-sourced
+  // canonical assertion + locks the field; an empty value clears it. Returns the refreshed
+  // field-review list. Used for editable authors (which has no Work column).
+  async setMetadataValue(
+    workId: string,
+    fieldName: string,
+    value: string,
+  ): Promise<FieldReview[]> {
+    return this.request<FieldReview[]>(`/api/v1/works/${workId}/metadata/set`, {
+      method: "POST",
+      body: { field_name: fieldName, value },
+    });
+  }
+
   async confirmMetadataField(
     workId: string,
     fieldName: string,

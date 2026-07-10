@@ -123,6 +123,52 @@ describe('WorkDetail metadata-conflict remove (Phase L, item 8)', () => {
     expect(client.deleteMetadataAssertion).not.toHaveBeenCalled();
   });
 
+  it('seeds the editable Authors field and persists a change via setMetadataValue', async () => {
+    const authorsField: FieldReview = {
+      field_name: 'authors',
+      canonical_value: 'Vaswani, A.; Shazeer, N.',
+      has_conflict: false,
+      confirmed: false,
+      match_pct: null,
+      assertions: [
+        { id: 'au1', field_name: 'authors', value: 'Vaswani, A.; Shazeer, N.', source: 'grobid', confidence: null, selected_as_canonical: true },
+      ],
+    };
+    const client = makeClient({
+      listWorkMetadata: vi.fn().mockResolvedValue([authorsField]),
+      updateWork: vi.fn().mockResolvedValue(makeWork()),
+      setMetadataValue: vi.fn().mockResolvedValue([authorsField]),
+    });
+    render(WorkDetail, { client: client as never, work: makeWork(), onUpdated: () => {} } as never);
+
+    // Authors input is seeded (async) from the loaded 'authors' assertion.
+    const input = (await screen.findByLabelText('Authors')) as HTMLInputElement;
+    await vi.waitFor(() => expect(input.value).toBe('Vaswani, A.; Shazeer, N.'));
+
+    await fireEvent.input(input, { target: { value: 'Vaswani, A.; Shazeer, N.; Parmar, N.' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await vi.waitFor(() =>
+      expect(client.setMetadataValue).toHaveBeenCalledWith(
+        'w1',
+        'authors',
+        'Vaswani, A.; Shazeer, N.; Parmar, N.',
+      ),
+    );
+  });
+
+  it('does not call setMetadataValue when Authors is unchanged', async () => {
+    const client = makeClient({
+      updateWork: vi.fn().mockResolvedValue(makeWork()),
+      setMetadataValue: vi.fn(),
+    });
+    render(WorkDetail, { client: client as never, work: makeWork(), onUpdated: () => {} } as never);
+    await screen.findByText('Title B');
+    await fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await vi.waitFor(() => expect(client.updateWork).toHaveBeenCalled());
+    expect(client.setMetadataValue).not.toHaveBeenCalled();
+  });
+
   it('disables the Remove button for a contributor who may not modify the paper', async () => {
     currentUser.set({ id: 'u1', username: 'co', role: 'contributor' } as never);
     const work = makeWork({ created_by_user_id: 'someone-else' });

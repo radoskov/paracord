@@ -181,6 +181,64 @@ def test_bulk_apply_rejects_non_promotable_field(client, db, make_user):
     assert r.status_code == 400
 
 
+def test_set_metadata_value_creates_locked_user_assertion(client, db, make_user):
+    """Batch10 #4: setting authors (no Work column) writes a user-sourced canonical assertion,
+    locks the field, and shows up in the metadata review."""
+    editor = make_user("md-set", role="editor")
+    w = _work(db, title="w")
+    r = client.post(
+        f"/api/v1/works/{w.id}/metadata/set",
+        headers=_headers(db, editor),
+        json={"field_name": "authors", "value": "Smith, J.; Doe, A."},
+    )
+    assert r.status_code == 200
+    reviews = {f["field_name"]: f for f in r.json()}
+    assert "authors" in reviews
+    assert reviews["authors"]["canonical_value"] == "Smith, J.; Doe, A."
+    assert reviews["authors"]["confirmed"] is True
+    rows = db.scalars(
+        select(MetadataAssertion).where(
+            MetadataAssertion.entity_id == w.id, MetadataAssertion.field_name == "authors"
+        )
+    ).all()
+    assert len(rows) == 1 and rows[0].source == "user" and rows[0].selected_as_canonical
+    db.expunge_all()
+    assert "authors" in (db.get(Work, w.id).confirmed_fields or [])
+
+
+def test_set_metadata_value_promotable_field_updates_work(client, db, make_user):
+    """A promotable field set manually also writes the Work column (verified via the API)."""
+    editor = make_user("md-set2", role="editor")
+    headers = _headers(db, editor)
+    w = _work(db, title="Old Title")
+    r = client.post(
+        f"/api/v1/works/{w.id}/metadata/set",
+        headers=headers,
+        json={"field_name": "title", "value": "New Manual Title"},
+    )
+    assert r.status_code == 200
+    got = client.get(f"/api/v1/works/{w.id}", headers=headers)
+    assert got.status_code == 200 and got.json()["canonical_title"] == "New Manual Title"
+
+
+def test_set_metadata_value_empty_clears_and_unlocks(client, db, make_user):
+    """An empty value de-canonicalises existing assertions and unlocks the field."""
+    editor = make_user("md-set3", role="editor")
+    w = _work(db)
+    _assertion(db, w, field="authors", value="A. Uthor", source="grobid", canonical=True)
+    w.confirmed_fields = ["authors"]
+    db.commit()
+    r = client.post(
+        f"/api/v1/works/{w.id}/metadata/set",
+        headers=_headers(db, editor),
+        json={"field_name": "authors", "value": ""},
+    )
+    assert r.status_code == 200
+    reviews = {f["field_name"]: f for f in r.json()}
+    assert reviews["authors"]["canonical_value"] is None
+    assert reviews["authors"]["confirmed"] is False
+
+
 def test_bulk_apply_all_promotes_every_field(client, db, make_user):
     """Issue (batch10 #3): field_name="all" promotes the best assertion for every promotable field,
     skips locked fields per-paper, and counts a paper applied if at least one field was set."""

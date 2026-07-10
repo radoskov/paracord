@@ -21,7 +21,9 @@ logical chunk; verified in the API + frontend containers.
   `POST /works/bulk-apply-metadata` promotes the best assertion for every promotable field
   (per-field helper `_promote_best_field`), a paper counting as applied if ≥1 field was set;
   locked fields still skipped. Frontend: "all fields" picker option + adjusted toast. ✅ done.
-- **4 — editable authors in the Details panel.** _pending._
+- **4 — editable authors in the Details panel.** New `POST /works/{id}/metadata/set` writes a
+  user-sourced canonical `authors` assertion + locks the field (no Work column added). Details panel
+  gains an Authors input seeded from the assertion; save persists only on change. ✅ done.
 - **2 — duplicates preview fix + open both papers in the paper view.** _pending._
 - **5 — new library columns (file count, topics, badges incl. conflicts, tags).** _pending._
 - **1 — multi-PDF staging import (extract-first preview + "import directly").** _pending._
