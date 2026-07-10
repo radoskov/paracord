@@ -4525,7 +4525,8 @@
             "default": "metadata",
             "enum": [
               "metadata",
-              "semantic"
+              "semantic",
+              "hybrid"
             ],
             "title": "Search Mode",
             "type": "string"
@@ -4713,7 +4714,8 @@
               {
                 "enum": [
                   "metadata",
-                  "semantic"
+                  "semantic",
+                  "hybrid"
                 ],
                 "type": "string"
               },

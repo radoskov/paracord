@@ -40,6 +40,7 @@ MAX_EMBEDDING_MODELS = 8
 # top of slugify, which is the sole source of column names).
 _SAFE_COLUMN = re.compile(r"^vec_[a-z0-9_]+$")
 
+
 def _table_present(db: Session) -> bool:
     """Whether the ``embedding_model_registry`` table exists (narrow unit-test schemas omit it)."""
     return table_present(db, EmbeddingModelRegistry.__tablename__)

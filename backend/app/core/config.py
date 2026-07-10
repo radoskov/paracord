@@ -151,9 +151,7 @@ class Settings(BaseSettings):
     # LAN/production deployment to instead fail CLOSED — requests that depend on Redis-backed limits
     # are rejected with 503 while Redis is down, and the admin Jobs view shows a red
     # "limits unavailable" status. Default off preserves the single-user behavior.
-    production_require_redis: bool = Field(
-        default=False, alias="PARACORD_PRODUCTION_REQUIRE_REDIS"
-    )
+    production_require_redis: bool = Field(default=False, alias="PARACORD_PRODUCTION_REQUIRE_REDIS")
     grobid_url: str = Field(default="http://localhost:8070", alias="GROBID_URL")
     # GROBID extraction options (driven from the `grobid:` YAML block / env).
     grobid_consolidate_header: bool = True

@@ -48,7 +48,7 @@ Historical tail; kept for the audit trail. All verified fixed.
   "rate & queue limits unavailable" banner (`queue_status.require_redis`). Login-throttle already
   degrades to a per-process window, so it was left as-is.
 - **E2** — parser-level PDF validation: `storage.probe_pdf_openable` opens uploaded bytes with
-  PyMuPDF and **fails closed** on encrypted/password-protected, page-less, or unparseable PDFs,
+  PyMuPDF and **fails closed** on encrypted/password-protected, page-less, or unparsable PDFs,
   wired into all five upload handlers after the `%PDF` header check so invalid bytes never reach
   GROBID/OCR. (was AUDIT_EXT **S1**/**S3**.)
 - **`Agent.revoked_at` cleanup** (the dead-code note below) — column dropped (migration
