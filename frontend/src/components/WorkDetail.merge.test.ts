@@ -82,3 +82,73 @@ describe('WorkDetail unmerge + linked papers (Batch D)', () => {
     await screen.findByText('Linked Paper');
   });
 });
+
+describe('WorkDetail merge / move (issue 4)', () => {
+  beforeEach(() => {
+    currentUser.set({ id: 'u1', username: 'ow', role: 'owner' } as never);
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const page = (items: Work[]) => ({ items, total: items.length, shelves: [], racks: [] });
+
+  it('merges another paper into this one via the picker + preview', async () => {
+    const source = makeWork({ id: 'w2', canonical_title: 'Duplicate Paper' });
+    const client = makeClient({
+      listWorks: vi.fn().mockResolvedValue(page([source])),
+      mergePaperPreview: vi.fn().mockResolvedValue({
+        base_work_id: 'w1',
+        source_work_id: 'w2',
+        fill_fields: ['abstract'],
+        conflict_fields: [],
+        file_count: 1,
+        incoming_reference_count: 0,
+        will_flatten: false,
+      }),
+      mergePaper: vi.fn().mockResolvedValue(makeWork()),
+    });
+    render(WorkDetail, { client: client as never, work: makeWork() });
+    await screen.findByText('Attention Is All You Need');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Merge…' }));
+    const input = await screen.findByPlaceholderText(/paper to merge in/i);
+    await fireEvent.input(input, { target: { value: 'Duplicate' } });
+
+    await fireEvent.click(await screen.findByText('Duplicate Paper'));
+    await waitFor(() => expect(client.mergePaperPreview).toHaveBeenCalledWith('w1', 'w2'));
+    expect(await screen.findByText(/1 file moved here/)).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    await waitFor(() => expect(client.mergePaper).toHaveBeenCalledWith('w1', 'w2'));
+  });
+
+  it('moves an attached file to another paper via the picker', async () => {
+    const file = {
+      id: 'f1',
+      sha256: 'a'.repeat(64),
+      size_bytes: 10,
+      original_filename: 'paper.pdf',
+      page_count: null,
+      text_layer_quality: 'ok',
+      status: 'extracted',
+      content_available: true,
+    };
+    const target = makeWork({ id: 'w2', canonical_title: 'Target Paper' });
+    const client = makeClient({
+      listWorkFiles: vi.fn().mockResolvedValue([file]),
+      listWorks: vi.fn().mockResolvedValue(page([target])),
+      moveWorkFile: vi.fn().mockResolvedValue(file),
+    });
+    render(WorkDetail, { client: client as never, work: makeWork() });
+    await screen.findByText('Attention Is All You Need');
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Move…' }));
+    const input = await screen.findByPlaceholderText(/destination paper/i);
+    await fireEvent.input(input, { target: { value: 'Target' } });
+
+    await fireEvent.click(await screen.findByText('Target Paper'));
+    await waitFor(() => expect(client.moveWorkFile).toHaveBeenCalledWith('w1', 'f1', 'w2'));
+  });
+});

@@ -9,6 +9,7 @@
     type CitationContext,
     type FieldReview,
     type JobRecord,
+    type MergePaperPreview,
     type QueueStatus,
     type ReferenceRecord,
     type RelatedWork,
@@ -35,6 +36,7 @@
   import PdfReader from './PdfReader.svelte';
   import ReferenceGraphModal from './ReferenceGraphModal.svelte';
   import ShelfPicker from './ShelfPicker.svelte';
+  import WorkPicker from './WorkPicker.svelte';
 
   export let client: ApiClient;
   export let work: Work;
@@ -320,6 +322,52 @@
       const updated = await client.unmergePaper(work.id);
       onUpdated(updated);
     }, 'Merge undone');
+  }
+
+  // Issue 4 — move an attached PDF to another paper. `moveFile` is the file being moved (opens the
+  // picker modal); `null` when closed.
+  let moveFile: WorkFile | null = null;
+  function openMove(file: WorkFile): void {
+    moveFile = file;
+  }
+  async function doMove(target: Work): Promise<void> {
+    const file = moveFile;
+    if (!file) return;
+    await run(async () => {
+      await client.moveWorkFile(work.id, file.id, target.id);
+      files = await client.listWorkFiles(work.id);
+      // The moved file may have been this paper's main file; reflect the server's cleared pointer.
+      if (work.main_file_id === file.id) onUpdated({ ...work, main_file_id: null });
+    }, `Moved “${file.original_filename ?? 'file'}” to “${target.canonical_title || 'the other paper'}”.`);
+    moveFile = null;
+  }
+
+  // Issue 4 — merge another paper INTO this one. Two-step: pick a source → preview → confirm.
+  let mergeOpen = false;
+  let mergeSource: Work | null = null;
+  let mergePreview: MergePaperPreview | null = null;
+  function openMerge(): void {
+    mergeOpen = true;
+    mergeSource = null;
+    mergePreview = null;
+  }
+  async function selectMergeSource(source: Work): Promise<void> {
+    await run(async () => {
+      mergeSource = source;
+      mergePreview = await client.mergePaperPreview(work.id, source.id);
+    });
+  }
+  async function doMerge(): Promise<void> {
+    const source = mergeSource;
+    if (!source) return;
+    await run(async () => {
+      const updated = await client.mergePaper(work.id, source.id);
+      onUpdated(updated);
+      await loadDetail(updated);
+    }, `Merged “${source.canonical_title || 'the other paper'}” into this paper.`);
+    mergeOpen = false;
+    mergeSource = null;
+    mergePreview = null;
   }
 
   // Organization / "Where is this?" — the shelves (and their racks) this paper sits in. Lazy-loaded
@@ -890,6 +938,8 @@
         title="Download this paper's annotations as Markdown">Export notes</button>
       <button type="button" class="secondary small" on:click={() => (showRefGraph = true)}
         title="Show a weighted citation graph of this paper's references (year × how heavily each is cited)">Reference graph</button>
+      <button type="button" class="secondary small" on:click={openMerge} disabled={loading || !canModify}
+        title={canModify ? 'Merge another paper into this one (moves its files/metadata here; reversible)' : INSUFFICIENT_ROLE}>Merge…</button>
       {#if work.has_reversible_shadow}
         <button type="button" class="secondary small" on:click={unmergePaper} disabled={loading || !canModify}
           title={canModify ? 'Undo the most recent merge into this paper (restores the merged paper)' : INSUFFICIENT_ROLE}>Unmerge</button>
@@ -1111,6 +1161,8 @@
                   title={canModify ? 'Queue GROBID extraction again for this file' : INSUFFICIENT_ROLE}>Re-extract</button>
                 <button type="button" class="secondary small" on:click={() => forceOcr(file)} disabled={loading || !canModify || !file.content_available}
                   title={canModify ? 'Force an OCR pass (for scanned PDFs with no/poor text layer)' : INSUFFICIENT_ROLE}>Force OCR</button>
+                <button type="button" class="secondary small" on:click={() => openMove(file)} disabled={loading || !canModify}
+                  title={canModify ? 'Move this file to another paper (it leaves this one)' : INSUFFICIENT_ROLE}>Move…</button>
                 <button type="button" class="secondary small danger-btn" on:click={() => removeFile(file)} disabled={loading || !canModify}
                   title={canModify ? 'Remove this file from the paper (the file stays in the library)' : INSUFFICIENT_ROLE}>Remove</button>
               </span>
@@ -1319,6 +1371,59 @@
 
 {#if showRefGraph}
   <ReferenceGraphModal {client} workId={work.id} onClose={() => (showRefGraph = false)} />
+{/if}
+
+{#if moveFile}
+  <Modal title="Move file to another paper" onClose={() => (moveFile = null)}>
+    <p class="modal-lead">
+      Move <strong>{moveFile.original_filename ?? 'this file'}</strong> to another paper. It will be
+      detached from this one — pick the destination:
+    </p>
+    <WorkPicker {client} excludeId={work.id} onSelect={doMove}
+      placeholder="Search the destination paper by title, DOI, or identifier…" />
+  </Modal>
+{/if}
+
+{#if mergeOpen}
+  <Modal title="Merge another paper into this one" onClose={() => (mergeOpen = false)}>
+    {#if !mergeSource}
+      <p class="modal-lead">
+        Pick the paper to fold into <strong>{work.canonical_title || 'this paper'}</strong>. Its
+        files, tags, shelves, references and metadata move here; it becomes a hidden shadow you can
+        Unmerge later.
+      </p>
+      <WorkPicker {client} excludeId={work.id} onSelect={selectMergeSource}
+        placeholder="Search the paper to merge in…" />
+    {:else}
+      <p class="modal-lead">
+        Merge <strong>{mergeSource.canonical_title || 'the selected paper'}</strong> into
+        <strong>{work.canonical_title || 'this paper'}</strong>?
+      </p>
+      {#if mergePreview}
+        <ul class="merge-preview">
+          <li>{mergePreview.file_count} file{mergePreview.file_count === 1 ? '' : 's'} moved here</li>
+          {#if mergePreview.fill_fields.length > 0}
+            <li>Fills empty fields: {mergePreview.fill_fields.join(', ')}</li>
+          {/if}
+          {#if mergePreview.conflict_fields.length > 0}
+            <li class="warn">Conflicting fields recorded (not overwritten): {mergePreview.conflict_fields.join(', ')}</li>
+          {/if}
+          {#if mergePreview.incoming_reference_count > 0}
+            <li>{mergePreview.incoming_reference_count} incoming reference(s) re-pointed here</li>
+          {/if}
+          {#if mergePreview.will_flatten}
+            <li class="warn">This paper already has a reversible merge; that one becomes permanent.</li>
+          {/if}
+        </ul>
+      {/if}
+      <div class="modal-actions">
+        <button type="button" class="secondary small" on:click={() => { mergeSource = null; mergePreview = null; }}
+          disabled={loading} title="Pick a different paper">Back</button>
+        <button type="button" class="small" on:click={doMerge} disabled={loading}
+          title="Merge the selected paper into this one">Merge</button>
+      </div>
+    {/if}
+  </Modal>
 {/if}
 
 {#if showFindModal}
@@ -2331,6 +2436,27 @@
 
   .dl-progress.has-failures {
     color: var(--status-danger);
+  }
+
+  .modal-lead {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+  }
+  .merge-preview {
+    margin: 0 0 0.9rem;
+    padding-left: 1.1rem;
+    font-size: 0.88rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .merge-preview .warn {
+    color: var(--status-warning);
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
   }
 
   .locations {

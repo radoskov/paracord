@@ -635,6 +635,17 @@ export interface WorkFile {
   extraction_queued?: boolean;
 }
 
+// What merging one paper into another would do (issue 4). Mirrors the backend MergePaperPreview.
+export interface MergePaperPreview {
+  base_work_id: string;
+  source_work_id: string;
+  fill_fields: string[];
+  conflict_fields: string[];
+  file_count: number;
+  incoming_reference_count: number;
+  will_flatten: boolean;
+}
+
 export interface WebCandidate {
   candidate_id: string;
   source: string;
@@ -1688,6 +1699,36 @@ export class ApiClient {
   async unmergePaper(workId: string): Promise<Work> {
     return this.request<Work>(`/api/v1/works/${workId}/unmerge`, {
       method: "POST",
+    });
+  }
+
+  // Move an attached PDF from one paper to another (issue 4): re-points the file's link.
+  async moveWorkFile(
+    workId: string,
+    fileId: string,
+    targetWorkId: string,
+  ): Promise<WorkFile> {
+    return this.request<WorkFile>(
+      `/api/v1/works/${workId}/files/${fileId}/move`,
+      { method: "POST", body: { target_work_id: targetWorkId } },
+    );
+  }
+
+  // Preview merging `sourceWorkId` INTO `workId` (issue 4) — read-only.
+  async mergePaperPreview(
+    workId: string,
+    sourceWorkId: string,
+  ): Promise<MergePaperPreview> {
+    return this.request<MergePaperPreview>(
+      `/api/v1/works/${workId}/merge-preview?source_work_id=${sourceWorkId}`,
+    );
+  }
+
+  // Merge another paper INTO this one (issue 4); the source becomes a reversible hidden shadow.
+  async mergePaper(workId: string, sourceWorkId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/${workId}/merge`, {
+      method: "POST",
+      body: { source_work_id: sourceWorkId },
     });
   }
 
