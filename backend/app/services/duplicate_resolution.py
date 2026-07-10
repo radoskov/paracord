@@ -53,6 +53,25 @@ def apply_duplicate_action(
         raise ValueError(
             "Candidate has already been resolved; reopen it before applying another action"
         )
+    if action == "ignore":
+        # Transient dismissal (owner decision): "ignore for now" adds NO permanent flag — delete the
+        # candidate so it drops from the current results but a future scan re-surfaces it. Contrast
+        # "keep_separate", which persists a reviewable/revocable "rejected" flag. Audit first.
+        record_event(
+            db,
+            "duplicate_candidate.resolved",
+            actor_user_id=actor.id,
+            entity_type="duplicate_candidate",
+            entity_id=str(candidate.id),
+            details={
+                "action": "ignore",
+                "status": "dismissed",
+                "candidate_type": candidate.candidate_type,
+            },
+        )
+        db.delete(candidate)
+        return candidate
+
     if action == "merge_works":
         _merge_work_candidate(db, candidate, target_work_id=target_work_id, actor=actor)
         _resolve(candidate, actor, "accepted", action)
@@ -66,8 +85,6 @@ def apply_duplicate_action(
         raise ValueError("split_file requires explicit split segments")
     elif action == "keep_separate":
         _resolve(candidate, actor, "rejected", action)
-    elif action == "ignore":
-        _resolve(candidate, actor, "ignored", action)
     else:
         raise ValueError(f"Unsupported duplicate action: {action}")
 

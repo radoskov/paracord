@@ -270,6 +270,10 @@ def update_duplicate_candidate(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Send either action or status, not both",
         )
+    # "ignore" deletes the candidate (transient dismissal); capture its view before it's gone so we
+    # can still return a 200 body (the client just reloads the list afterward).
+    is_ignore = payload.action == "ignore"
+    pre_view = _candidate_view(db, candidate) if is_ignore else None
     try:
         if payload.action:
             if payload.action == "split_file":
@@ -304,6 +308,9 @@ def update_duplicate_candidate(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
+    if is_ignore and pre_view is not None:
+        # The row was deleted; return the captured view marked dismissed.
+        return pre_view.model_copy(update={"status": "dismissed"})
     db.refresh(candidate)
     return _candidate_view(db, candidate)
 

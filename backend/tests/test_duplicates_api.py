@@ -181,6 +181,50 @@ def test_update_duplicate_candidate_marks_resolution(db_session, editor: User) -
     assert reopened.resolved_at is None
 
 
+def test_ignore_action_deletes_candidate_but_keep_separate_persists(
+    db_session, editor: User
+) -> None:
+    """batch10: 'ignore' is transient (row deleted → reappears on rescan); 'keep_separate' persists."""
+    a = Work(canonical_title="A", normalized_title="a")
+    b = Work(canonical_title="B", normalized_title="b")
+    c = Work(canonical_title="C", normalized_title="c")
+    d = Work(canonical_title="D", normalized_title="d")
+    db_session.add_all([a, b, c, d])
+    db_session.flush()
+
+    def _cand(x, y):
+        cand = DuplicateCandidate(
+            candidate_type="shared_file",
+            entity_a_type="work",
+            entity_a_id=x.id,
+            entity_b_type="work",
+            entity_b_id=y.id,
+            score=1.0,
+            signals={},
+        )
+        db_session.add(cand)
+        db_session.flush()
+        return cand
+
+    ignored = _cand(a, b)
+    kept = _cand(c, d)
+    db_session.commit()
+
+    r_ignore = update_duplicate_candidate(
+        ignored.id, DuplicateCandidateUpdate(action="ignore"), db=db_session, actor=editor
+    )
+    assert r_ignore.status == "dismissed"
+    # Row is gone (transient) → a future scan can re-surface it.
+    assert db_session.get(DuplicateCandidate, ignored.id) is None
+
+    r_keep = update_duplicate_candidate(
+        kept.id, DuplicateCandidateUpdate(action="keep_separate"), db=db_session, actor=editor
+    )
+    assert r_keep.status == "rejected"
+    # Row persists (permanent, reviewable, reopenable).
+    assert db_session.get(DuplicateCandidate, kept.id) is not None
+
+
 def test_merge_works_relinks_memberships_without_deleting_source(db_session, editor: User) -> None:
     target = Work(canonical_title="Target", normalized_title="target")
     source = Work(canonical_title="Source", normalized_title="source")

@@ -216,8 +216,7 @@
         <select bind:value={statusFilter} on:change={load} aria-label="Filter by status" title="Filter candidates by their review status">
           <option value="open">Open</option>
           <option value="accepted">Accepted</option>
-          <option value="rejected">Rejected</option>
-          <option value="ignored">Ignored</option>
+          <option value="rejected">Kept separate</option>
           <option value="">All</option>
         </select>
         <button type="button" on:click={scan} disabled={loading || !$canEdit}
@@ -318,9 +317,9 @@
                   title={$canEdit ? 'Mark one file as a duplicate copy' : INSUFFICIENT_ROLE}>Mark duplicate</button>
               {/if}
               <button type="button" class="secondary" on:click={() => apply(c, 'keep_separate')} disabled={loading || !$canEdit || c.status !== 'open'}
-                title={$canEdit ? 'These are genuinely different — keep them separate' : INSUFFICIENT_ROLE}>Keep separate</button>
+                title={$canEdit ? 'These are genuinely different — keep them separate (permanent, reviewable under “Kept separate”; reopen anytime)' : INSUFFICIENT_ROLE}>Keep separate</button>
               <button type="button" class="secondary" on:click={() => apply(c, 'ignore')} disabled={loading || !$canEdit || c.status !== 'open'}
-                title={$canEdit ? 'Dismiss this candidate without a decision' : INSUFFICIENT_ROLE}>Ignore</button>
+                title={$canEdit ? 'Dismiss for now — no permanent flag; it reappears the next time you scan' : INSUFFICIENT_ROLE}>Ignore</button>
               {#if c.status !== 'open'}
                 <button type="button" class="secondary" on:click={() => reopen(c)} disabled={loading || !$canEdit}
                   title={$canEdit ? 'Reopen this resolved candidate' : INSUFFICIENT_ROLE}>Reopen</button>
