@@ -3388,6 +3388,38 @@
         "title": "ImportRootOut",
         "type": "object"
       },
+      "KnownHashesRequest": {
+        "properties": {
+          "sha256": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sha256",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sha256"
+        ],
+        "title": "KnownHashesRequest",
+        "type": "object"
+      },
+      "KnownHashesResponse": {
+        "properties": {
+          "known": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known",
+            "type": "array"
+          }
+        },
+        "required": [
+          "known"
+        ],
+        "title": "KnownHashesResponse",
+        "type": "object"
+      },
       "LibraryColumnPrefs": {
         "additionalProperties": true,
         "properties": {
@@ -11165,6 +11197,66 @@
           }
         },
         "summary": "List Agent File Status",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/files/known-hashes": {
+      "post": {
+        "description": "Report which of the supplied file hashes the server still holds as library content (issue 1).\n\nGiven the agent's local file hashes, return the subset that exist as a ``File`` linked to at\nleast one paper. The agent's ``reconcile`` uses this to be content-aware: deleting a *duplicate*\npaper record (whose PDF lives on in the surviving canonical paper) removes that file's\n``AgentFile`` row, which used to make reconcile propose un-indexing the still-present local\nfile. Cross-checking the hash means only files whose content is genuinely gone server-side are\nflagged. Batch-capped like the manifest (D1); the agent chunks large sets.",
+        "operationId": "known_hashes_api_v1_agents_files_known_hashes_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnownHashesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnownHashesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Known Hashes",
         "tags": [
           "agents"
         ]

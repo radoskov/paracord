@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_agent_token
 from app.db.session import get_db
 from app.models.agent import Agent, AgentFile
+from app.models.file import File, FileWorkLink
 from app.schemas.agent import (
     AgentFileStatus,
     AgentManifestRequest,
@@ -296,6 +297,42 @@ def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> li
             )
         )
     return out
+
+
+class KnownHashesRequest(BaseModel):
+    sha256: list[str]
+
+
+class KnownHashesResponse(BaseModel):
+    known: list[str]
+
+
+@router.post("/files/known-hashes", response_model=KnownHashesResponse)
+def known_hashes(
+    payload: KnownHashesRequest, db: Session = DB_DEP, agent: Agent = AGENT_DEP
+) -> KnownHashesResponse:
+    """Report which of the supplied file hashes the server still holds as library content (issue 1).
+
+    Given the agent's local file hashes, return the subset that exist as a ``File`` linked to at
+    least one paper. The agent's ``reconcile`` uses this to be content-aware: deleting a *duplicate*
+    paper record (whose PDF lives on in the surviving canonical paper) removes that file's
+    ``AgentFile`` row, which used to make reconcile propose un-indexing the still-present local
+    file. Cross-checking the hash means only files whose content is genuinely gone server-side are
+    flagged. Batch-capped like the manifest (D1); the agent chunks large sets.
+    """
+    from app.services.app_config import enforce_batch_limit
+
+    hashes = [h for h in payload.sha256 if h]
+    if not hashes:
+        return KnownHashesResponse(known=[])
+    enforce_batch_limit(db, len(hashes))
+    rows = db.scalars(
+        select(File.sha256)
+        .join(FileWorkLink, FileWorkLink.file_id == File.id)
+        .where(File.sha256.in_(hashes))
+        .distinct()
+    ).all()
+    return KnownHashesResponse(known=list(rows))
 
 
 @router.post("/files/{local_file_id}/offer-teleport", status_code=status.HTTP_201_CREATED)

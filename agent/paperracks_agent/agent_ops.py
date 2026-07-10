@@ -562,6 +562,26 @@ async def reconcile(
         )
     ]
 
+    # Content-aware guard (issue 1): a candidate whose CONTENT still lives on the server (its hash is
+    # still linked to some paper) was not really deleted — only a duplicate *record* was, which
+    # removed the AgentFile row and is why the file looks "absent" above. Cross-check the hashes so
+    # we don't un-index a file the server still holds. Degrade to the raw server-view diff if the
+    # check fails (an older server without the endpoint, or a transient error) — never more
+    # aggressive than before.
+    if candidates:
+        hashes = sorted({rec.sha256 for rec in candidates if rec.sha256})
+        try:
+            cap = await _resolve_batch_cap(client)
+            preserved: set[str] = set()
+            for start in range(0, len(hashes), cap):
+                preserved |= await client.known_hashes(hashes[start : start + cap])
+            if preserved:
+                candidates = [rec for rec in candidates if rec.sha256 not in preserved]
+        except Exception as exc:  # noqa: BLE001 - degrade to the raw diff, never block reconcile
+            logger.warning(
+                "Content-aware reconcile check failed (%s); using the raw server-view diff", exc
+            )
+
     deletable: list[FileRecord] = []
     if delete_on_disk:
         deletable = [

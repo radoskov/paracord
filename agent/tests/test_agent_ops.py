@@ -14,7 +14,12 @@ class FakeClient:
     """Records calls instead of hitting a server."""
 
     def __init__(
-        self, pending=None, my_files=None, extraction_queued=True, max_batch_items=100
+        self,
+        pending=None,
+        my_files=None,
+        extraction_queued=True,
+        max_batch_items=100,
+        known=None,
     ) -> None:
         self.server_url = "http://test"
         self._max_batch_items = max_batch_items
@@ -26,6 +31,8 @@ class FakeClient:
         self.offered: list[str] = []
         self._pending = pending or []
         self._my_files = my_files or []
+        # Hashes the server still holds as library content (issue 1 content-aware reconcile).
+        self._known = set(known or [])
         # Simulate the server's D7 report of whether it could queue extraction.
         self._extraction_queued = extraction_queued
 
@@ -37,6 +44,9 @@ class FakeClient:
 
     async def get_my_files(self) -> list[dict]:
         return self._my_files
+
+    async def known_hashes(self, hashes: list[str]) -> set[str]:
+        return {h for h in hashes if h in self._known}
 
     async def report_source_removed(self, ids: list[str]) -> dict:
         self.removed.extend(ids)
@@ -401,6 +411,27 @@ def test_reconcile_un_indexes_index_only_stub_deleted_on_server(tmp_path: Path) 
     _root, _pdf, config, state, lid = _server_known_file(tmp_path)
     state.set_processing_state(lid, "indexed")  # index_only, never extracted/teleported
     r = asyncio.run(agent_ops.reconcile(config, state, FakeClient(my_files=[]), apply=True))
+    assert r["un_indexed"] == 1 and not state.all_files()
+
+
+def test_reconcile_keeps_file_whose_content_survives_on_server(tmp_path: Path) -> None:
+    """Issue 1: the AgentFile row is gone (my_files=[]), but the file's CONTENT still exists on the
+    server (a duplicate record was deleted, not the canonical). The content-aware hash check keeps
+    the local index instead of un-indexing it."""
+    _root, pdf, config, state, lid = _server_known_file(tmp_path)
+    sha = next(r.sha256 for r in state.all_files() if r.real_path == str(pdf))
+    kept = asyncio.run(
+        agent_ops.reconcile(config, state, FakeClient(my_files=[], known={sha}), apply=True)
+    )
+    assert kept["un_indexed"] == 0 and state.all_files()
+
+
+def test_reconcile_un_indexes_when_content_gone_server_side(tmp_path: Path) -> None:
+    """Issue 1: content genuinely gone (hash not known server-side) is still un-indexed."""
+    _root, _pdf, config, state, lid = _server_known_file(tmp_path)
+    r = asyncio.run(
+        agent_ops.reconcile(config, state, FakeClient(my_files=[], known=set()), apply=True)
+    )
     assert r["un_indexed"] == 1 and not state.all_files()
 
 

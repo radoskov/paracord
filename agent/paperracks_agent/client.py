@@ -130,3 +130,21 @@ class PaRacORDServerClient:
             )
             response.raise_for_status()
             return response.json()
+
+    async def known_hashes(self, hashes: list[str]) -> set[str]:
+        """Return the subset of ``hashes`` the server still holds as library content (issue 1).
+
+        Used by reconcile to avoid un-indexing a local file whose content still lives on the server
+        under another paper (e.g. after deleting a duplicate record). Server-unreachable / an older
+        server without this endpoint propagates as an ``httpx`` error for the caller to degrade on.
+        """
+        if not hashes:
+            return set()
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.server_url}/api/v1/agents/files/known-hashes",
+                json={"sha256": hashes},
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+            return set(response.json().get("known", []))

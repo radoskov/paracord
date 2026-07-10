@@ -776,3 +776,39 @@ def test_deleting_stub_removes_agent_file(client, auth_headers, db) -> None:
     assert r.status_code in (200, 204)
     db.expire_all()
     assert db.scalar(select(AgentFile).where(AgentFile.local_file_id == "s3")) is None
+
+
+def test_known_hashes_reports_only_linked_content(client, db) -> None:
+    """Issue 1: /agents/files/known-hashes returns hashes whose File is linked to a paper.
+
+    Reconcile uses this to keep a local file indexed when its content still lives on the server
+    under another paper (so deleting a duplicate record no longer un-indexes the surviving file).
+    """
+    from app.models.file import File, FileWorkLink
+    from app.models.work import Work
+
+    _agent, headers = _agent_with_token(db)
+
+    linked = File(sha256="a" * 64, size_bytes=10, original_filename="p.pdf", status="extracted")
+    orphan = File(sha256="b" * 64, size_bytes=10, original_filename="o.pdf", status="extracted")
+    work = Work(canonical_title="Owner", normalized_title="owner")
+    db.add_all([linked, orphan, work])
+    db.flush()
+    db.add(FileWorkLink(file_id=linked.id, work_id=work.id))
+    db.commit()
+
+    r = client.post(
+        "/api/v1/agents/files/known-hashes",
+        headers=headers,
+        json={"sha256": ["a" * 64, "b" * 64, "c" * 64]},
+    )
+    assert r.status_code == 200
+    known = set(r.json()["known"])
+    assert "a" * 64 in known  # linked to a paper → still on the server
+    assert "b" * 64 not in known  # File exists but backs no paper
+    assert "c" * 64 not in known  # unknown hash
+
+
+def test_known_hashes_requires_agent_token(client) -> None:
+    r = client.post("/api/v1/agents/files/known-hashes", json={"sha256": ["a" * 64]})
+    assert r.status_code == 401
