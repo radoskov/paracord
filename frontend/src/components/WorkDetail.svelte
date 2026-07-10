@@ -331,6 +331,15 @@
     });
   }
 
+  // Import a citing paper into the library from its DOI (creates a real, idempotent library paper).
+  async function importCiter(doi: string | null): Promise<void> {
+    if (!doi) return;
+    await run(async () => {
+      const res = await client.importByIdentifier('doi', doi);
+      message = res.created ? `Imported “${doi}” into the library.` : `“${doi}” is already in the library.`;
+    });
+  }
+
   let related: RelatedWork[] = [];
   let relatedLoaded = false;
   async function loadRelated(): Promise<void> {
@@ -1404,6 +1413,14 @@
               {#if c.doi}<a class="ref-badge ref-badge-link" href={`https://doi.org/${c.doi}`}
                   target="_blank" rel="noopener noreferrer" title="Open at doi.org">doi:{c.doi}</a>{/if}
             </small>
+            {#if c.doi}
+              <div class="ref-actions">
+                <button type="button" class="secondary small" on:click={() => importCiter(c.doi)}
+                  disabled={loading || !canModify}
+                  title={canModify ? 'Create a library paper from this citing paper' : INSUFFICIENT_ROLE}
+                  >Import</button>
+              </div>
+            {/if}
           </li>
         {/each}
       </ol>

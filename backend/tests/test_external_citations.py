@@ -1,10 +1,9 @@
 """External citing papers (batch 10, issue 8): fetch (OpenAlex→S2), store, panel + graph nodes."""
 
-
-from app.models.external_citation import ExternalCitation
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.work import Work
 from app.services import citing_papers as cp
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 OPENALEX_RESOLVE = {"id": "https://openalex.org/W100"}
 OPENALEX_CITES = {
@@ -116,10 +115,45 @@ def test_fetch_endpoint_stores_and_panel_returns(client, auth_headers, db, monke
     assert body["citation_count"] == 42
     assert [i["title"] for i in body["items"]] == ["Cite A"]
     assert body["items"][0]["authors"] == "X Y"
-    # Persisted + returned by the read endpoint.
-    assert db.scalar(select(ExternalCitation).where(ExternalCitation.work_id == work.id))
+    # Persisted (external paper + link) and returned by the read endpoint.
+    assert db.scalar(select(ExternalCitationLink).where(ExternalCitationLink.work_id == work.id))
+    assert db.scalar(select(ExternalPaper).where(ExternalPaper.doi == "10.1/a"))
     got = client.get(f"/api/v1/works/{work.id}/citing-papers", headers=headers)
     assert got.status_code == 200 and got.json()["items"][0]["title"] == "Cite A"
+
+
+def test_store_dedups_shared_citer_across_works(db):
+    """A citing paper (same DOI) that cites two works is stored ONCE and linked twice."""
+    w1 = _work(db, doi="10.1/one")
+    w2 = _work(db, doi="10.1/two")
+    citer = cp.CitingPaper(source="openalex", title="Shared Citer", year=2022, doi="10.9/shared")
+    cp.store_citing_papers(db, work=w1, papers=[citer], source="openalex")
+    cp.store_citing_papers(db, work=w2, papers=[citer], source="openalex")
+    db.commit()
+    assert db.scalar(select(func.count()).select_from(ExternalPaper)) == 1  # deduped
+    assert db.scalar(select(func.count()).select_from(ExternalCitationLink)) == 2  # linked twice
+
+
+def test_refetch_replaces_links_and_gcs_orphans(db):
+    """Refetching a work replaces its links; an external paper with no remaining link is removed."""
+    work = _work(db, doi="10.1/base")
+    cp.store_citing_papers(
+        db,
+        work=work,
+        papers=[cp.CitingPaper(source="openalex", title="Old", doi="10.9/old")],
+        source="openalex",
+    )
+    db.commit()
+    cp.store_citing_papers(
+        db,
+        work=work,
+        papers=[cp.CitingPaper(source="openalex", title="New", doi="10.9/new")],
+        source="openalex",
+    )
+    db.commit()
+    keys = set(db.scalars(select(ExternalPaper.dedup_key)).all())
+    assert keys == {"doi:10.9/new"}  # the orphaned "old" paper was GC'd
+    assert db.scalar(select(func.count()).select_from(ExternalCitationLink)) == 1
 
 
 def test_fetch_requires_identifier(client, auth_headers, db):
@@ -132,11 +166,12 @@ def test_fetch_requires_identifier(client, auth_headers, db):
 
 def test_reference_graph_includes_citing_nodes(client, auth_headers, db):
     work = _work(db, doi="10.1/base")
-    db.add(
-        ExternalCitation(
-            work_id=work.id, source="openalex", title="Citing X", year=2022, doi="10.9/x"
-        )
+    paper = ExternalPaper(
+        dedup_key="doi:10.9/x", source="openalex", title="Citing X", year=2022, doi="10.9/x"
     )
+    db.add(paper)
+    db.flush()
+    db.add(ExternalCitationLink(external_paper_id=paper.id, work_id=work.id))
     db.commit()
     headers = auth_headers("owner")
     without = client.get(f"/api/v1/works/{work.id}/reference-graph", headers=headers).json()

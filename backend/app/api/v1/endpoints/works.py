@@ -1568,19 +1568,31 @@ class CitingPapersResponse(BaseModel):
 
 
 def _citing_papers_response(db: Session, work: Work) -> CitingPapersResponse:
-    from app.models.external_citation import ExternalCitation
+    from app.models.external_citation import ExternalCitationLink, ExternalPaper
 
-    rows = list(
-        db.scalars(
-            select(ExternalCitation)
-            .where(ExternalCitation.work_id == work.id)
-            .order_by(ExternalCitation.year.desc().nullslast(), ExternalCitation.title)
-        ).all()
-    )
+    rows = db.execute(
+        select(ExternalPaper, ExternalCitationLink.fetched_at)
+        .join(ExternalCitationLink, ExternalCitationLink.external_paper_id == ExternalPaper.id)
+        .where(ExternalCitationLink.work_id == work.id)
+        .order_by(ExternalPaper.year.desc().nullslast(), ExternalPaper.title)
+    ).all()
+    items = [
+        CitingPaperRead(
+            id=paper.id,
+            source=paper.source,
+            external_id=paper.external_id,
+            title=paper.title,
+            authors=paper.authors,
+            year=paper.year,
+            doi=paper.doi,
+            venue=paper.venue,
+        )
+        for paper, _fetched in rows
+    ]
     return CitingPapersResponse(
-        items=[CitingPaperRead.model_validate(r) for r in rows],
-        source=rows[0].source if rows else None,
-        fetched_at=rows[0].fetched_at if rows else None,
+        items=items,
+        source=rows[0][0].source if rows else None,
+        fetched_at=rows[0][1] if rows else None,
         citation_count=work.citation_count,
         citation_count_source=work.citation_count_source,
     )

@@ -17,10 +17,13 @@ summary venue/author sub-tabs, external citing papers). Plan: `docs/WORKPLAN_202
 (design forks resolved by owner); handoff: `docs/agent_handoffs/2026-07-10-issue-batch-10.md`. On
 `main` (not pushed). One commit per logical chunk; verified in the API + frontend containers.
 
-- **8 — external citing papers.** New `external_citations` table + `citing_papers` service (OpenAlex
-  `filter=cites:` → Semantic Scholar `/citations` fallback; Crossref gives count only). Endpoints
-  `GET/POST /works/{id}/citing-papers[/fetch]` (on-demand, cap 100); paper-view "Citing papers" panel;
-  reference graph gains `include_citing` → incoming `citing` nodes + a "Show citing papers" toggle. ✅ done.
+- **8 — external citing papers.** `citing_papers` service (OpenAlex `filter=cites:` → Semantic Scholar
+  `/citations` fallback; Crossref gives count only). **Normalized, deduplicated permanent storage**
+  (`external_papers` + `external_citation_links`, migrations 0057→0058): a citer shared by several
+  works is stored once + referenced; orphans GC'd on refetch. Endpoints
+  `GET/POST /works/{id}/citing-papers[/fetch]` (on-demand, cap 100); paper-view "Citing papers" panel
+  with per-row Import; reference graph `include_citing` → incoming `citing` nodes + "Show citing
+  papers" toggle. ✅ done.
 
 - **3 — "Set metadata from best source" → "all fields".** `field_name: "all"` on
   `POST /works/bulk-apply-metadata` promotes the best assertion for every promotable field

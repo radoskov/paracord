@@ -12,11 +12,11 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.models.external_citation import ExternalCitation
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.work import Work
 from app.services.metadata_enrichment import (
     OPENALEX_API,
@@ -184,25 +184,85 @@ def fetch_citing_papers(
     return [], None
 
 
+def _dedup_key(paper: CitingPaper) -> str:
+    """Stable identity for deduping an external paper: normalized DOI, else source:external_id."""
+    if paper.doi:
+        return f"doi:{paper.doi.strip().lower()}"
+    return f"{paper.source}:{paper.external_id or ''}"
+
+
+def _upsert_external_paper(
+    db: Session, paper: CitingPaper, key: str, now: datetime
+) -> ExternalPaper:
+    """Fetch-or-create the deduplicated ExternalPaper for ``key``, refreshing its metadata."""
+    existing = db.scalar(select(ExternalPaper).where(ExternalPaper.dedup_key == key))
+    authors = "; ".join(paper.authors) if paper.authors else None
+    if existing is not None:
+        # Refresh metadata from the newer fetch (prefer non-empty values).
+        existing.title = paper.title or existing.title
+        existing.authors = authors or existing.authors
+        existing.year = paper.year if paper.year is not None else existing.year
+        existing.venue = paper.venue or existing.venue
+        existing.doi = paper.doi or existing.doi
+        existing.updated_at = now
+        return existing
+    created = ExternalPaper(
+        dedup_key=key,
+        source=paper.source,
+        external_id=paper.external_id,
+        doi=paper.doi,
+        title=paper.title,
+        authors=authors,
+        year=paper.year,
+        venue=paper.venue,
+        first_seen_at=now,
+        updated_at=now,
+    )
+    db.add(created)
+    db.flush()
+    return created
+
+
 def store_citing_papers(
     db: Session, *, work: Work, papers: list[CitingPaper], source: str
-) -> list[ExternalCitation]:
-    """Replace the work's cached citing papers with a fresh fetch. Caller commits."""
-    db.execute(delete(ExternalCitation).where(ExternalCitation.work_id == work.id))
+) -> list[ExternalCitationLink]:
+    """Replace the work's citing links with a fresh fetch, deduplicating external papers.
+
+    Each citing paper is upserted into the shared ``external_papers`` table (so a paper that cites
+    several works is stored once), then linked to this work. Orphaned external papers (no remaining
+    link after the replace) are removed. Caller commits.
+    """
     now = datetime.now(UTC)
-    rows = [
-        ExternalCitation(
-            work_id=work.id,
-            source=source,
-            external_id=p.external_id,
-            title=p.title,
-            authors="; ".join(p.authors) if p.authors else None,
-            year=p.year,
-            doi=p.doi,
-            venue=p.venue,
-            fetched_at=now,
+    # Remember which external papers this work linked to, to GC any that become orphaned.
+    prev_paper_ids = set(
+        db.scalars(
+            select(ExternalCitationLink.external_paper_id).where(
+                ExternalCitationLink.work_id == work.id
+            )
+        ).all()
+    )
+    db.execute(delete(ExternalCitationLink).where(ExternalCitationLink.work_id == work.id))
+
+    links: list[ExternalCitationLink] = []
+    seen_keys: set[str] = set()
+    for paper in papers:
+        key = _dedup_key(paper)
+        if key in seen_keys:  # same paper listed twice in one fetch → link once
+            continue
+        seen_keys.add(key)
+        external = _upsert_external_paper(db, paper, key, now)
+        link = ExternalCitationLink(external_paper_id=external.id, work_id=work.id, fetched_at=now)
+        db.add(link)
+        links.append(link)
+
+    db.flush()
+    # GC: drop previously-linked external papers that now have no links at all.
+    for paper_id in prev_paper_ids:
+        still_linked = db.scalar(
+            select(ExternalCitationLink.id).where(
+                ExternalCitationLink.external_paper_id == paper_id
+            )
         )
-        for p in papers
-    ]
-    db.add_all(rows)
-    return rows
+        if still_linked is None:
+            db.execute(delete(ExternalPaper).where(ExternalPaper.id == paper_id))
+    return links

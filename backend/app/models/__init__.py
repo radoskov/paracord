@@ -12,7 +12,7 @@ from app.models.citation_worklist import MissingWorkDecision
 from app.models.custom_theme import CustomTheme
 from app.models.duplicate import DuplicateCandidate
 from app.models.embedding_registry import EmbeddingModelRegistry
-from app.models.external_citation import ExternalCitation
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileSegment, FileWorkLink, Location
 from app.models.group import DefaultGrant, Group, GroupGrant, GroupMembership
 from app.models.import_root import ImportRoot
@@ -42,7 +42,8 @@ __all__ = [
     "DuplicateCandidate",
     "Embedding",
     "EmbeddingModelRegistry",
-    "ExternalCitation",
+    "ExternalCitationLink",
+    "ExternalPaper",
     "File",
     "FileSegment",
     "FileWorkLink",

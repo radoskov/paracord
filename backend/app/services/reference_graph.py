@@ -212,14 +212,15 @@ def build_reference_graph(
                 )
 
     if include_citing:
-        # Incoming external citing papers (batch10 #8): one node per cached ExternalCitation, with
-        # an edge pointing INTO the base paper so the direction (they cite us) is visible.
-        from app.models.external_citation import ExternalCitation
+        # Incoming external citing papers (batch10 #8): one node per linked (deduplicated)
+        # ExternalPaper, with an edge pointing INTO the base paper so the direction is visible.
+        from app.models.external_citation import ExternalCitationLink, ExternalPaper
 
         citing = db.scalars(
-            select(ExternalCitation)
-            .where(ExternalCitation.work_id == work.id)
-            .order_by(ExternalCitation.year.desc().nullslast())
+            select(ExternalPaper)
+            .join(ExternalCitationLink, ExternalCitationLink.external_paper_id == ExternalPaper.id)
+            .where(ExternalCitationLink.work_id == work.id)
+            .order_by(ExternalPaper.year.desc().nullslast())
         ).all()
         for ec in citing:
             node_id = f"citing:{ec.id}"

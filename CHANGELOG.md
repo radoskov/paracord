@@ -11,11 +11,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 - **External citing papers — see who cites a paper, and show them in the reference graph.** The paper
   view gains a **Citing papers** panel: a "Fetch citing papers" button retrieves the papers that cite
   this one from **OpenAlex** (falling back to **Semantic Scholar**) — Crossref only exposes the count,
-  not the list — and caches up to 100 (title, authors, year, venue, DOI), shown with "as of" +
-  provenance. The Reference Graph (from the paper view) gains a **"Show citing papers"** toggle that
-  adds those papers as incoming `citing` nodes with edges pointing into the base paper. New
-  `external_citations` table; `GET/POST /works/{id}/citing-papers[/fetch]`;
-  `reference-graph?include_citing=true`. Batch 10, issue 8.
+  not the list — up to 100 (title, authors, year, venue, DOI), shown with "as of" + provenance, each
+  with an **Import** action to add it to the library. Citing papers are stored **permanently and
+  deduplicated** as metadata-only "external papers" (a paper that cites several of your works is
+  stored once and referenced), so they never re-fetch unless you refresh. The Reference Graph gains a
+  **"Show citing papers"** toggle adding them as incoming `citing` nodes with edges into the base
+  paper. New `external_papers` + `external_citation_links` tables;
+  `GET/POST /works/{id}/citing-papers[/fetch]`; `reference-graph?include_citing=true`. Batch 10, issue 8.
 
 - **Venue & Author sub-tabs in the Citation Summary.** The Citation Summary tab now has
   **Overview / Venues / Authors** sub-tabs. Venues shows where the scope's papers are typically
