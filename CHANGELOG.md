@@ -8,6 +8,17 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **Move a PDF between papers, and merge two arbitrary papers.** The paper detail gains a "Move…"
+  action on each attached file (re-points its link to another paper via
+  `POST /works/{id}/files/{file_id}/move`) and a "Merge…" action that folds any other paper into
+  this one (`POST /works/{id}/merge` + `/merge-preview`, reusing the duplicate-resolution
+  `merge_works`; reversible via the existing `/unmerge`). New `WorkPicker` typeahead component. Lets
+  you consolidate a stub + a full record without deleting and re-uploading the PDF (issue 4).
+- **Content-aware agent reconcile.** New `POST /agents/files/known-hashes` reports which of the
+  agent's file hashes still exist as library content; `reconcile` uses it so deleting a *duplicate*
+  paper record (whose PDF lives on under the surviving canonical paper) no longer proposes
+  un-indexing the still-present local file — only files whose content is genuinely gone are flagged
+  (issue 1).
 - **"Both" (hybrid) mode in the Library search.** The Library search-mode dropdown gains a **both**
   option that runs the existing unified hybrid engine (BM25F+ lexical fused with dense semantic via
   Reciprocal Rank Fusion) instead of metadata-only or semantic-only. `SavedFilter.search_mode` now
@@ -25,6 +36,19 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Changed / Fixed
 
+- **Find-on-web no longer reports a failed download as "downloaded".** The batch counter advanced for
+  every processed candidate, so an allow-list failure (`status:"error"`) still showed "1/1
+  downloaded". It now counts only `attached`/`deduped` and, when some items failed, shows
+  `<ok>/<total> downloaded (N failed)` in red (issue 3).
+- **Jobs tab no longer freezes or gets stuck on "Loading…".** An absent `counts`/`jobs` in the
+  payload could throw during render (freezing the mounted tab); a failed first load left a permanent
+  "Loading…"; a stalled poll never resolved. The payload is now normalised, the last-good status is
+  kept on a refresh error (tab stays interactive), a Retry placeholder shows only on a failed first
+  load, overlapping polls are guarded, and `getJobs` has a 15s timeout. A positive filter count with
+  no jobs in the recent window is now explained (issue 2).
+- **Jobs nav semaphore is easier to read.** Slightly larger dot with a soft glow; the green (idle)
+  and blue (running/queued) states lightened and the blue leaned toward cyan so they no longer look
+  alike at a glance (issue 2).
 - **Agent "Scan & push" no longer creates duplicate papers for files already in the library.**
   `agent_files.ingest_manifest` now looks up an existing `File` by SHA-256 before minting a
   filename-titled `index_only` stub Work, linking to that file's existing (properly-titled) Work

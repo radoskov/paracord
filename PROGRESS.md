@@ -9,6 +9,32 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_9 (2026-07-10)
+
+Four more owner-reported items (reconcile false-positive, Jobs tab, find-on-web counter,
+record consolidation) on `main` (not pushed). Plan: `docs/WORKPLAN_2026-07-10_batch9.md`;
+handoff: `docs/agent_handoffs/2026-07-10-issue-batch-9.md`. One commit per logical chunk;
+verified in the API + agent + frontend containers.
+
+- **1 — reconcile wanted to un-index everything after deleting duplicates.** Root cause: reconcile
+  diffs the local index against `get_my_files`, and deleting a paper record deletes its `AgentFile`
+  row, so a just-deleted duplicate's file looked "absent". Made it content-aware: new
+  `POST /agents/files/known-hashes` reports which of the agent's hashes still exist as a `File`
+  linked to a paper; reconcile drops those candidates (content survives under the canonical paper),
+  flagging only files whose content is genuinely gone. Degrades to the raw diff on an older server.
+- **2 — Jobs tab.** (a) Nav semaphore enlarged with a soft glow, green/blue lightened + blue leaned
+  cyan so idle vs running read apart. (b) Freeze/stuck-loading hardened: payload normalised so an
+  absent `counts`/`jobs` can't throw mid-render, last-good status kept on a refresh error (tab stays
+  interactive), a Retry placeholder only on a failed first load, overlapping-poll guard, 15s
+  `getJobs` timeout, and a note explaining a positive filter count with no jobs in the recent window.
+- **3 — find-on-web "1/1 downloaded" on failure.** The counter incremented per processed item; now
+  only `attached`/`deduped` count as downloaded, and a failed batch shows `<ok>/<total>` in red with
+  `(N failed)`.
+- **4 — consolidate two records.** Added move-file (`POST /works/{id}/files/{file_id}/move`,
+  re-points a `FileWorkLink`) and exposed the existing `merge_works` for arbitrary papers
+  (`POST /works/{id}/merge` + `/merge-preview`, reversible via the existing `/unmerge`). New
+  `WorkPicker` typeahead + "Move…"/"Merge…" actions in the paper detail.
+
 ## issue_batch_8 (2026-07-09)
 
 Eight owner-reported items (test warnings, library UX, extraction robustness, jobs status, agent
