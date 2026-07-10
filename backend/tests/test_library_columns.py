@@ -17,7 +17,11 @@ def _work(db, title: str, **kwargs) -> Work:
 
 def _file(db, sha: str, *, status: str = "extracted", quality: str = "good") -> File:
     file = File(
-        sha256=sha, size_bytes=100, original_filename="p.pdf", status=status, text_layer_quality=quality
+        sha256=sha,
+        size_bytes=100,
+        original_filename="p.pdf",
+        status=status,
+        text_layer_quality=quality,
     )
     db.add(file)
     db.flush()
@@ -44,8 +48,20 @@ def test_library_columns_file_count_tags_and_badges(client, auth_headers, db):
     db.add(TagLink(tag_id=tag.id, entity_type="work", entity_id=b.id))
     db.add_all(
         [
-            MetadataAssertion(entity_type="work", entity_id=b.id, field_name="title", value="Beta", source="grobid"),
-            MetadataAssertion(entity_type="work", entity_id=b.id, field_name="title", value="Beta v2", source="crossref"),
+            MetadataAssertion(
+                entity_type="work",
+                entity_id=b.id,
+                field_name="title",
+                value="Beta",
+                source="grobid",
+            ),
+            MetadataAssertion(
+                entity_type="work",
+                entity_id=b.id,
+                field_name="title",
+                value="Beta v2",
+                source="crossref",
+            ),
         ]
     )
 
