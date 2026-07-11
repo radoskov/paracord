@@ -50,6 +50,17 @@
 
 <Modal title="Columns" {onClose}>
   <p class="muted">Choose which columns show and drag-free reorder them. Title is always shown.</p>
+  <div class="actions actions-top">
+    <button type="button" on:click={apply} title="Apply this column layout to the list">Apply</button>
+    <button type="button" class="secondary" on:click={onClose}
+      title="Discard changes and close">Cancel</button>
+  </div>
+  {#if overCap}
+    <p class="warn">
+      {visibleCount} columns selected — more than {SOFT_COLUMN_CAP} can crowd the list on narrow
+      screens. You can still apply it.
+    </p>
+  {/if}
   <ul class="cols">
     {#each localOrder as id, i (id)}
       <li>
@@ -78,17 +89,6 @@
       </li>
     {/each}
   </ul>
-  {#if overCap}
-    <p class="warn">
-      {visibleCount} columns selected — more than {SOFT_COLUMN_CAP} can crowd the list on narrow
-      screens. You can still apply it.
-    </p>
-  {/if}
-  <div class="actions">
-    <button type="button" on:click={apply} title="Apply this column layout to the list">Apply</button>
-    <button type="button" class="secondary" on:click={onClose}
-      title="Discard changes and close">Cancel</button>
-  </div>
 </Modal>
 
 <style>
@@ -149,5 +149,9 @@
     display: flex;
     gap: 0.5rem;
     margin-top: 0.5rem;
+  }
+
+  .actions-top {
+    margin-bottom: 0.5rem;
   }
 </style>

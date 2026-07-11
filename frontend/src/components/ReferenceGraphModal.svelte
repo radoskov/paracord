@@ -21,7 +21,7 @@
   let graph: ReferenceGraph | null = null;
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
-  let includeCiting = false;
+  let includeCiting = true;
   let yAxis = 'weighted';
   let colorBy = 'kind';
   let showHelp = false;
