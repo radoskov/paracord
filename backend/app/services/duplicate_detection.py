@@ -324,10 +324,21 @@ def _fuzzy_title_candidates(db: Session, work: Work) -> list[DuplicateCandidate]
 
 
 def split_arxiv_id(arxiv_id: str | None) -> dict[str, str | None]:
-    """Return arXiv base ID and optional version suffix."""
+    """Return arXiv base ID and optional version suffix.
+
+    Tolerates the decorations seen in extracted references and metadata: ``http``/``https`` schemes,
+    the ``arxiv.org/abs/`` and ``arxiv.org/pdf/`` paths, an ``arXiv:`` prefix (any case), and a
+    trailing ``.pdf``. Prefix stripping is case-insensitive (the id is lowercased first; the version
+    regex is ``re.IGNORECASE`` and the emitted base is lowercase anyway).
+    """
     if not arxiv_id:
         return {"base": None, "version": None}
-    cleaned = arxiv_id.strip().removeprefix("arXiv:").removeprefix("https://arxiv.org/abs/")
+    cleaned = arxiv_id.strip().lower()
+    for prefix in ("https://", "http://"):
+        cleaned = cleaned.removeprefix(prefix)
+    for prefix in ("arxiv.org/abs/", "arxiv.org/pdf/", "arxiv:"):
+        cleaned = cleaned.removeprefix(prefix)
+    cleaned = cleaned.removesuffix(".pdf")
     match = _ARXIV_VERSION_RE.match(cleaned)
     if not match:
         return {"base": cleaned.lower(), "version": None}
