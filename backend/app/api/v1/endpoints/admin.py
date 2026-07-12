@@ -48,6 +48,8 @@ class AppConfigOut(BaseModel):
     max_queue_len: int
     # Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
     use_fuzzy_match_as_confirmed: bool
+    # Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.
+    reference_rescan_on_startup: bool
 
 
 class AppConfigUpdate(BaseModel):
@@ -59,6 +61,7 @@ class AppConfigUpdate(BaseModel):
     rq_worker_count: int | None = Field(default=None, ge=1)
     max_queue_len: int | None = Field(default=None, ge=1)
     use_fuzzy_match_as_confirmed: bool | None = Field(default=None)
+    reference_rescan_on_startup: bool | None = Field(default=None)
 
 
 class AgentOut(BaseModel):
@@ -285,6 +288,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         rq_worker_count=app_config_service.effective_rq_worker_count(db),
         max_queue_len=app_config_service.effective_max_queue_len(db),
         use_fuzzy_match_as_confirmed=app_config_service.effective_use_fuzzy_match_as_confirmed(db),
+        reference_rescan_on_startup=app_config_service.effective_reference_rescan_on_startup(db),
     )
 
 
@@ -340,6 +344,12 @@ def update_app_config(
             changed["use_fuzzy_match_as_confirmed"] = (
                 app_config_service.update_use_fuzzy_match_as_confirmed(
                     db, value=payload.use_fuzzy_match_as_confirmed, actor_user_id=actor.id
+                )
+            )
+        if payload.reference_rescan_on_startup is not None:
+            changed["reference_rescan_on_startup"] = (
+                app_config_service.update_reference_rescan_on_startup(
+                    db, value=payload.reference_rescan_on_startup, actor_user_id=actor.id
                 )
             )
     except ValueError as exc:

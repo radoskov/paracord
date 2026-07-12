@@ -139,6 +139,32 @@ def update_use_fuzzy_match_as_confirmed(
     return bool(row.use_fuzzy_match_as_confirmed)
 
 
+def effective_reference_rescan_on_startup(
+    db: Session, *, settings: Settings | None = None
+) -> bool:
+    """Whether the API enqueues a full reference rematch on startup (F3a). Default OFF.
+
+    An absent app_config row or a NULL column reproduces the OFF default.
+    """
+    if not _app_config_table_present(db):
+        return False
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.reference_rescan_on_startup is None:
+        return False
+    return bool(row.reference_rescan_on_startup)
+
+
+def update_reference_rescan_on_startup(
+    db: Session, *, value: bool, actor_user_id: uuid.UUID | None = None
+) -> bool:
+    """Persist the reference-rescan-on-startup toggle (F3a). Returns the stored value."""
+    row = _ensure_row(db)
+    row.reference_rescan_on_startup = bool(value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return bool(row.reference_rescan_on_startup)
+
+
 def _ensure_row(db: Session) -> AppConfig:
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
     if row is None:

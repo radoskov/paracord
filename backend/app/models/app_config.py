@@ -82,6 +82,10 @@ class AppConfig(Base):
     # row or NULL → False) keeps fuzzy candidates as suggestions. The numeric matcher params live in
     # the static ``Settings``/YAML; only this toggle needs runtime edits, hence its home here.
     use_fuzzy_match_as_confirmed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Reference→library matching (F3a): when ON, the API enqueues a full library-wide reference
+    # rematch on startup (best-effort, like the D7 sweep) so the stored reference→work resolution
+    # stays fresh across deploys. OFF by default (an absent row or a NULL value → False).
+    reference_rescan_on_startup: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

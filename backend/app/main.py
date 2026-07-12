@@ -44,6 +44,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.info("Startup recovery sweep: %s", result)
     except Exception as exc:  # noqa: BLE001 - startup must not fail on a recovery hiccup
         logger.warning("Startup recovery sweep skipped: %s", exc)
+    # F3a — optionally re-run a full reference→work rematch on startup (owner toggle) so the stored
+    # resolution stays fresh across deploys. Best-effort + coalesced (deterministic job id), so it is
+    # safe to run from several API workers; a dead Redis just skips it (enqueue returns None).
+    try:
+        from app.db.session import SessionLocal
+        from app.services.app_config import effective_reference_rescan_on_startup
+
+        with SessionLocal() as db:
+            do_rescan = effective_reference_rescan_on_startup(db)
+        if do_rescan:
+            from app.workers.queue import enqueue_reference_rescan
+
+            logger.info("Startup reference rescan enqueued: %s", enqueue_reference_rescan())
+    except Exception as exc:  # noqa: BLE001 - startup must not fail on a rescan hiccup
+        logger.warning("Startup reference rescan skipped: %s", exc)
     yield
 
 
