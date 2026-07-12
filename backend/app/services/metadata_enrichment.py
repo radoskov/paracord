@@ -459,6 +459,25 @@ def enrich_work(
             work.citation_count_source = source
             work.citation_count_fetched_at = datetime.now(UTC)
             break
+    if promoted:
+        # Enrichment can be the moment this work first gains its DOI/arXiv id/title — exactly the
+        # fields the local matcher keys on. Reverse-rescan so still-external references and cached
+        # citing papers elsewhere in the library link up now, not at the next full rescan.
+        # Local imports: citing_papers imports this module (cycle guard).
+        from app.services.app_config import (  # noqa: PLC0415
+            effective_use_fuzzy_match_as_confirmed,
+        )
+        from app.services.citing_papers import (  # noqa: PLC0415
+            rescan_external_papers_for_new_work,
+        )
+        from app.services.reference_matching import (  # noqa: PLC0415
+            rescan_references_for_new_work,
+        )
+
+        rescan_references_for_new_work(
+            db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        )
+        rescan_external_papers_for_new_work(db, work)
     if sources:
         work.updated_at = datetime.now(UTC)
     return {"sources": sources, "promoted": promoted, "failed": failed}

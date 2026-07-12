@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.annotation import Annotation
 from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.organization import ShelfWork, TagLink
@@ -232,6 +233,9 @@ def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
             "reference_links_out": [],
             "reference_links_dropped": [],
             "references_in": [],
+            "external_citation_links": [],
+            "external_citation_links_dropped": [],
+            "external_resolved": [],
             "mentions_out": [],
             "mentions_in": [],
             "annotations": [],
@@ -252,6 +256,7 @@ def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
     ref_ids, mention_ids = redirect_references(db, source_id=source.id, base_id=base.id)
     record["moved"]["references_in"] = ref_ids
     record["moved"]["mentions_in"] = mention_ids
+    _move_external_citations(db, base=base, source=source, record=record)
 
     if base.main_file_id is None and source.main_file_id is not None:
         base.main_file_id = source.main_file_id
@@ -289,6 +294,37 @@ def redirect_references(
         mention.resolved_cited_work_id = base_id
         mention_ids.append(str(mention.id))
     return ref_ids, mention_ids
+
+
+def _move_external_citations(db: Session, *, base: Work, source: Work, record: dict) -> None:
+    """Incoming external citations follow the surviving paper.
+
+    Repoints the source's citing links onto the base (dropping any whose external paper already
+    cites the base — the link table is unique per (paper, work)), and repoints external papers the
+    local matcher resolved to the source. Recorded for exact unmerge reversal.
+    """
+    base_paper_ids = set(
+        db.scalars(
+            select(ExternalCitationLink.external_paper_id).where(
+                ExternalCitationLink.work_id == base.id
+            )
+        ).all()
+    )
+    for link in db.scalars(
+        select(ExternalCitationLink).where(ExternalCitationLink.work_id == source.id)
+    ).all():
+        if link.external_paper_id in base_paper_ids:
+            record["moved"]["external_citation_links_dropped"].append(str(link.external_paper_id))
+            db.delete(link)
+        else:
+            base_paper_ids.add(link.external_paper_id)
+            link.work_id = base.id
+            record["moved"]["external_citation_links"].append(str(link.id))
+    for paper in db.scalars(
+        select(ExternalPaper).where(ExternalPaper.resolved_work_id == source.id)
+    ).all():
+        paper.resolved_work_id = base.id
+        record["moved"]["external_resolved"].append(str(paper.id))
 
 
 def _finalize_reversible_shadows(db: Session, base: Work) -> None:
@@ -393,6 +429,14 @@ def unmerge_work(db: Session, *, base_id: uuid.UUID, actor: User) -> Work:
     for ref_id in moved.get("reference_links_dropped", []):
         db.add(ReferenceCitation(reference_id=uuid.UUID(ref_id), citing_work_id=shadow.id))
     _move_ids(db, Reference, moved.get("references_in", []), "resolved_work_id", shadow.id)
+    # Incoming external citations: move the repointed links back, recreate the deduped-away ones
+    # (they belonged to the shadow originally), and un-redirect matcher-resolved external papers.
+    _move_ids(
+        db, ExternalCitationLink, moved.get("external_citation_links", []), "work_id", shadow.id
+    )
+    for paper_id in moved.get("external_citation_links_dropped", []):
+        db.add(ExternalCitationLink(external_paper_id=uuid.UUID(paper_id), work_id=shadow.id))
+    _move_ids(db, ExternalPaper, moved.get("external_resolved", []), "resolved_work_id", shadow.id)
     _move_ids(db, CitationMention, moved.get("mentions_out", []), "citing_work_id", shadow.id)
     _move_ids(
         db, CitationMention, moved.get("mentions_in", []), "resolved_cited_work_id", shadow.id

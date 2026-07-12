@@ -395,18 +395,23 @@ def rescan_reference_matches_job() -> None:
     """Full-library reference→work rematch over every reference (batch 12, off the request path).
 
     Respects the batch-12 status rules per reference (confirmed locked; rejected not re-proposed) and
-    uses the current ``use_fuzzy_match_as_confirmed`` toggle. Committed in one transaction."""
+    uses the current ``use_fuzzy_match_as_confirmed`` toggle. Also rematches every cached external
+    citing paper (the incoming direction — same matcher). Committed in one transaction."""
     from sqlalchemy import select
 
     from app.db.session import SessionLocal
     from app.models.citation import Reference
+    from app.models.external_citation import ExternalPaper
     from app.services.app_config import effective_use_fuzzy_match_as_confirmed
+    from app.services.citing_papers import resolve_external_paper
     from app.services.reference_matching import resolve_and_persist
 
     with SessionLocal() as db:
         fuzzy = effective_use_fuzzy_match_as_confirmed(db)
         for reference in db.scalars(select(Reference)).all():
             resolve_and_persist(db, reference, fuzzy_as_confirmed=fuzzy)
+        for external in db.scalars(select(ExternalPaper)).all():
+            resolve_external_paper(db, external)
         db.commit()
 
 

@@ -16,6 +16,7 @@ from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileSegment, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
@@ -48,6 +49,8 @@ _TABLES = [
     Annotation.__table__,
     MetadataAssertion.__table__,
     DuplicateCandidate.__table__,
+    ExternalPaper.__table__,
+    ExternalCitationLink.__table__,
 ]
 
 

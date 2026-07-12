@@ -37,6 +37,7 @@ from app.services.app_config import (
 )
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
+from app.services.citing_papers import rescan_external_papers_for_new_work
 from app.services.doi_conflict import message_from_exception
 from app.services.duplicate_resolution import (
     has_reversible_shadow,
@@ -1049,6 +1050,7 @@ def import_reference_as_work(
     rescan_references_for_new_work(
         db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
     )
+    rescan_external_papers_for_new_work(db, work)
     db.commit()
     db.refresh(work)
     enqueue_embedding(work.id)
@@ -1087,6 +1089,7 @@ def create_work(
     rescan_references_for_new_work(
         db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
     )
+    rescan_external_papers_for_new_work(db, work)
     db.commit()
     enqueue_embedding(work.id)  # index off the search read path (best-effort)
     return work
@@ -1468,7 +1471,16 @@ def delete_work(
     # new status (external, or a fresh local_match if a duplicate still covers it), keeping the
     # stored resolution accurate instead of leaving a stale one until the next rescan.
     orphaned_refs = list(
-        db.scalars(select(Reference).where(Reference.resolved_work_id == work_id)).all()
+        db.scalars(
+            select(Reference).where(
+                or_(
+                    Reference.resolved_work_id == work_id,
+                    # A soft "likely local" guess pointing here would otherwise survive as a
+                    # stale likely_match with a NULLed suggestion (FK SET NULL) — re-resolve too.
+                    Reference.suggested_work_id == work_id,
+                )
+            )
+        ).all()
     )
     for ref in orphaned_refs:
         ref.resolved_work_id = None
@@ -1480,6 +1492,32 @@ def delete_work(
         .where(CitationMention.resolved_cited_work_id == work_id)
         .values(resolved_cited_work_id=None)
     )
+
+    # Incoming external citations: link rows cascade with the work, but the shared ExternalPaper
+    # rows they pointed at would linger until some other work's refetch GCs them — prune the ones
+    # whose ONLY link was this work now. Papers the matcher had resolved to this work get their
+    # FK nulled by ON DELETE SET NULL (they stay valid citers of other works).
+    from app.models.external_citation import ExternalCitationLink, ExternalPaper
+
+    linked_paper_ids = set(
+        db.scalars(
+            select(ExternalCitationLink.external_paper_id).where(
+                ExternalCitationLink.work_id == work_id
+            )
+        ).all()
+    )
+    if linked_paper_ids:
+        still_linked_papers = set(
+            db.scalars(
+                select(ExternalCitationLink.external_paper_id).where(
+                    ExternalCitationLink.external_paper_id.in_(linked_paper_ids),
+                    ExternalCitationLink.work_id != work_id,
+                )
+            ).all()
+        )
+        orphaned_papers = linked_paper_ids - still_linked_papers
+        if orphaned_papers:
+            db.execute(delete(ExternalPaper).where(ExternalPaper.id.in_(orphaned_papers)))
 
     # B6: drop any local-agent file that created/owns this paper as a stub, so deleting the paper on
     # the server makes it vanish from the agent's server view and a "Reconcile with server" un-indexes
@@ -1876,6 +1914,8 @@ class CitingPaperRead(BaseModel):
     year: int | None = None
     doi: str | None = None
     venue: str | None = None
+    # The library work this citing paper IS, when the local matcher recognizes it (in-library citer).
+    resolved_work_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1909,6 +1949,7 @@ def _citing_papers_response(db: Session, work: Work) -> CitingPapersResponse:
             year=paper.year,
             doi=paper.doi,
             venue=paper.venue,
+            resolved_work_id=paper.resolved_work_id,
         )
         for paper, _fetched in rows
     ]
@@ -1953,16 +1994,16 @@ def fetch_citing_papers_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Add a DOI or arXiv id to fetch citing papers",
         )
-    papers, source = cp.fetch_citing_papers(doi=work.doi, arxiv=work.arxiv_id)
+    papers, source, total = cp.fetch_citing_papers(doi=work.doi, arxiv=work.arxiv_id)
     if source is not None:
-        cp.store_citing_papers(db, work=work, papers=papers, source=source)
+        cp.store_citing_papers(db, work=work, papers=papers, source=source, total=total)
         record_event(
             db,
             "citations.citing_fetched",
             actor_user_id=actor.id,
             entity_type="work",
             entity_id=str(work_id),
-            details={"source": source, "count": len(papers)},
+            details={"source": source, "count": len(papers), "total": total},
         )
         db.commit()
     return _citing_papers_response(db, work)

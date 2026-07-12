@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 from app.core.config import Settings
 from app.db.base import Base
+from app.models.app_config import AppConfig
 from app.models.audit import AuditEvent
+from app.models.citation import Reference
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.metadata_enrichment import (
@@ -32,7 +35,18 @@ SEMANTIC_SCHOLAR_JSON = json.loads(
 def db_session(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'enrich.db'}")
     Base.metadata.create_all(
-        bind=engine, tables=[Work.__table__, MetadataAssertion.__table__, AuditEvent.__table__]
+        bind=engine,
+        tables=[
+            Work.__table__,
+            MetadataAssertion.__table__,
+            AuditEvent.__table__,
+            # enrich_work reverse-rescans references + cached citing papers when it promotes
+            # identifiers/title (the AppConfig singleton drives the fuzzy-as-confirmed toggle).
+            AppConfig.__table__,
+            Reference.__table__,
+            ExternalPaper.__table__,
+            ExternalCitationLink.__table__,
+        ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     with session_local() as session:

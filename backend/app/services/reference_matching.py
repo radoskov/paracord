@@ -61,7 +61,28 @@ class ReferenceMatch:
     via: str  # "identifier" | "fuzzy"
 
 
-def _ref_identifier_keys(reference: Reference) -> set[str]:
+@dataclass
+class MatchFields:
+    """The identifier/title/author fields the matcher reads, decoupled from the Reference model.
+
+    Lets other citation-shaped rows (an :class:`~app.models.external_citation.ExternalPaper`
+    citing paper, an import candidate) run through the exact same matching algorithm and gates as a
+    bibliography reference — same F1 behavior in both directions.
+    """
+
+    title: str | None = None
+    normalized_title: str | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    year: int | None = None
+    authors: list[str] | None = None
+
+
+# Everything the matcher reads is present on both Reference and MatchFields (duck-typed).
+Matchable = Reference | MatchFields
+
+
+def _ref_identifier_keys(reference: Matchable) -> set[str]:
     return set(_identifier_keys(doi=reference.doi, arxiv_id=reference.arxiv_id))
 
 
@@ -83,7 +104,7 @@ def _arxiv_base_of(*, arxiv_id: str | None, doi: str | None) -> str | None:
     return base
 
 
-def _identifier_gate_ok(reference: Reference, work: Work, *, gate_enabled: bool) -> bool:
+def _identifier_gate_ok(reference: Matchable, work: Work, *, gate_enabled: bool) -> bool:
     """A candidate is disqualified when an identifier present on *both* sides differs (D2).
 
     An arXiv DOI is compared as an *arXiv id*, not as a DOI: the preprint (arXiv DOI) and the
@@ -107,7 +128,7 @@ def _identifier_gate_ok(reference: Reference, work: Work, *, gate_enabled: bool)
     return not (ref_base and work_base and ref_base != work_base)
 
 
-def _year_ok(reference: Reference, work: Work, settings: Settings) -> bool:
+def _year_ok(reference: Matchable, work: Work, settings: Settings) -> bool:
     if not settings.reference_matching_require_year_match:
         return True
     if reference.year is not None and work.year is not None:
@@ -117,7 +138,7 @@ def _year_ok(reference: Reference, work: Work, settings: Settings) -> bool:
     return True
 
 
-def _author_ok(db: Session, reference: Reference, work: Work, settings: Settings) -> bool:
+def _author_ok(db: Session, reference: Matchable, work: Work, settings: Settings) -> bool:
     """Author-overlap gate (Phase 4), skipped when either side lists no authors."""
     ref_authors = reference.authors or []
     if not ref_authors:
@@ -150,7 +171,7 @@ def _work_author_names(db: Session, work_id: uuid.UUID) -> list[str]:
     return [name.strip() for name in (value or "").split(";") if name.strip()]
 
 
-def _works_by_identifier(db: Session, reference: Reference) -> list[Work]:
+def _works_by_identifier(db: Session, reference: Matchable) -> list[Work]:
     conditions = []
     if reference.doi:
         conditions.append(func.lower(Work.doi) == normalize_doi(reference.doi))
@@ -209,7 +230,7 @@ def _blocking_candidates(db: Session, normalized_title: str) -> list[Work]:
 
 def find_reference_match(
     db: Session,
-    reference: Reference,
+    reference: Matchable,
     *,
     settings: Settings | None = None,
     candidate_works: Sequence[Work] | None = None,

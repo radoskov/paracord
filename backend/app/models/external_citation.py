@@ -32,6 +32,13 @@ class ExternalPaper(Base):
     source: Mapped[str] = mapped_column(String(32))
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    arxiv_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The library work this citing paper IS, when the local matcher recognizes it (identifier match
+    # or a fuzzy match passing the reference-matching gates). Lets the UI mark in-library citers and
+    # the graph link them; NULL = external-only. Maintained by fetch, the rescan job, merge, delete.
+    resolved_work_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("works.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Authors as a "; "-joined display string (matches the authors metadata convention).
     authors: Mapped[str | None] = mapped_column(Text, nullable=True)

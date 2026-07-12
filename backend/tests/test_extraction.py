@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 from app.api.v1.endpoints.works import get_work_citation_contexts
 from app.db.base import Base
+from app.models.app_config import AppConfig
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, RawTeiDocument, Reference, ReferenceCitation
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.source import Source
@@ -45,6 +47,11 @@ def db_session(tmp_path: Path):
             CitationMention.__table__,
             MetadataAssertion.__table__,
             AuditEvent.__table__,
+            # store_parsed_extraction reverse-rescans cached citing papers + reads the AppConfig
+            # fuzzy-as-confirmed toggle after promoting the work's title/DOI.
+            AppConfig.__table__,
+            ExternalPaper.__table__,
+            ExternalCitationLink.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)

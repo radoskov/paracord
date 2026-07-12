@@ -16,6 +16,7 @@ from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
 from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileSegment, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
@@ -54,6 +55,9 @@ def db_session(tmp_path: Path):
             Annotation.__table__,
             MetadataAssertion.__table__,
             DuplicateCandidate.__table__,
+            # merge/unmerge move incoming external citations with the surviving paper.
+            ExternalPaper.__table__,
+            ExternalCitationLink.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)

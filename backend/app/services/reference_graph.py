@@ -247,7 +247,12 @@ def build_reference_graph(
                     "label": ec.title or "Citing paper",
                     "year": ec.year,
                     "kind": "citing",
-                    "resolved_work_id": None,
+                    # An in-library citer (resolved by the local matcher, clamped to visibility)
+                    # carries its work id so the UI can link/badge it as local.
+                    "resolved_work_id": str(ec.resolved_work_id)
+                    if ec.resolved_work_id is not None
+                    and (visible_ids is None or ec.resolved_work_id in visible_ids)
+                    else None,
                     # ExternalPaper.authors is a "; "-joined display string.
                     "authors": [a.strip() for a in ec.authors.split(";") if a.strip()]
                     if ec.authors
