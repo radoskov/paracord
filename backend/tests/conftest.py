@@ -124,6 +124,21 @@ def _audit_file_sink_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(get_settings(), "audit_log_path", str(tmp_path / "audit.jsonl"))
 
 
+@pytest.fixture(autouse=True)
+def _managed_library_tmp(tmp_path, monkeypatch):
+    """Redirect the managed-library root (default ``./storage/library``) to a throwaway path per test.
+
+    Uploads (and their derived-OCR siblings, which hang off the same root) would otherwise write to
+    the repo/volume's real ``./storage/library`` — which, as a Docker named volume, is created
+    root-owned and is not writable by the non-root test user on a fresh machine (PermissionError on
+    ``mkdir``). Pointing it at ``tmp_path`` makes every storage-writing test hermetic and independent
+    of volume ownership on any host. Tests that need to inspect the tree override this themselves.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "managed_library_root", str(tmp_path / "managed-library"))
+
+
 @pytest.fixture()
 def app(session_factory):
     from app.main import create_app
