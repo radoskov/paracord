@@ -105,11 +105,22 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     """
     job_id = extraction_job_id(file_id)
     try:
+        from rq import Retry
+
         queue = get_queue()
         existing = _live_job_id(queue.connection, job_id)
         if existing is not None:
             return existing
-        job = queue.enqueue(EXTRACT_JOB, str(file_id), force_ocr, job_id=job_id)
+        # F2: retry a *transient* extraction failure automatically (fast, in-Redis). The job itself
+        # zeroes retries_left on a terminal/cap failure so those aren't re-run; the durable
+        # File.extraction_attempts cap bounds retries across restarts (the recovery sweep backstop).
+        job = queue.enqueue(
+            EXTRACT_JOB,
+            str(file_id),
+            force_ocr,
+            job_id=job_id,
+            retry=Retry(max=2, interval=[15, 60]),
+        )
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue extraction for file %s: %s", file_id, exc)

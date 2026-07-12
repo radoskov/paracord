@@ -8,6 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+# Durable cap on how many times extraction is attempted for a file before a transient failure is
+# treated as terminal (F2). Bounds cross-restart retry loops: the RQ ``Retry`` budget lives only in
+# Redis, but ``File.extraction_attempts`` persists, so a permanently-failing file can't be re-swept
+# forever. A user-initiated (re-)extract resets the counter (via ``mark_extraction_requested``).
+MAX_EXTRACTION_ATTEMPTS = 3
+
 
 class File(Base):
     """Physical file identity, usually a PDF."""
@@ -30,6 +36,12 @@ class File(Base):
     # extraction (e.g. attach-without-extract) — such files are never swept.
     extraction_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Durable extraction-attempt counter (F2). Incremented at the start of each extraction run;
+    # reset to 0 by a user-initiated (re-)extract. When it reaches ``MAX_EXTRACTION_ATTEMPTS`` a
+    # transient failure is treated as terminal so retries can't loop forever across restarts.
+    extraction_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

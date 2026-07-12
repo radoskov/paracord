@@ -34,8 +34,13 @@ def mark_extraction_requested(file: File) -> None:
     Set in the SAME commit that intends to extract the file so the durable marker and the file row
     land together; the extraction worker clears it on terminal success/failure and the startup
     recovery sweep re-enqueues anything still marked (e.g. an enqueue lost to a dead Redis).
+
+    Also resets the F2 attempt counter, so a user-initiated (re-)extract always gets a fresh retry
+    budget even if a prior run gave up as terminal. Automatic retries (RQ) and the recovery sweep go
+    straight through ``enqueue_extraction`` and do NOT pass here, so they stay bounded by the cap.
     """
     file.extraction_requested_at = datetime.now(UTC)
+    file.extraction_attempts = 0
 
 
 def file_ids_pending_extraction(db: Session, source_id) -> list:

@@ -78,15 +78,31 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
     import uuid
 
     from sqlalchemy import select
-    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.exc import IntegrityError, OperationalError
 
     from app.core.config import get_settings
     from app.db.session import SessionLocal
-    from app.models.file import File, FileWorkLink
+    from app.models.file import MAX_EXTRACTION_ATTEMPTS, File, FileWorkLink
     from app.services.agent_files import discard_after_extract
     from app.services.extraction import extract_and_store
-    from app.services.grobid_client import GrobidClient
+    from app.services.grobid_client import GrobidClient, GrobidUnavailableError
     from app.workers.queue import enqueue_enrichment
+
+    def _disable_retry() -> None:
+        """Stop RQ retrying this job (terminal / cap reached) so it goes straight to failed.
+
+        RQ retries a job iff its ``retries_left`` is > 0 after it raises; zeroing it means a known-
+        terminal failure (DOI conflict, corrupt PDF, cap reached) is not re-run — it still raises so
+        it lands in the failed-jobs list. A no-op when not running under a worker (inline / tests).
+        """
+        try:
+            from rq import get_current_job
+
+            job = get_current_job()
+            if job is not None:
+                job.retries_left = 0
+        except Exception:  # noqa: BLE001 - no worker context (inline/tests): nothing to disable
+            pass
 
     settings = get_settings()
     client = GrobidClient(settings.grobid_url, settings=settings)
@@ -96,11 +112,16 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
         if file is None:
             return
 
+        # Count this attempt durably up front (survives a hard worker crash) so the cap bounds
+        # retries across restarts, not just within one RQ job's in-Redis retry budget (F2).
+        file.extraction_attempts = (file.extraction_attempts or 0) + 1
+        attempts = file.extraction_attempts
+        db.commit()
+
         def _mark_failed() -> None:
-            # Persist a durable failure marker (so the UI can show extraction never succeeded) and
-            # clear the owed-extraction marker: this is a terminal outcome, not "still owed" (D7), so
-            # the recovery sweep must not re-enqueue a file that already failed. Roll back first: the
-            # session may hold a half-applied extraction / a failed transaction that must not commit.
+            # Terminal outcome: persist a durable failure status and CLEAR the owed marker so the
+            # recovery sweep won't re-enqueue it. Roll back first — the session may hold a
+            # half-applied extraction / a failed transaction that must not commit.
             db.rollback()
             f = db.get(File, uuid.UUID(str(file_id)))
             if f is not None:
@@ -109,9 +130,8 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
                 db.commit()
 
         try:
-            # NOTE: the whole write path — extract, status update, and commit — is inside the try so
-            # a deferred flush (e.g. the DOI unique-violation, issue 6) is caught here rather than
-            # surfacing unguarded after the block and reverting extraction_requested_at (poison loop).
+            # The whole write path is inside the try so a deferred flush (e.g. the DOI unique
+            # violation, issue 6) is caught here rather than surfacing unguarded after the block.
             extract_and_store(
                 db,
                 file=file,
@@ -120,27 +140,41 @@ def extract_pdf_job(file_id: str, force_ocr: bool = False) -> None:
             )
             file.status = "extracted"
             file.extraction_requested_at = None  # terminal success — no longer owed (D7)
+            file.extraction_attempts = 0  # clean slate for any future re-extract
             link = db.scalar(select(FileWorkLink).where(FileWorkLink.file_id == file.id))
             work_id = str(link.work_id) if link else None
             # For index_and_extract uploads, discard the PDF now that extraction is stored —
             # only the Work, references and preview remain (SPEC §32.4).
             discard_after_extract(db, file=file, settings=settings)
             db.commit()
+        except (GrobidUnavailableError, OperationalError):
+            # TRANSIENT (GROBID unreachable / DB blip). Under the cap: keep the owed marker set and
+            # re-raise so RQ retries automatically (the recovery sweep is the cross-restart backstop).
+            # At the cap: give up as terminal so retries can't loop forever.
+            db.rollback()
+            if attempts >= MAX_EXTRACTION_ATTEMPTS:
+                _mark_failed()
+                _disable_retry()
+            raise
         except IntegrityError as exc:
+            # TERMINAL (e.g. a DOI unique-violation) — retrying can't help. Mark failed and stop RQ
+            # from retrying, but still raise so it is visible in the failed-jobs list.
             detail = doi_conflict_detail(exc)
             _mark_failed()
+            _disable_retry()
             if detail is not None:
-                # Handled terminal state: record a clear audit event and re-raise a concise message
-                # (not the raw SQL dump) that names the offending DOI and the paper that holds it.
-                # requested_at is already cleared, so no D7 retry loop. _mark_failed committed, so
-                # the session is clean for the existing-paper lookup inside conflict_message.
+                # Record a clear audit event and re-raise a concise message (not the raw SQL) naming
+                # the offending DOI and the paper that holds it. _mark_failed committed, so the
+                # session is clean for the existing-paper lookup inside conflict_message.
                 _record_doi_conflict(
                     entity_type="file", entity_id=str(file_id), detail=detail, phase="extract"
                 )
                 raise RuntimeError(conflict_message(db, doi=doi_from_detail(detail))) from None
             raise
         except Exception:
+            # TERMINAL (unexpected). Mark failed and don't retry, but surface it as failed.
             _mark_failed()
+            _disable_retry()
             raise
     # Chain external enrichment (best-effort; no-op when the work has no DOI/arXiv id).
     if work_id:

@@ -129,25 +129,33 @@ def test_jobs_endpoint_reports_health_fields(client, auth_headers) -> None:
 # --- Part 3, invariant 1: only owed files are swept -------------------------
 
 
-def test_owed_query_selects_only_marked_non_extracting_files(db) -> None:
-    """Invariant 1: never-requested (marker-null) files are never swept; extracting ones skipped."""
+def test_owed_query_selects_only_marked_uncapped_files(db) -> None:
+    """Invariant 1: never-requested (marker-null) files are never swept; capped files are terminal.
+
+    In-flight double-enqueue protection moved from a durable ``extracting`` status to the
+    deterministic-job-id live-guard in ``enqueue_extraction`` (which self-heals on worker death), so
+    File.status no longer filters the sweep — only the marker and the F2 attempt cap do.
+    """
+    from app.models.file import MAX_EXTRACTION_ATTEMPTS
+
     owed = File(
         sha256="a" * 64, size_bytes=1, status="available", extraction_requested_at=datetime.now(UTC)
     )
     never_requested = File(sha256="b" * 64, size_bytes=1, status="available")  # marker stays NULL
-    in_flight = File(
+    capped = File(
         sha256="c" * 64,
         size_bytes=1,
-        status="extracting",
+        status="available",
         extraction_requested_at=datetime.now(UTC),
+        extraction_attempts=MAX_EXTRACTION_ATTEMPTS,
     )
-    db.add_all([owed, never_requested, in_flight])
+    db.add_all([owed, never_requested, capped])
     db.commit()
 
     ids = set(recovery.owed_extraction_file_ids(db))
     assert owed.id in ids
     assert never_requested.id not in ids  # nobody asked to extract it
-    assert in_flight.id not in ids  # already extracting
+    assert capped.id not in ids  # exhausted the retry cap → terminal
 
 
 def test_sweep_reenqueues_each_owed_file(monkeypatch) -> None:
@@ -324,3 +332,109 @@ def test_non_doi_integrity_error_still_raises_raw(worker_env, monkeypatch) -> No
     session = worker_env()
     assert session.get(File, fid).status == "extract_failed"
     session.close()
+
+
+# --- F2: transient/terminal classification + bounded retries ----------------
+
+
+def _seed_file_with_attempts(session_factory, attempts: int) -> uuid.UUID:
+    session = session_factory()
+    file = File(
+        sha256=(uuid.uuid4().hex + uuid.uuid4().hex)[:64],
+        size_bytes=1,
+        status="available",
+        extraction_requested_at=datetime.now(UTC),
+        extraction_attempts=attempts,
+    )
+    session.add(file)
+    session.commit()
+    fid = file.id
+    session.close()
+    return fid
+
+
+def test_transient_failure_under_cap_keeps_marker(worker_env, monkeypatch) -> None:
+    """A transient GROBID failure below the cap re-raises (RQ retries) and KEEPS the owed marker."""
+    from app.services.grobid_client import GrobidUnavailableError
+    from app.workers.jobs import extract_pdf_job
+
+    def _down(*_a, **_k):
+        raise GrobidUnavailableError("grobid unreachable")
+
+    monkeypatch.setattr("app.services.extraction.extract_and_store", _down)
+    fid = _seed_file_with_attempts(worker_env, 0)
+    with pytest.raises(GrobidUnavailableError):
+        extract_pdf_job(str(fid))
+    session = worker_env()
+    file = session.get(File, fid)
+    assert file.extraction_attempts == 1  # this attempt was counted
+    assert file.extraction_requested_at is not None  # still owed → sweep/RQ can retry
+    assert file.status != "extract_failed"  # not given up yet
+    session.close()
+
+
+def test_transient_failure_at_cap_is_terminal(worker_env, monkeypatch) -> None:
+    """At the attempt cap a transient failure gives up: marked failed, marker cleared."""
+    from app.models.file import MAX_EXTRACTION_ATTEMPTS
+    from app.services.grobid_client import GrobidUnavailableError
+    from app.workers.jobs import extract_pdf_job
+
+    def _down(*_a, **_k):
+        raise GrobidUnavailableError("grobid unreachable")
+
+    monkeypatch.setattr("app.services.extraction.extract_and_store", _down)
+    fid = _seed_file_with_attempts(worker_env, MAX_EXTRACTION_ATTEMPTS - 1)
+    with pytest.raises(GrobidUnavailableError):
+        extract_pdf_job(str(fid))
+    session = worker_env()
+    file = session.get(File, fid)
+    assert file.extraction_attempts == MAX_EXTRACTION_ATTEMPTS
+    assert file.status == "extract_failed"
+    assert file.extraction_requested_at is None  # terminal → not re-swept
+    session.close()
+
+
+def test_success_resets_attempts(worker_env, monkeypatch) -> None:
+    """A successful extraction clears the marker AND resets the attempt counter."""
+    from app.workers.jobs import extract_pdf_job
+
+    monkeypatch.setattr("app.services.extraction.extract_and_store", lambda *a, **k: None)
+    fid = _seed_file_with_attempts(worker_env, 2)
+    extract_pdf_job(str(fid))
+    session = worker_env()
+    file = session.get(File, fid)
+    assert file.status == "extracted"
+    assert file.extraction_requested_at is None
+    assert file.extraction_attempts == 0
+    session.close()
+
+
+def test_owed_sweep_excludes_capped_files(worker_env) -> None:
+    """The recovery sweep skips files that already exhausted the retry cap (terminal)."""
+    from app.models.file import MAX_EXTRACTION_ATTEMPTS
+    from app.workers.recovery import owed_extraction_file_ids
+
+    retryable = _seed_file_with_attempts(worker_env, 1)
+    capped = _seed_file_with_attempts(worker_env, MAX_EXTRACTION_ATTEMPTS)
+    session = worker_env()
+    owed = set(owed_extraction_file_ids(session))
+    session.close()
+    assert retryable in owed
+    assert capped not in owed
+
+
+def test_mark_extraction_requested_resets_attempts(db) -> None:
+    """A user-initiated (re-)extract gives a fresh retry budget."""
+    from app.services.storage import mark_extraction_requested
+
+    file = File(
+        sha256=(uuid.uuid4().hex + uuid.uuid4().hex)[:64],
+        size_bytes=1,
+        status="extract_failed",
+        extraction_attempts=5,
+    )
+    db.add(file)
+    db.flush()
+    mark_extraction_requested(file)
+    assert file.extraction_attempts == 0
+    assert file.extraction_requested_at is not None

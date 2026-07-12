@@ -21,22 +21,25 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.file import File
+from app.models.file import MAX_EXTRACTION_ATTEMPTS, File
 from app.workers.queue import enqueue_extraction
 
 logger = logging.getLogger(__name__)
 
-# File statuses for which a fresh extraction must NOT be re-enqueued by the sweep. A file mid-flight
-# in the worker keeps the marker until the worker clears it, but we don't pile another job on top.
-_SKIP_STATUSES = {"extracting"}
-
 
 def owed_extraction_file_ids(db) -> list:
-    """Return ids of files still owed an extraction (marker set, not already extracting)."""
+    """Return ids of files still owed an extraction (marker set, attempts below the cap).
+
+    An in-flight file is NOT double-enqueued here: the marker is still set while the worker runs,
+    but ``enqueue_extraction``'s deterministic-job-id live-guard makes re-enqueuing a
+    queued/started/scheduled job a no-op — and, unlike a durable "extracting" status, that guard
+    self-heals if the worker dies (a dead job is no longer live, so the file is recovered on the
+    next sweep). Files that already hit the retry cap (F2) are terminal and excluded.
+    """
     stmt = (
         select(File.id)
         .where(File.extraction_requested_at.is_not(None))
-        .where(File.status.notin_(_SKIP_STATUSES))
+        .where(File.extraction_attempts < MAX_EXTRACTION_ATTEMPTS)
     )
     return list(db.scalars(stmt).all())
 
