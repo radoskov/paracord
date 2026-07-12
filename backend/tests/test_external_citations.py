@@ -329,3 +329,70 @@ def test_merge_moves_external_citations_and_unmerge_restores(db):
         ).all()
     )
     assert len(source_paper_ids) == 2  # both links restored to the shadow
+
+
+# --- S12: three-outcome fetch semantics -------------------------------------------------------------
+
+
+def test_authoritative_zero_answer_reports_the_source(monkeypatch):
+    """A provider that answers 'zero citers' (HTTP 200, empty page) IS an answer — distinct from
+    'no provider answered' (404s/failures)."""
+
+    def fake_get(url, params=None, headers=None):
+        if "/citations" in url:  # S2: empty but authoritative
+            return _FakeResp({"data": []})
+        if params and params.get("fields") == "citationCount":
+            return _FakeResp({"citationCount": 0})
+        if params and "filter" in params:  # OpenAlex cites page: empty but authoritative
+            return _FakeResp({"results": [], "meta": {"count": 0}})
+        return _FakeResp(OPENALEX_RESOLVE)
+
+    monkeypatch.setattr(cp, "_get", fake_get)
+    papers, source, total = cp.fetch_citing_papers(doi="10.1/base")
+    assert papers == [] and source == "openalex" and total == 0
+
+
+def test_unanswered_fetch_reports_no_source(monkeypatch):
+    def fake_get(url, params=None, headers=None):
+        return _FakeResp({}, status=404)
+
+    monkeypatch.setattr(cp, "_get", fake_get)
+    papers, source, total = cp.fetch_citing_papers(doi="10.1/base")
+    assert papers == [] and source is None and total is None
+
+
+def test_authoritative_zero_replaces_cache_and_keeps_as_of(db):
+    """An authoritative-zero store wipes the stale list but records when/where it was fetched."""
+    work = _work(db, doi="10.1/base")
+    cp.store_citing_papers(
+        db,
+        work=work,
+        papers=[cp.CitingPaper(source="openalex", title="Stale", doi="10.9/stale")],
+        source="openalex",
+    )
+    db.commit()
+    cp.store_citing_papers(db, work=work, papers=[], source="openalex", total=0)
+    db.commit()
+    assert db.scalar(select(func.count()).select_from(ExternalCitationLink)) == 0
+    assert db.scalar(select(func.count()).select_from(ExternalPaper)) == 0  # stale citer GC'd
+    assert work.citing_fetched_at is not None
+    assert work.citing_fetched_source == "openalex"
+    assert work.citation_count == 0
+
+
+def test_failed_fetch_keeps_cache(client, auth_headers, db, monkeypatch):
+    """No provider answered → the endpoint keeps the cached list untouched."""
+    work = _work(db, doi="10.1/base")
+    cp.store_citing_papers(
+        db,
+        work=work,
+        papers=[cp.CitingPaper(source="openalex", title="Kept", doi="10.9/kept")],
+        source="openalex",
+    )
+    db.commit()
+    monkeypatch.setattr(cp, "fetch_citing_papers", lambda **kw: ([], None, None))
+    resp = client.post(
+        f"/api/v1/works/{work.id}/citing-papers/fetch", headers=auth_headers("owner")
+    )
+    assert resp.status_code == 200
+    assert [i["title"] for i in resp.json()["items"]] == ["Kept"]

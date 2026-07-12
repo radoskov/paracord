@@ -1955,8 +1955,10 @@ def _citing_papers_response(db: Session, work: Work) -> CitingPapersResponse:
     ]
     return CitingPapersResponse(
         items=items,
-        source=rows[0][0].source if rows else None,
-        fetched_at=rows[0][1] if rows else None,
+        # Prefer the per-work snapshot (S12): it survives an authoritative-zero replace, where
+        # there are no link rows to carry a source/timestamp. Older rows predate the snapshot.
+        source=work.citing_fetched_source or (rows[0][0].source if rows else None),
+        fetched_at=work.citing_fetched_at or (rows[0][1] if rows else None),
         citation_count=work.citation_count,
         citation_count_source=work.citation_count_source,
     )

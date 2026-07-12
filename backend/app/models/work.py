@@ -90,6 +90,14 @@ class Work(Base):
     citation_count_fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When/where the citing-papers LIST was last authoritatively fetched (S12). Lives on the work
+    # (not on the link rows) because an authoritative "zero citers" answer has no rows to carry a
+    # timestamp — without this, "fetched, zero" and "never fetched / fetch failed" are
+    # indistinguishable and a stale cached list survives forever.
+    citing_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    citing_fetched_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Duplicate-merge shadow marker (Batch D). When set, this work has been merged INTO the work
     # with this id: it is a hidden "shadow" (never listed/searched/graphed/exported) and its incoming
     # references resolve to the base. NULL = a normal, visible work. FK SET NULL so deleting a base

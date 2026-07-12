@@ -119,16 +119,19 @@ def parse_s2_citing(payload: dict, limit: int = MAX_CITING) -> list[CitingPaper]
 
 def _fetch_openalex_citing(
     doi: str, *, limit: int, mailto: str | None
-) -> tuple[list[CitingPaper], int | None]:
+) -> tuple[list[CitingPaper], int | None, bool]:
+    """Returns ``(papers, total, answered)`` — ``answered`` is True only when OpenAlex
+    authoritatively listed this work's citers (even zero of them); a 404/unresolvable id is
+    "did not answer", so the caller keeps any cached list (S12 three-outcome semantics)."""
     params = {"mailto": mailto} if mailto else {}
     resolved = _get(f"{OPENALEX_API}/doi:{_idseg(doi)}", params=params)
     if resolved.status_code == 404:
-        return [], None
+        return [], None, False
     resolved.raise_for_status()
     resolved_json = resolved.json()
     short_id = _openalex_short_id(resolved_json.get("id"))
     if not short_id:
-        return [], None
+        return [], None, False
     page = _get(
         OPENALEX_API,
         params={
@@ -145,24 +148,25 @@ def _fetch_openalex_citing(
     total = (page_json.get("meta") or {}).get("count")
     if total is None:
         total = resolved_json.get("cited_by_count")
-    return parse_openalex_citing(page_json, limit), total
+    return parse_openalex_citing(page_json, limit), total, True
 
 
 def _fetch_s2_citing(
     *, doi: str | None, arxiv: str | None, limit: int
-) -> tuple[list[CitingPaper], int | None]:
+) -> tuple[list[CitingPaper], int | None, bool]:
+    """Returns ``(papers, total, answered)`` — see ``_fetch_openalex_citing``."""
     if arxiv:
         identifier = f"arXiv:{_idseg(_arxiv_base(arxiv))}"
     elif doi:
         identifier = f"DOI:{_idseg(doi)}"
     else:
-        return [], None
+        return [], None, False
     resp = _get(
         f"{SEMANTIC_SCHOLAR_API}/{identifier}/citations",
         params={"fields": "title,year,authors,externalIds,venue", "limit": min(limit, 1000)},
     )
     if resp.status_code == 404:
-        return [], None
+        return [], None, False
     resp.raise_for_status()
     papers = parse_s2_citing(resp.json(), limit)
     # The citations page carries no total; one cheap follow-up fetches the count snapshot.
@@ -176,7 +180,7 @@ def _fetch_s2_citing(
             total = int(raw) if raw is not None else None
     except Exception as exc:  # noqa: BLE001 - the count is a bonus, never fail the list for it
         logger.debug("Semantic Scholar citationCount fetch failed: %s", exc)
-    return papers, total
+    return papers, total, True
 
 
 def fetch_citing_papers(
@@ -188,31 +192,45 @@ def fetch_citing_papers(
 ) -> tuple[list[CitingPaper], str | None, int | None]:
     """Fetch up to ``limit`` citing papers via OpenAlex, falling back to Semantic Scholar.
 
-    Returns ``(papers, source, total)`` where ``source`` is the provider that answered (``None``
-    when neither could — no identifier, or both failed) and ``total`` is that provider's full
-    citation count (may exceed the capped list; ``None`` when unknown). Never raises for
-    network/parse errors — a failed provider is logged and the fallback is tried.
+    Returns ``(papers, source, total)``. Three outcomes (S12):
+
+    * a provider listed ≥1 citers → its papers/source/total;
+    * a provider **authoritatively answered zero** (HTTP 200, empty citers page) and the other had
+      nothing better → ``([], source, total-or-0)`` — the caller must replace the cache with empty;
+    * no provider answered (no identifier, 404s, network failures) → ``([], None, None)`` — the
+      caller must keep whatever it has cached and surface the failure.
+
+    Never raises for network/parse errors — a failed provider is logged and the fallback is tried.
     """
     settings = settings or get_settings()
     mailto = getattr(settings, "crossref_mailto", None) or None
     limit = max(1, min(limit, MAX_CITING))
 
+    empty_answer: tuple[str, int | None] | None = None
     if doi:
         try:
-            papers, total = _fetch_openalex_citing(doi, limit=limit, mailto=mailto)
+            papers, total, answered = _fetch_openalex_citing(doi, limit=limit, mailto=mailto)
             if papers:
                 return papers, "openalex", total
+            if answered:
+                # Authoritative zero — remember it, but still give S2 a chance to know better.
+                empty_answer = ("openalex", total)
         except Exception as exc:  # noqa: BLE001 - try the fallback provider
             logger.warning("OpenAlex citing-papers fetch failed for doi %s: %s", doi, exc)
 
     if doi or arxiv:
         try:
-            papers, total = _fetch_s2_citing(doi=doi, arxiv=arxiv, limit=limit)
+            papers, total, answered = _fetch_s2_citing(doi=doi, arxiv=arxiv, limit=limit)
             if papers:
                 return papers, "semanticscholar", total
+            if answered and empty_answer is None:
+                empty_answer = ("semanticscholar", total)
         except Exception as exc:  # noqa: BLE001 - both providers failed
             logger.warning("Semantic Scholar citing-papers fetch failed: %s", exc)
 
+    if empty_answer is not None:
+        source, total = empty_answer
+        return [], source, total if total is not None else 0
     return [], None, None
 
 
@@ -377,6 +395,8 @@ def store_citing_papers(
     drift apart. Caller commits.
     """
     now = datetime.now(UTC)
+    work.citing_fetched_at = now  # survives an empty (authoritative-zero) replace — S12
+    work.citing_fetched_source = source
     if total is not None:
         work.citation_count = total
         work.citation_count_source = source
