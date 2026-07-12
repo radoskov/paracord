@@ -575,6 +575,10 @@ def queue_status(limit: int = 25) -> dict:
                         "target_id": target_id,
                         "paper_title": None,
                         "paper_sha256": None,
+                        # F2: retries remaining on this job's RQ Retry budget (None = no retry
+                        # policy). A "scheduled" job with retries_left set is a pending retry — the
+                        # Jobs tab labels it so users see the app is retrying, not stuck.
+                        "retries_left": getattr(job, "retries_left", None),
                     }
                 )
             return rows
@@ -582,6 +586,7 @@ def queue_status(limit: int = 25) -> dict:
         jobs = (
             _collect(queue.failed_job_registry.get_job_ids(), "failed")
             + _collect(queue.started_job_registry.get_job_ids(), "started")
+            + _collect(queue.scheduled_job_registry.get_job_ids(), "scheduled")
             + _collect(queue.job_ids, "queued")
             + _collect(queue.finished_job_registry.get_job_ids(), "finished")
         )
