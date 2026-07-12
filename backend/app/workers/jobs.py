@@ -13,6 +13,9 @@ from app.services.doi_conflict import conflict_message, doi_conflict_detail, doi
 
 logger = logging.getLogger(__name__)
 
+# Batch size for the full-library rescan sweep (S8): rows matched+committed per transaction.
+_RESCAN_COMMIT_EVERY = 500
+
 
 def _record_job_event(event_type: str, job_name: str, *, error: str | None = None) -> None:
     """Persist a ``job.*`` audit event in its own short-lived session (best-effort, fail-open).
@@ -404,7 +407,14 @@ def rescan_reference_matches_job() -> None:
 
     Respects the batch-12 status rules per reference (confirmed locked; rejected not re-proposed) and
     uses the current ``use_fuzzy_match_as_confirmed`` toggle. Also rematches every cached external
-    citing paper (the incoming direction — same matcher). Committed in one transaction."""
+    citing paper (the incoming direction — same matcher).
+
+    S8/S9: the library's works, identifier/blocking keys, and author names are loaded ONCE into
+    in-memory indexes (hard assumption: they fit in RAM), so each row is matched with dict lookups
+    instead of 2-3 SQL point queries. Commits land every ``_RESCAN_COMMIT_EVERY`` rows and each row
+    is individually guarded — a crash/poison row loses at most one batch, and a rerun (idempotent)
+    finishes the rest.
+    """
     from sqlalchemy import select
 
     from app.db.session import SessionLocal
@@ -412,15 +422,72 @@ def rescan_reference_matches_job() -> None:
     from app.models.external_citation import ExternalPaper
     from app.services.app_config import effective_use_fuzzy_match_as_confirmed
     from app.services.citing_papers import resolve_external_paper
-    from app.services.reference_matching import resolve_and_persist
+    from app.services.reference_matching import (
+        build_match_indexes,
+        candidates_from_indexes,
+        resolve_and_persist,
+    )
+    from app.utils.normalization import normalize_title
+
+    def _id_batches(ids: list) -> list[list]:
+        return [ids[i : i + _RESCAN_COMMIT_EVERY] for i in range(0, len(ids), _RESCAN_COMMIT_EVERY)]
 
     with SessionLocal() as db:
+        # The in-memory indexes hold ORM Work rows across many commits; default expire-on-commit
+        # would turn every post-commit attribute read into a refresh query (defeating S8).
+        db.expire_on_commit = False
         fuzzy = effective_use_fuzzy_match_as_confirmed(db)
-        for reference in db.scalars(select(Reference)).all():
-            resolve_and_persist(db, reference, fuzzy_as_confirmed=fuzzy)
-        for external in db.scalars(select(ExternalPaper)).all():
-            resolve_external_paper(db, external)
-        db.commit()
+        indexes = build_match_indexes(db)
+
+        # Ids first, rows per batch: a mid-iteration commit would kill a streaming cursor, and a
+        # crashed run loses at most the current (uncommitted) batch — the rerun is idempotent and
+        # skips already-settled rows cheaply.
+        for batch in _id_batches(db.scalars(select(Reference.id)).all()):
+            for reference in db.scalars(select(Reference).where(Reference.id.in_(batch))).all():
+                candidates = candidates_from_indexes(
+                    indexes,
+                    doi=reference.doi,
+                    arxiv_id=reference.arxiv_id,
+                    normalized_title=reference.normalized_title
+                    or (normalize_title(reference.title) if reference.title else None),
+                )
+                try:
+                    resolve_and_persist(
+                        db,
+                        reference,
+                        fuzzy_as_confirmed=fuzzy,
+                        candidate_works=candidates,
+                        author_names=indexes.author_names,
+                    )
+                except Exception:  # noqa: BLE001 - one poisoned row must not kill the sweep
+                    logger.warning("reference rescan failed for %s", reference.id, exc_info=True)
+                    db.rollback()
+            db.commit()
+
+        for batch in _id_batches(db.scalars(select(ExternalPaper.id)).all()):
+            for external in db.scalars(
+                select(ExternalPaper).where(ExternalPaper.id.in_(batch))
+            ).all():
+                candidates = candidates_from_indexes(
+                    indexes,
+                    doi=external.doi,
+                    arxiv_id=external.arxiv_id,
+                    normalized_title=normalize_title(external.title) if external.title else None,
+                )
+                try:
+                    resolve_external_paper(
+                        db,
+                        external,
+                        candidate_works=candidates,
+                        author_names=indexes.author_names,
+                        clear_on_miss=True,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "external-paper rescan failed for %s", external.id, exc_info=True
+                    )
+                    db.rollback()
+            db.commit()
 
 
 @_audited_job

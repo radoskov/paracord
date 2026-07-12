@@ -277,6 +277,8 @@ def resolve_external_paper(
     exclude_work_id=None,
     candidate_works: list[Work] | None = None,
     settings: Settings | None = None,
+    author_names=None,
+    clear_on_miss: bool | None = None,
 ) -> bool:
     """Run the local matcher for one external citing paper; returns whether the link changed.
 
@@ -287,7 +289,11 @@ def resolve_external_paper(
     workflow here: the resolution is recomputed on every fetch/rescan, so it self-heals.
     """
     match = find_reference_match(
-        db, _external_match_fields(external), settings=settings, candidate_works=candidate_works
+        db,
+        _external_match_fields(external),
+        settings=settings,
+        candidate_works=candidate_works,
+        author_names=author_names,
     )
     resolved = match.work_id if match is not None else None
     if resolved is not None:
@@ -306,8 +312,11 @@ def resolve_external_paper(
         )
         if resolved in excluded:
             resolved = None
-    if candidate_works is not None and resolved is None:
-        # A targeted rescan (one new work) must not clear a resolution owned by a full match run.
+    if clear_on_miss is None:
+        clear_on_miss = candidate_works is None
+    if not clear_on_miss and resolved is None:
+        # A targeted rescan (one new work) must not clear a resolution owned by a full match run;
+        # the full rescan job passes clear_on_miss=True with its complete candidate set.
         return False
     if external.resolved_work_id == resolved:
         return False

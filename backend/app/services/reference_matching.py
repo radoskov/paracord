@@ -28,7 +28,7 @@ must not corrupt them.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import func, or_, select
@@ -138,12 +138,26 @@ def _year_ok(reference: Matchable, work: Work, settings: Settings) -> bool:
     return True
 
 
-def _author_ok(db: Session, reference: Matchable, work: Work, settings: Settings) -> bool:
-    """Author-overlap gate (Phase 4), skipped when either side lists no authors."""
+def _author_ok(
+    db: Session,
+    reference: Matchable,
+    work: Work,
+    settings: Settings,
+    author_names: Mapping[uuid.UUID, list[str]] | None = None,
+) -> bool:
+    """Author-overlap gate (Phase 4), skipped when either side lists no authors.
+
+    ``author_names`` is an optional prebuilt work-id → names map (the batch rescan job builds it
+    once instead of one query per fuzzy candidate — S8); when absent, the DB is queried per work.
+    """
     ref_authors = reference.authors or []
     if not ref_authors:
         return True  # a signal we can't compute can't disqualify
-    work_authors = _work_author_names(db, work.id)
+    work_authors = (
+        author_names.get(work.id, [])
+        if author_names is not None
+        else _work_author_names(db, work.id)
+    )
     if not work_authors:
         return True
     ratio = author_overlap_ratio(ref_authors, work_authors)
@@ -234,6 +248,7 @@ def find_reference_match(
     *,
     settings: Settings | None = None,
     candidate_works: Sequence[Work] | None = None,
+    author_names: Mapping[uuid.UUID, list[str]] | None = None,
 ) -> ReferenceMatch | None:
     """Best local work this reference likely is, or ``None``.
 
@@ -276,7 +291,7 @@ def find_reference_match(
             continue
         if not _year_ok(reference, work, settings):
             continue
-        if not _author_ok(db, reference, work, settings):
+        if not _author_ok(db, reference, work, settings, author_names=author_names):
             continue
         if best is None or score > best.score:
             best = ReferenceMatch(work_id=work.id, score=score, via="fuzzy")
@@ -332,6 +347,7 @@ def resolve_and_persist(
     settings: Settings | None = None,
     fuzzy_as_confirmed: bool = False,
     candidate_works: Sequence[Work] | None = None,
+    author_names: Mapping[uuid.UUID, list[str]] | None = None,
 ) -> bool:
     """Run the matcher for one reference and persist the outcome. Returns whether it changed.
 
@@ -344,7 +360,9 @@ def resolve_and_persist(
     if status == _LOCKED_STATUS:
         return False
 
-    match = find_reference_match(db, reference, settings=settings, candidate_works=candidate_works)
+    match = find_reference_match(
+        db, reference, settings=settings, candidate_works=candidate_works, author_names=author_names
+    )
 
     if match is not None and match.via == "identifier":
         return _set_local(reference, match)
@@ -384,6 +402,78 @@ def run_matching_for_references(
         ):
             changed += 1
     return changed
+
+
+@dataclass
+class MatchIndexes:
+    """In-memory candidate indexes over the whole library, for the full rescan job (S8/S9).
+
+    Holds every non-shadow Work once (hard assumption: the library fits in RAM — a few MB per
+    10k works) plus the two candidate-selection keys the SQL path uses (identifier keys and the
+    stopword-relaxed title block) and a prebuilt work→author-names map, so a full-library rescan
+    does O(rows) dict lookups instead of 2-3 SQL point queries per reference.
+    """
+
+    identifier: dict[str, list[Work]]
+    blocks: dict[str, list[Work]]
+    author_names: dict[uuid.UUID, list[str]]
+
+
+def build_match_indexes(db: Session) -> MatchIndexes:
+    """Load all candidate works + author names once and index them for in-memory matching."""
+    identifier: dict[str, list[Work]] = {}
+    blocks: dict[str, list[Work]] = {}
+    for work in db.scalars(select(Work).where(Work.merged_into_id.is_(None))).all():
+        for key in _identifier_keys(doi=work.doi, arxiv_id=work.arxiv_id):
+            identifier.setdefault(key, []).append(work)
+        base = _work_arxiv_base(work)
+        if base:
+            identifier.setdefault(f"arxiv:{base}", []).append(work)
+        if work.normalized_title:
+            block = _relaxed_blocking_key(work.normalized_title)
+            if block:
+                blocks.setdefault(block, []).append(work)
+    # Best authors assertion per work, one query (canonical first, then confidence) — first wins.
+    author_names: dict[uuid.UUID, list[str]] = {}
+    rows = db.execute(
+        select(MetadataAssertion.entity_id, MetadataAssertion.value)
+        .where(
+            MetadataAssertion.entity_type == "work",
+            MetadataAssertion.field_name == "authors",
+        )
+        .order_by(
+            MetadataAssertion.selected_as_canonical.desc(),
+            func.coalesce(MetadataAssertion.confidence, 0).desc(),
+        )
+    ).all()
+    for work_id, value in rows:
+        if work_id not in author_names:
+            author_names[work_id] = [n.strip() for n in (value or "").split(";") if n.strip()]
+    return MatchIndexes(identifier=identifier, blocks=blocks, author_names=author_names)
+
+
+def candidates_from_indexes(
+    indexes: MatchIndexes,
+    *,
+    doi: str | None,
+    arxiv_id: str | None,
+    normalized_title: str | None,
+) -> list[Work]:
+    """The plausible candidate works for one reference-shaped row, deduplicated, from the indexes.
+
+    Mirrors the SQL candidate selection (identifier lookups + stopword-relaxed title block), so
+    matching over these candidates decides exactly what the per-row queries would.
+    """
+    seen: dict[uuid.UUID, Work] = {}
+    for key in _identifier_keys(doi=doi, arxiv_id=arxiv_id):
+        for work in indexes.identifier.get(key, ()):
+            seen.setdefault(work.id, work)
+    if normalized_title:
+        block = _relaxed_blocking_key(normalized_title)
+        if block:
+            for work in indexes.blocks.get(block, ()):
+                seen.setdefault(work.id, work)
+    return list(seen.values())
 
 
 def rescan_references_for_new_work(
