@@ -3,7 +3,6 @@
 import uuid
 
 import pytest
-
 from app.models.ai import Embedding
 from app.models.chunk import WorkChunk
 from app.models.file import File, FileWorkLink

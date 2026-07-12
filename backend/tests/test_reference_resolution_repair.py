@@ -24,7 +24,7 @@ def _work(db, title, **fields) -> Work:
 
 
 def test_build_citation_graph_does_not_mutate_resolution_status(db, make_reference) -> None:
-    target = _work(db, "Shared Target", doi="10.9/target")
+    _work(db, "Shared Target", doi="10.9/target")  # in scope so the identifier index can resolve to it
     citing = _work(db, "Citing Paper")
     # An UNRESOLVED reference whose identifier matches a local work in scope: the graph will resolve
     # it in-memory to build the edge, but must NOT write the result back onto the row.
