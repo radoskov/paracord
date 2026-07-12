@@ -139,9 +139,7 @@ def update_use_fuzzy_match_as_confirmed(
     return bool(row.use_fuzzy_match_as_confirmed)
 
 
-def effective_reference_rescan_on_startup(
-    db: Session, *, settings: Settings | None = None
-) -> bool:
+def effective_reference_rescan_on_startup(db: Session, *, settings: Settings | None = None) -> bool:
     """Whether the API enqueues a full reference rematch on startup (F3a). Default OFF.
 
     An absent app_config row or a NULL column reproduces the OFF default.

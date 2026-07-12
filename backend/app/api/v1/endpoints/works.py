@@ -945,9 +945,7 @@ def list_works(
     sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
     base_direction = sort_column.asc() if order == "asc" else sort_column.desc()
     # NULL-carrying sorts (citation_count) order NULLs last regardless of direction.
-    direction = (
-        base_direction.nullslast() if (sort or "") in _NULLS_LAST_SORTS else base_direction
-    )
+    direction = base_direction.nullslast() if (sort or "") in _NULLS_LAST_SORTS else base_direction
     stmt = (
         stmt.order_by(direction, Work.id)
         .offset((page - 1) * effective_per_page)

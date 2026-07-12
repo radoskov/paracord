@@ -24,7 +24,9 @@ def _work(db, title, **fields) -> Work:
 
 
 def test_build_citation_graph_does_not_mutate_resolution_status(db, make_reference) -> None:
-    _work(db, "Shared Target", doi="10.9/target")  # in scope so the identifier index can resolve to it
+    _work(
+        db, "Shared Target", doi="10.9/target"
+    )  # in scope so the identifier index can resolve to it
     citing = _work(db, "Citing Paper")
     # An UNRESOLVED reference whose identifier matches a local work in scope: the graph will resolve
     # it in-memory to build the edge, but must NOT write the result back onto the row.
@@ -45,7 +47,9 @@ def test_build_citation_graph_does_not_mutate_resolution_status(db, make_referen
     assert ref.resolved_work_id is None
 
 
-def test_deleting_cited_work_reresolves_referencing_rows(client, auth_headers, db, make_reference) -> None:
+def test_deleting_cited_work_reresolves_referencing_rows(
+    client, auth_headers, db, make_reference
+) -> None:
     headers = auth_headers("editor")
     target = _work(db, "Cited Target", doi="10.7/target")
     citing = _work(db, "Citer")
@@ -66,7 +70,9 @@ def test_deleting_cited_work_reresolves_referencing_rows(client, auth_headers, d
 
     db.expire_all()
     reloaded = db.get(Reference, ref_id)
-    assert reloaded is not None, "reference is still cited by another work → must not be orphan-pruned"
+    assert reloaded is not None, (
+        "reference is still cited by another work → must not be orphan-pruned"
+    )
     assert reloaded.resolved_work_id is None
     # No other local work carries this DOI/title now, so it re-resolves to external (not left stale).
     assert reloaded.resolution_status == "external"

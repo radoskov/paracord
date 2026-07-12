@@ -304,7 +304,9 @@ def enrich_work_job(work_id: str) -> dict | None:
         try:
             result = enrich_work(db, work, settings=get_settings())
             db.commit()
-            _clear_work_processing_error(work_id, "enrich")  # succeeded — clear any prior enrich error
+            _clear_work_processing_error(
+                work_id, "enrich"
+            )  # succeeded — clear any prior enrich error
         except IntegrityError as exc:
             # A DOI from an external source collided with another paper's DOI (issue 6). Enrichment
             # is best-effort and not swept by D7, so this is non-fatal: roll back, record a clear
