@@ -104,8 +104,8 @@ def test_preferences_put_then_get_roundtrip(client, auth_headers, prefs_tmp_path
 
     got = client.get("/api/v1/preferences", headers=h)
     assert got.json()["library_columns"]["order"] == ["title", "year", "doi"]
-    # The atomic write actually created the file at the configured tmp path.
-    assert prefs_tmp_path.exists()
+    # The atomic write actually created the per-user file next to the configured path (S11).
+    assert list((prefs_tmp_path.parent / "preferences.d").glob("*.yaml"))
 
 
 def test_preferences_are_per_user_isolated(client, auth_headers, prefs_tmp_path):
@@ -133,3 +133,45 @@ def test_preferences_are_per_user_isolated(client, auth_headers, prefs_tmp_path)
 
 def test_preferences_require_auth(client, prefs_tmp_path):
     assert client.get("/api/v1/preferences").status_code == 401
+
+
+def test_preferences_read_falls_back_to_legacy_shared_file(
+    client, auth_headers, prefs_tmp_path
+) -> None:
+    """S11 lazy migration: a user who never wrote since the per-user split still reads their slice
+    from the old single shared file; their first write lands in the per-user file and wins."""
+    import yaml
+    from app.services import preferences as prefs
+
+    h = auth_headers("reader")
+    me = client.get("/api/v1/auth/me", headers=h).json()
+    legacy = prefs._preferences_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        yaml.safe_dump(
+            {"version": 1, "users": {me["id"]: {"library_columns": {"order": ["title"]}}}}
+        ),
+        encoding="utf-8",
+    )
+    got = client.get("/api/v1/preferences", headers=h).json()
+    assert got["library_columns"]["order"] == ["title"]
+
+    # A write goes to the per-user file and shadows the legacy slice from then on.
+    client.put("/api/v1/preferences", headers=h, json={"library_columns": {"order": ["year"]}})
+    assert (legacy.parent / "preferences.d" / f"{me['id']}.yaml").exists()
+    got = client.get("/api/v1/preferences", headers=h).json()
+    assert got["library_columns"]["order"] == ["year"]
+
+
+def test_preferences_writes_are_one_file_per_user(client, auth_headers, prefs_tmp_path) -> None:
+    """S11: each user's save touches only their own file (no shared read-modify-write)."""
+    from app.services import preferences as prefs
+
+    alice = auth_headers("owner")
+    bob = auth_headers("reader")
+    client.put("/api/v1/preferences", headers=alice, json={"library_columns": {"a": 1}})
+    client.put("/api/v1/preferences", headers=bob, json={"library_columns": {"b": 2}})
+    user_dir = prefs._preferences_path().parent / "preferences.d"
+    assert len(list(user_dir.glob("*.yaml"))) == 2
+    assert client.get("/api/v1/preferences", headers=alice).json()["library_columns"]["a"] == 1
+    assert client.get("/api/v1/preferences", headers=bob).json()["library_columns"]["b"] == 2
