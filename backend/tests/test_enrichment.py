@@ -390,3 +390,47 @@ def test_enrich_work_leaves_citation_count_null_without_identifier(db_session) -
     assert work.citation_count is None
     assert work.citation_count_source is None
     assert work.citation_count_fetched_at is None
+
+
+def test_get_honors_retry_after_on_rate_limit(monkeypatch) -> None:
+    """S6c: a 429 with Retry-After is retried once in-request after a capped sleep."""
+    from app.services import metadata_enrichment as me
+
+    httpx = me.httpx
+
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_get(url, params=None, headers=None):
+        calls.append(url)
+        status = 429 if len(calls) == 1 else 200
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            status, headers={"retry-after": "2"} if status == 429 else {}, request=request
+        )
+
+    monkeypatch.setattr(me._HTTP_CLIENT, "get", fake_get)
+    monkeypatch.setattr(me.time, "sleep", lambda s: sleeps.append(s))
+    response = me._get("https://api.crossref.org/works/x")
+    assert response.status_code == 200
+    assert len(calls) == 2
+    assert sleeps == [2.0]
+
+
+def test_get_caps_absurd_retry_after(monkeypatch) -> None:
+    from app.services import metadata_enrichment as me
+
+    httpx = me.httpx
+
+    sleeps: list[float] = []
+    request = httpx.Request("GET", "https://api.crossref.org/works/x")
+    responses = iter(
+        [
+            httpx.Response(429, headers={"retry-after": "3600"}, request=request),
+            httpx.Response(200, request=request),
+        ]
+    )
+    monkeypatch.setattr(me._HTTP_CLIENT, "get", lambda *a, **k: next(responses))
+    monkeypatch.setattr(me.time, "sleep", lambda s: sleeps.append(s))
+    assert me._get("https://api.crossref.org/works/x").status_code == 200
+    assert sleeps == [me._RETRY_AFTER_CAP_SECONDS]

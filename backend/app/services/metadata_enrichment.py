@@ -9,6 +9,7 @@ user-confirmed. Outbound requests carry only bibliographic identifiers (see SECU
 
 import logging
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -217,10 +218,41 @@ def _idseg(identifier: str) -> str:
 _HTTP_CLIENT = httpx.Client(timeout=30, follow_redirects=True)
 
 
+# One in-request retry after a rate-limit/overload response (S6c). Longer waits are the RQ-level
+# retry's job — sleeping longer than this inside a request/job just pins the worker.
+_RETRY_AFTER_CAP_SECONDS = 15.0
+_RETRYABLE_STATUS = (429, 503)
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """The server-requested wait from a 429/503 ``Retry-After`` header, capped; None = don't wait.
+
+    Only the delta-seconds form is honored (the HTTP-date form is rare on these APIs and not worth
+    parsing); a missing/garbage header still gets a short default wait so the retry isn't instant.
+    """
+    if response.status_code not in _RETRYABLE_STATUS:
+        return None
+    raw = response.headers.get("retry-after", "").strip()
+    try:
+        wanted = float(raw) if raw else 1.0
+    except ValueError:
+        wanted = 1.0
+    return min(max(wanted, 0.0), _RETRY_AFTER_CAP_SECONDS)
+
+
 def _get(url: str, *, params: dict | None = None, headers: dict | None = None) -> httpx.Response:
-    """GET ``url`` following only same-host redirects (SSRF guard)."""
+    """GET ``url`` following only same-host redirects (SSRF guard).
+
+    Retries ONCE, in-request, when the API answers 429/503, honoring a (capped) ``Retry-After`` —
+    the common polite-pool rate-limit case. Anything beyond that single retry is left to the
+    caller / the RQ job-level retry.
+    """
     expected_host = urlsplit(url).hostname
     response = _HTTP_CLIENT.get(url, params=params, headers=headers or {})
+    wait = _retry_after_seconds(response)
+    if wait is not None:
+        time.sleep(wait)
+        response = _HTTP_CLIENT.get(url, params=params, headers=headers or {})
     for hop in [*response.history, response]:
         if urlsplit(str(hop.url)).hostname != expected_host:
             raise ExternalFetchError(

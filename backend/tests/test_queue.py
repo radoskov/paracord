@@ -82,3 +82,21 @@ def test_order_jobs_newest_first_missing_timestamp_sorts_last() -> None:
     ]
     ordered = [j["id"] for j in queue._order_jobs_newest_first(list(jobs))]
     assert ordered == ["has-ts", "no-ts"]
+
+
+def test_enqueue_work_job_declares_transient_retry(monkeypatch) -> None:
+    """S6/S7: per-work jobs are enqueued with an RQ Retry so transient failures re-run."""
+    wid = "11111111-1111-1111-1111-111111111111"
+    captured: dict = {}
+
+    class _RetryCapturingQueue(_FakeQueue):
+        def enqueue(self, func, *args, job_id=None, retry=None, **kw):
+            captured["retry"] = retry
+            return super().enqueue(func, *args, job_id=job_id, **kw)
+
+    monkeypatch.setattr(queue, "get_queue", lambda: _RetryCapturingQueue())
+    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, _jid: None)
+    assert queue.enqueue_enrichment(wid) == f"enrich-{wid}"
+    retry = captured["retry"]
+    assert retry is not None and retry.max == 2
+    assert retry.intervals == [30, 120]

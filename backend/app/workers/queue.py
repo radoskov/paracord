@@ -156,11 +156,19 @@ def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
     """
     job_id = f"{prefix}-{work_id}"
     try:
+        from rq import Retry
+
         queue = get_queue()
         existing = _live_job_id(queue.connection, job_id)
         if existing is not None:
             return existing
-        return queue.enqueue(job_func, str(work_id), job_id=job_id).id
+        # S6/S7: transient failures (rate-limited external APIs, network blips, a briefly-down
+        # Postgres) re-run automatically. Deterministic failures don't reach the retry: the jobs
+        # catch them (e.g. enrich's DOI-conflict path) and record processing_error WITHOUT raising,
+        # so only genuinely unexpected/transient exceptions trigger a re-run.
+        return queue.enqueue(
+            job_func, str(work_id), job_id=job_id, retry=Retry(max=2, interval=[30, 120])
+        ).id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue %s for work %s: %s", prefix, work_id, exc)
         return None

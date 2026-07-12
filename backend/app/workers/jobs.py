@@ -303,6 +303,14 @@ def enrich_work_job(work_id: str) -> dict | None:
             return None
         try:
             result = enrich_work(db, work, settings=get_settings())
+            if result.get("failed") and not result.get("sources"):
+                # Every planned source failed (enrich_work swallows per-source errors so a partial
+                # outage can't abort the rest). A total failure is almost always transient
+                # (rate-limit, network), so raise: the generic handler below flags the paper and
+                # the re-raise lets the RQ retry (S6) re-run the job.
+                raise RuntimeError(
+                    "enrichment failed for every source: " + ", ".join(result["failed"])
+                )
             db.commit()
             _clear_work_processing_error(
                 work_id, "enrich"
