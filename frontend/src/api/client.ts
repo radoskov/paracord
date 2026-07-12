@@ -1047,6 +1047,8 @@ export interface CitingPaper {
   year: number | null;
   doi: string | null;
   venue: string | null;
+  // The library work this citing paper IS, when the local matcher recognizes it.
+  resolved_work_id: string | null;
 }
 
 export interface CitingPapersResponse {

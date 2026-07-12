@@ -1512,8 +1512,11 @@
               {c.authors ?? ''}{c.year ? ` · ${c.year}` : ''}{c.venue ? ` · ${c.venue}` : ''}
               {#if c.doi}<a class="ref-badge ref-badge-link" href={`https://doi.org/${c.doi}`}
                   target="_blank" rel="noopener noreferrer" title="Open at doi.org">doi:{c.doi}</a>{/if}
+              {#if c.resolved_work_id}<button type="button" class="ref-badge ref-badge-link"
+                  on:click={() => onSelectWork(c.resolved_work_id)}
+                  title="This citing paper is already in the library — open it">in library</button>{/if}
             </small>
-            {#if c.doi}
+            {#if c.doi && !c.resolved_work_id}
               <div class="ref-actions">
                 <button type="button" class="secondary small" on:click={() => importCiter(c.doi)}
                   disabled={loading || !canModify}
