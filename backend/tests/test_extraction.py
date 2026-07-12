@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.work import Work
 from app.services.extraction import extract_and_store, store_parsed_extraction
 from app.services.storage import file_ids_pending_extraction
-from app.services.tei_parser import parse_tei
+from app.services.tei_parser import ParsedPaper, ParsedReference, parse_tei
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -190,6 +190,30 @@ def test_store_parsed_extraction_is_idempotent(db_session) -> None:
     db_session.commit()
     assert len(db_session.scalars(select(Reference)).all()) == 2  # not duplicated
     assert len(db_session.scalars(select(CitationMention)).all()) == 2
+
+
+def test_store_parsed_extraction_handles_duplicate_references_in_one_work(db_session) -> None:
+    """Two bib entries that dedup to the same canonical reference (shared rows, batch 12) must
+    yield a single citation edge, not a uq_reference_citation violation."""
+    work = Work(canonical_title="x", normalized_title="x", canonical_metadata_source="filename")
+    db_session.add(work)
+    db_session.commit()
+
+    parsed = ParsedPaper(
+        references=[
+            ParsedReference(key="b0", title="Same Cited Paper", doi="10.1/same", year=2020),
+            ParsedReference(key="b1", title="Same Cited Paper", doi="10.1/same", year=2020),
+        ]
+    )
+    store_parsed_extraction(db_session, work=work, parsed=parsed)
+    db_session.commit()
+
+    refs = db_session.scalars(select(Reference)).all()
+    assert len(refs) == 1  # both bib entries collapse to one canonical reference
+    edges = db_session.scalars(
+        select(ReferenceCitation).where(ReferenceCitation.citing_work_id == work.id)
+    ).all()
+    assert len(edges) == 1  # exactly one edge, no duplicate-key violation
 
 
 def test_store_parsed_extraction_does_not_duplicate_identical_assertions(db_session) -> None:

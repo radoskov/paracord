@@ -196,6 +196,10 @@ def store_parsed_extraction(
     )
     db.execute(delete(ReferenceCitation).where(ReferenceCitation.citing_work_id == work.id))
     reference_by_key: dict[str, Reference] = {}
+    # Two distinct bib entries can dedup to the *same* canonical reference (shared rows, batch 12);
+    # a work cites each canonical reference at most once, so guard the edge against duplicates to
+    # avoid violating uq_reference_citation.
+    cited_reference_ids: set[Any] = set()
     for index, reference in enumerate(parsed.references):
         saved = find_or_create_reference(
             db,
@@ -206,13 +210,15 @@ def store_parsed_extraction(
             raw_citation=reference.raw_citation,
             authors=list(reference.authors) if reference.authors else None,
         )
-        db.add(
-            ReferenceCitation(
-                reference_id=saved.id,
-                citing_work_id=work.id,
-                source_tei_id=source_tei.id if source_tei else None,
+        if saved.id not in cited_reference_ids:
+            cited_reference_ids.add(saved.id)
+            db.add(
+                ReferenceCitation(
+                    reference_id=saved.id,
+                    citing_work_id=work.id,
+                    source_tei_id=source_tei.id if source_tei else None,
+                )
             )
-        )
         if reference.key:
             reference_by_key[reference.key] = saved
         reference_by_key[f"b{index}"] = saved
