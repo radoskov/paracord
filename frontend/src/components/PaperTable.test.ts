@@ -46,4 +46,10 @@ describe('PaperTable batch10 columns (issue 5)', () => {
     expect(screen.getByText('0')).toBeTruthy();
     expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(3);
   });
+
+  it('flags a per-paper processing error on the title (F2)', () => {
+    const work = makeWork({ processing_error: 'enrich: DOI conflict' });
+    render(PaperTable, { works: [work], columns: NEW_COLUMNS } as never);
+    expect(screen.getByText(/processing failed/)).toBeTruthy();
+  });
 });

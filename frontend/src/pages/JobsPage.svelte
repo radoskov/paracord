@@ -234,6 +234,9 @@
               <li>
                 <div class="job-row">
                   <span class="badge badge-{job.status}">{job.status}</span>
+                  {#if job.retries_left != null}
+                    <small class="muted" title="Automatic retries remaining before this is marked failed">↻ {job.retries_left} left</small>
+                  {/if}
                   <strong>{job.task}</strong>
                   <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
                 </div>

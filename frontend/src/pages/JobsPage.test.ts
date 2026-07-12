@@ -27,6 +27,18 @@ function makeStatus(jobs: JobRecord[]): QueueStatus {
 }
 
 describe('JobsPage queue-health semaphore (D7)', () => {
+  it('surfaces the automatic-retry budget on a job (F2)', async () => {
+    const client = {
+      getJobs: vi
+        .fn()
+        .mockResolvedValue(
+          makeStatus([job({ id: 'r', task: 'extract', status: 'scheduled', retries_left: 2 })]),
+        ),
+    };
+    render(JobsPage, { client: client as never });
+    expect(await screen.findByText(/2 left/)).toBeTruthy();
+  });
+
   it('shows GREEN when Redis is reachable and workers are running', async () => {
     const status: QueueStatus = {
       ...makeStatus([]),

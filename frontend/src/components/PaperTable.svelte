@@ -136,6 +136,9 @@
                 {#if work.arxiv_id}
                   <span>{work.arxiv_id}</span>
                 {/if}
+                {#if work.processing_error}
+                  <span class="badge badge-error" title={work.processing_error}>⚠ processing failed</span>
+                {/if}
               </td>
             {:else if col.id === 'year'}
               <td>{work.year ?? '-'}</td>

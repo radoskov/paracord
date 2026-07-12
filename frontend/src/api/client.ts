@@ -31,6 +31,9 @@ export interface Work {
   venue: string | null;
   year: number | null;
   reading_status: ReadingStatus;
+  // Per-paper processing error (F2): "<stage>: <reason>" when a background enrich/keyword/topic job
+  // failed for this paper; null when clear. Drives a "processing failed" indicator.
+  processing_error?: string | null;
   // Origin marker; "agent_index_only" on a not-yet-extracted local-agent stub (B6).
   canonical_metadata_source?: string | null;
   // The file to open by default (the "main" file); null falls back to the first attached file.
@@ -1334,6 +1337,9 @@ export interface JobRecord {
   target_id?: string | null;
   paper_title?: string | null;
   paper_sha256?: string | null;
+  // F2: RQ retries remaining (null = no retry policy). A "scheduled" job with this set is a pending
+  // automatic retry — the Jobs tab surfaces it so a retry looks like progress, not a stuck job.
+  retries_left?: number | null;
 }
 
 export interface QueueStatus {
