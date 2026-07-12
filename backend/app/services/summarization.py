@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.models.ai import Summary
 from app.models.citation import RawTeiDocument
-from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
+from app.services.scope_resolution import resolve_scope_works
 from app.services.tei_parser import extract_body_text
 
 logger = logging.getLogger(__name__)
@@ -293,46 +293,10 @@ def list_work_summaries(db: Session, work_id: uuid.UUID) -> list[Summary]:
     )
 
 
-def _scope_works(
-    db: Session,
-    *,
-    scope_type: str,
-    scope_id: uuid.UUID | None,
-    visible_ids: set[uuid.UUID] | None = None,
-) -> list[Work]:
-    if scope_type == "library":
-        works = list(db.scalars(select(Work)).all())
-    elif scope_type == "shelf":
-        if scope_id is None:
-            raise ValueError("scope_id is required for a shelf summary")
-        works = list(
-            db.scalars(
-                select(Work)
-                .join(ShelfWork, ShelfWork.work_id == Work.id)
-                .where(ShelfWork.shelf_id == scope_id)
-            ).all()
-        )
-    elif scope_type == "rack":
-        if scope_id is None:
-            raise ValueError("scope_id is required for a rack summary")
-        works = list(
-            db.scalars(
-                select(Work)
-                .join(ShelfWork, ShelfWork.work_id == Work.id)
-                .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
-                .where(RackShelf.rack_id == scope_id)
-                .distinct()
-            ).all()
-        )
-    else:
-        raise ValueError(f"Unsupported scope type: {scope_type!r}")
-    # Merged shadows (Batch D) are never part of a scope summary, for anyone.
-    works = [
-        w
-        for w in works
-        if w.merged_into_id is None and (visible_ids is None or w.id in visible_ids)
-    ]
-    return works
+# Scope resolution is shared now (S1/S2) — one query-returning resolver, required
+# visibility clamp, shadow filter applied centrally.
+def _scope_works(db, *, scope_type, scope_id, visible_ids):
+    return resolve_scope_works(db, scope_type, scope_id, visible_ids=visible_ids)
 
 
 def summarize_scope(
