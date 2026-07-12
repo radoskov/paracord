@@ -11,7 +11,7 @@ def test_reference_shorthand_from_mention_marker(client, auth_headers, db, make_
     db.add(citing)
     db.flush()
     ref = make_reference(db, citing_work_id=citing.id, title="A Cited Paper", year=2020)
-    other = make_reference(db, citing_work_id=citing.id, title="No Mentions", year=2019)
+    make_reference(db, citing_work_id=citing.id, title="No Mentions", year=2019)
     # "[69]" appears twice, "[xx]" once → most common wins.
     db.add_all(
         [
