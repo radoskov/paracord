@@ -118,7 +118,8 @@ def export_bibliography(
         for entry in entries:
             override = citation_keys.get(str(entry.work.id))
             if override:
-                entry.key = override
+                entry.key = _safe_citation_key(override, entry.key)
+        _ensure_unique_keys(entries)
     if output_format == "styled":
         content = render_styled(entries, style or "apa")
     else:
@@ -334,6 +335,48 @@ def _base_key(entry: _Entry) -> str:
         stem = (words[0] if words else "work").lower()
     year = str(entry.work.year or "nd")
     return f"{stem}{year}"
+
+
+# A user-supplied citation key is emitted *verbatim* into structural positions — BibTeX
+# ``@article{<key>,``, LaTeX ``\cite{<key>}`` / ``\bibitem{<key>}``, Pandoc ``@<key>``, and the
+# CSL-JSON ``"id"``. Left unchecked, a crafted key (e.g. ``x},title={INJECTED``) breaks out of the
+# entry and injects arbitrary BibTeX/LaTeX. We *neutralise only the structural delimiters* and
+# preserve everything a real key legitimately uses: Unicode letters (e.g. ``Müller``) and the
+# punctuation seen in DBLP/DOI-derived keys (``. : + / _ -``). This kept set is the intersection of
+# what BibTeX keys, LaTeX ``\cite`` arguments, and Pandoc citation keys all accept. Field *values*
+# (author names, DOIs, URLs, dates) are NOT touched here — they are escaped, never stripped, by the
+# per-format renderers (``_escape_bibtex`` / ``_escape_latex`` / ``_escape_html`` / JSON).
+_UNSAFE_KEY_CHARS = re.compile(r"[^\w.:+/-]", re.UNICODE)
+
+
+def _safe_citation_key(raw: str, fallback: str) -> str:
+    """Neutralise structural characters in a user-supplied citation key, preserving the rest.
+
+    Only characters that could break out of a BibTeX/LaTeX/Pandoc citation context are replaced
+    (with ``-``); Unicode letters and ``. : + / _ -`` are kept so legitimate keys survive intact.
+    Returns ``fallback`` (the auto-assigned key) if nothing usable remains.
+    """
+    cleaned = _UNSAFE_KEY_CHARS.sub("-", raw or "")
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    # Pandoc requires a key to *begin* with a letter/digit/underscore; trim leading/trailing
+    # punctuation so the key is valid across every target format.
+    cleaned = re.sub(r"^[^\w]+|[^\w]+$", "", cleaned)
+    return cleaned or fallback
+
+
+def _ensure_unique_keys(entries: list[_Entry]) -> None:
+    """De-duplicate final citation keys after overrides are applied.
+
+    Two different overrides (or an override and an auto key) can end up identical, and duplicate
+    keys are a hard error in BibTeX/biber. A colliding key gets a ``-N`` suffix (``-`` is in the
+    safe key charset); the first occurrence is kept unchanged.
+    """
+    seen: dict[str, int] = {}
+    for entry in entries:
+        base = entry.key
+        seen[base] = seen.get(base, 0) + 1
+        if seen[base] > 1:
+            entry.key = f"{base}-{seen[base]}"
 
 
 def _split_name(name: str) -> dict[str, str]:
