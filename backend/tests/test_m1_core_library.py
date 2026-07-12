@@ -22,7 +22,7 @@ from app.core.config import Settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
@@ -60,6 +60,7 @@ def db_session(tmp_path: Path):
             Tag.__table__,
             TagLink.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             # list_works reads metadata_assertions for the conflict badge (batch10 issue 5).
             MetadataAssertion.__table__,
         ],
@@ -311,7 +312,7 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
     assert filtered_ids(tag_id=tag.id) == [included.id]
 
 
-def test_work_list_filters_by_extraction_status(db_session, owner: User) -> None:
+def test_work_list_filters_by_extraction_status(db_session, owner: User, make_reference) -> None:
     """has_pdf / has_references / missing filter on extraction + metadata completeness."""
     import uuid
 
@@ -324,7 +325,7 @@ def test_work_list_filters_by_extraction_status(db_session, owner: User) -> None
     db_session.add(pdf)
     db_session.flush()
     db_session.add(FileWorkLink(file_id=pdf.id, work_id=with_pdf.id))
-    db_session.add(Reference(id=uuid.uuid4(), citing_work_id=with_pdf.id, raw_citation="ref"))
+    make_reference(db_session, citing_work_id=with_pdf.id, id=uuid.uuid4(), raw_citation="ref")
     db_session.commit()
 
     def ids(**filters) -> set:

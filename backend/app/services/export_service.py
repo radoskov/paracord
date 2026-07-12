@@ -18,6 +18,7 @@ from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
 from app.services import csl
 from app.services.audit import record_event
+from app.services.reference_links import citing_work_ids_subquery
 
 # format -> (file extension, content type)
 FORMAT_MEDIA: dict[str, tuple[str, str]] = {
@@ -230,10 +231,10 @@ def _resolve_unresolved_references(
     """
     stmt = select(Reference).where(Reference.resolved_work_id.is_(None))
     if scope_id:
-        stmt = stmt.where(Reference.citing_work_id == uuid.UUID(scope_id))
+        stmt = stmt.where(Reference.id.in_(citing_work_ids_subquery([uuid.UUID(scope_id)])))
     if visible_ids is not None:
-        stmt = stmt.where(Reference.citing_work_id.in_(visible_ids))
-    stmt = stmt.order_by(Reference.citing_work_id, Reference.created_at)
+        stmt = stmt.where(Reference.id.in_(citing_work_ids_subquery(visible_ids)))
+    stmt = stmt.order_by(Reference.created_at)
     return list(db.scalars(stmt).all())
 
 

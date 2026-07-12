@@ -14,7 +14,7 @@ from app.core.security import hash_password
 from app.db.base import Base
 from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink
 from app.models.metadata import MetadataAssertion
@@ -49,6 +49,7 @@ def db_session(tmp_path: Path):
             Tag.__table__,
             TagLink.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             CitationMention.__table__,
             Annotation.__table__,
             MetadataAssertion.__table__,

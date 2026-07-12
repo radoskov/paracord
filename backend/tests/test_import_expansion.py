@@ -299,19 +299,18 @@ def test_delete_work_requires_editor(client, auth_headers) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_work_references_endpoint_lists_bibliography(client, auth_headers, db) -> None:
-    from app.models.citation import Reference
-
+def test_work_references_endpoint_lists_bibliography(
+    client, auth_headers, db, make_reference
+) -> None:
     headers = auth_headers("editor")
     work = client.post("/api/v1/works", headers=headers, json={"canonical_title": "Citing"}).json()
-    db.add(
-        Reference(
-            citing_work_id=uuid.UUID(work["id"]),
-            title="A Cited Paper",
-            year=2020,
-            doi="10.1/x",
-            resolution_status="unresolved",
-        )
+    make_reference(
+        db,
+        citing_work_id=uuid.UUID(work["id"]),
+        title="A Cited Paper",
+        year=2020,
+        doi="10.1/x",
+        resolution_status="unresolved",
     )
     db.commit()
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from app.db.base import Base
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
@@ -30,6 +30,7 @@ def db_session(tmp_path: Path):
         tables=[
             Work.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
             ImportBatch.__table__,
@@ -55,16 +56,14 @@ def _shelf_with_works(db, works: list[Work]) -> Shelf:
     return shelf
 
 
-def test_local_match_edge_between_scope_works(db_session) -> None:
+def test_local_match_edge_between_scope_works(db_session, make_reference) -> None:
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/citing")
     cited = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
     shelf = _shelf_with_works(db_session, [citing, cited])
     # Citing's bibliography references the cited work by DOI (twice -> weight 2).
-    db_session.add_all(
-        [
-            Reference(citing_work_id=citing.id, doi="10.1/CITED", title="Cited"),
-            Reference(citing_work_id=citing.id, doi="https://doi.org/10.1/cited", title="Cited"),
-        ]
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/CITED", title="Cited")
+    make_reference(
+        db_session, citing_work_id=citing.id, doi="https://doi.org/10.1/cited", title="Cited"
     )
     db_session.commit()
 
@@ -81,11 +80,11 @@ def test_local_match_edge_between_scope_works(db_session) -> None:
     assert graph.summary["external_node_count"] == 0
 
 
-def test_local_only_drops_external_references(db_session) -> None:
+def test_local_only_drops_external_references(db_session, make_reference) -> None:
     citing = Work(canonical_title="Citing", normalized_title="citing")
     shelf = _shelf_with_works(db_session, [citing])
-    db_session.add(
-        Reference(citing_work_id=citing.id, title="Some uncollected paper", doi="10.9/elsewhere")
+    make_reference(
+        db_session, citing_work_id=citing.id, title="Some uncollected paper", doi="10.9/elsewhere"
     )
     db_session.commit()
 
@@ -106,10 +105,10 @@ def test_local_only_drops_external_references(db_session) -> None:
     assert external.label == "Some uncollected paper"
 
 
-def test_self_citation_is_dropped(db_session) -> None:
+def test_self_citation_is_dropped(db_session, make_reference) -> None:
     work = Work(canonical_title="Solo", normalized_title="solo", doi="10.1/solo")
     shelf = _shelf_with_works(db_session, [work])
-    db_session.add(Reference(citing_work_id=work.id, doi="10.1/solo", title="Solo"))
+    make_reference(db_session, citing_work_id=work.id, doi="10.1/solo", title="Solo")
     db_session.commit()
 
     graph = build_citation_graph(db_session, scope_type="shelf", scope_id=shelf.id)
@@ -132,12 +131,12 @@ def _add_works(db, works: list[Work]) -> None:
     db.commit()
 
 
-def test_selected_papers_scope_resolves_passed_ids(db_session) -> None:
+def test_selected_papers_scope_resolves_passed_ids(db_session, make_reference) -> None:
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/citing")
     cited = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
     outside = Work(canonical_title="Outside", normalized_title="outside", doi="10.1/outside")
     _add_works(db_session, [citing, cited, outside])
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/cited", title="Cited"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/cited", title="Cited")
     db_session.commit()
 
     graph = build_citation_graph(
@@ -152,11 +151,11 @@ def test_selected_papers_scope_resolves_passed_ids(db_session) -> None:
     assert only_citing.edges == []
 
 
-def test_search_result_scope_resolves_passed_ids(db_session) -> None:
+def test_search_result_scope_resolves_passed_ids(db_session, make_reference) -> None:
     a = Work(canonical_title="A", normalized_title="a", doi="10.1/a")
     b = Work(canonical_title="B", normalized_title="b", doi="10.1/b")
     _add_works(db_session, [a, b])
-    db_session.add(Reference(citing_work_id=a.id, doi="10.1/b", title="B"))
+    make_reference(db_session, citing_work_id=a.id, doi="10.1/b", title="B")
     db_session.commit()
 
     graph = build_citation_graph(db_session, scope_type="search_result", work_ids=[a.id, b.id])
@@ -164,7 +163,7 @@ def test_search_result_scope_resolves_passed_ids(db_session) -> None:
     assert len(graph.edges) == 1
 
 
-def test_import_batch_scope_resolves_batch_works(db_session) -> None:
+def test_import_batch_scope_resolves_batch_works(db_session, make_reference) -> None:
     batch = ImportBatch(input_type="bibtex", status="completed")
     db_session.add(batch)
     db_session.flush()
@@ -182,7 +181,7 @@ def test_import_batch_scope_resolves_batch_works(db_session) -> None:
     )
     other = Work(canonical_title="Other", normalized_title="other", doi="10.1/other")  # NULL batch
     _add_works(db_session, [citing, cited, other])
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/cited", title="Cited"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/cited", title="Cited")
     db_session.commit()
 
     graph = build_citation_graph(db_session, scope_type="import_batch", scope_id=batch.id)
@@ -192,7 +191,7 @@ def test_import_batch_scope_resolves_batch_works(db_session) -> None:
 
 
 @pytest.mark.parametrize("scope_type", ["selected_papers", "search_result", "import_batch"])
-def test_new_scopes_clamped_to_visible_ids(db_session, scope_type) -> None:
+def test_new_scopes_clamped_to_visible_ids(db_session, scope_type, make_reference) -> None:
     batch = ImportBatch(input_type="bibtex", status="completed")
     db_session.add(batch)
     db_session.flush()
@@ -210,7 +209,7 @@ def test_new_scopes_clamped_to_visible_ids(db_session, scope_type) -> None:
     )
     _add_works(db_session, [citing, hidden])
     # citing references the hidden work; even a persisted resolution must never leak it.
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/hidden", title="Hidden"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/hidden", title="Hidden")
     db_session.commit()
 
     kwargs = (
@@ -235,14 +234,14 @@ def _version_group(db, rep: Work, member: Work) -> None:
     db.commit()
 
 
-def test_collapse_merges_version_nodes_and_remaps_edges(db_session) -> None:
+def test_collapse_merges_version_nodes_and_remaps_edges(db_session, make_reference) -> None:
     rep = Work(canonical_title="A", normalized_title="a", doi="10.1/a")
     alt = Work(canonical_title="A prime", normalized_title="a prime", doi="10.1/aprime")
     citing = Work(canonical_title="B", normalized_title="b", doi="10.1/b")
     _add_works(db_session, [rep, alt, citing])
     _version_group(db_session, rep, alt)
     # B cites the alternate version of A.
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/aprime", title="A prime"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/aprime", title="A prime")
     db_session.commit()
 
     graph = build_citation_graph(
@@ -260,19 +259,15 @@ def test_collapse_merges_version_nodes_and_remaps_edges(db_session) -> None:
     assert graph.summary["collapsed_version_groups"] == 1
 
 
-def test_collapse_aggregates_and_dedups_parallel_edges(db_session) -> None:
+def test_collapse_aggregates_and_dedups_parallel_edges(db_session, make_reference) -> None:
     rep = Work(canonical_title="A", normalized_title="a", doi="10.1/a")
     alt = Work(canonical_title="A prime", normalized_title="a prime", doi="10.1/aprime")
     citing = Work(canonical_title="B", normalized_title="b", doi="10.1/b")
     _add_works(db_session, [rep, alt, citing])
     _version_group(db_session, rep, alt)
     # B cites both A and A' -> after collapse a single B->A edge with summed weight.
-    db_session.add_all(
-        [
-            Reference(citing_work_id=citing.id, doi="10.1/a", title="A"),
-            Reference(citing_work_id=citing.id, doi="10.1/aprime", title="A prime"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/a", title="A")
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/aprime", title="A prime")
     db_session.commit()
 
     graph = build_citation_graph(
@@ -285,13 +280,13 @@ def test_collapse_aggregates_and_dedups_parallel_edges(db_session) -> None:
     assert graph.edges[0].weight == 2
 
 
-def test_collapse_drops_version_to_version_self_loop(db_session) -> None:
+def test_collapse_drops_version_to_version_self_loop(db_session, make_reference) -> None:
     rep = Work(canonical_title="A", normalized_title="a", doi="10.1/a")
     alt = Work(canonical_title="A prime", normalized_title="a prime", doi="10.1/aprime")
     _add_works(db_session, [rep, alt])
     _version_group(db_session, rep, alt)
     # A' cites A (the earlier version) -> both collapse to the representative -> self-loop dropped.
-    db_session.add(Reference(citing_work_id=alt.id, doi="10.1/a", title="A"))
+    make_reference(db_session, citing_work_id=alt.id, doi="10.1/a", title="A")
     db_session.commit()
 
     graph = build_citation_graph(
@@ -304,10 +299,12 @@ def test_collapse_drops_version_to_version_self_loop(db_session) -> None:
     assert {n.id for n in graph.nodes} == {str(rep.id)}
 
 
-def test_collapse_leaves_external_nodes_untouched(db_session) -> None:
+def test_collapse_leaves_external_nodes_untouched(db_session, make_reference) -> None:
     citing = Work(canonical_title="B", normalized_title="b", doi="10.1/b")
     _add_works(db_session, [citing])
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.9/external", title="External paper"))
+    make_reference(
+        db_session, citing_work_id=citing.id, doi="10.9/external", title="External paper"
+    )
     db_session.commit()
 
     graph = build_citation_graph(
@@ -322,13 +319,13 @@ def test_collapse_leaves_external_nodes_untouched(db_session) -> None:
     assert len(graph.edges) == 1
 
 
-def test_no_collapse_keeps_version_nodes_separate(db_session) -> None:
+def test_no_collapse_keeps_version_nodes_separate(db_session, make_reference) -> None:
     rep = Work(canonical_title="A", normalized_title="a", doi="10.1/a")
     alt = Work(canonical_title="A prime", normalized_title="a prime", doi="10.1/aprime")
     citing = Work(canonical_title="B", normalized_title="b", doi="10.1/b")
     _add_works(db_session, [rep, alt, citing])
     _version_group(db_session, rep, alt)
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/aprime", title="A prime"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/aprime", title="A prime")
     db_session.commit()
 
     graph = build_citation_graph(
@@ -342,28 +339,29 @@ def test_no_collapse_keeps_version_nodes_separate(db_session) -> None:
 # ── §8.9 depth: centrality sizing, color-by, warnings, neighborhood (Track C P5b) ────────────────
 
 
-def _hub_and_spokes(db) -> tuple[Work, list[Work]]:
+def _hub_and_spokes(db, make_reference) -> tuple[Work, list[Work]]:
     """A hub cited by three spokes: hub has the highest in-centrality on the directed graph."""
     hub = Work(canonical_title="Hub", normalized_title="hub", doi="10.1/hub")
     spokes = [
         Work(canonical_title=f"S{i}", normalized_title=f"s{i}", doi=f"10.1/s{i}") for i in range(3)
     ]
     _add_works(db, [hub, *spokes])
-    db.add_all(Reference(citing_work_id=s.id, doi="10.1/hub", title="Hub") for s in spokes)
+    for s in spokes:
+        make_reference(db, citing_work_id=s.id, doi="10.1/hub", title="Hub")
     db.commit()
     return hub, spokes
 
 
-def test_compute_metrics_off_by_default_leaves_zero_centrality(db_session) -> None:
-    hub, spokes = _hub_and_spokes(db_session)
+def test_compute_metrics_off_by_default_leaves_zero_centrality(db_session, make_reference) -> None:
+    hub, spokes = _hub_and_spokes(db_session, make_reference)
     graph = build_citation_graph(
         db_session, scope_type="selected_papers", work_ids=[hub.id, *[s.id for s in spokes]]
     )
     assert all(node.pagerank == 0.0 and node.betweenness == 0.0 for node in graph.nodes)
 
 
-def test_centrality_ranks_hub_above_spokes(db_session) -> None:
-    hub, spokes = _hub_and_spokes(db_session)
+def test_centrality_ranks_hub_above_spokes(db_session, make_reference) -> None:
+    hub, spokes = _hub_and_spokes(db_session, make_reference)
     graph = build_citation_graph(
         db_session,
         scope_type="selected_papers",
@@ -380,18 +378,14 @@ def test_centrality_ranks_hub_above_spokes(db_session) -> None:
     assert abs(sum(node.pagerank for node in graph.nodes) - 1.0) < 1.0e-3
 
 
-def test_betweenness_flags_the_bridge(db_session) -> None:
+def test_betweenness_flags_the_bridge(db_session, make_reference) -> None:
     # A - bridge - B (path): the bridge lies on the only shortest path, so it alone scores > 0.
     left = Work(canonical_title="L", normalized_title="l", doi="10.1/l")
     bridge = Work(canonical_title="Br", normalized_title="br", doi="10.1/br")
     right = Work(canonical_title="R", normalized_title="r", doi="10.1/r")
     _add_works(db_session, [left, bridge, right])
-    db_session.add_all(
-        [
-            Reference(citing_work_id=left.id, doi="10.1/br", title="Br"),
-            Reference(citing_work_id=bridge.id, doi="10.1/r", title="R"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=left.id, doi="10.1/br", title="Br")
+    make_reference(db_session, citing_work_id=bridge.id, doi="10.1/r", title="R")
     db_session.commit()
     graph = build_citation_graph(
         db_session,
@@ -405,17 +399,13 @@ def test_betweenness_flags_the_bridge(db_session) -> None:
     assert by_id[str(right.id)].betweenness == 0.0
 
 
-def test_edge_weight_is_mention_count(db_session) -> None:
+def test_edge_weight_is_mention_count(db_session, make_reference) -> None:
     citing = Work(canonical_title="C", normalized_title="c", doi="10.1/c")
     cited = Work(canonical_title="D", normalized_title="d", doi="10.1/d")
     _add_works(db_session, [citing, cited])
-    db_session.add_all(
-        [
-            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
-            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
-            Reference(citing_work_id=citing.id, doi="10.1/d", title="D"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/d", title="D")
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/d", title="D")
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/d", title="D")
     db_session.commit()
     graph = build_citation_graph(
         db_session,
@@ -539,21 +529,21 @@ def test_warning_badge_from_file_link_and_duplicate(db_session) -> None:
     assert warned == {warned_file.id, dup_a.id, dup_b.id}
 
 
-def test_neighborhood_returns_one_hop_set(db_session) -> None:
+def test_neighborhood_returns_one_hop_set(db_session, make_reference) -> None:
     focus = Work(canonical_title="Focus", normalized_title="focus", doi="10.1/focus")
     cites = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
     citer = Work(canonical_title="Citer", normalized_title="citer", doi="10.1/citer")
     far = Work(canonical_title="Far", normalized_title="far", doi="10.1/far")
     _add_works(db_session, [focus, cites, citer, far])
-    db_session.add_all(
-        [
-            Reference(citing_work_id=focus.id, doi="10.1/cited", title="Cited"),  # focus -> cites
-            Reference(citing_work_id=citer.id, doi="10.1/focus", title="Focus"),  # citer -> focus
-            Reference(
-                citing_work_id=far.id, doi="10.1/citer", title="Citer"
-            ),  # far -> citer (2 hop)
-        ]
-    )
+    make_reference(
+        db_session, citing_work_id=focus.id, doi="10.1/cited", title="Cited"
+    )  # focus -> cites
+    make_reference(
+        db_session, citing_work_id=citer.id, doi="10.1/focus", title="Focus"
+    )  # citer -> focus
+    make_reference(
+        db_session, citing_work_id=far.id, doi="10.1/citer", title="Citer"
+    )  # far -> citer (2 hop)
     db_session.commit()
     graph = build_citation_neighborhood(db_session, work_id=focus.id, hops=1)
     ids = {n.work_id for n in graph.nodes}
@@ -572,14 +562,16 @@ def test_neighborhood_none_for_hidden_focus(db_session) -> None:
 # ── Endpoint: §8.9 depth params + neighborhood (uses the in-memory `client` fixture) ─────────────
 
 
-def test_endpoint_citation_graph_ships_depth_fields(client, auth_headers, db) -> None:
+def test_endpoint_citation_graph_ships_depth_fields(
+    client, auth_headers, db, make_reference
+) -> None:
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/c")
     cited = Work(
         canonical_title="Cited", normalized_title="cited", doi="10.1/d", reading_status="read"
     )
     db.add_all([citing, cited])
     db.flush()
-    db.add(Reference(citing_work_id=citing.id, doi="10.1/d", title="Cited"))
+    make_reference(db, citing_work_id=citing.id, doi="10.1/d", title="Cited")
     db.commit()
 
     response = client.post(
@@ -598,12 +590,14 @@ def test_endpoint_citation_graph_ships_depth_fields(client, auth_headers, db) ->
     assert body["summary"]["color_by"] == "status"
 
 
-def test_endpoint_neighborhood_returns_one_hop_and_requires_auth(client, auth_headers, db) -> None:
+def test_endpoint_neighborhood_returns_one_hop_and_requires_auth(
+    client, auth_headers, db, make_reference
+) -> None:
     focus = Work(canonical_title="Focus", normalized_title="focus", doi="10.1/focus")
     cited = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
     db.add_all([focus, cited])
     db.flush()
-    db.add(Reference(citing_work_id=focus.id, doi="10.1/cited", title="Cited"))
+    make_reference(db, citing_work_id=focus.id, doi="10.1/cited", title="Cited")
     db.commit()
 
     # Unauthenticated → 401 (auth dependency on the works router).
@@ -625,7 +619,9 @@ def test_endpoint_neighborhood_returns_one_hop_and_requires_auth(client, auth_he
     assert missing.status_code in (404, 422)
 
 
-def test_endpoint_neighborhood_enforces_reader_see_filter(client, auth_headers, db) -> None:
+def test_endpoint_neighborhood_enforces_reader_see_filter(
+    client, auth_headers, db, make_reference
+) -> None:
     """A reader gets 404 for a focus paper they cannot SEE, and never sees a hidden neighbor.
 
     Endpoint-level companion to the service tests: the works-router auth is exercised through the
@@ -646,13 +642,13 @@ def test_endpoint_neighborhood_enforces_reader_see_filter(client, auth_headers, 
             ShelfWork(shelf_id=private.id, work_id=hidden_cited.id),
         ]
     )
-    db.add(Reference(citing_work_id=hidden_focus.id, doi="10.1/hc", title="HCited"))
+    make_reference(db, citing_work_id=hidden_focus.id, doi="10.1/hc", title="HCited")
 
     # A loose (visible) focus that cites the hidden paper by DOI.
     focus = Work(canonical_title="Focus2", normalized_title="focus2", doi="10.1/f2")
     db.add(focus)
     db.flush()
-    db.add(Reference(citing_work_id=focus.id, doi="10.1/hc", title="HCited"))
+    make_reference(db, citing_work_id=focus.id, doi="10.1/hc", title="HCited")
     db.commit()
 
     # The reader cannot SEE the private focus → 404.

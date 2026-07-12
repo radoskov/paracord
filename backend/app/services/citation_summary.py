@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
@@ -193,7 +193,12 @@ def citation_summary(
         summary.version = _scope_signature([], 0, limit)
         return summary
 
-    references = db.scalars(select(Reference).where(Reference.citing_work_id.in_(member_ids))).all()
+    references = db.scalars(
+        select(Reference)
+        .join(ReferenceCitation, ReferenceCitation.reference_id == Reference.id)
+        .where(ReferenceCitation.citing_work_id.in_(member_ids))
+        .distinct()
+    ).all()
     signature = _scope_signature(works, len(references), limit)
     cached = _SUMMARY_CACHE.get(signature)
     if cached is not None:
@@ -380,6 +385,14 @@ def _missing_works(
     local_index = _local_work_index(
         db, scope_works=scope_works, references=references, visible_ids=visible
     )
+    # Which scope works cite each (shared) canonical reference — a reference may be cited by many.
+    citing_by_ref: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    for ref_id, citing_wid in db.execute(
+        select(ReferenceCitation.reference_id, ReferenceCitation.citing_work_id).where(
+            ReferenceCitation.citing_work_id.in_(scope_id_set)
+        )
+    ).all():
+        citing_by_ref[ref_id].append(citing_wid)
 
     @dataclass
     class _Agg:
@@ -407,6 +420,8 @@ def _missing_works(
         key = _missing_key(reference)
         if key is None:
             continue
+        citing_wids = citing_by_ref.get(reference.id, [])
+        n_citing = len(citing_wids) or 1  # defensive: a reference always has ≥1 citing work
         agg = aggregates.get(key)
         title = reference.title or reference.doi or reference.arxiv_id or "Cited work"
         has_doi = reference.doi is not None
@@ -416,14 +431,14 @@ def _missing_works(
                 doi=normalize_doi(reference.doi) if reference.doi else None,
                 year=reference.year,
                 arxiv_id=reference.arxiv_id,
-                citing={reference.citing_work_id},
-                mentions=1,
+                citing=set(citing_wids),
+                mentions=n_citing,
                 reference_id=reference.id,
                 has_doi=has_doi,
             )
         else:
-            agg.citing.add(reference.citing_work_id)
-            agg.mentions += 1
+            agg.citing.update(citing_wids)
+            agg.mentions += n_citing
             # Prefer a representative reference that carries a DOI and a real title.
             if (has_doi and not agg.has_doi) or (
                 reference.title and agg.title in (agg.doi, "Cited work")

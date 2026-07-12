@@ -22,7 +22,7 @@ from app.models.agent import AgentFile
 from app.models.ai import Embedding, Summary
 from app.models.annotation import Annotation
 from app.models.chunk import WorkChunk
-from app.models.citation import CitationMention, RawTeiDocument, Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
@@ -46,6 +46,7 @@ from app.services.file_paths import (
     resolve_streamable_pdf_path,
 )
 from app.services.queue_capacity import assert_queue_has_capacity
+from app.services.reference_links import references_for_work
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import (
@@ -466,14 +467,15 @@ def build_works_query(
         stmt = stmt.where(member)
     if parsed.cites:
         # cites:X — works that cite the work(s) matching X. A local citation edge is a Reference
-        # resolved to a target work (Reference.citing_work_id cites Reference.resolved_work_id), so
-        # this keeps works that have a resolved reference whose target matches X (title/id).
+        # resolved to a target work, cited by a work via ReferenceCitation, so this keeps works that
+        # have a citation onto a resolved reference whose target matches X (title/id).
         target = Work.__table__.alias("cited_target")
         cites_cond = _name_or_id_condition(target.c.canonical_title, target.c.id, parsed.cites)
         edge = (
-            select(Reference.id)
+            select(ReferenceCitation.id)
+            .join(Reference, Reference.id == ReferenceCitation.reference_id)
             .join(target, target.c.id == Reference.resolved_work_id)
-            .where(Reference.citing_work_id == Work.id, cites_cond)
+            .where(ReferenceCitation.citing_work_id == Work.id, cites_cond)
             .exists()
         )
         stmt = stmt.where(edge)
@@ -485,8 +487,9 @@ def build_works_query(
             source.c.canonical_title, source.c.id, parsed.cited_by_local
         )
         edge = (
-            select(Reference.id)
-            .join(source, source.c.id == Reference.citing_work_id)
+            select(ReferenceCitation.id)
+            .join(Reference, Reference.id == ReferenceCitation.reference_id)
+            .join(source, source.c.id == ReferenceCitation.citing_work_id)
             .where(Reference.resolved_work_id == Work.id, src_cond)
             .exists()
         )
@@ -580,7 +583,11 @@ def build_works_query(
         has_file = select(FileWorkLink.work_id).where(FileWorkLink.work_id == Work.id).exists()
         stmt = stmt.where(has_file if has_pdf else ~has_file)
     if has_references is not None:
-        has_refs = select(Reference.id).where(Reference.citing_work_id == Work.id).exists()
+        has_refs = (
+            select(ReferenceCitation.id)
+            .where(ReferenceCitation.citing_work_id == Work.id)
+            .exists()
+        )
         stmt = stmt.where(has_refs if has_references else ~has_refs)
     if parsed.has_annotations:  # has:notes / has:annotations — ≥1 annotation on the work
         stmt = stmt.where(select(Annotation.id).where(Annotation.work_id == Work.id).exists())
@@ -1265,7 +1272,26 @@ def delete_work(
     db.execute(delete(ShelfWork).where(ShelfWork.work_id == work_id))
     db.execute(delete(Annotation).where(Annotation.work_id == work_id))
     db.execute(delete(CitationMention).where(CitationMention.citing_work_id == work_id))
-    db.execute(delete(Reference).where(Reference.citing_work_id == work_id))
+    # Unlink this work's citation edges, then prune canonical references nobody else cites.
+    orphan_candidates = set(
+        db.scalars(
+            select(ReferenceCitation.reference_id).where(
+                ReferenceCitation.citing_work_id == work_id
+            )
+        ).all()
+    )
+    db.execute(delete(ReferenceCitation).where(ReferenceCitation.citing_work_id == work_id))
+    if orphan_candidates:
+        still_linked = set(
+            db.scalars(
+                select(ReferenceCitation.reference_id).where(
+                    ReferenceCitation.reference_id.in_(orphan_candidates)
+                )
+            ).all()
+        )
+        orphaned = orphan_candidates - still_linked
+        if orphaned:
+            db.execute(delete(Reference).where(Reference.id.in_(orphaned)))
     db.execute(delete(WorkVersion).where(WorkVersion.work_id == work_id))
     db.execute(
         delete(MetadataAssertion).where(
@@ -1503,13 +1529,7 @@ def list_work_references(
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     _guard_see_work(db, actor, work)
-    references = list(
-        db.scalars(
-            select(Reference)
-            .where(Reference.citing_work_id == work_id)
-            .order_by(Reference.created_at)
-        ).all()
-    )
+    references = references_for_work(db, work_id)
     shorthands = _reference_shorthands(db, [ref.id for ref in references])
     return [
         ReferenceRead.model_validate(ref).model_copy(update={"shorthand": shorthands.get(ref.id)})

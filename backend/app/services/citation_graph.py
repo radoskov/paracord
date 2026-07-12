@@ -15,12 +15,13 @@ from typing import Literal
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import FileWorkLink
 from app.models.organization import RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
+from app.services.reference_links import citing_work_ids_subquery
 from app.utils.normalization import normalize_doi
 
 # Non-private shelf access levels (mirrors ``access._OPEN_OR_VISIBLE``): only these shelves may
@@ -124,8 +125,16 @@ def build_citation_graph(
     if not scope_works:
         return CitationGraph(summary=_summary([], [], scope_count=0, unresolved=0))
 
+    # Which scope works cite each (shared) canonical reference — a reference may be cited by several.
+    citing_by_ref: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    for ref_id, citing_wid in db.execute(
+        select(ReferenceCitation.reference_id, ReferenceCitation.citing_work_id).where(
+            ReferenceCitation.citing_work_id.in_(scope_works.keys())
+        )
+    ).all():
+        citing_by_ref[ref_id].append(citing_wid)
     references = db.scalars(
-        select(Reference).where(Reference.citing_work_id.in_(scope_works.keys()))
+        select(Reference).where(Reference.id.in_(citing_by_ref.keys()))
     ).all()
 
     local_index = _local_work_index(
@@ -141,11 +150,10 @@ def build_citation_graph(
     unresolved = 0
 
     for reference in references:
+        citing_wids = citing_by_ref.get(reference.id, [])
         resolved = _resolve_reference(reference, local_index)
         if resolved is None:
-            if reference.resolution_status == "unresolved":
-                pass  # status already correct
-            unresolved += 1
+            unresolved += len(citing_wids)  # one unresolved edge per citing work in scope
             continue
         target_node, resolution = resolved
         # Access control: never surface a hidden local work as an edge target (a persisted
@@ -155,7 +163,7 @@ def build_citation_graph(
             and target_node.work_id is not None
             and target_node.work_id not in visible_ids
         ):
-            unresolved += 1
+            unresolved += len(citing_wids)
             continue
         # Persist the resolution result so subsequent queries don't need to re-resolve.
         if reference.resolution_status == "unresolved":
@@ -165,12 +173,14 @@ def build_citation_graph(
             resolution == "external" or target_node.work_id not in scope_works
         ):
             continue
-        if target_node.id == str(reference.citing_work_id):
-            continue  # drop self-citations
         nodes.setdefault(target_node.id, target_node)
-        key = (str(reference.citing_work_id), target_node.id)
-        edge_weights[key] += 1
-        edge_resolution[key] = resolution
+        # One edge per citing work in scope (a shared reference fans out to each of them).
+        for citing_wid in citing_wids:
+            if target_node.id == str(citing_wid):
+                continue  # drop self-citations
+            key = (str(citing_wid), target_node.id)
+            edge_weights[key] += 1
+            edge_resolution[key] = resolution
 
     edges = [
         GraphEdge(
@@ -709,7 +719,9 @@ def _direct_citation_neighbors(
 
     # Outgoing: references from the frontier works, resolved to local works (anywhere in the library,
     # via a references-aware index — the same resolution the include-external graph uses).
-    refs = db.scalars(select(Reference).where(Reference.citing_work_id.in_(frontier))).all()
+    refs = db.scalars(
+        select(Reference).where(Reference.id.in_(citing_work_ids_subquery(frontier)))
+    ).all()
     index = _local_work_index(
         db,
         scope_works={work.id: work for work in frontier_works},
@@ -728,7 +740,11 @@ def _direct_citation_neighbors(
     conditions = [Reference.resolved_work_id.in_(frontier)]
     if dois:
         conditions.append(func.lower(Reference.doi).in_(dois))
-    citer_ids = db.scalars(select(Reference.citing_work_id).where(or_(*conditions))).all()
+    citer_ids = db.scalars(
+        select(ReferenceCitation.citing_work_id)
+        .join(Reference, Reference.id == ReferenceCitation.reference_id)
+        .where(or_(*conditions))
+    ).all()
     neighbors.update(citer_ids)
 
     neighbors.discard(None)  # defensive: never carry a NULL citer through

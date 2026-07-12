@@ -1,19 +1,17 @@
 """Phase 2 — references shorthand, file content_available, hash search (items 6, 9, 10)."""
 
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention
 from app.models.file import File, FileWorkLink
 from app.models.work import Work
 
 
-def test_reference_shorthand_from_mention_marker(client, auth_headers, db):
+def test_reference_shorthand_from_mention_marker(client, auth_headers, db, make_reference):
     """A reference's derived ``shorthand`` is the most common linked mention marker_text."""
     citing = Work(canonical_title="Citing", normalized_title="citing")
     db.add(citing)
     db.flush()
-    ref = Reference(citing_work_id=citing.id, title="A Cited Paper", year=2020)
-    other = Reference(citing_work_id=citing.id, title="No Mentions", year=2019)
-    db.add_all([ref, other])
-    db.flush()
+    ref = make_reference(db, citing_work_id=citing.id, title="A Cited Paper", year=2020)
+    other = make_reference(db, citing_work_id=citing.id, title="No Mentions", year=2019)
     # "[69]" appears twice, "[xx]" once → most common wins.
     db.add_all(
         [

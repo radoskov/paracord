@@ -6,7 +6,7 @@ import pytest
 from app.api.v1.endpoints.works import get_work_citation_contexts
 from app.db.base import Base
 from app.models.audit import AuditEvent
-from app.models.citation import CitationMention, RawTeiDocument, Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference, ReferenceCitation
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.source import Source
@@ -41,6 +41,7 @@ def db_session(tmp_path: Path):
             Source.__table__,
             RawTeiDocument.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             CitationMention.__table__,
             MetadataAssertion.__table__,
             AuditEvent.__table__,
@@ -140,7 +141,10 @@ def test_store_parsed_extraction_promotes_when_not_user_confirmed(db_session) ->
     assert work.venue == "Advances in Neural Information Processing Systems"
     assert work.year == 2017
     assert (
-        db_session.scalar(select(Reference).where(Reference.citing_work_id == work.id)) is not None
+        db_session.scalar(
+            select(ReferenceCitation).where(ReferenceCitation.citing_work_id == work.id)
+        )
+        is not None
     )
     assert len(db_session.scalars(select(Reference)).all()) == 2
     assert summary["citation_mention_count"] == 2

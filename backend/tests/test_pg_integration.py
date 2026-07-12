@@ -65,7 +65,7 @@ def pg_engine():
         admin.dispose()
 
 
-def test_fk_cascade_deletes_references_and_mentions(pg_engine):
+def test_fk_cascade_deletes_references_and_mentions(pg_engine, make_reference):
     from app.models.citation import CitationMention, Reference
     from app.models.work import Work
 
@@ -73,17 +73,22 @@ def test_fk_cascade_deletes_references_and_mentions(pg_engine):
         work = Work(canonical_title="Cascade", normalized_title="cascade")
         db.add(work)
         db.flush()
-        ref = Reference(citing_work_id=work.id, raw_citation="r")
-        db.add(ref)
-        db.flush()
+        ref = make_reference(db, citing_work_id=work.id, raw_citation="r")
         db.add(CitationMention(citing_work_id=work.id, reference_id=ref.id))
         db.commit()
         work_id, ref_id = work.id, ref.id
 
         db.delete(db.get(Work, work_id))
         db.commit()
-        # CASCADE removed the dependent rows.
-        assert db.get(Reference, ref_id) is None
+        # CASCADE removed the work-dependent rows: the per-work citation edge and the mentions.
+        # The canonical Reference is shared/decoupled (batch 12) — no FK to the citing work — so it
+        # survives its citing work's deletion.
+        edges = db.execute(
+            text("SELECT count(*) FROM reference_citations WHERE citing_work_id = :w"),
+            {"w": str(work_id)},
+        ).scalar()
+        assert edges == 0
+        assert db.get(Reference, ref_id) is not None
         mentions = db.execute(
             text("SELECT count(*) FROM citation_mentions WHERE citing_work_id = :w"),
             {"w": str(work_id)},

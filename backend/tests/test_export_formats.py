@@ -8,7 +8,6 @@ assertions), per-format media types, and the `paper.exported` audit event (SPEC 
 import json
 
 from app.models.audit import AuditEvent
-from app.models.citation import Reference
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Shelf, ShelfWork
 from app.models.source import ImportBatch
@@ -177,28 +176,26 @@ def test_export_import_batch_target(client, auth_headers, db):
     assert "Unbatched paper" not in body["content"]
 
 
-def test_export_missing_references_target(client, auth_headers, db):
+def test_export_missing_references_target(client, auth_headers, db, make_reference):
     citing = Work(canonical_title="Citing work", normalized_title="citing work")
     db.add(citing)
     db.flush()
-    db.add(
-        Reference(
-            citing_work_id=citing.id,
-            raw_citation="Doe, J. (1999). A lost paper. Journal of Nowhere.",
-            resolution_status="unresolved",
-        )
+    make_reference(
+        db,
+        citing_work_id=citing.id,
+        raw_citation="Doe, J. (1999). A lost paper. Journal of Nowhere.",
+        resolution_status="unresolved",
     )
     # A resolved reference must NOT appear in the missing-references export.
     resolved_target = Work(canonical_title="Resolved target", normalized_title="resolved target")
     db.add(resolved_target)
     db.flush()
-    db.add(
-        Reference(
-            citing_work_id=citing.id,
-            resolved_work_id=resolved_target.id,
-            raw_citation="Smith, A. (2000). A found paper.",
-            resolution_status="local_match",
-        )
+    make_reference(
+        db,
+        citing_work_id=citing.id,
+        resolved_work_id=resolved_target.id,
+        raw_citation="Smith, A. (2000). A found paper.",
+        resolution_status="local_match",
     )
     db.commit()
     body = client.post(

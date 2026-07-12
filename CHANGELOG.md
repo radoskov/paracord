@@ -6,6 +6,29 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ## [Unreleased]
 
+### Changed
+
+- **References are now canonical (shared across citing papers).** A cited reference is stored **once**
+  and linked to every paper that cites it via a new `reference_citations` table, instead of being
+  duplicated per citing work — so resolving/confirming a reference to a library paper applies to all
+  citing works at once, and matching runs once per cited thing. The migration
+  (`0059_canonical_references`) is a **lossless 1:1 structural expansion**: every existing reference
+  keeps its row and id and gets exactly one citation link; no reference is merged or deleted
+  (deduplication of true duplicates is a separate, opt-in, forward-only step). `Reference` also gains
+  the fields the upcoming "likely local" matcher needs (`normalized_title`, `authors`,
+  `suggested_work_id`, `match_score`, `dedup_key`). Batch 12 (Phase 1).
+
+### Fixed
+
+- **Bibliography titles differing only by punctuation/dash/case now normalize equal.** `normalize_title`
+  strips punctuation before collapsing whitespace, so "KnowRob – A Knowledge Processing…" and
+  "KnowRob: A knowledge processing…" compare as the same title (also strengthens the existing
+  work-vs-work duplicate scanner). DOI/arXiv identifier normalization hardened to strip `http(s)://`,
+  `dx.doi.org`, bare-host, lowercase `arxiv:`, `/pdf/`, and trailing `.pdf` prefixes/suffixes. Batch 12
+  (Phase 0).
+- **Column picker: Apply/Cancel moved above the list** so they're reachable without scrolling a long
+  column list; the reference graph now **shows citing papers by default**. Batch 12 (Phase 0).
+
 ### Added
 
 - **"Duplicate PDF" awareness when attaching a shared PDF.** Attaching a PDF that (by content hash)

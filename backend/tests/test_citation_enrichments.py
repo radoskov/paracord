@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from app.db.base import Base
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.citation_worklist import MissingWorkDecision
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.models.source import ImportBatch
@@ -29,6 +29,7 @@ def db_session(tmp_path: Path):
         tables=[
             Work.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
             Rack.__table__,
@@ -61,17 +62,13 @@ def _work(db, title: str, **kwargs) -> Work:
 # --- C3c: coverage metric -----------------------------------------------------------------------
 
 
-def test_coverage_metric_counts_held_vs_missing(db_session) -> None:
+def test_coverage_metric_counts_held_vs_missing(db_session, make_reference) -> None:
     actor = _owner(db_session)
     held = _work(db_session, "Held", doi="10.1/held")
     citing = _work(db_session, "Citing", doi="10.1/citing")
     # One reference resolves to a held local work; one resolves to an external (missing) work.
-    db_session.add_all(
-        [
-            Reference(citing_work_id=citing.id, doi="10.1/held", title="Held"),
-            Reference(citing_work_id=citing.id, doi="10.9/missing", title="Missing"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/held", title="Held")
+    make_reference(db_session, citing_work_id=citing.id, doi="10.9/missing", title="Missing")
     db_session.commit()
 
     summary = citation_summary(db_session, actor, SummaryScope(type="library"))
@@ -142,10 +139,10 @@ def test_external_preview_graceful_on_all_sources_failing() -> None:
 # --- C3a: worklist service ----------------------------------------------------------------------
 
 
-def test_worklist_decision_persists_and_survives_recompute(db_session) -> None:
+def test_worklist_decision_persists_and_survives_recompute(db_session, make_reference) -> None:
     actor = _owner(db_session)
     p1 = _work(db_session, "P1", doi="10.1/p1")
-    db_session.add(Reference(citing_work_id=p1.id, doi="10.9/wanted", title="Wanted paper"))
+    make_reference(db_session, citing_work_id=p1.id, doi="10.9/wanted", title="Wanted paper")
     db_session.commit()
 
     summary = citation_summary(db_session, actor, SummaryScope(type="library"))
@@ -234,15 +231,16 @@ def test_external_preview_endpoint_no_identifier(client, auth_headers) -> None:
     assert "no preview" in body["message"].lower()
 
 
-def test_external_preview_endpoint_by_reference(client, db, auth_headers, monkeypatch) -> None:
+def test_external_preview_endpoint_by_reference(
+    client, db, auth_headers, monkeypatch, make_reference
+) -> None:
     from app.api.v1.endpoints import citations as citations_ep
     from app.services.external_preview import ExternalPreview
 
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/citing")
     db.add(citing)
     db.flush()
-    ref = Reference(citing_work_id=citing.id, doi="10.9/wanted", title="Wanted")
-    db.add(ref)
+    ref = make_reference(db, citing_work_id=citing.id, doi="10.9/wanted", title="Wanted")
     db.commit()
 
     def _stub(*, doi=None, arxiv_id=None, settings=None):
@@ -288,11 +286,11 @@ def test_worklist_bad_decision_400(client, auth_headers) -> None:
     assert response.status_code == 400
 
 
-def test_missing_export_endpoint_returns_bibtex(client, db, auth_headers) -> None:
+def test_missing_export_endpoint_returns_bibtex(client, db, auth_headers, make_reference) -> None:
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/citing")
     db.add(citing)
     db.flush()
-    db.add(Reference(citing_work_id=citing.id, doi="10.9/missing", title="Missing Paper"))
+    make_reference(db, citing_work_id=citing.id, doi="10.9/missing", title="Missing Paper")
     db.commit()
 
     response = client.get(

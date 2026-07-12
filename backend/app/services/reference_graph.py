@@ -15,8 +15,9 @@ from collections import defaultdict
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.work import Work
+from app.services.reference_links import references_for_work
 
 # Free-text TEI section head → bucket. First matching rule wins (order matters: "related work"
 # must beat "...work method..."), else "other". The buckets line up with the Profile weights.
@@ -86,13 +87,7 @@ def build_reference_graph(
     edges are always present. ``include_citing`` adds the work's fetched external citing papers as
     incoming ``kind="citing"`` nodes with edges pointing INTO the base paper (batch10 #8).
     """
-    references = list(
-        db.scalars(
-            select(Reference)
-            .where(Reference.citing_work_id == work.id)
-            .order_by(Reference.created_at)
-        ).all()
-    )
+    references = references_for_work(db, work.id)
 
     # Section-bucketed mention counts per reference, from the in-text citation mentions.
     counts_by_ref: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -144,12 +139,16 @@ def build_reference_graph(
             topics_by_work[wid] = list(topics or [])
             venue_by_work[wid] = venue
         degree_stmt = (
-            select(Reference.resolved_work_id, func.count(distinct(Reference.citing_work_id)))
+            select(
+                Reference.resolved_work_id,
+                func.count(distinct(ReferenceCitation.citing_work_id)),
+            )
+            .join(ReferenceCitation, ReferenceCitation.reference_id == Reference.id)
             .where(Reference.resolved_work_id.in_(local_work_ids))
             .group_by(Reference.resolved_work_id)
         )
         if visible_ids is not None:
-            degree_stmt = degree_stmt.where(Reference.citing_work_id.in_(visible_ids))
+            degree_stmt = degree_stmt.where(ReferenceCitation.citing_work_id.in_(visible_ids))
         for wid, deg in db.execute(degree_stmt).all():
             degree_by_work[wid] = int(deg)
 
@@ -198,8 +197,10 @@ def build_reference_graph(
         # resolved-local reference work in this set.
         local_ids = list(work_to_ref_node)
         for citing_wid, cited_wid in db.execute(
-            select(Reference.citing_work_id, Reference.resolved_work_id).where(
-                Reference.citing_work_id.in_(local_ids),
+            select(ReferenceCitation.citing_work_id, Reference.resolved_work_id)
+            .join(ReferenceCitation, ReferenceCitation.reference_id == Reference.id)
+            .where(
+                ReferenceCitation.citing_work_id.in_(local_ids),
                 Reference.resolved_work_id.in_(local_ids),
             )
         ).all():

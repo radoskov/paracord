@@ -9,6 +9,33 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## issue_batch_12 (2026-07-11)
+
+Reference→library matching ("likely local" citations) + reference-graph fixes. Plan:
+`docs/WORKPLAN_2026-07-11_batch12.md` (owner decisions D1–D6 + items #1–#7 locked); handoff:
+`docs/agent_handoffs/2026-07-11-issue-batch-12.md`. On `main` (not pushed). One commit per phase.
+
+- **Phase 0 (done).** `normalize_title` now strips punctuation **before** collapsing whitespace so
+  "KnowRob – A…" and "KnowRob: A…" normalize equal (also strengthens the work-vs-work dup scanner);
+  `normalize_doi`/`split_arxiv_id` harden prefix handling (`http(s)`, `dx.doi.org`, bare host,
+  lowercase `arxiv:`, `/pdf/`, `.pdf`). Column-picker Apply/Cancel moved above the list; reference
+  graph shows citing papers by default.
+- **Phase 1 (done) — canonical-reference refactor (#3).** `Reference` is now the **canonical** cited
+  thing; the per-citing-work edge moved to a new **`ReferenceCitation`** link table (symmetric with
+  `ExternalPaper`/`ExternalCitationLink`), so one reference is shared by every work that cites it and
+  a resolution applies to all citing works at once. `Reference` also gains the matching columns
+  (`normalized_title`, `authors` JSONB, `suggested_work_id`, `match_score`, `dedup_key`). Migration
+  `0059_canonical_references` is a **lossless 1:1 structural expansion** (every existing row keeps its
+  id, gets exactly one link); dedup/consolidation of duplicate reference rows is deliberately **not**
+  in the migration — it's a separate forward-only opt-in job (Phase 1b, not yet built). Every
+  `citing_work_id == work_id` read moved through the link table (`extraction`, `reference_graph`,
+  `citation_graph`, `citation_summary`, `works`, `citations`, `export_service`,
+  `duplicate_resolution`). 744 fast-tier tests green; migration parity + autogenerate-clean pass;
+  downgrade→upgrade round-trip verified on dev Postgres.
+- **Phases 2–5 (todo).** Matcher + config + persistence + rescan (D1/D2/D3); confirm/reject/import
+  actions + `use_fuzzy_match_as_confirmed` admin toggle (#1/#4); authors persist+match+display
+  (#5/#6); `likely_local` graph colour + citing/external overlap-collapse (#7).
+
 ## issue_batch_11 (2026-07-10)
 
 Owner-reported duplicate-PDF handling issues (follow-up to batch 10). Handoff:

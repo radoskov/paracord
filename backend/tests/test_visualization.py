@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from app.db.base import Base
 from app.models.chunk import WorkChunk
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.models.source import ImportBatch
 from app.models.user import User
@@ -33,6 +33,7 @@ def db_session(tmp_path: Path):
             Work.__table__,
             WorkChunk.__table__,
             Reference.__table__,
+            ReferenceCitation.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
             Rack.__table__,
@@ -61,7 +62,7 @@ def test_registry_has_temporal_map() -> None:
     assert "temporal_map" in available_view_types()
 
 
-def test_temporal_map_axes_map_correctly(db_session) -> None:
+def test_temporal_map_axes_map_correctly(db_session, make_reference) -> None:
     actor = _owner(db_session)
     citing = Work(canonical_title="Citing", normalized_title="citing", doi="10.1/citing", year=2020)
     cited = Work(
@@ -73,7 +74,7 @@ def test_temporal_map_axes_map_correctly(db_session) -> None:
     )
     db_session.add_all([citing, cited])
     db_session.flush()
-    db_session.add(Reference(citing_work_id=citing.id, doi="10.1/cited", title="Cited"))
+    make_reference(db_session, citing_work_id=citing.id, doi="10.1/cited", title="Cited")
     db_session.commit()
 
     payload = get_viz(
@@ -100,7 +101,7 @@ def test_temporal_map_axes_map_correctly(db_session) -> None:
     assert citing_node.shape == "in_library"
 
 
-def test_local_degree_axis_counts_incoming_citations(db_session) -> None:
+def test_local_degree_axis_counts_incoming_citations(db_session, make_reference) -> None:
     actor = _owner(db_session)
     a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2019)
     b = Work(canonical_title="B", normalized_title="b", doi="10.1/b", year=2018)
@@ -108,12 +109,8 @@ def test_local_degree_axis_counts_incoming_citations(db_session) -> None:
     db_session.add_all([a, b, cited])
     db_session.flush()
     # Both A and B cite the seed -> its local degree is 2 (distinct in-library citing papers).
-    db_session.add_all(
-        [
-            Reference(citing_work_id=a.id, doi="10.1/seed", title="Seed"),
-            Reference(citing_work_id=b.id, doi="10.1/seed", title="Seed"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=a.id, doi="10.1/seed", title="Seed")
+    make_reference(db_session, citing_work_id=b.id, doi="10.1/seed", title="Seed")
     db_session.commit()
 
     payload = get_viz(
@@ -819,7 +816,7 @@ def test_registry_has_p5a_views() -> None:
     assert {"co_citation", "topic_river", "similarity_heatmap"} <= set(types)
 
 
-def test_co_citation_coupling_links_works_sharing_a_reference(db_session) -> None:
+def test_co_citation_coupling_links_works_sharing_a_reference(db_session, make_reference) -> None:
     actor = _owner(db_session)
     a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2020)
     b = Work(canonical_title="B", normalized_title="b", doi="10.1/b", year=2019)
@@ -827,13 +824,9 @@ def test_co_citation_coupling_links_works_sharing_a_reference(db_session) -> Non
     db_session.add_all([a, b, c])
     db_session.flush()
     # A and B both cite the same external work -> bibliographic coupling (weight = 1 shared ref).
-    db_session.add_all(
-        [
-            Reference(citing_work_id=a.id, doi="10.9/shared", title="Shared classic"),
-            Reference(citing_work_id=b.id, doi="10.9/shared", title="Shared classic"),
-            Reference(citing_work_id=c.id, doi="10.9/other", title="Unrelated"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=a.id, doi="10.9/shared", title="Shared classic")
+    make_reference(db_session, citing_work_id=b.id, doi="10.9/shared", title="Shared classic")
+    make_reference(db_session, citing_work_id=c.id, doi="10.9/other", title="Unrelated")
     db_session.commit()
 
     payload = get_viz(
@@ -849,7 +842,7 @@ def test_co_citation_coupling_links_works_sharing_a_reference(db_session) -> Non
     assert _node_by_id(payload, a.id).x is None
 
 
-def test_co_citation_links_works_cited_together(db_session) -> None:
+def test_co_citation_links_works_cited_together(db_session, make_reference) -> None:
     actor = _owner(db_session)
     a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2020)
     b = Work(canonical_title="B", normalized_title="b", doi="10.1/b", year=2019)
@@ -857,12 +850,8 @@ def test_co_citation_links_works_cited_together(db_session) -> None:
     db_session.add_all([a, b, citer])
     db_session.flush()
     # One paper cites both A and B -> A and B are co-cited (weight = 1 shared citer).
-    db_session.add_all(
-        [
-            Reference(citing_work_id=citer.id, doi="10.1/a", title="A"),
-            Reference(citing_work_id=citer.id, doi="10.1/b", title="B"),
-        ]
-    )
+    make_reference(db_session, citing_work_id=citer.id, doi="10.1/a", title="A")
+    make_reference(db_session, citing_work_id=citer.id, doi="10.1/b", title="B")
     db_session.commit()
 
     payload = get_viz(
@@ -1033,18 +1022,14 @@ def test_similarity_heatmap_see_filter_hides_private_work(db_session) -> None:
     assert str(loose.id) in payload.matrix["ids"]
 
 
-def test_endpoint_builds_p5a_views(client, db, auth_headers) -> None:
+def test_endpoint_builds_p5a_views(client, db, auth_headers, make_reference) -> None:
     headers = auth_headers("owner")
     a = Work(canonical_title="Alpha", normalized_title="alpha", doi="10.2/a", year=2020)
     b = Work(canonical_title="Beta", normalized_title="beta", doi="10.2/b", year=2019)
     db.add_all([a, b])
     db.flush()
-    db.add_all(
-        [
-            Reference(citing_work_id=a.id, doi="10.9/s", title="S"),
-            Reference(citing_work_id=b.id, doi="10.9/s", title="S"),
-        ]
-    )
+    make_reference(db, citing_work_id=a.id, doi="10.9/s", title="S")
+    make_reference(db, citing_work_id=b.id, doi="10.9/s", title="S")
     db.commit()
 
     listed = client.get("/api/v1/viz/", headers=headers).json()["view_types"]
@@ -1075,7 +1060,7 @@ def test_endpoint_bad_edge_context_400(client, db, auth_headers) -> None:
     assert response.status_code == 400
 
 
-def test_temporal_map_edges_suppressed_above_edge_limit(db_session) -> None:
+def test_temporal_map_edges_suppressed_above_edge_limit(db_session, make_reference) -> None:
     """B3: the citation-edge overlay is drawn under the edge limit and suppressed (with a note) when
     the placed papers exceed it — so a large scope stays readable instead of a hairball."""
     actor = _owner(db_session)
@@ -1083,7 +1068,7 @@ def test_temporal_map_edges_suppressed_above_edge_limit(db_session) -> None:
     b = Work(canonical_title="B", normalized_title="b", year=2019)
     db_session.add_all([a, b])
     db_session.flush()
-    db_session.add(Reference(citing_work_id=a.id, resolved_work_id=b.id, title="B"))
+    make_reference(db_session, citing_work_id=a.id, resolved_work_id=b.id, title="B")
     db_session.commit()
 
     under = get_viz(

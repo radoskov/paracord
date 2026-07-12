@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.models.citation import CitationMention, RawTeiDocument, Reference
+from app.models.citation import CitationMention, RawTeiDocument, Reference, ReferenceCitation
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
@@ -24,6 +24,7 @@ from app.services.ai_config import get_ai_config
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path, save_derived_ocr_pdf
 from app.services.keyword_extraction import extract_keywords
+from app.services.reference_links import find_or_create_reference
 from app.services.tei_parser import ParsedPaper, extract_body_text, extract_sections, parse_tei
 from app.utils.normalization import normalize_title
 
@@ -180,24 +181,55 @@ def store_parsed_extraction(
         db.add(source_tei)
         db.flush()
 
-    # References and mentions are owned by the extraction: replace idempotently.
+    # References and mentions are owned by this work's extraction: replace idempotently. References
+    # are now shared canonical rows (batch 12), so we unlink *this work's* citation edges + mentions
+    # and find-or-create the canonical references, rather than deleting reference rows outright.
     db.execute(delete(CitationMention).where(CitationMention.citing_work_id == work.id))
-    db.execute(delete(Reference).where(Reference.citing_work_id == work.id))
+    prior_ref_ids = set(
+        db.scalars(
+            select(ReferenceCitation.reference_id).where(
+                ReferenceCitation.citing_work_id == work.id
+            )
+        ).all()
+    )
+    db.execute(delete(ReferenceCitation).where(ReferenceCitation.citing_work_id == work.id))
     reference_by_key: dict[str, Reference] = {}
     for index, reference in enumerate(parsed.references):
-        saved = Reference(
-            citing_work_id=work.id,
-            raw_citation=reference.raw_citation,
+        saved = find_or_create_reference(
+            db,
             title=reference.title,
             doi=reference.doi,
+            arxiv_id=getattr(reference, "arxiv_id", None),
             year=reference.year,
-            source_tei_id=source_tei.id if source_tei else None,
+            raw_citation=reference.raw_citation,
+            authors=list(reference.authors) if reference.authors else None,
         )
-        db.add(saved)
-        db.flush()
+        db.add(
+            ReferenceCitation(
+                reference_id=saved.id,
+                citing_work_id=work.id,
+                source_tei_id=source_tei.id if source_tei else None,
+            )
+        )
         if reference.key:
             reference_by_key[reference.key] = saved
         reference_by_key[f"b{index}"] = saved
+    db.flush()
+
+    # Prune canonical references this work no longer cites and nobody else does either (orphans).
+    kept_ids = {ref.id for ref in reference_by_key.values()}
+    stale_ids = prior_ref_ids - kept_ids
+    if stale_ids:
+        still_linked = set(
+            db.scalars(
+                select(ReferenceCitation.reference_id).where(
+                    ReferenceCitation.reference_id.in_(stale_ids)
+                )
+            ).all()
+        )
+        orphaned = stale_ids - still_linked
+        if orphaned:
+            db.execute(delete(Reference).where(Reference.id.in_(orphaned)))
 
     mention_count = 0
     for mention in parsed.citation_mentions:

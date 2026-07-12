@@ -15,12 +15,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user
 from app.core.config import get_settings
 from app.db.session import get_db
-from app.models.citation import Reference
+from app.models.citation import Reference, ReferenceCitation
 from app.models.user import User
 from app.services import access, citation_worklist
 from app.services.citation_summary import (
@@ -290,7 +291,18 @@ def get_external_preview(
     if reference_id is not None:
         reference = db.get(Reference, reference_id)
         visible = access.visible_work_ids(db, actor)
-        if reference is None or (visible is not None and reference.citing_work_id not in visible):
+        citing = (
+            set(
+                db.scalars(
+                    select(ReferenceCitation.citing_work_id).where(
+                        ReferenceCitation.reference_id == reference_id
+                    )
+                ).all()
+            )
+            if reference is not None
+            else set()
+        )
+        if reference is None or (visible is not None and visible.isdisjoint(citing)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
         doi = doi or reference.doi
         arxiv = arxiv or reference.arxiv_id

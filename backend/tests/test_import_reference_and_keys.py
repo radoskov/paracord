@@ -4,17 +4,17 @@ from app.models.citation import Reference
 from app.models.work import Work
 
 
-def test_import_reference_as_work_resolves_it(client, auth_headers, db):
+def test_import_reference_as_work_resolves_it(client, auth_headers, db, make_reference):
     citing = Work(canonical_title="Citing", normalized_title="citing")
     db.add(citing)
     db.flush()
-    ref = Reference(
+    ref = make_reference(
+        db,
         citing_work_id=citing.id,
         title="A Cited Paper Not Yet In Library",
         doi="10.9999/cited",
         year=2018,
     )
-    db.add(ref)
     db.commit()
 
     created = client.post(f"/api/v1/works/from-reference/{ref.id}", headers=auth_headers("editor"))

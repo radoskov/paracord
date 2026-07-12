@@ -7,7 +7,7 @@ complement the service-level unit tests by covering routing, auth, schemas, and 
 
 import fitz
 import pytest
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 
@@ -192,13 +192,13 @@ def test_m2_metadata_review_and_select(client, auth_headers, db):
     assert selected.json()["canonical_title"] == "GROBID Mis-detected Title"
 
 
-def test_m2_citation_contexts_surface(client, auth_headers, db):
+def test_m2_citation_contexts_surface(client, auth_headers, db, make_reference):
     work = Work(canonical_title="Paper", normalized_title="paper")
     db.add(work)
     db.flush()
-    ref = Reference(citing_work_id=work.id, title="Cited Work", raw_citation="Cited Work, 2020")
-    db.add(ref)
-    db.flush()
+    ref = make_reference(
+        db, citing_work_id=work.id, title="Cited Work", raw_citation="Cited Work, 2020"
+    )
     db.add(
         CitationMention(
             citing_work_id=work.id,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from app.models.citation import Reference
 
 pytestmark = pytest.mark.safety
 
@@ -130,10 +129,11 @@ def test_missing_export_private_shelf_scope_404(client, auth_headers, make_shelf
 # --- external-preview: a reference whose citing work is hidden must 404 -------------------------
 
 
-def test_external_preview_hidden_reference_404(client, auth_headers, db, hidden_work) -> None:
+def test_external_preview_hidden_reference_404(
+    client, auth_headers, db, hidden_work, make_reference
+) -> None:
     work = hidden_work()
-    reference = Reference(citing_work_id=work.id, doi="10.1234/secret", title="Hidden ref")
-    db.add(reference)
+    reference = make_reference(db, citing_work_id=work.id, doi="10.1234/secret", title="Hidden ref")
     db.commit()
     db.refresh(reference)
     resp = client.get(

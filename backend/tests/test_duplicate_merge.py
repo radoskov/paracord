@@ -14,7 +14,7 @@ from app.core.security import hash_password
 from app.db.base import Base
 from app.models.annotation import Annotation
 from app.models.audit import AuditEvent
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileSegment, FileWorkLink
 from app.models.metadata import MetadataAssertion
@@ -43,6 +43,7 @@ _TABLES = [
     Tag.__table__,
     TagLink.__table__,
     Reference.__table__,
+    ReferenceCitation.__table__,
     CitationMention.__table__,
     Annotation.__table__,
     MetadataAssertion.__table__,
@@ -184,18 +185,17 @@ def test_merge_never_overwrites_locked_base_field(db_session, owner) -> None:
 # --------------------------------------------------------------------------------------------------
 # Merge: entity movement + redirect + hiding
 # --------------------------------------------------------------------------------------------------
-def _wire_full_source(db_session, base, source):
+def _wire_full_source(db_session, base, source, make_reference):
     file = File(sha256="a" * 64, size_bytes=1)
     shelf = Shelf(name="Reading")
     tag = Tag(name="ml", normalized_name="ml")
     citer = Work(canonical_title="Citer", normalized_title="citer")
     db_session.add_all([file, shelf, tag, citer])
     db_session.flush()
-    ref_out = Reference(citing_work_id=source.id, raw_citation="out")
-    ref_in = Reference(
-        citing_work_id=citer.id, resolved_work_id=source.id, raw_citation="in", title="t"
+    ref_out = make_reference(db_session, citing_work_id=source.id, raw_citation="out")
+    ref_in = make_reference(
+        db_session, citing_work_id=citer.id, resolved_work_id=source.id, raw_citation="in", title="t"
     )
-    db_session.add_all([file, ref_out, ref_in])
     db_session.flush()
     mention_out = CitationMention(citing_work_id=source.id, reference_id=ref_out.id)
     mention_in = CitationMention(
@@ -238,12 +238,14 @@ def _wire_full_source(db_session, base, source):
     }
 
 
-def test_merge_moves_all_owned_entities_and_redirects_incoming(db_session, owner) -> None:
+def test_merge_moves_all_owned_entities_and_redirects_incoming(
+    db_session, owner, make_reference
+) -> None:
     base = Work(canonical_title="Base", normalized_title="base")
     source = Work(canonical_title="Source", normalized_title="source")
     db_session.add_all([base, source])
     db_session.commit()
-    w = _wire_full_source(db_session, base, source)
+    w = _wire_full_source(db_session, base, source, make_reference)
 
     dr.merge_works(db_session, base=base, source=source, actor=owner)
     db_session.commit()
@@ -260,7 +262,14 @@ def test_merge_moves_all_owned_entities_and_redirects_incoming(db_session, owner
         )
         is not None
     )
-    assert db_session.get(Reference, w["ref_out"].id).citing_work_id == base.id
+    assert (
+        db_session.scalar(
+            select(ReferenceCitation.citing_work_id).where(
+                ReferenceCitation.reference_id == w["ref_out"].id
+            )
+        )
+        == base.id
+    )
     # Incoming reference redirected: the citer now resolves to the base.
     assert db_session.get(Reference, w["ref_in"].id).resolved_work_id == base.id
     assert db_session.get(CitationMention, w["mention_out"].id).citing_work_id == base.id
@@ -291,7 +300,7 @@ def test_merged_source_is_hidden_shadow(db_session, owner) -> None:
 # --------------------------------------------------------------------------------------------------
 # Unmerge: exact reversal
 # --------------------------------------------------------------------------------------------------
-def test_unmerge_reverses_the_last_merge_exactly(db_session, owner) -> None:
+def test_unmerge_reverses_the_last_merge_exactly(db_session, owner, make_reference) -> None:
     base = Work(canonical_title="Base", normalized_title="base", abstract="Base abstract")
     source = Work(
         canonical_title="Source",
@@ -301,7 +310,7 @@ def test_unmerge_reverses_the_last_merge_exactly(db_session, owner) -> None:
     )
     db_session.add_all([base, source])
     db_session.commit()
-    w = _wire_full_source(db_session, base, source)
+    w = _wire_full_source(db_session, base, source, make_reference)
 
     dr.merge_works(db_session, base=base, source=source, actor=owner)
     db_session.commit()
@@ -325,7 +334,14 @@ def test_unmerge_reverses_the_last_merge_exactly(db_session, owner) -> None:
         == source.id
     )
     assert db_session.get(ShelfWork, {"shelf_id": w["shelf"].id, "work_id": source.id}) is not None
-    assert db_session.get(Reference, w["ref_out"].id).citing_work_id == source.id
+    assert (
+        db_session.scalar(
+            select(ReferenceCitation.citing_work_id).where(
+                ReferenceCitation.reference_id == w["ref_out"].id
+            )
+        )
+        == source.id
+    )
     assert db_session.get(Reference, w["ref_in"].id).resolved_work_id == source.id
     assert db_session.get(WorkVersion, w["version"].id).work_id == source.id
     assert db_session.get(Annotation, w["annotation"].id).work_id == source.id

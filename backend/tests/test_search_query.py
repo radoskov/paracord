@@ -4,7 +4,6 @@ import uuid
 
 from app.models.ai import Summary
 from app.models.annotation import Annotation
-from app.models.citation import Reference
 from app.models.group import Group, GroupGrant, GroupMembership
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
 from app.services.search_query import parse_search_query
@@ -223,20 +222,19 @@ def test_list_works_rack_operator(client, auth_headers, db):
     assert _titles(client.get("/api/v1/works?q=rack:MyRack", headers=h)) == {"Racked paper"}
 
 
-def test_list_works_cites_and_cited_by_local(client, auth_headers, db):
+def test_list_works_cites_and_cited_by_local(client, auth_headers, db, make_reference):
     h = auth_headers("owner")
     citing = _make(client, h, canonical_title="Citing survey")
     cited = _make(client, h, canonical_title="Foundational method")
     _make(client, h, canonical_title="Unconnected paper")
 
     # A resolved local citation edge: "Citing survey" cites "Foundational method".
-    db.add(
-        Reference(
-            citing_work_id=uuid.UUID(citing["id"]),
-            resolved_work_id=uuid.UUID(cited["id"]),
-            title="Foundational method",
-            resolution_status="local_match",
-        )
+    make_reference(
+        db,
+        citing_work_id=uuid.UUID(citing["id"]),
+        resolved_work_id=uuid.UUID(cited["id"]),
+        title="Foundational method",
+        resolution_status="local_match",
     )
     db.commit()
 

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.annotation import Annotation
-from app.models.citation import CitationMention, Reference
+from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
@@ -229,7 +229,8 @@ def merge_works(db: Session, *, base: Work, source: Work, actor: User) -> Work:
             "file_work_links": [],
             "shelf_works": [],
             "tag_links": [],
-            "references_out": [],
+            "reference_links_out": [],
+            "reference_links_dropped": [],
             "references_in": [],
             "mentions_out": [],
             "mentions_in": [],
@@ -384,7 +385,13 @@ def unmerge_work(db: Session, *, base_id: uuid.UUID, actor: User) -> Work:
     _move_ids(db, FileWorkLink, moved.get("file_work_links", []), "work_id", shadow.id)
     _move_shelf_works_back(db, moved.get("shelf_works", []), base_id=base_id, shadow_id=shadow.id)
     _move_tag_links_back(db, moved.get("tag_links", []), base_id=base_id, shadow_id=shadow.id)
-    _move_ids(db, Reference, moved.get("references_out", []), "citing_work_id", shadow.id)
+    # Outgoing citation edges: repoint the moved link rows back, and recreate the ones dropped as
+    # duplicates during the merge (they belonged to the shadow originally).
+    _move_ids(
+        db, ReferenceCitation, moved.get("reference_links_out", []), "citing_work_id", shadow.id
+    )
+    for ref_id in moved.get("reference_links_dropped", []):
+        db.add(ReferenceCitation(reference_id=uuid.UUID(ref_id), citing_work_id=shadow.id))
     _move_ids(db, Reference, moved.get("references_in", []), "resolved_work_id", shadow.id)
     _move_ids(db, CitationMention, moved.get("mentions_out", []), "citing_work_id", shadow.id)
     _move_ids(
@@ -754,10 +761,25 @@ def _move_owned_entities(db: Session, *, base: Work, source: Work, record: dict[
         tag_link.entity_id = base.id
         moved["tag_links"].append(str(tag_link.tag_id))
 
-    # Outgoing references + citation mentions (the source as the CITING work).
-    for ref in db.scalars(select(Reference).where(Reference.citing_work_id == source.id)).all():
-        ref.citing_work_id = base.id
-        moved["references_out"].append(str(ref.id))
+    # Outgoing citation edges (source as the CITING work): repoint the link rows to base, dropping
+    # any that would duplicate a link base already has onto the same shared canonical reference.
+    base_cited_ref_ids = set(
+        db.scalars(
+            select(ReferenceCitation.reference_id).where(
+                ReferenceCitation.citing_work_id == base.id
+            )
+        ).all()
+    )
+    for link in db.scalars(
+        select(ReferenceCitation).where(ReferenceCitation.citing_work_id == source.id)
+    ).all():
+        if link.reference_id in base_cited_ref_ids:
+            moved["reference_links_dropped"].append(str(link.reference_id))
+            db.delete(link)
+        else:
+            link.citing_work_id = base.id
+            base_cited_ref_ids.add(link.reference_id)
+            moved["reference_links_out"].append(str(link.id))
     for mention in db.scalars(
         select(CitationMention).where(CitationMention.citing_work_id == source.id)
     ).all():

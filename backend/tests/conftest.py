@@ -148,6 +148,34 @@ def client(app):
 
 
 @pytest.fixture()
+def make_reference():
+    """Factory: create a canonical Reference + its per-work citation link (batch 12).
+
+    ``Reference`` no longer carries ``citing_work_id`` — the edge lives in ``ReferenceCitation``.
+    Call ``make_reference(db, citing_work_id=work.id, title=..., doi=..., ...)``; ``**fields`` are
+    Reference columns. Returns the Reference. A session is passed in (not closed over) so the same
+    factory works with either the ``db`` or ``db_session`` fixture.
+    """
+    from app.models.citation import Reference, ReferenceCitation
+
+    def _make(db, *, citing_work_id, source_tei_id=None, **fields):
+        reference = Reference(**fields)
+        db.add(reference)
+        db.flush()
+        db.add(
+            ReferenceCitation(
+                reference_id=reference.id,
+                citing_work_id=citing_work_id,
+                source_tei_id=source_tei_id,
+            )
+        )
+        db.flush()
+        return reference
+
+    return _make
+
+
+@pytest.fixture()
 def make_user(db):
     """Create a user row directly. Returns the User."""
 
