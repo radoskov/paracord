@@ -44,9 +44,12 @@ if [ -n "$healed" ] || \
     chown -R node:node "$NODE_MODULES"
 fi
 
-if [ -d /app/frontend/dist ] && \
-   [ "$(stat -c %u /app/frontend/dist)" != "$(id -u node)" ]; then
-    chown -R node:node /app/frontend/dist
+# `vite build` empties dist/ (rm) before writing. Stale root-owned children left by an earlier build
+# that ran as root would make that rm fail with EACCES. Chown only the entries NOT already owned by
+# `node`: idempotent, and — unlike a top-level-only owner check — it repairs root-owned *children*
+# even when dist/ itself already looks node-owned (the exact state that breaks emptyOutDir).
+if [ -d /app/frontend/dist ]; then
+    find /app/frontend/dist \! -user node -exec chown node:node {} + 2>/dev/null || true
 fi
 
 exec gosu node "$@"
