@@ -454,6 +454,26 @@
     }, 'Reference imported into the library');
   }
 
+  // Confirm / reject a reference's "likely local" match (batch 12).
+  async function actOnReference(
+    referenceId: string,
+    action: 'link' | 'reject',
+  ): Promise<void> {
+    await run(async () => {
+      await client.actOnReference(work.id, referenceId, action);
+      references = await client.listWorkReferences(work.id);
+    }, action === 'link' ? 'Match confirmed' : 'Marked as not a match');
+  }
+
+  // Re-run reference→library matching for this paper's bibliography (batch 12).
+  async function rescanReferences(): Promise<void> {
+    await run(async () => {
+      const res = await client.rescanWorkReferences(work.id);
+      references = await client.listWorkReferences(work.id);
+      message = `Rescanned ${res.scanned} references — ${res.changed} updated`;
+    });
+  }
+
   async function exportNotes(): Promise<void> {
     await run(async () => {
       const r = await client.exportAnnotations(work.id, 'markdown');
@@ -1364,6 +1384,13 @@
         (watch the Jobs tab); a manually-created paper with no PDF won’t have any.
       </p>
     {:else}
+      <div class="ref-actions refs-toolbar">
+        <button type="button" class="secondary small" on:click={rescanReferences}
+          disabled={loading || !canModify}
+          title={canModify
+            ? 'Re-check these references against the library for likely matches'
+            : INSUFFICIENT_ROLE}>Rescan matches</button>
+      </div>
       <ol class="refs">
         {#each references as ref (ref.id)}
           <li class="entry-card" id={`ref-${ref.id}`} class:flash-ref={flashRefId === ref.id}>
@@ -1379,12 +1406,27 @@
                   type="button"
                   class="ref-badge ref-badge-link"
                   on:click={() => onSelectWork(ref.resolved_work_id)}
-                  title="Open this paper in the library">in library</button>{/if}
+                  title={ref.resolution_status === 'confirmed_match'
+                    ? 'Confirmed match — open this paper in the library'
+                    : 'Open this paper in the library'}>in library{#if ref.resolution_status === 'confirmed_match'} ✓{/if}</button>{/if}
+              {#if !ref.resolved_work_id && ref.resolution_status === 'likely_match' && ref.suggested_work_id}<button
+                  type="button"
+                  class="ref-badge ref-badge-likely"
+                  on:click={() => onSelectWork(ref.suggested_work_id)}
+                  title="Likely already in the library — click to view the candidate">likely match{#if ref.match_score} · {Math.round(ref.match_score)}%{/if}</button>{/if}
             </small>
             <div class="ref-actions">
               {#if locatableReferenceIds.has(ref.id)}
                 <button type="button" class="secondary small" on:click={() => findReferenceInText(ref.id)}
                   title="Open the reader and jump to where this reference is cited">Find in text</button>
+              {/if}
+              {#if ref.resolution_status === 'likely_match' && ref.suggested_work_id}
+                <button type="button" class="small" on:click={() => actOnReference(ref.id, 'link')}
+                  disabled={loading || !canModify}
+                  title={canModify ? 'Confirm this is the same paper (links it permanently)' : INSUFFICIENT_ROLE}>Confirm match</button>
+                <button type="button" class="secondary small" on:click={() => actOnReference(ref.id, 'reject')}
+                  disabled={loading || !canModify}
+                  title={canModify ? 'This is not the same paper' : INSUFFICIENT_ROLE}>Not a match</button>
               {/if}
               {#if !ref.resolved_work_id}
                 <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
@@ -2298,6 +2340,24 @@
 
   .ref-badge-link:hover {
     text-decoration: underline;
+  }
+
+  /* "likely match" badge (batch 12) — a soft, unconfirmed candidate; warning-tinted, clickable. */
+  .ref-badge-likely {
+    background: var(--status-warning-bg);
+    border: none;
+    color: var(--status-warning);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.68rem;
+  }
+
+  .ref-badge-likely:hover {
+    text-decoration: underline;
+  }
+
+  .refs-toolbar {
+    margin-bottom: 0.5rem;
   }
 
   .ref-actions {

@@ -825,7 +825,19 @@ export interface ReferenceRecord {
   year: number | null;
   resolution_status: string;
   resolved_work_id: string | null;
+  // Unconfirmed fuzzy "likely local" candidate (batch 12): the work this reference probably is.
+  suggested_work_id: string | null;
+  match_score: number | null;
   shorthand: string | null;
+}
+
+export type ReferenceAction = "link" | "reject" | "import";
+
+export interface ReferenceRescanResult {
+  scanned: number;
+  changed: number;
+  queued: boolean;
+  job_id: string | null;
 }
 
 export interface Annotation {
@@ -1236,6 +1248,8 @@ export interface AppConfig {
   max_batch_items: number;
   rq_worker_count: number;
   max_queue_len: number;
+  // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
+  use_fuzzy_match_as_confirmed: boolean;
 }
 
 export interface AgentRecord {
@@ -1721,6 +1735,26 @@ export class ApiClient {
   async listWorkReferences(workId: string): Promise<ReferenceRecord[]> {
     return this.request<ReferenceRecord[]>(
       `/api/v1/works/${workId}/references`,
+    );
+  }
+
+  /** Confirm / reject / import a reference's "likely local" match (batch 12). */
+  async actOnReference(
+    workId: string,
+    referenceId: string,
+    action: ReferenceAction,
+  ): Promise<ReferenceRecord> {
+    return this.request<ReferenceRecord>(
+      `/api/v1/works/${workId}/references/${referenceId}`,
+      { method: "PATCH", body: JSON.stringify({ action }) },
+    );
+  }
+
+  /** Re-run reference→library matching for one paper's bibliography (batch 12). */
+  async rescanWorkReferences(workId: string): Promise<ReferenceRescanResult> {
+    return this.request<ReferenceRescanResult>(
+      `/api/v1/works/${workId}/references/rescan`,
+      { method: "POST" },
     );
   }
 

@@ -312,10 +312,13 @@
   let maxBatchItems = '';
   let rqWorkerCount = '';
   let maxQueueLen = '';
+  let useFuzzyAsConfirmed = false;
   let savingAppConfig = false;
   let savingOverload = false;
+  let savingMatching = false;
   let appConfigMsg = '';
   let overloadMsg = '';
+  let matchingMsg = '';
 
   function applyAppConfig(cfg: AppConfig): void {
     maxPapersPerPage = String(cfg.max_papers_per_page);
@@ -324,6 +327,21 @@
     maxBatchItems = String(cfg.max_batch_items);
     rqWorkerCount = String(cfg.rq_worker_count);
     maxQueueLen = String(cfg.max_queue_len);
+    useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
+  }
+
+  async function saveMatchingConfig(): Promise<void> {
+    savingMatching = true;
+    matchingMsg = '';
+    await run(async () => {
+      applyAppConfig(
+        await client.updateAppConfig({ use_fuzzy_match_as_confirmed: useFuzzyAsConfirmed }),
+      );
+      matchingMsg = useFuzzyAsConfirmed
+        ? 'Saved. A library-wide rescan was started to promote existing likely matches.'
+        : 'Saved.';
+    });
+    savingMatching = false;
   }
 
   async function saveAppConfig(): Promise<void> {
@@ -1452,6 +1470,28 @@
         {#if message}<p class="danger">{message}</p>{/if}
       </form>
     </section>
+
+    <section class="surface admin-section">
+      <div class="section-head">
+        <h2>Reference matching</h2>
+      </div>
+      <form on:submit|preventDefault={saveMatchingConfig} class="stack">
+        <label class="field checkbox-field">
+          <input type="checkbox" bind:checked={useFuzzyAsConfirmed} />
+          Treat a fuzzy “likely local” match as confirmed
+        </label>
+        <p class="small-help">
+          Off (default): a tolerant title match to a library paper is a soft <em>likely match</em>
+          you confirm with one click, and it isn’t counted in graphs/metrics until you do. On: a
+          match above the configured threshold is linked automatically (a hard link, counted
+          everywhere). Turning this on starts a one-time library-wide rescan so existing likely
+          matches are promoted. Exact DOI/arXiv matches are always treated as confirmed regardless.
+        </p>
+        <button type="submit" disabled={savingMatching || loading}
+          title="Save the reference-matching mode">Save</button>
+        {#if matchingMsg}<p class="muted">{matchingMsg}</p>{/if}
+      </form>
+    </section>
   </div>
 {/if}
 
@@ -1459,6 +1499,18 @@
   .admin-layout {
     max-width: 92rem;
     margin: 0 auto;
+  }
+
+  /* Inline checkbox + label (batch 12 reference-matching toggle). */
+  .checkbox-field {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+
+  .checkbox-field input {
+    width: auto;
   }
 
   .admin-tabs {

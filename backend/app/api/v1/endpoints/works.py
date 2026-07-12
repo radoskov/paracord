@@ -1561,6 +1561,85 @@ def list_work_references(
     ]
 
 
+class ReferenceActionRequest(BaseModel):
+    """A confirm/reject/import action on a (canonical) reference (batch 12, item #4)."""
+
+    action: Literal["link", "reject", "import"]
+
+
+@router.patch("/{work_id}/references/{reference_id}", response_model=ReferenceRead)
+def act_on_reference(
+    work_id: uuid.UUID,
+    reference_id: uuid.UUID,
+    payload: ReferenceActionRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> ReferenceRead:
+    """Confirm / reject / import a reference's "likely local" match (batch 12, item #4).
+
+    Because references are canonical (shared across citing works), the action applies to **all**
+    citing works at once; ``work_id`` scopes authorization and confirms this paper actually cites the
+    reference. Actions:
+
+    * ``link`` — confirm the suggested candidate: ``resolved_work_id = suggested_work_id``, status
+      ``confirmed_match`` (LOCKED — a rescan never reverts or re-suggests it).
+    * ``reject`` — status ``rejected_match``; the suggestion is kept so a rescan won't re-propose the
+      *same* candidate (a different, better one may still surface).
+    * ``import`` — create a library work from the reference (the existing from-reference path).
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    reference = db.get(Reference, reference_id)
+    if reference is None or not db.scalar(
+        select(ReferenceCitation.id).where(
+            ReferenceCitation.reference_id == reference_id,
+            ReferenceCitation.citing_work_id == work_id,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found for this paper"
+        )
+
+    if payload.action == "link":
+        if reference.suggested_work_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Reference has no suggested match to confirm",
+            )
+        reference.resolved_work_id = reference.suggested_work_id
+        reference.resolution_status = "confirmed_match"
+        record_event(
+            db,
+            "reference.confirm",
+            actor_user_id=actor.id,
+            entity_type="reference",
+            entity_id=str(reference.id),
+            details={"work_id": str(reference.resolved_work_id)},
+        )
+    elif payload.action == "reject":
+        reference.resolution_status = "rejected_match"  # keep suggested_work_id/match_score
+        record_event(
+            db,
+            "reference.reject",
+            actor_user_id=actor.id,
+            entity_type="reference",
+            entity_id=str(reference.id),
+            details={"work_id": str(reference.suggested_work_id) if reference.suggested_work_id else None},
+        )
+    else:  # import
+        import_reference_as_work(reference_id=reference_id, db=db, actor=actor)
+        db.refresh(reference)
+
+    db.commit()
+    db.refresh(reference)
+    shorthands = _reference_shorthands(db, [reference.id])
+    return ReferenceRead.model_validate(reference).model_copy(
+        update={"shorthand": shorthands.get(reference.id)}
+    )
+
+
 class ReferenceRescanResult(BaseModel):
     """Outcome of a reference→library rematch (batch 12)."""
 

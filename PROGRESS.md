@@ -47,9 +47,18 @@ Reference→library matching ("likely local" citations) + reference-graph fixes.
   audited). YAML `reference_matching:` block → `Settings`. The `use_fuzzy_match_as_confirmed` bool +
   migration `0060` + effective/update helpers landed here (extraction needs the getter); the admin
   endpoint + UI toggle are Phase 3.
-- **Phases 3–5 (todo).** Confirm/reject/import actions + admin toggle exposure (#1/#4); authors
-  display (#4 — persist + match already done); `likely_local` graph colour + citing/external
-  overlap-collapse (#7).
+- **Phase 3 (done) — confirm/reject/import actions + admin toggle (#1/#4).**
+  `PATCH /works/{id}/references/{reference_id}` `{action: link|reject|import}` — `link` confirms the
+  suggestion (`confirmed_match`, locked; audited `reference.confirm`), `reject` → `rejected_match`
+  keeping the suggestion (audited `reference.reject`), `import` runs the existing from-reference path.
+  Acts on the canonical reference so it applies to all citing works; `work_id` scopes auth. The
+  References panel (WorkDetail) now shows a "likely match · N%" badge with **Confirm match** / **Not a
+  match** buttons and a **Rescan matches** button. Admin "Settings" tab gains a **Reference matching**
+  section with the `use_fuzzy_match_as_confirmed` checkbox (exposed in `AppConfigOut`/`Update` +
+  `PATCH /app-config`); turning it ON enqueues a library-wide rescan to promote existing likely
+  matches.
+- **Phases 4–5 (todo).** Authors **display** (#4 — persist + match already done in Phase 2);
+  `likely_local` graph colour + citing/external overlap-collapse (#7).
 
 ## issue_batch_11 (2026-07-10)
 

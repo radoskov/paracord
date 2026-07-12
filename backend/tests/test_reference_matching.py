@@ -281,3 +281,117 @@ def test_per_paper_rescan_requires_contributor(client, auth_headers, db, make_re
         f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("reader")
     )
     assert r.status_code == 403
+
+
+# --- confirm / reject / import actions (item #4) --------------------------------------------------
+
+
+def _seed_likely(db, make_reference):
+    citing = _work(db, "Citing Paper", year=2021)
+    target = _work(db, LOCAL_TITLE, year=2010)
+    ref = make_reference(
+        db,
+        citing_work_id=citing.id,
+        title=CITED_TITLE,
+        year=2010,
+        suggested_work_id=target.id,
+        match_score=98.0,
+        resolution_status="likely_match",
+    )
+    db.commit()
+    return citing, target, ref
+
+
+def test_link_action_confirms_and_locks(client, auth_headers, db, make_reference) -> None:
+    citing, target, ref = _seed_likely(db, make_reference)
+    r = client.patch(
+        f"/api/v1/works/{citing.id}/references/{ref.id}",
+        headers=auth_headers("editor"),
+        json={"action": "link"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resolution_status"] == "confirmed_match"
+    assert body["resolved_work_id"] == str(target.id)
+    # A rescan must NOT revert a confirmed match.
+    client.post(f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor"))
+    refs = client.get(
+        f"/api/v1/works/{citing.id}/references", headers=auth_headers("editor")
+    ).json()
+    assert refs[0]["resolution_status"] == "confirmed_match"
+
+
+def test_reject_action_keeps_suggestion(client, auth_headers, db, make_reference) -> None:
+    citing, target, ref = _seed_likely(db, make_reference)
+    r = client.patch(
+        f"/api/v1/works/{citing.id}/references/{ref.id}",
+        headers=auth_headers("editor"),
+        json={"action": "reject"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resolution_status"] == "rejected_match"
+    assert body["suggested_work_id"] == str(target.id)  # kept for display
+    assert body["resolved_work_id"] is None
+
+
+def test_link_without_suggestion_is_conflict(client, auth_headers, db, make_reference) -> None:
+    citing = _work(db, "Citing Paper", year=2021)
+    ref = make_reference(db, citing_work_id=citing.id, title="Orphan ref", resolution_status="external")
+    db.commit()
+    r = client.patch(
+        f"/api/v1/works/{citing.id}/references/{ref.id}",
+        headers=auth_headers("editor"),
+        json={"action": "link"},
+    )
+    assert r.status_code == 409
+
+
+def test_import_action_creates_work(client, auth_headers, db, make_reference) -> None:
+    citing = _work(db, "Citing Paper", year=2021)
+    ref = make_reference(
+        db, citing_work_id=citing.id, title="A Missing Paper", year=2018, resolution_status="external"
+    )
+    db.commit()
+    r = client.patch(
+        f"/api/v1/works/{citing.id}/references/{ref.id}",
+        headers=auth_headers("editor"),
+        json={"action": "import"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resolution_status"] == "local_match"
+    assert body["resolved_work_id"] is not None
+
+
+def test_action_on_reference_not_cited_by_work_is_404(client, auth_headers, db, make_reference) -> None:
+    citing = _work(db, "Citing Paper", year=2021)
+    other = _work(db, "Other Paper", year=2021)
+    ref = make_reference(db, citing_work_id=other.id, title="Elsewhere", resolution_status="external")
+    db.commit()
+    r = client.patch(
+        f"/api/v1/works/{citing.id}/references/{ref.id}",
+        headers=auth_headers("editor"),
+        json={"action": "reject"},
+    )
+    assert r.status_code == 404
+
+
+def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monkeypatch) -> None:
+    from app.workers import queue as queue_mod
+
+    calls = []
+    monkeypatch.setattr(queue_mod, "enqueue_reference_rescan", lambda: calls.append(1) or "job-1")
+    admin = auth_headers("owner")
+    assert (
+        client.get("/api/v1/admin/app-config", headers=admin).json()[
+            "use_fuzzy_match_as_confirmed"
+        ]
+        is False
+    )
+    r = client.patch(
+        "/api/v1/admin/app-config", headers=admin, json={"use_fuzzy_match_as_confirmed": True}
+    )
+    assert r.status_code == 200
+    assert r.json()["use_fuzzy_match_as_confirmed"] is True
+    assert calls == [1]  # flipping ON kicks off a library-wide rescan

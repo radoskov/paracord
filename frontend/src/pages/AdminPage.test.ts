@@ -29,6 +29,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       max_batch_items: 100,
       rq_worker_count: 2,
       max_queue_len: 1000,
+      use_fuzzy_match_as_confirmed: false,
     }),
     updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
       max_papers_per_page: 250,
@@ -37,6 +38,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       max_batch_items: 100,
       rq_worker_count: 2,
       max_queue_len: 1000,
+      use_fuzzy_match_as_confirmed: false,
       ...changes,
     })),
     ...overrides,
@@ -148,6 +150,27 @@ describe('AdminPage groups section', () => {
         max_batch_items: 100,
         rq_worker_count: 4,
         max_queue_len: 1000,
+      }),
+    );
+  });
+
+  it('saves the reference-matching toggle from the Settings tab', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.getAppConfig).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const toggle = screen.getByLabelText(
+      'Treat a fuzzy “likely local” match as confirmed',
+    ) as HTMLInputElement;
+    await waitFor(() => expect(toggle.checked).toBe(false));
+
+    await fireEvent.click(toggle);
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[2]);
+
+    await waitFor(() =>
+      expect(client.updateAppConfig).toHaveBeenCalledWith({
+        use_fuzzy_match_as_confirmed: true,
       }),
     );
   });

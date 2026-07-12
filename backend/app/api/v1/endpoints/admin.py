@@ -46,6 +46,8 @@ class AppConfigOut(BaseModel):
     max_batch_items: int
     rq_worker_count: int
     max_queue_len: int
+    # Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
+    use_fuzzy_match_as_confirmed: bool
 
 
 class AppConfigUpdate(BaseModel):
@@ -56,6 +58,7 @@ class AppConfigUpdate(BaseModel):
     max_batch_items: int | None = Field(default=None, ge=1)
     rq_worker_count: int | None = Field(default=None, ge=1)
     max_queue_len: int | None = Field(default=None, ge=1)
+    use_fuzzy_match_as_confirmed: bool | None = Field(default=None)
 
 
 class AgentOut(BaseModel):
@@ -281,6 +284,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         max_batch_items=app_config_service.effective_max_batch_items(db),
         rq_worker_count=app_config_service.effective_rq_worker_count(db),
         max_queue_len=app_config_service.effective_max_queue_len(db),
+        use_fuzzy_match_as_confirmed=app_config_service.effective_use_fuzzy_match_as_confirmed(db),
     )
 
 
@@ -300,7 +304,7 @@ def update_app_config(
     actor: User = Depends(require_admin),
 ) -> AppConfigOut:
     """Update the runtime app configuration (owner or admin); only supplied fields change."""
-    changed: dict[str, int] = {}
+    changed: dict[str, int | bool] = {}
     try:
         if payload.max_papers_per_page is not None:
             changed["max_papers_per_page"] = app_config_service.update_max_papers_per_page(
@@ -332,6 +336,12 @@ def update_app_config(
             changed["max_queue_len"] = app_config_service.update_max_queue_len(
                 db, value=payload.max_queue_len, actor_user_id=actor.id
             )
+        if payload.use_fuzzy_match_as_confirmed is not None:
+            changed["use_fuzzy_match_as_confirmed"] = (
+                app_config_service.update_use_fuzzy_match_as_confirmed(
+                    db, value=payload.use_fuzzy_match_as_confirmed, actor_user_id=actor.id
+                )
+            )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     record_event(
@@ -344,6 +354,12 @@ def update_app_config(
     db.commit()
     # Newly-persisted rate limits take effect after the short config cache expires.
     rate_limit.reset_cache()
+    # Turning "fuzzy as confirmed" ON promotes existing soft likely_matches to hard links — kick off a
+    # background library-wide rematch so that happens without waiting for the next extraction (batch 12).
+    if payload.use_fuzzy_match_as_confirmed:
+        from app.workers.queue import enqueue_reference_rescan
+
+        enqueue_reference_rescan()
     return _app_config_out(db)
 
 

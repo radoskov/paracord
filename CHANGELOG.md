@@ -41,6 +41,12 @@ The format follows Keep a Changelog style conventions, but the project is curren
   (per-paper, or a library-wide background job). A runtime "use fuzzy as confirmed" toggle (default
   off) decides whether a fuzzy match is a soft suggestion or a hard link. Batch 12 (Phase 2).
 
+- **Confirm / reject a likely reference match.** A reference's References panel now shows a
+  **likely match · N%** badge with **Confirm match** and **Not a match** buttons (plus a **Rescan
+  matches** button); confirming links it permanently (and a rescan never reverts it), rejecting keeps
+  it from being re-proposed. A **Reference matching** section in Admin → Settings holds the "treat a
+  fuzzy match as confirmed" toggle; turning it on kicks off a library-wide rescan. Batch 12 (Phase 3).
+
 - **"Duplicate PDF" awareness when attaching a shared PDF.** Attaching a PDF that (by content hash)
   already belongs to another paper now shows a **duplicate PDF** badge in the Files section — click it
   to find the other paper(s) via a Library hash search. The duplicate scan also gains a **`shared_file`**
