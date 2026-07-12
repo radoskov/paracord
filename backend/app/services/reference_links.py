@@ -18,6 +18,13 @@ from app.models.citation import Reference, ReferenceCitation
 from app.services.duplicate_detection import split_arxiv_id
 from app.utils.normalization import normalize_doi, normalize_title
 
+# ``Reference.dedup_key`` is ``String(512)`` and indexed. A real-world reference can carry a very long
+# (or mis-parsed, whole-citation-as-title) title, so the title-based key must be capped or the value
+# overflows the column (Postgres raises "value too long", failing extraction *and* the 0059 backfill
+# migration). Truncating the title portion is safe: the key stays deterministic and two references
+# whose titles agree for the first ~500 chars are, for dedup purposes, the same work.
+_MAX_DEDUP_KEY_LEN = 512
+
 
 def reference_dedup_key(
     *,
@@ -40,7 +47,11 @@ def reference_dedup_key(
         if base:
             return f"arxiv:{base}"
     if normalized_title:
-        return f"title:{normalized_title}|{year if year is not None else ''}"
+        year_part = str(year) if year is not None else ""
+        # Cap the title so the whole key fits the indexed String(512) column.
+        budget = _MAX_DEDUP_KEY_LEN - len("title:") - len("|") - len(year_part)
+        title_part = normalized_title[:budget] if budget > 0 else ""
+        return f"title:{title_part}|{year_part}"
     return None
 
 
