@@ -9,7 +9,7 @@ static ``Settings`` defaults apply.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, Uuid
+from sqlalchemy import Boolean, DateTime, Integer, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -76,6 +76,12 @@ class AppConfig(Base):
     max_queue_len: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_MAX_QUEUE_LEN)
     )
+    # Reference→library matching (batch 12, owner item #1). When ON, a fuzzy "likely local" candidate
+    # that clears the title threshold + gates becomes a HARD link (``resolved_work_id`` set, counted in
+    # every graph/metric calculation) instead of a soft one-click suggestion. OFF (default; an absent
+    # row or NULL → False) keeps fuzzy candidates as suggestions. The numeric matcher params live in
+    # the static ``Settings``/YAML; only this toggle needs runtime edits, hence its home here.
+    use_fuzzy_match_as_confirmed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

@@ -31,6 +31,16 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **"Likely local" reference matching.** Extracted bibliography references are now matched against
+  the library so a cited paper that's already present stops showing as "external" (and its Import
+  stops creating a near-duplicate). A DOI/arXiv identifier is the authoritative gate — present on
+  both sides it must match exactly, else the candidate is rejected; otherwise a tolerant title match
+  (dash/colon/case-insensitive) with equal-year and author-overlap checks proposes a **likely match**
+  the owner can confirm or reject. Matching runs at extraction, on reverse-rescan when a new paper
+  enters the library (linking existing references without re-extracting), and via manual rescan
+  (per-paper, or a library-wide background job). A runtime "use fuzzy as confirmed" toggle (default
+  off) decides whether a fuzzy match is a soft suggestion or a hard link. Batch 12 (Phase 2).
+
 - **"Duplicate PDF" awareness when attaching a shared PDF.** Attaching a PDF that (by content hash)
   already belongs to another paper now shows a **duplicate PDF** badge in the Files section — click it
   to find the other paper(s) via a Library hash search. The duplicate scan also gains a **`shared_file`**

@@ -21,10 +21,12 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services import ocr as ocr_service
 from app.services.ai_config import get_ai_config
+from app.services.app_config import effective_use_fuzzy_match_as_confirmed
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path, save_derived_ocr_pdf
 from app.services.keyword_extraction import extract_keywords
 from app.services.reference_links import find_or_create_reference
+from app.services.reference_matching import run_matching_for_references
 from app.services.tei_parser import ParsedPaper, extract_body_text, extract_sections, parse_tei
 from app.utils.normalization import normalize_title
 
@@ -199,7 +201,7 @@ def store_parsed_extraction(
             db,
             title=reference.title,
             doi=reference.doi,
-            arxiv_id=getattr(reference, "arxiv_id", None),
+            arxiv_id=reference.arxiv_id,
             year=reference.year,
             raw_citation=reference.raw_citation,
             authors=list(reference.authors) if reference.authors else None,
@@ -230,6 +232,16 @@ def store_parsed_extraction(
         orphaned = stale_ids - still_linked
         if orphaned:
             db.execute(delete(Reference).where(Reference.id.in_(orphaned)))
+
+    # Reference→library matching (batch 12): resolve each canonical reference this extraction touched
+    # against the local library, before building mentions (so a mention inherits the resolution). The
+    # fuzzy-as-confirmed runtime toggle is read from the AppConfig singleton (Phase 3).
+    run_matching_for_references(
+        db,
+        set(reference_by_key.values()),
+        settings=get_settings(),
+        fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db),
+    )
 
     mention_count = 0
     for mention in parsed.citation_mentions:

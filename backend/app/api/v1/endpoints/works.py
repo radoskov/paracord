@@ -15,8 +15,9 @@ from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_authenticated_user, require_contributor
+from app.api.deps import require_authenticated_user, require_contributor, require_min_role
 from app.core.config import get_settings
+from app.core.security import Role
 from app.db.session import get_db
 from app.models.agent import AgentFile
 from app.models.ai import Embedding, Summary
@@ -30,7 +31,10 @@ from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagL
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
-from app.services.app_config import effective_max_papers_per_page
+from app.services.app_config import (
+    effective_max_papers_per_page,
+    effective_use_fuzzy_match_as_confirmed,
+)
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
 from app.services.doi_conflict import message_from_exception
@@ -47,6 +51,10 @@ from app.services.file_paths import (
 )
 from app.services.queue_capacity import assert_queue_has_capacity
 from app.services.reference_links import references_for_work
+from app.services.reference_matching import (
+    rescan_references_for_new_work,
+    run_matching_for_references,
+)
 from app.services.search_query import parse_search_query
 from app.services.semantic_search import related_works
 from app.services.storage import (
@@ -80,6 +88,7 @@ DB_DEP = Depends(get_db)
 # Paper mutations require at least the contributor floor; per-object scoping (own-only for
 # contributors, see/modify for everyone) is enforced in the body via ``access.can_modify_work``.
 CONTRIBUTOR_DEP = Depends(require_contributor)
+EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 AUTH_DEP = Depends(require_authenticated_user)
 
 
@@ -908,6 +917,12 @@ def import_reference_as_work(
     db.flush()
     reference.resolved_work_id = work.id
     reference.resolution_status = "local_match"
+    # Reverse-rescan (batch 12): this newly-created work may also be what OTHER still-external
+    # references cite — link them now (fuzzy stays soft; toggle read from AppConfig) so importing one
+    # citation doesn't leave its siblings pointing "external".
+    rescan_references_for_new_work(
+        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+    )
     db.commit()
     db.refresh(work)
     enqueue_embedding(work.id)
@@ -942,6 +957,10 @@ def create_work(
     from app.services.default_shelf import place_on_default_if_loose
 
     place_on_default_if_loose(db, work.id, actor_id=actor.id)
+    # Reverse-rescan (batch 12): link any still-external references that cite this new paper.
+    rescan_references_for_new_work(
+        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+    )
     db.commit()
     enqueue_embedding(work.id)  # index off the search read path (best-effort)
     return work
@@ -1482,6 +1501,11 @@ class ReferenceRead(BaseModel):
     year: int | None = None
     resolution_status: str
     resolved_work_id: uuid.UUID | None = None
+    # Unconfirmed fuzzy "likely local" candidate (batch 12): the work this reference *probably* is,
+    # with its 0-100 title-match score. Never promoted to resolved_work_id while soft — the client
+    # renders these as a one-click "likely match" the owner confirms/rejects.
+    suggested_work_id: uuid.UUID | None = None
+    match_score: float | None = None
     # Derived in-text shorthand/label (e.g. "[69]" or "(Chen et al., 2022)") taken from a linked
     # CitationMention.marker_text — lets a reference be cross-referenced with its in-text citations.
     shorthand: str | None = None
@@ -1535,6 +1559,61 @@ def list_work_references(
         ReferenceRead.model_validate(ref).model_copy(update={"shorthand": shorthands.get(ref.id)})
         for ref in references
     ]
+
+
+class ReferenceRescanResult(BaseModel):
+    """Outcome of a reference→library rematch (batch 12)."""
+
+    scanned: int = 0
+    changed: int = 0
+    queued: bool = False
+    job_id: str | None = None
+
+
+@router.post("/{work_id}/references/rescan", response_model=ReferenceRescanResult)
+def rescan_work_references(
+    work_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
+) -> ReferenceRescanResult:
+    """Re-run reference→library matching for one paper's bibliography (batch 12, D3).
+
+    Synchronous (a single paper's references are few). Respects the batch-12 status rules: a
+    confirmed match stays locked; a rejected candidate is not re-proposed. Uses the current
+    ``use_fuzzy_match_as_confirmed`` toggle."""
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    references = references_for_work(db, work_id)
+    changed = run_matching_for_references(
+        db, references, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+    )
+    db.commit()
+    return ReferenceRescanResult(scanned=len(references), changed=changed)
+
+
+@router.post("/references/rescan-all", response_model=ReferenceRescanResult)
+def rescan_all_references(db: Session = DB_DEP, actor: User = EDITOR_DEP) -> ReferenceRescanResult:
+    """Re-run reference→library matching across the WHOLE library (batch 12, D3).
+
+    A full rematch is a minutes-long job at scale, so it is always enqueued on the background worker
+    (mirrors ``POST /duplicates/scan``). Audited as a bulk action."""
+    from app.workers.queue import enqueue_reference_rescan
+
+    job_id = enqueue_reference_rescan()
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Reference-rescan queue unavailable",
+        )
+    record_event(
+        db,
+        "reference.rescan_all",
+        actor_user_id=actor.id,
+        entity_type="library",
+        details={"job_id": job_id},
+    )
+    db.commit()
+    return ReferenceRescanResult(queued=True, job_id=job_id)
 
 
 @router.get("/{work_id}/reference-graph")

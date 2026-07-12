@@ -19,6 +19,7 @@ class ParsedReference:
     raw_citation: str | None = None
     title: str | None = None
     doi: str | None = None
+    arxiv_id: str | None = None
     year: int | None = None
     # Additive (Phase J batch import): the citation's authors and venue, when GROBID resolves them.
     authors: list[str] = field(default_factory=list)
@@ -146,6 +147,7 @@ def _biblstruct_to_reference(bibl, index: int) -> ParsedReference:
         raw_citation=_text(bibl.find('.//t:note[@type="raw_reference"]', TEI_NS)),
         title=title,
         doi=_text(bibl.find('.//t:idno[@type="DOI"]', TEI_NS)),
+        arxiv_id=_text(bibl.find('.//t:idno[@type="arXiv"]', TEI_NS)),
         year=_year(
             _first(
                 bibl.find(".//t:monogr//t:date", TEI_NS),

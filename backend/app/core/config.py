@@ -110,6 +110,25 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
     if "resolve_timeout" in web_find:
         values["web_find_resolve_timeout"] = web_find["resolve_timeout"]
 
+    # Reference→library matching (batch 12): tolerant title(+year+author) matcher for bibliography
+    # references. Numeric params are boot-fixed here; the fuzzy-as-confirmed runtime toggle is on the
+    # AppConfig DB singleton (Phase 3), not YAML.
+    reference_matching = data.get("reference_matching") or {}
+    if "enabled" in reference_matching:
+        values["reference_matching_enabled"] = reference_matching["enabled"]
+    if "title_similarity_threshold" in reference_matching:
+        values["reference_matching_title_threshold"] = reference_matching[
+            "title_similarity_threshold"
+        ]
+    if "author_overlap_threshold" in reference_matching:
+        values["reference_matching_author_threshold"] = reference_matching[
+            "author_overlap_threshold"
+        ]
+    if "require_year_match" in reference_matching:
+        values["reference_matching_require_year_match"] = reference_matching["require_year_match"]
+    if "identifier_gate" in reference_matching:
+        values["reference_matching_identifier_gate"] = reference_matching["identifier_gate"]
+
     # OCR / advanced extraction (Phase B5). `processing.ocr` toggles the OCRmyPDF pre-step; the
     # `processing.advanced_extraction` block selects an opt-in ML extractor (activate-when-present).
     processing = data.get("processing") or {}
@@ -217,6 +236,24 @@ class Settings(BaseSettings):
     # Score at/above which a lookup-engine batch line is auto-treated as a confident "matched"
     # (its top candidate prefills the draft); below it the line is "title_only".
     web_find_batch_match_threshold: float = 0.6
+    # Reference→library matching (batch 12 — "likely local" citations). Tolerant title(+year+author)
+    # matcher that links an extracted bibliography reference to a library work it likely IS, so refs
+    # for papers already in the library stop showing as "external". Operator-tuned / boot-fixed
+    # (Settings is @lru_cache'd); only the fuzzy-as-confirmed *toggle* is runtime-editable, and it
+    # lives on the AppConfig DB singleton instead (batch 12 Phase 3).
+    reference_matching_enabled: bool = True
+    # similarity_pct (0-100) at/above which a candidate work is a title match. The KnowRob dash/colon
+    # pair scores 98.0, so 90 comfortably links it while excluding unrelated same-first-word titles.
+    reference_matching_title_threshold: float = 90.0
+    # Author-overlap ratio (0-1) a candidate must clear when both sides list authors (Phase 4). The
+    # gate is skipped when either side has no authors — a signal you can't compute can't disqualify.
+    reference_matching_author_threshold: float = 0.5
+    # When both reference and candidate carry a year they must be equal; unset on either side skips it.
+    reference_matching_require_year_match: bool = True
+    # DOI/arXiv is the authoritative gate: identifiers present on BOTH sides must match exactly (else
+    # that candidate is disqualified, no fuzzy fallback). Only when identifiers are absent does fuzzy
+    # run. Off = ignore identifiers and always go fuzzy (not recommended).
+    reference_matching_identifier_gate: bool = True
     # AI provider seams (Stage 6). Defaults keep the dependency-free lexical baselines; the
     # heavier providers are opt-in and degrade gracefully when their lib/daemon is absent.
     embedding_provider: str = "hash_bow"  # hash_bow | sentence_transformers | ollama

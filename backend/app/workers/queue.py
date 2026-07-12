@@ -24,9 +24,12 @@ PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
 TOPIC_JOB = "app.workers.jobs.topic_work_job"
 KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
+REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
 
 # Deterministic id so a burst of edits coalesces into a single pending rebuild (D13a).
 BM25_REBUILD_JOB_ID = "bm25-rebuild"
+# Deterministic id so repeated "rescan all references" clicks coalesce into one pending job.
+REF_MATCH_JOB_ID = "reference-rescan-all"
 
 
 def get_queue():
@@ -184,6 +187,22 @@ def enqueue_duplicate_scan() -> str | None:
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue duplicate scan: %s", exc)
+        return None
+
+
+def enqueue_reference_rescan() -> str | None:
+    """Best-effort enqueue of a full-library reference→work rematch (batch 12). Returns id or None.
+
+    Uses the fixed id ``reference-rescan-all`` and skips the enqueue when a live job with that id
+    already exists, so repeated clicks coalesce into a single pending rescan."""
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, REF_MATCH_JOB_ID)
+        if existing is not None:
+            return existing
+        return queue.enqueue(REF_MATCH_JOB, job_id=REF_MATCH_JOB_ID).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue reference rescan: %s", exc)
         return None
 
 

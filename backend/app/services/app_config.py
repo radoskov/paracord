@@ -112,6 +112,33 @@ def effective_max_queue_len(db: Session, *, settings: Settings | None = None) ->
     return row.max_queue_len
 
 
+def effective_use_fuzzy_match_as_confirmed(
+    db: Session, *, settings: Settings | None = None
+) -> bool:
+    """Whether a fuzzy "likely local" match is auto-promoted to a hard link (batch 12, owner #1).
+
+    OFF by default: a fuzzy candidate stays a soft ``likely_match`` suggestion. An absent app_config
+    row or a NULL column reproduces that default.
+    """
+    if not _app_config_table_present(db):
+        return False
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.use_fuzzy_match_as_confirmed is None:
+        return False
+    return bool(row.use_fuzzy_match_as_confirmed)
+
+
+def update_use_fuzzy_match_as_confirmed(
+    db: Session, *, value: bool, actor_user_id: uuid.UUID | None = None
+) -> bool:
+    """Persist the fuzzy-as-confirmed toggle (batch 12). Returns the stored value."""
+    row = _ensure_row(db)
+    row.use_fuzzy_match_as_confirmed = bool(value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return bool(row.use_fuzzy_match_as_confirmed)
+
+
 def _ensure_row(db: Session) -> AppConfig:
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
     if row is None:

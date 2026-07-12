@@ -78,6 +78,17 @@ web_find:
   download_timeout: 60.0       # seconds per PDF download
   max_download_bytes: 104857600  # 100 MB hard cap; oversized downloads are refused
 
+# Reference→library matching ("likely local" citations). Links an extracted bibliography reference
+# to a library work it likely IS, so refs for papers already in the library stop showing as
+# "external" (and their Import stops creating near-duplicates). The runtime "use fuzzy as confirmed"
+# toggle lives in Admin → Settings, not here.
+reference_matching:
+  enabled: true
+  title_similarity_threshold: 90.0  # similarity_pct (0-100) for a fuzzy title match
+  author_overlap_threshold: 0.5     # required author overlap (0-1) when both sides list authors
+  require_year_match: true          # when both years are present they must be equal
+  identifier_gate: true             # DOIs/arXiv ids present on both sides must match exactly
+
 processing:
   # Fast preview path: first-page text/thumbnails before the slower GROBID job.
   pdf_preview: pymupdf

@@ -32,9 +32,24 @@ Reference→library matching ("likely local" citations) + reference-graph fixes.
   `citation_graph`, `citation_summary`, `works`, `citations`, `export_service`,
   `duplicate_resolution`). 744 fast-tier tests green; migration parity + autogenerate-clean pass;
   downgrade→upgrade round-trip verified on dev Postgres.
-- **Phases 2–5 (todo).** Matcher + config + persistence + rescan (D1/D2/D3); confirm/reject/import
-  actions + `use_fuzzy_match_as_confirmed` admin toggle (#1/#4); authors persist+match+display
-  (#5/#6); `likely_local` graph colour + citing/external overlap-collapse (#7).
+- **Phase 2 (done) — matcher + config + persistence + rescan (D1/D2/D3).** New
+  `services/reference_matching.py`: identifier gate (DOI/arXiv must match exactly when present on
+  both sides, else disqualified — no fuzzy fallback) then fuzzy title (`similarity_pct` ≥ 90) with
+  equal-year + author-overlap gates. Persists per the status rules: identifier → `local_match`;
+  fuzzy → `likely_match` (soft, `suggested_work_id`+`match_score`, never written to
+  `resolved_work_id`) unless the `use_fuzzy_match_as_confirmed` toggle promotes it to a hard link; a
+  `confirmed_match` is locked and a `rejected_match` isn't re-proposed. Author matching
+  (`services/author_matching.py`, owner #5/#6): (surname, first-initial), diacritic-folded, "et al"
+  validated against the single best author. Wired into extraction (also adds `arxiv_id` to
+  `ParsedReference`/TEI parse); **reverse-rescan** on new-work creation (import-from-reference +
+  manual create) links still-external references without re-extracting; manual rescan endpoints
+  (`POST /works/{id}/references/rescan` sync per-paper, `POST /works/references/rescan-all` enqueued +
+  audited). YAML `reference_matching:` block → `Settings`. The `use_fuzzy_match_as_confirmed` bool +
+  migration `0060` + effective/update helpers landed here (extraction needs the getter); the admin
+  endpoint + UI toggle are Phase 3.
+- **Phases 3–5 (todo).** Confirm/reject/import actions + admin toggle exposure (#1/#4); authors
+  display (#4 — persist + match already done); `likely_local` graph colour + citing/external
+  overlap-collapse (#7).
 
 ## issue_batch_11 (2026-07-10)
 
