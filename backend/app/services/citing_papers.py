@@ -35,7 +35,10 @@ from app.utils.normalization import arxiv_base_from_doi, normalize_doi, normaliz
 
 logger = logging.getLogger(__name__)
 
-MAX_CITING = 100  # on-demand cap (owner decision)
+# Default per-paper cap on fetched citing papers. The runtime value comes from
+# app_config.citing_papers_fetch_cap (Admin → Settings, S20); this constant is the fallback for
+# direct service calls and the parser default.
+MAX_CITING = 1000
 
 
 @dataclass
@@ -132,23 +135,35 @@ def _fetch_openalex_citing(
     short_id = _openalex_short_id(resolved_json.get("id"))
     if not short_id:
         return [], None, False
-    page = _get(
-        OPENALEX_API,
-        params={
-            "filter": f"cites:{short_id}",
-            "per-page": min(limit, 200),
-            "select": "id,display_name,publication_year,doi,authorships,primary_location",
-            **({"mailto": mailto} if mailto else {}),
-        },
-    )
-    page.raise_for_status()
-    page_json = page.json()
-    # The true total (may exceed the capped list): the cites-filter count, else the work's own
-    # cited_by_count from the resolve call.
-    total = (page_json.get("meta") or {}).get("count")
+    # Cursor-paged up to ``limit`` (S20): OpenAlex serves 200 per page; meta.next_cursor walks on.
+    papers: list[CitingPaper] = []
+    total: int | None = None
+    cursor: str | None = "*"
+    while cursor and len(papers) < limit:
+        page = _get(
+            OPENALEX_API,
+            params={
+                "filter": f"cites:{short_id}",
+                "per-page": min(limit - len(papers), 200),
+                "cursor": cursor,
+                "select": "id,display_name,publication_year,doi,authorships,primary_location",
+                **({"mailto": mailto} if mailto else {}),
+            },
+        )
+        page.raise_for_status()
+        page_json = page.json()
+        meta = page_json.get("meta") or {}
+        if total is None:
+            total = meta.get("count")
+        batch = parse_openalex_citing(page_json, limit - len(papers))
+        papers.extend(batch)
+        if not batch:
+            break
+        cursor = meta.get("next_cursor")
     if total is None:
+        # The true total (may exceed the capped list): fall back to the work's own count.
         total = resolved_json.get("cited_by_count")
-    return parse_openalex_citing(page_json, limit), total, True
+    return papers, total, True
 
 
 def _fetch_s2_citing(
@@ -161,14 +176,30 @@ def _fetch_s2_citing(
         identifier = f"DOI:{_idseg(doi)}"
     else:
         return [], None, False
-    resp = _get(
-        f"{SEMANTIC_SCHOLAR_API}/{identifier}/citations",
-        params={"fields": "title,year,authors,externalIds,venue", "limit": min(limit, 1000)},
-    )
-    if resp.status_code == 404:
-        return [], None, False
-    resp.raise_for_status()
-    papers = parse_s2_citing(resp.json(), limit)
+    # Offset-paged up to ``limit`` (S20): S2 serves at most 1000 per request; ``next`` walks on.
+    papers: list[CitingPaper] = []
+    offset = 0
+    answered = False
+    while len(papers) < limit:
+        resp = _get(
+            f"{SEMANTIC_SCHOLAR_API}/{identifier}/citations",
+            params={
+                "fields": "title,year,authors,externalIds,venue",
+                "limit": min(limit - len(papers), 1000),
+                "offset": offset,
+            },
+        )
+        if resp.status_code == 404:
+            return [], None, False
+        resp.raise_for_status()
+        answered = True
+        payload = resp.json()
+        batch = parse_s2_citing(payload, limit - len(papers))
+        papers.extend(batch)
+        next_offset = payload.get("next")
+        if not batch or next_offset is None:
+            break
+        offset = next_offset
     # The citations page carries no total; one cheap follow-up fetches the count snapshot.
     total: int | None = None
     try:
@@ -204,7 +235,7 @@ def fetch_citing_papers(
     """
     settings = settings or get_settings()
     mailto = getattr(settings, "crossref_mailto", None) or None
-    limit = max(1, min(limit, MAX_CITING))
+    limit = max(1, limit)  # the cap itself is the caller's (admin-configured) choice — S20
 
     empty_answer: tuple[str, int | None] | None = None
     if doi:

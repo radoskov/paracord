@@ -46,6 +46,10 @@ class AppConfigOut(BaseModel):
     max_batch_items: int
     rq_worker_count: int
     max_queue_len: int
+    # Citing-papers fetch cap (S20): max external citers fetched+cached per paper.
+    citing_papers_fetch_cap: int
+    # AI scope-job threshold (S15/S16): scopes above this run topics/summaries on the worker.
+    ai_scope_job_threshold: int
     # Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
     use_fuzzy_match_as_confirmed: bool
     # Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.
@@ -60,6 +64,8 @@ class AppConfigUpdate(BaseModel):
     max_batch_items: int | None = Field(default=None, ge=1)
     rq_worker_count: int | None = Field(default=None, ge=1)
     max_queue_len: int | None = Field(default=None, ge=1)
+    citing_papers_fetch_cap: int | None = Field(default=None, ge=1)
+    ai_scope_job_threshold: int | None = Field(default=None, ge=1)
     use_fuzzy_match_as_confirmed: bool | None = Field(default=None)
     reference_rescan_on_startup: bool | None = Field(default=None)
 
@@ -287,6 +293,8 @@ def _app_config_out(db: Session) -> AppConfigOut:
         max_batch_items=app_config_service.effective_max_batch_items(db),
         rq_worker_count=app_config_service.effective_rq_worker_count(db),
         max_queue_len=app_config_service.effective_max_queue_len(db),
+        citing_papers_fetch_cap=app_config_service.effective_citing_papers_fetch_cap(db),
+        ai_scope_job_threshold=app_config_service.effective_ai_scope_job_threshold(db),
         use_fuzzy_match_as_confirmed=app_config_service.effective_use_fuzzy_match_as_confirmed(db),
         reference_rescan_on_startup=app_config_service.effective_reference_rescan_on_startup(db),
     )
@@ -339,6 +347,14 @@ def update_app_config(
         if payload.max_queue_len is not None:
             changed["max_queue_len"] = app_config_service.update_max_queue_len(
                 db, value=payload.max_queue_len, actor_user_id=actor.id
+            )
+        if payload.citing_papers_fetch_cap is not None:
+            changed["citing_papers_fetch_cap"] = app_config_service.update_citing_papers_fetch_cap(
+                db, value=payload.citing_papers_fetch_cap, actor_user_id=actor.id
+            )
+        if payload.ai_scope_job_threshold is not None:
+            changed["ai_scope_job_threshold"] = app_config_service.update_ai_scope_job_threshold(
+                db, value=payload.ai_scope_job_threshold, actor_user_id=actor.id
             )
         if payload.use_fuzzy_match_as_confirmed is not None:
             changed["use_fuzzy_match_as_confirmed"] = (

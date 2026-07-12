@@ -209,3 +209,24 @@ def test_shelves_racks_are_see_filtered(client, db, make_user):
     assert "SecretShelf" not in shelf_names
     assert "PublicRack" in rack_names
     assert "SecretRack" not in rack_names
+
+
+def test_app_config_citing_cap_and_ai_threshold_roundtrip(client, auth_headers):
+    """S20/S16: the two new runtime knobs default correctly and round-trip via the admin API."""
+    admin = auth_headers("owner")
+    got = client.get("/api/v1/admin/app-config", headers=admin).json()
+    assert got["citing_papers_fetch_cap"] == 1000
+    assert got["ai_scope_job_threshold"] == 100
+    patched = client.patch(
+        "/api/v1/admin/app-config",
+        headers=admin,
+        json={"citing_papers_fetch_cap": 250, "ai_scope_job_threshold": 40},
+    ).json()
+    assert patched["citing_papers_fetch_cap"] == 250
+    assert patched["ai_scope_job_threshold"] == 40
+    assert (
+        client.patch(
+            "/api/v1/admin/app-config", headers=admin, json={"citing_papers_fetch_cap": 0}
+        ).status_code
+        == 422
+    )

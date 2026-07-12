@@ -38,6 +38,14 @@ _DEFAULT_RQ_WORKER_COUNT = 2
 # measurement fails open (allows) when Redis is unreachable.
 _DEFAULT_MAX_QUEUE_LEN = 1000
 
+# Out-of-the-box cap on how many citing papers one fetch stores per paper (S20). Providers are
+# paged up to this cap; changeable in Admin → Settings (egress-volume knob).
+_DEFAULT_CITING_PAPERS_FETCH_CAP = 1000
+
+# Out-of-the-box scope size above which topic-model/summary requests run as a background job
+# instead of inline in the request (S15/S16).
+_DEFAULT_AI_SCOPE_JOB_THRESHOLD = 100
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -75,6 +83,14 @@ class AppConfig(Base):
     # rejected with 429 once the pending queue is at this cap (fail-open if Redis is unreachable).
     max_queue_len: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_MAX_QUEUE_LEN)
+    )
+    # Citing-papers fetch cap (S20): max external citers fetched+cached per paper (paged fetch).
+    citing_papers_fetch_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_CITING_PAPERS_FETCH_CAP)
+    )
+    # AI scope-job threshold (S15/S16): scopes larger than this run topics/summaries on the worker.
+    ai_scope_job_threshold: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_AI_SCOPE_JOB_THRESHOLD)
     )
     # Reference→library matching (batch 12, owner item #1). When ON, a fuzzy "likely local" candidate
     # that clears the title threshold + gates becomes a HARD link (``resolved_work_id`` set, counted in

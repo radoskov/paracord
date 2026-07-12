@@ -32,6 +32,7 @@ from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
 from app.services.app_config import (
+    effective_citing_papers_fetch_cap,
     effective_max_papers_per_page,
     effective_use_fuzzy_match_as_confirmed,
 )
@@ -1996,7 +1997,11 @@ def fetch_citing_papers_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Add a DOI or arXiv id to fetch citing papers",
         )
-    papers, source, total = cp.fetch_citing_papers(doi=work.doi, arxiv=work.arxiv_id)
+    papers, source, total = cp.fetch_citing_papers(
+        doi=work.doi,
+        arxiv=work.arxiv_id,
+        limit=effective_citing_papers_fetch_cap(db),
+    )
     if source is not None:
         cp.store_citing_papers(db, work=work, papers=papers, source=source, total=total)
         record_event(

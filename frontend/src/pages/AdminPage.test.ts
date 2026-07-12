@@ -29,6 +29,8 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       max_batch_items: 100,
       rq_worker_count: 2,
       max_queue_len: 1000,
+      citing_papers_fetch_cap: 1000,
+      ai_scope_job_threshold: 100,
       use_fuzzy_match_as_confirmed: false,
       reference_rescan_on_startup: false,
     }),
@@ -39,6 +41,8 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       max_batch_items: 100,
       rq_worker_count: 2,
       max_queue_len: 1000,
+      citing_papers_fetch_cap: 1000,
+      ai_scope_job_threshold: 100,
       use_fuzzy_match_as_confirmed: false,
       reference_rescan_on_startup: false,
       ...changes,
@@ -153,6 +157,8 @@ describe('AdminPage groups section', () => {
         max_batch_items: 100,
         rq_worker_count: 4,
         max_queue_len: 1000,
+        citing_papers_fetch_cap: 1000,
+        ai_scope_job_threshold: 100,
       }),
     );
   });

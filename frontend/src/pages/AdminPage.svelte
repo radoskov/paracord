@@ -310,6 +310,8 @@
   let maxBatchItems = '';
   let rqWorkerCount = '';
   let maxQueueLen = '';
+  let citingFetchCap = '';
+  let aiScopeJobThreshold = '';
   let useFuzzyAsConfirmed = false;
   let referenceRescanOnStartup = false;
   let rescanningLibrary = false;
@@ -328,6 +330,8 @@
     maxBatchItems = String(cfg.max_batch_items);
     rqWorkerCount = String(cfg.rq_worker_count);
     maxQueueLen = String(cfg.max_queue_len);
+    citingFetchCap = String(cfg.citing_papers_fetch_cap);
+    aiScopeJobThreshold = String(cfg.ai_scope_job_threshold);
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
     referenceRescanOnStartup = cfg.reference_rescan_on_startup;
   }
@@ -380,12 +384,16 @@
     const batch = Math.trunc(Number(maxBatchItems));
     const workers = Math.trunc(Number(rqWorkerCount));
     const queueLen = Math.trunc(Number(maxQueueLen));
+    const citingCap = Math.trunc(Number(citingFetchCap));
+    const aiThreshold = Math.trunc(Number(aiScopeJobThreshold));
     for (const [label, v] of [
       ['Per-client rate limit', perClient],
       ['Global rate limit', global],
       ['Max papers per import', batch],
       ['RQ worker count', workers],
       ['Max queue length', queueLen],
+      ['Citing-papers fetch cap', citingCap],
+      ['AI background-job threshold', aiThreshold],
     ] as const) {
       if (!Number.isFinite(v) || v < 1) {
         message = `${label} must be a whole number of at least 1`;
@@ -402,6 +410,8 @@
           max_batch_items: batch,
           rq_worker_count: workers,
           max_queue_len: queueLen,
+          citing_papers_fetch_cap: citingCap,
+          ai_scope_job_threshold: aiThreshold,
         }),
       );
       overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
@@ -1478,6 +1488,23 @@
           A new import, extraction or reindex is rejected with HTTP 429 once this many jobs are
           already waiting. If the queue can’t be measured (Redis down) the request is allowed
           (fail-open).
+        </p>
+        <label class="field">
+          Citing papers fetched per paper
+          <input type="number" min="1" bind:value={citingFetchCap} />
+        </label>
+        <p class="small-help">
+          How many citing papers one “Fetch citing papers” pulls from OpenAlex/Semantic Scholar and
+          caches per paper (paged requests). Higher values find more in-library citers but make each
+          fetch heavier.
+        </p>
+        <label class="field">
+          Background-job threshold for AI scopes
+          <input type="number" min="1" bind:value={aiScopeJobThreshold} />
+        </label>
+        <p class="small-help">
+          Topic models and summaries over scopes larger than this many papers run as a background
+          job (watch the Jobs tab) instead of making the browser wait.
         </p>
         <button type="submit" disabled={savingOverload || loading}
           title="Save overload-protection settings">Save</button>

@@ -1277,6 +1277,10 @@ export interface AppConfig {
   max_batch_items: number;
   rq_worker_count: number;
   max_queue_len: number;
+  // Citing-papers fetch cap (S20): max external citers fetched+cached per paper.
+  citing_papers_fetch_cap: number;
+  // AI scope-job threshold (S15/S16): scopes above this run topics/summaries as a background job.
+  ai_scope_job_threshold: number;
   // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
   use_fuzzy_match_as_confirmed: boolean;
   // Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.

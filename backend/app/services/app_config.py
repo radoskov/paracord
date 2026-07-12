@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.app_config import (
+    _DEFAULT_AI_SCOPE_JOB_THRESHOLD,
+    _DEFAULT_CITING_PAPERS_FETCH_CAP,
     _DEFAULT_MAX_BATCH_ITEMS,
     _DEFAULT_MAX_QUEUE_LEN,
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
@@ -110,6 +112,52 @@ def effective_max_queue_len(db: Session, *, settings: Settings | None = None) ->
     if row is None or row.max_queue_len is None:
         return _DEFAULT_MAX_QUEUE_LEN
     return row.max_queue_len
+
+
+def effective_citing_papers_fetch_cap(db: Session, *, settings: Settings | None = None) -> int:
+    """Return the effective cap on citing papers fetched+cached per paper (S20)."""
+    if not _app_config_table_present(db):
+        return _DEFAULT_CITING_PAPERS_FETCH_CAP
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.citing_papers_fetch_cap is None:
+        return _DEFAULT_CITING_PAPERS_FETCH_CAP
+    return row.citing_papers_fetch_cap
+
+
+def update_citing_papers_fetch_cap(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new citing-papers fetch cap (S20). Returns the stored value."""
+    if value < 1:
+        raise ValueError("citing_papers_fetch_cap must be >= 1")
+    row = _ensure_row(db)
+    row.citing_papers_fetch_cap = value
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return row.citing_papers_fetch_cap
+
+
+def effective_ai_scope_job_threshold(db: Session, *, settings: Settings | None = None) -> int:
+    """Return the scope size above which topic/summary requests run as a background job (S15/S16)."""
+    if not _app_config_table_present(db):
+        return _DEFAULT_AI_SCOPE_JOB_THRESHOLD
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.ai_scope_job_threshold is None:
+        return _DEFAULT_AI_SCOPE_JOB_THRESHOLD
+    return row.ai_scope_job_threshold
+
+
+def update_ai_scope_job_threshold(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new AI scope-job threshold (S15/S16). Returns the stored value."""
+    if value < 1:
+        raise ValueError("ai_scope_job_threshold must be >= 1")
+    row = _ensure_row(db)
+    row.ai_scope_job_threshold = value
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return row.ai_scope_job_threshold
 
 
 def effective_use_fuzzy_match_as_confirmed(

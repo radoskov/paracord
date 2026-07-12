@@ -396,3 +396,50 @@ def test_failed_fetch_keeps_cache(client, auth_headers, db, monkeypatch):
     )
     assert resp.status_code == 200
     assert [i["title"] for i in resp.json()["items"]] == ["Kept"]
+
+
+def test_openalex_fetch_pages_with_cursor(monkeypatch):
+    """S20: fetching pages the OpenAlex cites query with a cursor until the cap is reached."""
+    pages = {
+        "*": {
+            "meta": {"count": 3, "next_cursor": "c2"},
+            "results": [
+                {"id": f"https://openalex.org/W{i}", "display_name": f"P{i}"} for i in (1, 2)
+            ],
+        },
+        "c2": {
+            "meta": {"count": 3, "next_cursor": None},
+            "results": [{"id": "https://openalex.org/W3", "display_name": "P3"}],
+        },
+    }
+    seen_cursors = []
+
+    def fake_get(url, params=None, headers=None):
+        if params and "filter" in params:
+            seen_cursors.append(params["cursor"])
+            return _FakeResp(pages[params["cursor"]])
+        return _FakeResp(OPENALEX_RESOLVE)
+
+    monkeypatch.setattr(cp, "_get", fake_get)
+    papers, source, total = cp.fetch_citing_papers(doi="10.1/base", limit=10)
+    assert source == "openalex" and total == 3
+    assert [p.title for p in papers] == ["P1", "P2", "P3"]
+    assert seen_cursors == ["*", "c2"]
+
+
+def test_fetch_endpoint_respects_admin_cap(client, auth_headers, db, monkeypatch):
+    """The admin-configured citing_papers_fetch_cap is passed through to the fetch (S20)."""
+    from app.services.app_config import update_citing_papers_fetch_cap
+
+    work = _work(db, doi="10.1/base")
+    update_citing_papers_fetch_cap(db, value=7)
+    db.commit()
+    captured = {}
+
+    def fake_fetch(**kw):
+        captured.update(kw)
+        return [], None, None
+
+    monkeypatch.setattr(cp, "fetch_citing_papers", fake_fetch)
+    client.post(f"/api/v1/works/{work.id}/citing-papers/fetch", headers=auth_headers("owner"))
+    assert captured["limit"] == 7
