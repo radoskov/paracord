@@ -880,6 +880,10 @@
             "title": "Rate Limit Per Client Per Min",
             "type": "integer"
           },
+          "reference_rescan_on_startup": {
+            "title": "Reference Rescan On Startup",
+            "type": "boolean"
+          },
           "rq_worker_count": {
             "title": "Rq Worker Count",
             "type": "integer"
@@ -896,7 +900,8 @@
           "max_batch_items",
           "rq_worker_count",
           "max_queue_len",
-          "use_fuzzy_match_as_confirmed"
+          "use_fuzzy_match_as_confirmed",
+          "reference_rescan_on_startup"
         ],
         "title": "AppConfigOut",
         "type": "object"
@@ -962,6 +967,17 @@
               }
             ],
             "title": "Rate Limit Per Client Per Min"
+          },
+          "reference_rescan_on_startup": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Rescan On Startup"
           },
           "rq_worker_count": {
             "anyOf": [
@@ -8177,6 +8193,16 @@
             "title": "Keywords",
             "type": "array"
           },
+          "local_citation_count": {
+            "default": 0,
+            "title": "Local Citation Count",
+            "type": "integer"
+          },
+          "local_reference_count": {
+            "default": 0,
+            "title": "Local Reference Count",
+            "type": "integer"
+          },
           "main_file_id": {
             "anyOf": [
               {
@@ -8212,6 +8238,11 @@
           "reading_status": {
             "title": "Reading Status",
             "type": "string"
+          },
+          "reference_count": {
+            "default": 0,
+            "title": "Reference Count",
+            "type": "integer"
           },
           "shelves": {
             "default": [],
