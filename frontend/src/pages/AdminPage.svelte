@@ -311,6 +311,9 @@
   let rqWorkerCount = '';
   let maxQueueLen = '';
   let useFuzzyAsConfirmed = false;
+  let referenceRescanOnStartup = false;
+  let rescanningLibrary = false;
+  let rescanLibraryMsg = '';
   let savingAppConfig = false;
   let savingOverload = false;
   let savingMatching = false;
@@ -326,6 +329,7 @@
     rqWorkerCount = String(cfg.rq_worker_count);
     maxQueueLen = String(cfg.max_queue_len);
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
+    referenceRescanOnStartup = cfg.reference_rescan_on_startup;
   }
 
   async function saveMatchingConfig(): Promise<void> {
@@ -333,13 +337,26 @@
     matchingMsg = '';
     await run(async () => {
       applyAppConfig(
-        await client.updateAppConfig({ use_fuzzy_match_as_confirmed: useFuzzyAsConfirmed }),
+        await client.updateAppConfig({
+          use_fuzzy_match_as_confirmed: useFuzzyAsConfirmed,
+          reference_rescan_on_startup: referenceRescanOnStartup,
+        }),
       );
       matchingMsg = useFuzzyAsConfirmed
         ? 'Saved. A library-wide rescan was started to promote existing likely matches.'
         : 'Saved.';
     });
     savingMatching = false;
+  }
+
+  async function rescanWholeLibrary(): Promise<void> {
+    rescanningLibrary = true;
+    rescanLibraryMsg = '';
+    await run(async () => {
+      await client.rescanAllReferences();
+      rescanLibraryMsg = 'Library-wide reference rescan started — watch the Jobs tab for progress.';
+    });
+    rescanningLibrary = false;
   }
 
   async function saveAppConfig(): Promise<void> {
@@ -1485,10 +1502,31 @@
           everywhere). Turning this on starts a one-time library-wide rescan so existing likely
           matches are promoted. Exact DOI/arXiv matches are always treated as confirmed regardless.
         </p>
+        <label class="field checkbox-field">
+          <input type="checkbox" bind:checked={referenceRescanOnStartup} />
+          Re-scan all references on server startup
+        </label>
+        <p class="small-help">
+          When on, the server re-runs reference→paper matching across the whole library each time it
+          starts, so the stored “local / external” status stays fresh after deploys or bulk changes.
+          Off by default; matching still runs automatically on import, extraction, and paper edits.
+        </p>
         <button type="submit" disabled={savingMatching || loading}
-          title="Save the reference-matching mode">Save</button>
+          title="Save the reference-matching settings">Save</button>
         {#if matchingMsg}<p class="muted">{matchingMsg}</p>{/if}
       </form>
+      <div class="stack">
+        <button type="button" class="secondary" disabled={rescanningLibrary || loading}
+          on:click={rescanWholeLibrary}
+          title="Re-run reference→paper matching across the entire library now">
+          Rescan whole library now
+        </button>
+        <p class="small-help">
+          Runs the same matcher over every reference immediately (queued in the background) — use it
+          after a bulk import so newly-added papers are linked without waiting for the next restart.
+        </p>
+        {#if rescanLibraryMsg}<p class="muted">{rescanLibraryMsg}</p>{/if}
+      </div>
     </section>
   </div>
 {/if}

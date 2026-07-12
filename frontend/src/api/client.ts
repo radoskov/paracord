@@ -1274,6 +1274,8 @@ export interface AppConfig {
   max_queue_len: number;
   // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
   use_fuzzy_match_as_confirmed: boolean;
+  // Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.
+  reference_rescan_on_startup: boolean;
 }
 
 export interface AgentRecord {
@@ -1780,6 +1782,13 @@ export class ApiClient {
       `/api/v1/works/${workId}/references/rescan`,
       { method: "POST" },
     );
+  }
+
+  /** Re-run reference→library matching across the WHOLE library (queued; editor+). */
+  async rescanAllReferences(): Promise<ReferenceRescanResult> {
+    return this.request<ReferenceRescanResult>("/api/v1/works/references/rescan-all", {
+      method: "POST",
+    });
   }
 
   async uploadWorkFile(workId: string, file: File): Promise<WorkFile> {

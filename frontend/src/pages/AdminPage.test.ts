@@ -30,6 +30,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       rq_worker_count: 2,
       max_queue_len: 1000,
       use_fuzzy_match_as_confirmed: false,
+      reference_rescan_on_startup: false,
     }),
     updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
       max_papers_per_page: 250,
@@ -39,8 +40,10 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       rq_worker_count: 2,
       max_queue_len: 1000,
       use_fuzzy_match_as_confirmed: false,
+      reference_rescan_on_startup: false,
       ...changes,
     })),
+    rescanAllReferences: vi.fn().mockResolvedValue({}),
     ...overrides,
   };
 }
@@ -171,7 +174,21 @@ describe('AdminPage groups section', () => {
     await waitFor(() =>
       expect(client.updateAppConfig).toHaveBeenCalledWith({
         use_fuzzy_match_as_confirmed: true,
+        reference_rescan_on_startup: false,
       }),
     );
+  });
+
+  it('triggers a whole-library reference rescan from the Settings tab', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.getAppConfig).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Rescan whole library now' }),
+    );
+
+    await waitFor(() => expect(client.rescanAllReferences).toHaveBeenCalled());
   });
 });
