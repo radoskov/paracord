@@ -130,6 +130,9 @@ services:
         condition: service_started
     volumes:
       - ./agent:/app/agent
+      # Read-only so the agent test suite can validate config/agent.example.yaml against the real
+      # AgentConfig schema (prevents the example drifting from the code — see test_example_config).
+      - ./config:/app/config:ro
     command: ["sleep", "infinity"]
 
   # PaRacORD web frontend (Vite + Svelte). Dependencies live in the named

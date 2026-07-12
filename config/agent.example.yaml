@@ -1,36 +1,34 @@
-agent:
-  name: workstation-agent
-  server_url: http://127.0.0.1:8000
-  token_file: ~/.config/paracord/agent.token
-  database_file: ~/.local/share/paracord-agent/agent.sqlite3
-  poll_interval_seconds: 30
+# PaRacORD local agent — EXAMPLE configuration (reference only).
+#
+# The live config is written and rewritten by the CLI / local web GUI at
+#     ~/.config/paracord/agent.yaml      (override the directory with $PARACORD_AGENT_HOME)
+# You normally do NOT hand-edit it — use `paracord-agent add-folder`, `set-server`, etc. This file
+# simply documents every field the agent actually reads (schema: paperracks_agent.config).
+#
+# Secrets are NOT stored here: the server bearer token and the web-GUI token live in the OS keyring
+# (or a 0600 secrets file), set via `paracord-agent set-token`.
 
-filesystem:
-  allowed_roots:
-    - ~/papers
-    - ~/projects
-  follow_symlinks: false
-  include_extensions:
-    - .pdf
-  exclude_globs:
-    - "**/.git/**"
-    - "**/__pycache__/**"
-    - "**/node_modules/**"
+name: workstation-agent              # display name shown in the server's Admin -> Agents
+server_url: http://127.0.0.1:8000    # PaRacORD server base URL
+agent_id: null                       # set automatically on `paracord-agent enroll`
+refresh_interval: 30                 # seconds between scan+sync cycles in `paracord-agent start`
+web_port: 8765                       # local-only web GUI port (`paracord-agent web up`)
 
-scan:
-  compute_sha256: true
-  compute_quick_text_fingerprint: true
-  max_file_size_mb: 512
+# Defaults applied to newly-added folders/files (per-item values below override these):
+default_action: index_only           # index_only | index_and_extract | teleport
+default_teleport_policy: ask         # ask | allow
 
-teleport:
-  enabled: true
-  chunk_size_mb: 8
-  verify_server_hash: true
+follow_symlinks: false               # if true, symlinked PDFs inside a watched root are indexed
+auto_prune_unwatched: false          # keep-by-default: never drop unwatched-but-present files on sync
+create_index_stubs: true             # create a library "stub" paper for each index_only file
 
-streaming:
-  enabled: true
-  require_recent_server_nonce: true
+# Watched folders (recursively scanned for *.pdf). Add via `paracord-agent add-folder <path>`.
+folders:
+  - path: ~/papers
+    mode: monitored                  # monitored (re-scanned each cycle) | once
+    action: index_only               # index_only | index_and_extract | teleport
+    teleport_policy: ask             # ask | allow
+    enabled: true                    # false pauses the folder without removing it
 
-logging:
-  level: INFO
-  file: ~/.local/share/paracord-agent/agent.log
+# Individually managed files. Add via `paracord-agent add-file <path>`.
+files: []

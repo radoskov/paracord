@@ -1,12 +1,33 @@
+# PaRacORD local agent — example systemd unit.
+#
+# Runs `paracord-agent start` (continuous scan + sync) in the foreground under systemd
+# (Type=simple). Do NOT pass `--daemon` — it is a reserved no-op; systemd owns the process here.
+#
+# Before installing, adjust:
+#   * ExecStart  — the real path to the installed command (e.g. a virtualenv's bin) and the
+#                  config file location. `start` reads the config from --config if given, else from
+#                  $PARACORD_AGENT_HOME/agent.yaml, else ~/.config/paracord/agent.yaml.
+#   * User       — the account that OWNS the watched folders. Never run the agent as root.
+#
+# Install (system service):
+#   sudo cp paperracks-agent.service.example /etc/systemd/system/paracord-agent.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now paracord-agent
+#
+# Or as a per-user service (no `User=` needed; drop it and use `systemctl --user`):
+#   cp paperracks-agent.service.example ~/.config/systemd/user/paracord-agent.service
+#   systemctl --user enable --now paracord-agent
+
 [Unit]
 Description=PaRacORD Local Agent
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/paracord-agent serve --config /etc/paracord/agent.yaml
+User=youruser
+ExecStart=/usr/local/bin/paracord-agent start --config /home/youruser/.config/paracord/agent.yaml
 Restart=on-failure
-User=%i
+RestartSec=5
 
 [Install]
 WantedBy=default.target
