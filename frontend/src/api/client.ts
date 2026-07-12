@@ -992,8 +992,13 @@ export interface ReferenceGraphNode {
   id: string;
   label: string;
   year: number | null;
-  kind: "base" | "local" | "external" | "citing";
+  kind: "base" | "local" | "likely_local" | "external" | "citing";
   resolved_work_id: string | null;
+  // A soft "likely local" candidate (batch 12): the work this reference probably is + score.
+  suggested_work_id?: string | null;
+  match_score?: number | null;
+  // Parsed authors (batch 12): references + citing papers, for the tooltip.
+  authors?: string[] | null;
   section_counts: Record<string, number>;
   mention_count: number;
   weighted: number;

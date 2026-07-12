@@ -73,6 +73,40 @@ function escapeHtml(s: string): string {
   );
 }
 
+// Blend a hex colour toward white by `amount` (0..1). Used to tint the "likely in library" colour
+// as a lighter shade of the "in library" colour (#7) so it reads as related-but-unconfirmed.
+function lighten(color: string, amount: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return color;
+  const num = parseInt(m[1], 16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  const r = mix((num >> 16) & 255);
+  const g = mix((num >> 8) & 255);
+  const b = mix(num & 255);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+// Group co-located nodes (identical plotted x,y) so an overlap becomes ONE count-badged marker
+// instead of indistinguishable stacked dots (ported from temporalMap.ts). Grouping is within one
+// series so a marker keeps a single colour. Fixes ~100 citing papers pixel-stacking as "a handful".
+function groupByCoord(
+  nodes: ReferenceGraphNode[],
+  xOf: (n: ReferenceGraphNode) => number | undefined,
+  yOf: (n: ReferenceGraphNode) => number,
+): ReferenceGraphNode[][] {
+  const by = new Map<string, ReferenceGraphNode[]>();
+  for (const n of nodes) {
+    const key = `${xOf(n)}|${yOf(n)}`;
+    const arr = by.get(key);
+    if (arr) arr.push(n);
+    else by.set(key, [n]);
+  }
+  return [...by.values()];
+}
+
+// How many overlapping members a cluster tooltip lists before summarizing the rest ("…and N more").
+const TOOLTIP_MEMBER_LIMIT = 10;
+
 export interface YAxisOption {
   key: string;
   label: string;
@@ -124,7 +158,7 @@ export const REFERENCE_GRAPH_HELP = {
     "The horizontal axis is always publication year (older to the left, newer to the right). References with no known year sit in a separate “no year” lane at the far left so they stay visible.",
   size: "Node size is always the section-weighted citation count — how heavily this paper relies on that reference. The per-section weights (abstract, methods, …) are set in your Profile.",
   color:
-    "Colour marks the node kind: this paper, an in-library reference (a work you already have), or an external reference (cited but not in your library).",
+    "Colour marks the node kind: this paper, an in-library reference (a work you already have), a “likely in library” reference (a tolerant title match awaiting your confirmation, shown as a lighter tint of the in-library colour), or an external reference (cited but not in your library). When several nodes land on the same spot they collapse into one marker with a count badge — hover it to list them (up to 10, with the true total) and open or import each.",
   refEdges:
     "“Local reference-to-reference edges”: when on, also draws citation links between the in-library references that cite one another — not just from this paper out to each reference — revealing how your cited works build on each other. Off by default because it needs those references' own extracted citations.",
   naLane:
@@ -189,26 +223,48 @@ export function buildReferenceGraphOption(
   const yFor = (n: ReferenceGraphNode) =>
     n.kind === "base" ? baseY : (yById.get(n.id) ?? naY);
 
-  const point = (n: ReferenceGraphNode) => ({
-    value: [x.get(n.id), yFor(n)],
-    name: n.id,
-    node: n,
-    symbolSize:
-      n.kind === "base" ? BASE_SYMBOL : sizeFor(weightedById.get(n.id) ?? 0),
-    // A node with no value for this axis gets a dashed outline so it reads as "n/a", not zero.
-    ...(isNa(n)
-      ? {
-          itemStyle: {
-            borderType: "dashed",
-            borderColor: theme.text,
-            borderWidth: 1.5,
-            opacity: 0.65,
-          },
-        }
-      : {}),
-  });
+  const symbolFor = (n: ReferenceGraphNode) =>
+    n.kind === "base" ? BASE_SYMBOL : sizeFor(weightedById.get(n.id) ?? 0);
+
+  // One plotted marker for a group of co-located nodes: a lone node renders as before; ≥2 nodes
+  // collapse to a single count-badged marker whose tooltip lists every member (enterable links).
+  const collapsedPoint = (members: ReferenceGraphNode[]) => {
+    const rep = members[0];
+    const point: Record<string, unknown> = {
+      value: [x.get(rep.id), yFor(rep)],
+      name: rep.id,
+      node: rep,
+      members,
+      symbolSize: Math.max(...members.map(symbolFor)),
+      // A node with no value for this axis gets a dashed outline so it reads as "n/a", not zero.
+      ...(isNa(rep)
+        ? {
+            itemStyle: {
+              borderType: "dashed",
+              borderColor: theme.text,
+              borderWidth: 1.5,
+              opacity: 0.65,
+            },
+          }
+        : {}),
+    };
+    if (members.length > 1) {
+      point.label = {
+        show: true,
+        formatter: String(members.length),
+        color: theme.tooltipText,
+        fontSize: 10,
+        fontWeight: "bold",
+      };
+    }
+    return point;
+  };
+
+  const grouped = (nodes: ReferenceGraphNode[]) =>
+    groupByCoord(nodes, (n) => x.get(n.id), yFor).map(collapsedPoint);
 
   const palette = theme.categorical ?? [];
+  const localColor = palette[1] ?? theme.text;
   let series: Record<string, unknown>[];
   if (colorBy === "venue") {
     // 5d: one series (colour) per distinct venue. External refs without a venue group under
@@ -219,32 +275,34 @@ export function buildReferenceGraphOption(
       type: "scatter",
       name: v,
       color: palette[i % Math.max(1, palette.length)] ?? theme.text,
-      data: graph.nodes.filter((n) => venueOf(n) === v).map(point),
+      data: grouped(graph.nodes.filter((n) => venueOf(n) === v)),
       emphasis: { focus: "series" },
       z: 2,
     }));
   } else {
-    // Default: one series per node kind so the legend reads local / external / this paper.
+    // Default: one series per node kind so the legend reads local / likely / external / this paper.
     // Explicit palette indices per kind (was position-based, which made "base" and "external"
     // collide on palette[2]); base and external are kept far apart so the focal paper stands out.
+    // "Likely in library" (#7) is a lighter tint of the "In library" colour — related but unconfirmed.
     const kinds: {
-      key: "base" | "local" | "external" | "citing";
+      key: "base" | "local" | "likely_local" | "external" | "citing";
       name: string;
-      idx: number;
-      fallback: string;
+      color: string;
+      z: number;
     }[] = [
-      { key: "base", name: "This paper", idx: 0, fallback: theme.axisLine },
-      { key: "local", name: "In library", idx: 1, fallback: theme.text },
-      { key: "external", name: "External", idx: 3, fallback: theme.splitLine },
-      { key: "citing", name: "Cites this", idx: 4, fallback: theme.text },
+      { key: "base", name: "This paper", color: palette[0] ?? theme.axisLine, z: 3 },
+      { key: "local", name: "In library", color: localColor, z: 2 },
+      { key: "likely_local", name: "Likely in library", color: lighten(localColor, 0.45), z: 2 },
+      { key: "external", name: "External", color: palette[3] ?? theme.splitLine, z: 2 },
+      { key: "citing", name: "Cites this", color: palette[4] ?? theme.text, z: 2 },
     ];
     series = kinds.map((k) => ({
       type: "scatter",
       name: k.name,
-      color: palette[k.idx % Math.max(1, palette.length)] ?? k.fallback,
-      data: graph.nodes.filter((n) => n.kind === k.key).map(point),
+      color: k.color,
+      data: grouped(graph.nodes.filter((n) => n.kind === k.key)),
       emphasis: { focus: "series" },
-      z: k.key === "base" ? 3 : 2,
+      z: k.z,
     }));
   }
 
@@ -301,23 +359,65 @@ export function buildReferenceGraphOption(
       trigger: "item",
       // 5c: clamp the tooltip inside the chart box so a node near the modal edge doesn't overflow.
       confine: true,
+      // Enterable so the user can move into an overlap tooltip and click a specific paper's link.
+      enterable: true,
       backgroundColor: theme.tooltipBg,
       borderColor: theme.tooltipBg,
       textStyle: { color: theme.tooltipText },
-      formatter: (params: { data?: { node?: ReferenceGraphNode } }) => {
-        const n = params.data?.node;
+      formatter: (params: {
+        data?: { node?: ReferenceGraphNode; members?: ReferenceGraphNode[] };
+      }) => {
+        const members = params.data?.members;
+        if (members && members.length > 1) {
+          // Overlap: list up to 10 members with an [open] link + the TRUE total, and an "import all"
+          // affordance over the not-in-library members. The host delegates clicks on the links.
+          const link =
+            "color:inherit;text-decoration:underline;cursor:pointer;display:block;margin-top:2px";
+          const shown = members.slice(0, TOOLTIP_MEMBER_LIMIT);
+          const rows = shown
+            .map(
+              (m) =>
+                `<a data-viz-open="${escapeHtml(m.id)}" style="${link}" title="Open / import this reference">${escapeHtml(m.label)}${m.year != null ? ` (${m.year})` : ""}</a>`,
+            )
+            .join("");
+          const more =
+            members.length > shown.length
+              ? `<div style="margin-top:2px;opacity:0.8">…and ${members.length - shown.length} more</div>`
+              : "";
+          const importable = members
+            .filter((m) => !m.resolved_work_id && m.kind !== "base")
+            .map((m) => m.id);
+          const importAll = importable.length
+            ? `<a data-viz-import-all="${escapeHtml(importable.join(","))}" style="${link};margin-top:6px;font-weight:bold" title="Prefill the import box with the papers here that aren't in your library">Import all ${importable.length} →</a>`
+            : "";
+          return `<strong>${members.length} papers here</strong>${rows}${more}${importAll}`;
+        }
+        const n = params.data?.node ?? members?.[0];
         if (!n) return "";
         if (n.kind === "base")
           return `<strong>${escapeHtml(n.label)}</strong><br>(this paper)`;
+        const kindLabel =
+          n.kind === "local"
+            ? "In library"
+            : n.kind === "likely_local"
+              ? `Likely in library${n.match_score != null ? ` · ${Math.round(n.match_score)}% match` : ""} — click to review`
+              : n.kind === "citing"
+                ? "Cites this paper"
+                : "External";
         const breakdown = Object.entries(n.section_counts)
           .map(([b, c]) => `${b} ×${c}`)
           .join(", ");
         return [
           `<strong>${escapeHtml(n.label)}</strong>`,
+          n.authors && n.authors.length ? escapeHtml(n.authors.join(", ")) : "",
           n.year != null ? `Year: ${n.year}` : "Year: n/a",
-          `${n.kind === "local" ? "In library" : "External"}`,
-          `Cited ${n.mention_count}× ${breakdown ? `(${escapeHtml(breakdown)})` : ""}`,
-        ].join("<br>");
+          kindLabel,
+          n.kind === "citing"
+            ? ""
+            : `Cited ${n.mention_count}× ${breakdown ? `(${escapeHtml(breakdown)})` : ""}`,
+        ]
+          .filter(Boolean)
+          .join("<br>");
       },
     },
     grid: { left: 56, right: 24, top: 32, bottom: 48 },

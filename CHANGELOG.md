@@ -52,6 +52,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
   (surname, first initial) so "London, Jack" ≈ "J. London" but "R. London" ✗ "Jack London", with
   "et al." validated against the single best-matching author. Batch 12 (Phase 4).
 
+- **Reference graph: "likely in library" colour + overlapping-node fix.** Reference nodes that are a
+  likely (unconfirmed) match now render in a lighter tint of the in-library colour. Overlapping nodes
+  that used to pixel-stack into "a handful" (notably ~100 citing papers sharing a year) now collapse
+  into a single count-badged marker; hovering it lists up to 10 of the papers there (with the true
+  total) as clickable links, plus an **Import all** action for the ones not yet in your library.
+  Reference and citing nodes also show their authors in the tooltip. Batch 12 (Phase 5).
+
 - **"Duplicate PDF" awareness when attaching a shared PDF.** Attaching a PDF that (by content hash)
   already belongs to another paper now shows a **duplicate PDF** badge in the Files section — click it
   to find the other paper(s) via a Library hash search. The duplicate scan also gains a **`shared_file`**

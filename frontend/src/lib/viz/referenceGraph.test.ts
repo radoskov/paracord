@@ -261,4 +261,111 @@ describe("buildReferenceGraphOption", () => {
     // The kind legend names are no longer the series grouping.
     expect(names).not.toContain("In library");
   });
+
+  it("adds a 'Likely in library' series tinted lighter than 'In library' (batch 12 #7)", () => {
+    const likely: ReferenceGraph = {
+      base_work_id: "base",
+      nodes: [
+        graph.nodes[0],
+        {
+          id: "lk",
+          label: "Likely ref",
+          year: 2016,
+          kind: "likely_local",
+          resolved_work_id: null,
+          suggested_work_id: "w9",
+          match_score: 95,
+          section_counts: { methods: 1 },
+          mention_count: 1,
+          weighted: 4,
+        },
+      ],
+      edges: [],
+    };
+    const option = buildReferenceGraphOption(likely, DEFAULT_SECTION_WEIGHTS, theme);
+    const series = option.series as Array<{ name: string; color?: string; data: unknown[] }>;
+    const likelySeries = series.find((s) => s.name === "Likely in library")!;
+    const localColor = series.find((s) => s.name === "In library")!.color!;
+    expect(likelySeries.data.length).toBe(1);
+    // A lighter tint of the local hue — different from, but derived from, the in-library colour.
+    expect(likelySeries.color).toBeTruthy();
+    expect(likelySeries.color).not.toBe(localColor);
+  });
+
+  it("collapses co-located nodes into one count-badged marker whose tooltip lists members", () => {
+    // Three external refs at the same year, all n/a on the citations axis → same (x, y) → one marker.
+    const stacked: ReferenceGraph = {
+      base_work_id: "base",
+      nodes: [
+        graph.nodes[0],
+        ...[1, 2, 3].map((i) => ({
+          id: `e${i}`,
+          label: `Ext ${i}`,
+          year: 2018,
+          kind: "external" as const,
+          resolved_work_id: null,
+          section_counts: {},
+          mention_count: 0,
+          weighted: 0,
+        })),
+      ],
+      edges: [],
+    };
+    const option = buildReferenceGraphOption(stacked, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "citations",
+    });
+    const external = (
+      option.series as Array<{
+        name: string;
+        data: Array<{ members: unknown[]; label?: { formatter: string } }>;
+      }>
+    ).find((s) => s.name === "External")!;
+    expect(external.data.length).toBe(1); // three refs collapsed into one marker
+    expect(external.data[0].members).toHaveLength(3);
+    expect(external.data[0].label?.formatter).toBe("3"); // count badge
+
+    const fmt = (
+      option.tooltip as {
+        formatter: (p: { data?: { members?: unknown[] } }) => string;
+      }
+    ).formatter;
+    const html = fmt({ data: external.data[0] });
+    expect(html).toContain("3 papers here");
+    expect(html).toContain("data-viz-open");
+    expect(html).toContain("data-viz-import-all");
+  });
+
+  it("tooltip shows a likely-match's score + authors for a single node", () => {
+    const likely: ReferenceGraph = {
+      base_work_id: "base",
+      nodes: [
+        graph.nodes[0],
+        {
+          id: "lk",
+          label: "Likely ref",
+          year: 2016,
+          kind: "likely_local",
+          resolved_work_id: null,
+          suggested_work_id: "w9",
+          match_score: 93,
+          authors: ["Tenorth, M.", "Beetz, M."],
+          section_counts: { methods: 1 },
+          mention_count: 1,
+          weighted: 4,
+        },
+      ],
+      edges: [],
+    };
+    const option = buildReferenceGraphOption(likely, DEFAULT_SECTION_WEIGHTS, theme);
+    const node = (
+      option.series as Array<{ name: string; data: Array<{ node: { id: string } }> }>
+    )
+      .find((s) => s.name === "Likely in library")!
+      .data.find((d) => d.node.id === "lk");
+    const html = (
+      option.tooltip as { formatter: (p: unknown) => string }
+    ).formatter({ data: node });
+    expect(html).toContain("93% match");
+    expect(html).toContain("Tenorth, M., Beetz, M.");
+  });
 });

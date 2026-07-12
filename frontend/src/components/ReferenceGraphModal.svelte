@@ -44,6 +44,49 @@
     return node.year != null ? `${title} (${node.year})` : title;
   }
 
+  // A single node click: open the paper it is/likely-is in the Library, else prefill Import (5g).
+  function openOrImportNode(node: ReferenceGraphNode): void {
+    if (node.kind === 'base') return;
+    // A likely_local reference isn't resolved but has a candidate work to review.
+    const openId =
+      node.resolved_work_id ??
+      (node.kind === 'likely_local' ? (node.suggested_work_id ?? null) : null);
+    if (openId) {
+      pendingLibraryOpen.set(openId);
+      if (typeof window !== 'undefined') window.location.hash = '#library';
+      onClose();
+    } else {
+      pendingImportText.set(citationLine(node));
+      if (typeof window !== 'undefined') window.location.hash = '#import';
+      onClose();
+    }
+  }
+
+  // Delegate clicks on the enterable tooltip's links (an overlap-cluster lists its members): open a
+  // single member, or prefill the Import box with every not-in-library member of the cluster.
+  function onContainerClick(ev: MouseEvent): void {
+    const target = ev.target as HTMLElement | null;
+    const openEl = target?.closest('[data-viz-open]');
+    if (openEl) {
+      const node = graph?.nodes.find((n) => n.id === openEl.getAttribute('data-viz-open'));
+      if (node) openOrImportNode(node);
+      return;
+    }
+    const importEl = target?.closest('[data-viz-import-all]');
+    if (importEl) {
+      const ids = (importEl.getAttribute('data-viz-import-all') ?? '').split(',').filter(Boolean);
+      const lines = ids
+        .map((id) => graph?.nodes.find((n) => n.id === id))
+        .filter((n): n is ReferenceGraphNode => !!n)
+        .map(citationLine);
+      if (lines.length) {
+        pendingImportText.set(lines.join('\n'));
+        if (typeof window !== 'undefined') window.location.hash = '#import';
+        onClose();
+      }
+    }
+  }
+
   async function loadWeights(): Promise<void> {
     try {
       const prefs = await client.getPreferences();
@@ -78,20 +121,10 @@
         chart = echarts.init(container);
         chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
           const node = params.data?.node;
-          if (!node || node.kind === 'base') return;
-          if (node.resolved_work_id) {
-            // In-library reference → open it in the Library tab.
-            pendingLibraryOpen.set(node.resolved_work_id);
-            if (typeof window !== 'undefined') window.location.hash = '#library';
-            onClose();
-          } else {
-            // 5g: external reference → jump to Import and prefill the batch-import box with a
-            // citation line the user can adjust before searching.
-            pendingImportText.set(citationLine(node));
-            if (typeof window !== 'undefined') window.location.hash = '#import';
-            onClose();
-          }
+          if (node) openOrImportNode(node);
         });
+        // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
+        container.addEventListener('click', onContainerClick);
       }
       chart.setOption(
         buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis, colorBy }),
@@ -121,6 +154,7 @@
     await loadGraph();
   });
   onDestroy(() => {
+    if (container) container.removeEventListener('click', onContainerClick);
     if (chart) chart.dispose();
   });
 </script>

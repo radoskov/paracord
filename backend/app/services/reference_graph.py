@@ -122,6 +122,17 @@ def build_reference_graph(
             visible_ids is None or ref.resolved_work_id in visible_ids
         )
 
+    def _is_likely(ref: Reference) -> bool:
+        # A soft "likely local" candidate (batch 12): a fuzzy match awaiting confirmation. It is NOT
+        # resolved, so local-only metrics are never computed on the guess — it just gets its own node
+        # kind + colour and carries the suggested work id/score for the tooltip.
+        return (
+            not _is_local(ref)
+            and ref.resolution_status == "likely_match"
+            and ref.suggested_work_id is not None
+            and (visible_ids is None or ref.suggested_work_id in visible_ids)
+        )
+
     # Per-local-work metrics for the selectable Y axes (B7 v2): global citation count, in-library
     # citation degree, and topic similarity to the base paper. Null for external references.
     local_work_ids = {ref.resolved_work_id for ref in references if _is_local(ref)}
@@ -165,18 +176,23 @@ def build_reference_graph(
     work_to_ref_node: dict[uuid.UUID, str] = {}
     for ref in references:
         is_local = _is_local(ref)
+        is_likely = _is_likely(ref)
         counts = dict(counts_by_ref.get(ref.id, {}))
         wid = ref.resolved_work_id if is_local else None
         node = {
             "id": str(ref.id),
             "label": ref.title or ref.raw_citation or "Untitled reference",
             "year": ref.year,
-            "kind": "local" if is_local else "external",
+            "kind": "local" if is_local else "likely_local" if is_likely else "external",
             "resolved_work_id": str(wid) if wid else None,
+            # A soft candidate (batch 12): carried for the tooltip + jump-to, but NOT resolved.
+            "suggested_work_id": str(ref.suggested_work_id) if is_likely else None,
+            "match_score": ref.match_score if is_likely else None,
+            "authors": list(ref.authors) if ref.authors else None,
             "section_counts": counts,
             "mention_count": sum(counts.values()),
             "weighted": round(_weighted(counts, DEFAULT_SECTION_WEIGHTS), 3),
-            # Selectable-Y metrics (null for external / when unavailable).
+            # Selectable-Y metrics (null for external/likely / when unavailable).
             "citation_count": citation_by_work.get(wid) if wid else None,
             "local_degree": degree_by_work.get(wid, 0) if wid else None,
             "topic_similarity": _topic_similarity(wid) if wid else None,
@@ -232,6 +248,10 @@ def build_reference_graph(
                     "year": ec.year,
                     "kind": "citing",
                     "resolved_work_id": None,
+                    # ExternalPaper.authors is a "; "-joined display string.
+                    "authors": [a.strip() for a in ec.authors.split(";") if a.strip()]
+                    if ec.authors
+                    else None,
                     "section_counts": {},
                     "mention_count": 0,
                     "weighted": 0.0,

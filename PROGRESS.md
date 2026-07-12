@@ -61,8 +61,16 @@ Reference→library matching ("likely local" citations) + reference-graph fixes.
   `author_matching`); this adds **display**: `ReferenceRead`/`ReferenceRecord` carry `authors`, and
   the References panel shows a reference's authors. Citing papers already show their authors
   (`ExternalPaper.authors`); graph-tooltip authors ship with Phase 5.
-- **Phase 5 (todo).** `likely_local` node kind + lighter-tint colour; citing/external
-  overlap-collapse in `referenceGraph.ts` (+ author tooltips).
+- **Phase 5 (done) — reference-graph rendering (#7 + overlap fix).** `build_reference_graph` emits a
+  `likely_local` node kind carrying `suggested_work_id`/`match_score` (left unresolved so local
+  metrics aren't computed on a guess) + `authors` on reference/citing nodes. `referenceGraph.ts`
+  colours `likely_local` as a lighter tint of the in-library hue, and ports temporalMap's
+  overlap-collapse (`groupByCoord` + count-badge marker + **enterable** tooltip listing ≤10 members
+  with the true total + an "import all" affordance) so ~100 citing/external nodes stop pixel-stacking.
+  `ReferenceGraphModal` delegates container clicks on the tooltip's `data-viz-open` /
+  `data-viz-import-all` links (single open / multi-line import prefill); a `likely_local` click opens
+  its candidate work. **Batch 12 complete** (fast-follow: multi-paper citation-graph resolver, D5,
+  still deferred).
 
 ## issue_batch_11 (2026-07-10)
 

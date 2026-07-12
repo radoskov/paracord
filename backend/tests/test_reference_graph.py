@@ -66,6 +66,37 @@ def test_reference_graph_splits_local_external_with_section_counts(
     assert set(by_label["Local Cited"]) >= {"citation_count", "local_degree", "topic_similarity"}
 
 
+def test_reference_graph_marks_likely_local_nodes(
+    client, auth_headers, db, make_reference
+) -> None:
+    """Batch 12: a soft fuzzy match gets a `likely_local` node kind carrying the suggested work +
+    score, but stays unresolved so local-only metrics aren't computed on the guess."""
+    base = Work(canonical_title="Base", normalized_title="base", year=2020)
+    candidate = Work(canonical_title="Candidate", normalized_title="candidate", year=2015)
+    db.add_all([base, candidate])
+    db.flush()
+    ref = make_reference(
+        db,
+        citing_work_id=base.id,
+        title="Candidate (as cited)",
+        year=2015,
+        resolution_status="likely_match",
+        suggested_work_id=candidate.id,
+        match_score=95.0,
+        authors=["Tenorth, M."],
+    )
+    db.commit()
+
+    r = client.get(f"/api/v1/works/{base.id}/reference-graph", headers=auth_headers("editor"))
+    assert r.status_code == 200
+    node = next(n for n in r.json()["nodes"] if n["id"] == str(ref.id))
+    assert node["kind"] == "likely_local"
+    assert node["suggested_work_id"] == str(candidate.id)
+    assert node["match_score"] == 95.0
+    assert node["resolved_work_id"] is None  # never resolved on a guess
+    assert node["authors"] == ["Tenorth, M."]
+
+
 def test_reference_graph_selectable_y_metrics(client, auth_headers, db, make_reference) -> None:
     """B7 v2: local reference nodes carry citation_count, local_degree and topic_similarity to the
     base paper; external nodes leave them null (rendered on the 'n/a' lane)."""
