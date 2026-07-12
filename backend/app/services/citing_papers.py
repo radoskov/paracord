@@ -179,7 +179,6 @@ def _fetch_s2_citing(
     # Offset-paged up to ``limit`` (S20): S2 serves at most 1000 per request; ``next`` walks on.
     papers: list[CitingPaper] = []
     offset = 0
-    answered = False
     while len(papers) < limit:
         resp = _get(
             f"{SEMANTIC_SCHOLAR_API}/{identifier}/citations",
@@ -192,7 +191,6 @@ def _fetch_s2_citing(
         if resp.status_code == 404:
             return [], None, False
         resp.raise_for_status()
-        answered = True
         payload = resp.json()
         batch = parse_s2_citing(payload, limit - len(papers))
         papers.extend(batch)

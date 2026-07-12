@@ -622,11 +622,81 @@ def keywords_work_job(work_id: str) -> None:
             raise
 
 
-def summarize_scope_job(scope_type: str, scope_id: str | None = None) -> None:
-    """Run local summary pipeline for a scope."""
-    _ = (scope_type, scope_id)
+@_audited_job
+def summarize_scope_job(
+    scope_type: str,
+    scope_id: str | None = None,
+    summary_type: str | None = None,
+    max_sentences: int = 8,
+    model_name: str | None = None,
+    actor_user_id: str | None = None,
+) -> dict | None:
+    """Run the scope-summary pipeline off the request path (S15).
+
+    Enqueued when the scope exceeds the ``ai_scope_job_threshold`` (S16). Runs with the
+    *requesting user's* visibility (recomputed here from ``actor_user_id``) so the stored summary
+    matches what the inline path would have produced; aborts if that user is gone.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.user import User
+    from app.services import access
+    from app.services.summarization import summarize_scope
+
+    with SessionLocal() as db:
+        actor = db.get(User, uuid.UUID(actor_user_id)) if actor_user_id else None
+        if actor is None:
+            return None
+        summary, work_count = summarize_scope(
+            db,
+            scope_type=scope_type,
+            scope_id=uuid.UUID(scope_id) if scope_id else None,
+            summary_type=summary_type or "extractive",
+            max_sentences=max_sentences,
+            model_name=model_name,
+            created_by_user_id=actor.id,
+            visible_ids=access.visible_work_ids(db, actor),
+        )
+        db.commit()
+        return {"summary_id": str(summary.id), "work_count": work_count}
 
 
-def topic_model_job(scope_type: str, scope_id: str | None = None) -> None:
-    """Run topic modeling pipeline for a scope."""
-    _ = (scope_type, scope_id)
+@_audited_job
+def topic_model_job(
+    scope_type: str,
+    scope_id: str | None = None,
+    max_topics: int = 5,
+    backend: str | None = None,
+    embedding_model: str | None = None,
+    actor_user_id: str | None = None,
+) -> dict | None:
+    """Run the scope topic-model pipeline off the request path (S15).
+
+    Stores TopicAssignment rows exactly like the inline path (same visibility, recomputed from
+    ``actor_user_id``); the UI reads them back through the topic graph.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.user import User
+    from app.services import access
+    from app.services.ai_config import get_ai_config
+    from app.services.topic_modeling import model_topics
+
+    with SessionLocal() as db:
+        actor = db.get(User, uuid.UUID(actor_user_id)) if actor_user_id else None
+        if actor is None:
+            return None
+        cfg = get_ai_config(db)
+        result = model_topics(
+            db,
+            scope_type=scope_type,
+            scope_id=uuid.UUID(scope_id) if scope_id else None,
+            max_topics=max(1, min(max_topics, 20)),
+            backend=backend or cfg.topic_backend,
+            embedding_model=embedding_model or cfg.topic_embedding_model,
+            visible_ids=access.visible_work_ids(db, actor),
+        )
+        db.commit()
+        return {"model_id": result.get("model_id"), "work_count": result.get("work_count")}

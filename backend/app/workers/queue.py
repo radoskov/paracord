@@ -23,6 +23,8 @@ REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
 TOPIC_JOB = "app.workers.jobs.topic_work_job"
 KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
+SUMMARY_SCOPE_JOB = "app.workers.jobs.summarize_scope_job"
+TOPIC_SCOPE_JOB = "app.workers.jobs.topic_model_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
 REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
 
@@ -261,6 +263,44 @@ def enqueue_model_pull(provider: str, model: str) -> str | None:
         return None
 
 
+def _enqueue_scope_job(
+    job_func: str, prefix: str, scope_type: str, scope_id, **kwargs
+) -> str | None:
+    """Best-effort enqueue of a per-scope AI job (S15) under a deterministic id.
+
+    ``{prefix}-{scope_type}-{scope_id|library}``: re-clicking while a run for the same scope is in
+    flight returns the live job instead of stacking a duplicate. Never raises (queue-down -> None,
+    the caller falls back to running inline).
+    """
+    job_id = f"{prefix}-{scope_type}-{scope_id or 'library'}"
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        return queue.enqueue(
+            job_func,
+            args=(scope_type, str(scope_id) if scope_id else None),
+            kwargs=kwargs,
+            job_id=job_id,
+        ).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning(
+            "Could not enqueue %s for scope %s/%s: %s", prefix, scope_type, scope_id, exc
+        )
+        return None
+
+
+def enqueue_scope_summary(scope_type: str, scope_id, **kwargs) -> str | None:
+    """Best-effort enqueue of a large-scope summary job (S15). Returns the job id, or None."""
+    return _enqueue_scope_job(SUMMARY_SCOPE_JOB, "summary-scope", scope_type, scope_id, **kwargs)
+
+
+def enqueue_scope_topics(scope_type: str, scope_id, **kwargs) -> str | None:
+    """Best-effort enqueue of a large-scope topic-model job (S15). Returns the job id, or None."""
+    return _enqueue_scope_job(TOPIC_SCOPE_JOB, "topics-scope", scope_type, scope_id, **kwargs)
+
+
 _FUNC_LABELS = {
     EXTRACT_JOB: "extract",
     ENRICH_JOB: "enrich",
@@ -268,6 +308,8 @@ _FUNC_LABELS = {
     CHUNK_JOB: "chunk",
     TOPIC_JOB: "topic",
     KEYWORDS_JOB: "keywords",
+    SUMMARY_SCOPE_JOB: "summary-scope",
+    TOPIC_SCOPE_JOB: "topics-scope",
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",
     PULL_MODEL_JOB: "model-pull",

@@ -140,6 +140,30 @@
     if (typeof window !== 'undefined') window.location.hash = '#library';
   }
 
+  // S15: a large scope is answered with a queued background job — poll until it leaves the
+  // active set, then run the completion callback (refresh the relevant view).
+  async function pollJob(jobId: string, onDone: () => Promise<void>): Promise<void> {
+    const active = new Set(['queued', 'started', 'deferred', 'scheduled']);
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const status = await client.getJobs(100);
+        const job = status.jobs.find((j) => j.id === jobId);
+        if (job && job.status === 'failed') {
+          message = `Background job failed: ${job.error ?? 'see the Jobs tab'}`;
+          return;
+        }
+        if (!job || !active.has(job.status)) {
+          await onDone();
+          return;
+        }
+      } catch {
+        // transient polling error — keep trying
+      }
+    }
+    message = 'Still running in the background — check the Jobs tab.';
+  }
+
   async function modelTopics(): Promise<void> {
     await run(async () => {
       const response = await client.modelTopics({
@@ -147,6 +171,13 @@
         scopeId: scope.scopeId,
         maxTopics: 6,
       });
+      if (response.queued && response.job_id) {
+        message = `Modeling ${response.work_count} papers in the background — the topic graph will refresh when done.`;
+        void pollJob(response.job_id, async () => {
+          message = 'Topic model finished — refresh the topic graph to see the new topics.';
+        });
+        return;
+      }
       topics = response.topics;
       message = `Modelled ${response.topics.length} topics over ${response.work_count} papers`;
     });
@@ -154,7 +185,16 @@
 
   async function summarise(): Promise<void> {
     await run(async () => {
-      summary = await client.createScopeScope(scope.scopeType, scope.scopeId);
+      const response = await client.createScopeScope(scope.scopeType, scope.scopeId);
+      if (response.queued && response.job_id) {
+        message = `Summarizing ${response.work_count} papers in the background…`;
+        void pollJob(response.job_id, async () => {
+          summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId);
+          message = 'Summary ready.';
+        });
+        return;
+      }
+      summary = response;
     }, 'Summary generated');
   }
 

@@ -547,3 +547,88 @@ def test_scope_summary_api_defaults_to_extractive_without_model(client, auth_hea
     assert body["summary_type"] == "extractive"
     assert body["provider_used"] == "extractive"
     assert body["fallback"] is False
+
+
+# --- S15/S16: async routing for large scopes --------------------------------------------------------
+
+
+def _mk_works(db, n: int) -> None:
+    from app.models.work import Work
+
+    for i in range(n):
+        db.add(Work(canonical_title=f"P{i}", normalized_title=f"p{i}", abstract=f"Alpha beta {i}."))
+    db.commit()
+
+
+def test_large_scope_summary_is_queued(client, auth_headers, db, monkeypatch) -> None:
+    from app.services.app_config import update_ai_scope_job_threshold
+    from app.workers import queue as queue_mod
+
+    update_ai_scope_job_threshold(db, value=2)
+    _mk_works(db, 3)
+    monkeypatch.setattr(queue_mod, "enqueue_scope_summary", lambda *a, **k: "summary-scope-library")
+    resp = client.post(
+        "/api/v1/ai/summaries",
+        headers=auth_headers("owner"),
+        json={"scope_type": "library"},
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["queued"] is True and body["job_id"] == "summary-scope-library"
+    assert body["work_count"] == 3
+
+
+def test_small_scope_summary_stays_inline_and_latest_reads_back(client, auth_headers, db) -> None:
+    _mk_works(db, 2)  # at the default threshold (100) → inline
+    resp = client.post(
+        "/api/v1/ai/summaries", headers=auth_headers("owner"), json={"scope_type": "library"}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["queued"] is False and resp.json()["text"]
+    latest = client.get(
+        "/api/v1/ai/summaries/latest?scope_type=library", headers=auth_headers("owner")
+    )
+    assert latest.status_code == 200
+    assert latest.json()["text"] == resp.json()["text"]
+    assert latest.json()["work_count"] == 2
+
+
+def test_large_scope_topics_are_queued(client, auth_headers, db, monkeypatch) -> None:
+    from app.services.app_config import update_ai_scope_job_threshold
+    from app.workers import queue as queue_mod
+
+    update_ai_scope_job_threshold(db, value=1)
+    _mk_works(db, 2)
+    monkeypatch.setattr(queue_mod, "enqueue_scope_topics", lambda *a, **k: "topics-scope-library")
+    resp = client.post(
+        "/api/v1/ai/topics", headers=auth_headers("owner"), json={"scope_type": "library"}
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] is True and resp.json()["job_id"] == "topics-scope-library"
+
+
+def test_scope_jobs_run_with_the_requesting_users_visibility(db, monkeypatch) -> None:
+    """The background job recomputes the actor's SEE-set — it must not widen visibility."""
+    import contextlib
+
+    from app.core.security import hash_password
+    from app.models.ai import Summary
+    from app.models.user import User
+    from app.workers import jobs
+    from sqlalchemy import select
+
+    _mk_works(db, 2)
+    actor = User(username="jobrunner", password_hash=hash_password("pw"), role="owner")
+    db.add(actor)
+    db.commit()
+
+    @contextlib.contextmanager
+    def _session():
+        yield db
+
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "SessionLocal", lambda: _session())
+    result = jobs.summarize_scope_job("library", None, actor_user_id=str(actor.id))
+    assert result is not None and result["work_count"] == 2
+    assert db.scalar(select(Summary).where(Summary.entity_type == "library")) is not None

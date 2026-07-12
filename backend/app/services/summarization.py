@@ -299,6 +299,16 @@ def _scope_works(db, *, scope_type, scope_id, visible_ids):
     return resolve_scope_works(db, scope_type, scope_id, visible_ids=visible_ids)
 
 
+def latest_scope_summary(db: Session, *, scope_type: str, scope_id: uuid.UUID | None):
+    """The most recent stored summary for a scope, or None (read path for the S15 async flow)."""
+    entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    return db.scalars(
+        select(Summary)
+        .where(Summary.entity_type == scope_type, Summary.entity_id == entity_id)
+        .order_by(Summary.created_at.desc())
+    ).first()
+
+
 def summarize_scope(
     db: Session,
     *,
@@ -382,6 +392,8 @@ def summarize_scope(
             "summary_type": summary_type,
             "max_sentences": max_sentences,
             "model_name": model_name,
+            # Read back by GET /ai/summaries/latest (S15 async completion).
+            "work_count": len(works),
         },
     )
     db.add(summary)

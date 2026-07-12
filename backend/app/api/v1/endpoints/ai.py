@@ -3,7 +3,7 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +16,9 @@ from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.services import access
 from app.services.access_settings import get_default_access_level
-from app.services.summarization import summarize_scope
+from app.services.app_config import effective_ai_scope_job_threshold
+from app.services.scope_resolution import count_scope_works
+from app.services.summarization import latest_scope_summary, summarize_scope
 from app.services.topic_modeling import model_topics
 from app.utils.normalization import normalize_title
 
@@ -41,13 +43,19 @@ class ScopeSummaryRequest(BaseModel):
 
 
 class ScopeSummaryResponse(BaseModel):
-    entity_type: str
-    entity_id: str
-    summary_type: str
-    text: str
+    # Optional-with-defaults so the queued variant (S15: no summary yet, just a job id) validates;
+    # the inline path always fills them.
+    entity_type: str | None = None
+    entity_id: str | None = None
+    summary_type: str | None = None
+    text: str | None = None
     model_name: str | None = None
     prompt_version: str | None = None
-    work_count: int
+    work_count: int = 0
+    # S15: the scope was too large to run inline — a background job was queued instead. Poll the
+    # Jobs list for ``job_id``, then fetch GET /ai/summaries/latest.
+    queued: bool = False
+    job_id: str | None = None
     # Provider provenance (#10): what was requested vs used, and why it fell back if it did.
     provider_requested: str | None = None
     provider_used: str | None = None
@@ -58,13 +66,17 @@ class ScopeSummaryResponse(BaseModel):
 @router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
 def create_scope_summary(
     payload: ScopeSummaryRequest,
+    response: Response,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> ScopeSummaryResponse:
     """Generate (replacing prior) an extractive summary over a library/shelf/rack scope.
 
     Access control: a shelf/rack scope requires SEE on that container, and only papers the caller
-    may SEE feed the summary."""
+    may SEE feed the summary. Scopes above the admin ``ai_scope_job_threshold`` run on the
+    background worker instead (202 + job id; poll the Jobs list, then GET /ai/summaries/latest)
+    so a library-sized summary can't pin an API worker for minutes (S15/S16).
+    """
     if not access.can_see_scope_container(
         db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
     ):
@@ -77,6 +89,28 @@ def create_scope_summary(
 
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
+    visible = access.visible_work_ids(db, actor)
+    try:
+        scope_size = count_scope_works(
+            db, payload.scope_type, payload.scope_id, visible_ids=visible
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if scope_size > effective_ai_scope_job_threshold(db):
+        from app.workers.queue import enqueue_scope_summary
+
+        job_id = enqueue_scope_summary(
+            payload.scope_type,
+            payload.scope_id,
+            summary_type=summary_type,
+            max_sentences=max(3, min(payload.max_sentences, 20)),
+            model_name=payload.model_name,
+            actor_user_id=str(actor.id),
+        )
+        if job_id is not None:
+            response.status_code = status.HTTP_202_ACCEPTED
+            return ScopeSummaryResponse(queued=True, job_id=job_id, work_count=scope_size)
+        # Queue unavailable — fall through and run inline rather than fail the request.
     try:
         summary, work_count = summarize_scope(
             db,
@@ -86,7 +120,7 @@ def create_scope_summary(
             max_sentences=max(3, min(payload.max_sentences, 20)),
             model_name=payload.model_name,
             created_by_user_id=actor.id,
-            visible_ids=access.visible_work_ids(db, actor),
+            visible_ids=visible,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -124,7 +158,8 @@ class TopicRead(BaseModel):
 
 
 class TopicModelResponse(BaseModel):
-    model_id: str
+    # Optional so the queued variant (S15) validates; the inline path always fills it.
+    model_id: str | None = None
     backend: str | None = None
     embedding_model: str | None = None
     scope_type: str
@@ -139,18 +174,53 @@ class TopicModelResponse(BaseModel):
     # Papers skipped because they lack pre-indexed chunk vectors for the model (D19); the read path
     # never embeds inline, so the UI shows a "N papers not indexed for this model — reindex" notice.
     unindexed_work_count: int = 0
+    # S15: queued-as-background-job variant (scope above the admin threshold).
+    queued: bool = False
+    job_id: str | None = None
+
+
+@router.get("/summaries/latest", response_model=ScopeSummaryResponse)
+def read_latest_scope_summary(
+    scope_type: Literal["library", "shelf", "rack"],
+    scope_id: uuid.UUID | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ScopeSummaryResponse:
+    """Return the most recent stored summary for a scope (the S15 async-completion read path)."""
+    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    summary = latest_scope_summary(db, scope_type=scope_type, scope_id=scope_id)
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No summary for this scope yet"
+        )
+    return ScopeSummaryResponse(
+        entity_type=summary.entity_type,
+        entity_id=str(summary.entity_id),
+        summary_type=summary.summary_type,
+        text=summary.text,
+        model_name=summary.model_name,
+        prompt_version=summary.prompt_version,
+        work_count=(summary.params or {}).get("work_count", 0),
+        provider_requested=summary.provider_requested,
+        provider_used=summary.provider_used,
+        fallback=summary.fallback,
+    )
 
 
 @router.post("/topics", response_model=TopicModelResponse)
 def create_topic_model(
     payload: TopicRequest,
+    response: Response,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> TopicModelResponse:
     """Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments.
 
     Access control: a shelf/rack scope requires SEE on that container, and only papers the caller
-    may SEE are clustered."""
+    may SEE are clustered. Scopes above the admin ``ai_scope_job_threshold`` run on the background
+    worker instead (202 + job id; assignments land in the topic graph when done) — S15/S16.
+    """
     from app.services.ai_config import get_ai_config
 
     if not access.can_see_scope_container(
@@ -159,6 +229,35 @@ def create_topic_model(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
     cfg = get_ai_config(db)
     backend = payload.backend or cfg.topic_backend
+    visible = access.visible_work_ids(db, actor)
+    try:
+        scope_size = count_scope_works(
+            db, payload.scope_type, payload.scope_id, visible_ids=visible
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if scope_size > effective_ai_scope_job_threshold(db):
+        from app.workers.queue import enqueue_scope_topics
+
+        job_id = enqueue_scope_topics(
+            payload.scope_type,
+            payload.scope_id,
+            max_topics=max(1, min(payload.max_topics, 20)),
+            backend=backend,
+            embedding_model=payload.embedding_model or cfg.topic_embedding_model,
+            actor_user_id=str(actor.id),
+        )
+        if job_id is not None:
+            response.status_code = status.HTTP_202_ACCEPTED
+            return TopicModelResponse(
+                queued=True,
+                job_id=job_id,
+                scope_type=payload.scope_type,
+                scope_id=str(payload.scope_id) if payload.scope_id else None,
+                work_count=scope_size,
+                topics=[],
+            )
+        # Queue unavailable — fall through and run inline rather than fail the request.
     try:
         result = model_topics(
             db,
@@ -167,7 +266,7 @@ def create_topic_model(
             max_topics=max(1, min(payload.max_topics, 20)),
             backend=backend,
             embedding_model=payload.embedding_model or cfg.topic_embedding_model,
-            visible_ids=access.visible_work_ids(db, actor),
+            visible_ids=visible,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

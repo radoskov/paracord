@@ -197,11 +197,14 @@ export interface Topic {
 }
 
 export interface TopicModelResponse {
-  model_id: string;
+  model_id: string | null;
   scope_type: string;
   scope_id: string | null;
   work_count: number;
   topics: Topic[];
+  // S15: the scope was too large to run inline — poll the job; assignments land in the topic graph.
+  queued?: boolean;
+  job_id?: string | null;
 }
 
 export type GraphScopeType =
@@ -1112,13 +1115,17 @@ export interface BatchCommitDraft {
 }
 
 export interface ScopeSummaryResponse {
-  entity_type: string;
-  entity_id: string;
-  summary_type: string;
-  text: string;
+  // Nullable because a large scope is answered with a queued job instead (S15).
+  entity_type: string | null;
+  entity_id: string | null;
+  summary_type: string | null;
+  text: string | null;
   model_name: string | null;
   prompt_version: string | null;
   work_count: number;
+  // S15: the scope was too large to run inline — poll the job, then getLatestScopeSummary().
+  queued?: boolean;
+  job_id?: string | null;
   // Provider provenance (#10 / L4): what was requested vs used, and why it fell back. `provider_used`
   // is 'extractive' whenever the summary is the extractive fallback (no model configured, or the
   // model was unavailable), which the Insights UI surfaces as a hint.
@@ -2366,6 +2373,15 @@ export class ApiClient {
       method: "POST",
       body: { scope_type: scopeType, scope_id: scopeId ?? null },
     });
+  }
+
+  async getLatestScopeSummary(
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+  ): Promise<ScopeSummaryResponse> {
+    const params = new URLSearchParams({ scope_type: scopeType });
+    if (scopeId) params.set("scope_id", scopeId);
+    return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/latest?${params}`);
   }
 
   async listAdminUsers(): Promise<AdminUser[]> {
