@@ -45,6 +45,7 @@ from app.services.citation_graph import (
     _scope_works,
     build_citation_graph,
 )
+from app.utils.bounded_cache import BoundedTTLCache
 from app.utils.normalization import normalize_doi, normalize_title
 
 # Local-graph node cap (mirrors the citation/topic graph and the viz providers). Exact Brandes
@@ -61,9 +62,10 @@ _SCHEMA_VERSION = "v1"
 # Bridge-centrality method label surfaced to the client (exact, not an approximation, at this cap).
 BRIDGE_METHOD = "brandes_betweenness_undirected"
 
-# In-process summary cache, keyed by the scope signature (see :func:`_scope_signature`). Fine for a
-# mostly single-user / few-LAN-user deployment; a persisted cache would slot in here keyed the same.
-_SUMMARY_CACHE: dict[str, CitationSummary] = {}
+# In-process summary cache, keyed by the scope signature (see :func:`_scope_signature`). The key is
+# already content-versioned (max updated_at + reference count), so TTL/LRU only bound memory (S10:
+# 128 entries, 15 min); a persisted cache would slot in here keyed the same.
+_SUMMARY_CACHE = BoundedTTLCache(maxsize=128, ttl_seconds=900)
 
 
 @dataclass
@@ -206,7 +208,7 @@ def citation_summary(
 
     summary = _compute(db, works, member_ids, references, visible, limit, notes)
     summary.version = signature
-    _SUMMARY_CACHE[signature] = summary
+    _SUMMARY_CACHE.set(signature, summary)
     return summary
 
 

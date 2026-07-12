@@ -16,7 +16,6 @@ short TTL so repeated opens of the same reference do not re-hit the upstream API
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -27,15 +26,17 @@ from app.services.metadata_enrichment import (
     fetch_openalex,
     fetch_semantic_scholar,
 )
+from app.utils.bounded_cache import BoundedTTLCache
 from app.utils.normalization import normalize_doi
 
 logger = logging.getLogger(__name__)
 
 # How long a fetched preview is served from the in-process cache before a re-fetch (seconds).
-PREVIEW_TTL_SECONDS = 600
+PREVIEW_TTL_SECONDS = 900
 
-# key -> (expires_at_monotonic, preview_or_None). A cached ``None`` is a remembered miss.
-_PREVIEW_CACHE: dict[str, tuple[float, ExternalPreview | None]] = {}
+# A cached ``None`` is a remembered miss, so lookups use the _CACHE_MISS sentinel (S10: bounded).
+_PREVIEW_CACHE = BoundedTTLCache(maxsize=256, ttl_seconds=PREVIEW_TTL_SECONDS)
+_CACHE_MISS = object()
 
 
 @dataclass
@@ -105,10 +106,9 @@ def external_preview(
         return None
 
     key = _cache_key(doi, arxiv_id)
-    now = time.monotonic()
-    cached = _PREVIEW_CACHE.get(key)
-    if cached is not None and cached[0] > now:
-        return cached[1]
+    cached = _PREVIEW_CACHE.get(key, _CACHE_MISS)
+    if cached is not _CACHE_MISS:
+        return cached
 
     mailto = getattr(settings, "crossref_mailto", None) if settings is not None else None
     planned: list[tuple[str, Callable[[], ExternalMetadata | None]]] = []
@@ -135,7 +135,7 @@ def external_preview(
                 break
 
     result = preview if preview.sources else None
-    _PREVIEW_CACHE[key] = (now + PREVIEW_TTL_SECONDS, result)
+    _PREVIEW_CACHE.set(key, result)
     return result
 
 

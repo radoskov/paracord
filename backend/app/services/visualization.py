@@ -54,6 +54,7 @@ from app.services.topic_modeling import (
     _tfidf,
     _tokenize,
 )
+from app.utils.bounded_cache import BoundedTTLCache
 
 # Node cap (mirrors the citation/topic graph's ``MAX_NODES=400`` concept). Bounds the per-request
 # compute so a huge scope can't stall the endpoint; the truncation is reported in ``notes``.
@@ -76,10 +77,9 @@ _METRIC_CACHE_NOTE = "metrics computed per request; add a scope-keyed cache in P
 # updated in place): a hash mismatch recomputes and overwrites, so the cache self-invalidates instead
 # of serving a stale layout. An in-process dict is enough for a mostly single-user / few-LAN-user
 # deployment. Cached tuple: ``(vector_hash, coords, assignments, effective_layout, layout_note)``.
-_LAYOUT_CACHE: dict[
-    tuple[tuple[str, ...], str | None, str],
-    tuple[str, np.ndarray, list[int], str, str | None],
-] = {}
+# Bounded (S10: 32 entries, 30 min TTL) — layouts hold coordinate arrays, so the cap matters more
+# than the TTL; the stored vector_hash already self-invalidates stale content.
+_LAYOUT_CACHE = BoundedTTLCache(maxsize=32, ttl_seconds=1800)
 
 # Embedding-cluster layout algorithms (§2b). ``pca`` (numpy, instant, no dep) is the default; ``umap``
 # is opt-in and needs ``umap-learn`` from the AI extra image (see backend/Dockerfile ml-extraction).
@@ -671,7 +671,7 @@ def _embedding_layout(
     k = max(1, min(DEFAULT_MAX_TOPICS, len(kept)))
     dense_dicts = [{i: float(v) for i, v in enumerate(row)} for row in matrix]
     assignments = _kmeans(dense_dicts, k)
-    _LAYOUT_CACHE[cache_key] = (vector_hash, coords, assignments, effective_layout, layout_note)
+    _LAYOUT_CACHE.set(cache_key, (vector_hash, coords, assignments, effective_layout, layout_note))
     return _EmbeddingLayout(
         coords,
         kept,
