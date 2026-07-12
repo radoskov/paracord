@@ -218,6 +218,9 @@ class WorkRead(BaseModel):
     venue: str | None = None
     year: int | None = None
     reading_status: str
+    # Per-paper processing error (F2): "<stage>: <reason>" when a background enrich/keyword/topic job
+    # failed for this paper; NULL when clear. Drives a "processing failed" badge.
+    processing_error: str | None = None
     # Origin marker; "agent_index_only" on a not-yet-extracted local-agent stub (B6), cleared once
     # the paper is extracted/teleported — the library UI badges it "not extracted" while set.
     canonical_metadata_source: str | None = None

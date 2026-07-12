@@ -42,6 +42,10 @@ class Work(Base):
     work_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
     canonical_metadata_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reading_status: Mapped[str] = mapped_column(String(64), default="unread", index=True)
+    # Per-paper processing error (F2): a short "<stage>: <reason>" set by a failed enrich/keyword/
+    # topic job and cleared on that same stage's next success — drives a "processing failed" badge in
+    # the UI. (Extraction failures live on File.status instead.) NULL = no outstanding error.
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # User-chosen primary file for one-click "Read" (#16); NULL → the first attached file is used.
     main_file_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True

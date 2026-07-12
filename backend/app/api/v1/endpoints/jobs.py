@@ -39,14 +39,17 @@ def clear_job_history(
 
 @router.post("/reprocess-pending")
 def reprocess_pending(_: User = ADMIN_DEP) -> dict:
-    """Re-enqueue extraction for every file still owed one (the D7 recovery sweep, on demand).
+    """Re-enqueue everything still owed processing (the recovery sweeps, on demand).
 
-    Idempotent: a file already queued/running is left alone. Degrades gracefully (never 500) when
-    the queue is offline — reports ``redis_reachable: false`` instead.
+    Runs both the D7 owed-extraction sweep and the F2 downstream sweep (chunk/embed for works
+    extracted but never indexed). Idempotent: anything already queued/running is left alone.
+    Degrades gracefully (never 500) when the queue is offline — reports ``redis_reachable: false``.
     """
-    from app.workers.recovery import sweep_owed_extractions
+    from app.workers.recovery import sweep_owed_downstream, sweep_owed_extractions
 
-    return sweep_owed_extractions()
+    result = sweep_owed_extractions()
+    result["downstream"] = sweep_owed_downstream()
+    return result
 
 
 @router.post("/clear-queue")

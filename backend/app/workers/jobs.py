@@ -52,6 +52,52 @@ def _record_doi_conflict(*, entity_type: str, entity_id: str, detail: str, phase
         logger.warning("doi_conflict audit failed for %s %s", entity_type, entity_id, exc_info=True)
 
 
+def _set_work_processing_error(work_id: str, stage: str, message: str) -> None:
+    """Record a per-paper processing error for ``stage`` (F2) so it shows on the paper as a badge.
+
+    Own short-lived session, best-effort (never breaks the job). Overwrites any prior error for the
+    paper — the badge reflects the most recent failed stage.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+
+    try:
+        with SessionLocal() as db:
+            work = db.get(Work, uuid.UUID(str(work_id)))
+            if work is not None:
+                work.processing_error = f"{stage}: {message}".strip()[:500]
+                db.commit()
+    except Exception:  # noqa: BLE001 - the indicator is best-effort; never break the job
+        logger.warning("could not set processing_error for work %s", work_id, exc_info=True)
+
+
+def _clear_work_processing_error(work_id: str, stage: str) -> None:
+    """Clear a per-paper processing error, but only if it belongs to ``stage`` (F2).
+
+    Stage-scoped so a successful keyword/topic re-run can't erase an outstanding enrich failure.
+    Own session, best-effort.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+
+    try:
+        with SessionLocal() as db:
+            work = db.get(Work, uuid.UUID(str(work_id)))
+            if (
+                work is not None
+                and work.processing_error is not None
+                and work.processing_error.startswith(f"{stage}:")
+            ):
+                work.processing_error = None
+                db.commit()
+    except Exception:  # noqa: BLE001 - best-effort
+        logger.warning("could not clear processing_error for work %s", work_id, exc_info=True)
+
+
 def _audited_job[JobT: Callable[..., Any]](func: JobT) -> JobT:
     """Emit ``job.started`` / ``job.completed`` / ``job.failed`` audit events around a job (§7.6)."""
     job_name = func.__name__
@@ -258,21 +304,28 @@ def enrich_work_job(work_id: str) -> dict | None:
         try:
             result = enrich_work(db, work, settings=get_settings())
             db.commit()
+            _clear_work_processing_error(work_id, "enrich")  # succeeded — clear any prior enrich error
         except IntegrityError as exc:
             # A DOI from an external source collided with another paper's DOI (issue 6). Enrichment
             # is best-effort and not swept by D7, so this is non-fatal: roll back, record a clear
-            # audit event, and let the paper keep the data it already had (chunk/embed still run).
+            # audit event, flag the paper, and let it keep the data it already had (chunk/embed run).
             detail = doi_conflict_detail(exc)
             db.rollback()
             if detail is None:
+                _set_work_processing_error(work_id, "enrich", "database integrity error")
                 raise
             _record_doi_conflict(
                 entity_type="work", entity_id=str(work_id), detail=detail, phase="enrich"
             )
-            result = {
-                "error": "doi_conflict",
-                "detail": conflict_message(db, doi=doi_from_detail(detail)),
-            }
+            message = conflict_message(db, doi=doi_from_detail(detail))
+            _set_work_processing_error(work_id, "enrich", message)
+            result = {"error": "doi_conflict", "detail": message}
+        except Exception as exc:
+            # Unexpected enrichment failure: flag the paper (loud, per-paper) and re-raise so it also
+            # lands in the failed-jobs list / job.failed audit. chunk+embed still run (finally).
+            db.rollback()
+            _set_work_processing_error(work_id, "enrich", str(exc))
+            raise
         finally:
             # Chunk now that title/abstract/TEI are settled (chunks are the semantic-embedding
             # unit), then (re)index embeddings — both off the search read path. Runs even when
@@ -426,14 +479,20 @@ def topic_work_job(work_id: str) -> None:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
-        config = get_ai_config(db)
-        work.topics = extract_paper_topics(
-            db,
-            work=work,
-            backend=config.topic_backend,
-            embedding_model=config.topic_embedding_model,
-        )
-        db.commit()
+        try:
+            config = get_ai_config(db)
+            work.topics = extract_paper_topics(
+                db,
+                work=work,
+                backend=config.topic_backend,
+                embedding_model=config.topic_embedding_model,
+            )
+            db.commit()
+            _clear_work_processing_error(work_id, "topics")
+        except Exception as exc:
+            db.rollback()
+            _set_work_processing_error(work_id, "topics", str(exc))
+            raise
 
 
 @_audited_job
@@ -456,21 +515,29 @@ def keywords_work_job(work_id: str) -> None:
         work = db.get(Work, uuid.UUID(str(work_id)))
         if work is None:
             return
-        body = ""
-        headings = ""
-        tei = db.scalar(
-            select(RawTeiDocument)
-            .where(RawTeiDocument.work_id == work.id)
-            .order_by(RawTeiDocument.created_at.desc())
-        )
-        if tei is not None:
-            body = extract_body_text(tei.tei_xml) or ""
-            headings = " ".join(label for label, _ in extract_sections(tei.tei_xml) if label)
-        source = " ".join(part for part in (work.canonical_title, work.abstract, body) if part)
-        # Boost phrases that also appear in the title / abstract / section headings (issue 8).
-        boost = " ".join(part for part in (work.canonical_title, work.abstract, headings) if part)
-        work.keywords = extract_keywords(source, top_k=12, boost_text=boost)
-        db.commit()
+        try:
+            body = ""
+            headings = ""
+            tei = db.scalar(
+                select(RawTeiDocument)
+                .where(RawTeiDocument.work_id == work.id)
+                .order_by(RawTeiDocument.created_at.desc())
+            )
+            if tei is not None:
+                body = extract_body_text(tei.tei_xml) or ""
+                headings = " ".join(label for label, _ in extract_sections(tei.tei_xml) if label)
+            source = " ".join(part for part in (work.canonical_title, work.abstract, body) if part)
+            # Boost phrases that also appear in the title / abstract / section headings (issue 8).
+            boost = " ".join(
+                part for part in (work.canonical_title, work.abstract, headings) if part
+            )
+            work.keywords = extract_keywords(source, top_k=12, boost_text=boost)
+            db.commit()
+            _clear_work_processing_error(work_id, "keywords")
+        except Exception as exc:
+            db.rollback()
+            _set_work_processing_error(work_id, "keywords", str(exc))
+            raise
 
 
 def summarize_scope_job(scope_type: str, scope_id: str | None = None) -> None:

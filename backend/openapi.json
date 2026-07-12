@@ -8227,6 +8227,17 @@
             ],
             "title": "Merged Into Id"
           },
+          "processing_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processing Error"
+          },
           "racks": {
             "default": [],
             "items": {
@@ -15757,7 +15768,7 @@
     },
     "/api/v1/jobs/reprocess-pending": {
       "post": {
-        "description": "Re-enqueue extraction for every file still owed one (the D7 recovery sweep, on demand).\n\nIdempotent: a file already queued/running is left alone. Degrades gracefully (never 500) when\nthe queue is offline — reports ``redis_reachable: false`` instead.",
+        "description": "Re-enqueue everything still owed processing (the recovery sweeps, on demand).\n\nRuns both the D7 owed-extraction sweep and the F2 downstream sweep (chunk/embed for works\nextracted but never indexed). Idempotent: anything already queued/running is left alone.\nDegrades gracefully (never 500) when the queue is offline — reports ``redis_reachable: false``.",
         "operationId": "reprocess_pending_api_v1_jobs_reprocess_pending_post",
         "parameters": [
           {

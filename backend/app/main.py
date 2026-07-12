@@ -44,6 +44,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.info("Startup recovery sweep: %s", result)
     except Exception as exc:  # noqa: BLE001 - startup must not fail on a recovery hiccup
         logger.warning("Startup recovery sweep skipped: %s", exc)
+    # F2 — recover the downstream stages (chunk/embed) for works extracted but never indexed, derived
+    # from state (extracted file + missing chunks/embedding). Best-effort; deterministic ids coalesce.
+    try:
+        from app.workers.recovery import sweep_owed_downstream
+
+        downstream = sweep_owed_downstream()
+        if downstream.get("chunk") or downstream.get("embed"):
+            logger.info("Startup downstream recovery: %s", downstream)
+    except Exception as exc:  # noqa: BLE001 - startup must not fail on a recovery hiccup
+        logger.warning("Startup downstream recovery skipped: %s", exc)
     # F3a — optionally re-run a full reference→work rematch on startup (owner toggle) so the stored
     # resolution stays fresh across deploys. Best-effort + coalesced (deterministic job id), so it is
     # safe to run from several API workers; a dead Redis just skips it (enqueue returns None).
