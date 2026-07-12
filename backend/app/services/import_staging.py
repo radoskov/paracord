@@ -294,7 +294,7 @@ def _create_work_from_item(
         needs_extraction = True
     # store_parsed_extraction only promotes into an empty DOI; keep the accepted DOI in sync.
     if parsed_doi and not work.doi:
-        work.doi = parsed_doi
+        work.doi = normalize_doi(parsed_doi)
     work.arxiv_base_id = arxiv_base_id(work.arxiv_id)
     return work, needs_extraction
 

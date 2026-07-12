@@ -55,3 +55,35 @@ def test_split_arxiv_id_keeps_version_suffix() -> None:
     parsed = split_arxiv_id("arXiv:1706.03762v5")
     assert parsed["base"] == "1706.03762"
     assert parsed["version"] == "v5"
+
+
+def test_one_canonical_arxiv_parser_everywhere() -> None:
+    """S3: identifiers.arxiv_base_id / duplicate_detection.split_arxiv_id /
+    metadata_enrichment._arxiv_base are aliases of the one normalization-layer parser —
+    every decoration form normalizes identically through all three."""
+    from app.services.duplicate_detection import split_arxiv_id as dd_split
+    from app.services.identifiers import arxiv_base_id as id_base
+    from app.services.metadata_enrichment import _arxiv_base as me_base
+    from app.utils.normalization import arxiv_base_id
+
+    forms = [
+        "1706.03762",
+        "1706.03762v2",
+        "arXiv:1706.03762v2",
+        "ARXIV:1706.03762",
+        "https://arxiv.org/abs/1706.03762v1",
+        "http://arxiv.org/abs/1706.03762",
+        "arxiv.org/abs/1706.03762",
+        "https://arxiv.org/pdf/1706.03762v3.pdf",
+        "arxiv.org/pdf/1706.03762.pdf",
+        "cs/0112017",
+        "arXiv:cs/0112017v1",
+        "math.GT/0309136",
+    ]
+    for form in forms:
+        expected = arxiv_base_id(form)
+        assert expected is not None, form
+        assert expected == expected.lower(), form
+        assert dd_split(form)["base"] == expected, form
+        assert id_base(form) == expected, form
+        assert me_base(form) == expected, form

@@ -1,28 +1,13 @@
 """Shared bibliographic identifier helpers."""
 
-import re
 from typing import TYPE_CHECKING
 
-from app.utils.normalization import normalize_doi
+# Re-exported: the ONE canonical arXiv parser lives in utils.normalization (S3); this module keeps
+# the name because most ingest paths import it from here.
+from app.utils.normalization import arxiv_base_id, normalize_doi  # noqa: F401
 
 if TYPE_CHECKING:
     from app.models.work import Work
-
-_ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$", re.IGNORECASE)
-_ARXIV_PREFIXES = ("arXiv:", "https://arxiv.org/abs/", "http://arxiv.org/abs/")
-
-
-def arxiv_base_id(arxiv_id: str | None) -> str | None:
-    """Return the version-less arXiv base id (e.g. '1706.03762' from '1706.03762v1').
-
-    Returns None when the input is None or empty.
-    """
-    if not arxiv_id:
-        return None
-    cleaned = arxiv_id.strip()
-    for prefix in _ARXIV_PREFIXES:
-        cleaned = cleaned.removeprefix(prefix)
-    return _ARXIV_VERSION_SUFFIX.sub("", cleaned) or None
 
 
 def _identifier_locked(work: "Work", field_name: str) -> bool:

@@ -37,6 +37,46 @@ def normalize_doi(doi: str) -> str:
     return cleaned
 
 
+# The ONE canonical arXiv-id parser (S3). Previously three divergent copies lived in
+# duplicate_detection / identifiers / metadata_enrichment, each tolerating a different subset of
+# the real-world decorations — so the same stored id could normalize three ways depending on which
+# feature touched it. Those modules now delegate here.
+_ARXIV_VERSION_RE = re.compile(
+    r"^(?P<base>(?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Z]{2})?/\d{7}))(?:v(?P<version>\d+))?$",
+    re.IGNORECASE,
+)
+
+
+def split_arxiv_id(arxiv_id: str | None) -> dict[str, str | None]:
+    """Return arXiv base ID and optional version suffix.
+
+    Tolerates the decorations seen in extracted references and metadata: ``http``/``https``
+    schemes, the ``arxiv.org/abs/`` and ``arxiv.org/pdf/`` paths, an ``arXiv:`` prefix (any case),
+    and a trailing ``.pdf``. The emitted base is always lowercase.
+    """
+    if not arxiv_id:
+        return {"base": None, "version": None}
+    cleaned = arxiv_id.strip().lower()
+    for prefix in ("https://", "http://"):
+        cleaned = cleaned.removeprefix(prefix)
+    for prefix in ("arxiv.org/abs/", "arxiv.org/pdf/", "arxiv:"):
+        cleaned = cleaned.removeprefix(prefix)
+    cleaned = cleaned.removesuffix(".pdf")
+    match = _ARXIV_VERSION_RE.match(cleaned)
+    if not match:
+        return {"base": cleaned or None, "version": None}
+    version = match.group("version")
+    return {
+        "base": match.group("base").lower(),
+        "version": f"v{version}" if version else None,
+    }
+
+
+def arxiv_base_id(arxiv_id: str | None) -> str | None:
+    """The version-less, lowercase arXiv base id (``1706.03762`` from ``arXiv:1706.03762v1``)."""
+    return split_arxiv_id(arxiv_id)["base"]
+
+
 # DataCite registers arXiv e-prints as ``10.48550/arXiv.<id>`` DOIs; Crossref/GROBID consolidation
 # increasingly emits that form where older data carries a bare arXiv id. Both spell the same paper,
 # so identifier matching must bridge them.

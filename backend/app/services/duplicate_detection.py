@@ -1,6 +1,5 @@
 """Duplicate and version-candidate detection."""
 
-import re
 import uuid
 from difflib import SequenceMatcher
 from typing import Any
@@ -11,7 +10,11 @@ from sqlalchemy.orm import Session
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.work import Work
-from app.utils.normalization import normalize_doi, normalize_title
+from app.utils.normalization import (  # noqa: F401 - split_arxiv_id is re-exported (S3: one canonical parser)
+    normalize_doi,
+    normalize_title,
+    split_arxiv_id,
+)
 
 FUZZY_TITLE_THRESHOLD = 0.92
 
@@ -34,12 +37,6 @@ def _blocking_key(normalized_title: str) -> str:
     differ in their first word are not fuzzy-matched (DOI/arXiv exact matching still catches those).
     """
     return normalized_title.split(" ", 1)[0] if normalized_title else ""
-
-
-_ARXIV_VERSION_RE = re.compile(
-    r"^(?P<base>(?:\d{4}\.\d{4,5})|(?:[a-z-]+(?:\.[A-Z]{2})?/\d{7}))(?:v(?P<version>\d+))?$",
-    re.IGNORECASE,
-)
 
 
 def scan_duplicate_candidates(
@@ -321,32 +318,6 @@ def _fuzzy_title_candidates(db: Session, work: Work) -> list[DuplicateCandidate]
             )
         )
     return candidates
-
-
-def split_arxiv_id(arxiv_id: str | None) -> dict[str, str | None]:
-    """Return arXiv base ID and optional version suffix.
-
-    Tolerates the decorations seen in extracted references and metadata: ``http``/``https`` schemes,
-    the ``arxiv.org/abs/`` and ``arxiv.org/pdf/`` paths, an ``arXiv:`` prefix (any case), and a
-    trailing ``.pdf``. Prefix stripping is case-insensitive (the id is lowercased first; the version
-    regex is ``re.IGNORECASE`` and the emitted base is lowercase anyway).
-    """
-    if not arxiv_id:
-        return {"base": None, "version": None}
-    cleaned = arxiv_id.strip().lower()
-    for prefix in ("https://", "http://"):
-        cleaned = cleaned.removeprefix(prefix)
-    for prefix in ("arxiv.org/abs/", "arxiv.org/pdf/", "arxiv:"):
-        cleaned = cleaned.removeprefix(prefix)
-    cleaned = cleaned.removesuffix(".pdf")
-    match = _ARXIV_VERSION_RE.match(cleaned)
-    if not match:
-        return {"base": cleaned.lower(), "version": None}
-    version = match.group("version")
-    return {
-        "base": match.group("base").lower(),
-        "version": f"v{version}" if version else None,
-    }
 
 
 def _upsert_candidate(

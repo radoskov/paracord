@@ -31,7 +31,7 @@ from app.services.reference_matching import (
     run_matching_for_references,
 )
 from app.services.tei_parser import ParsedPaper, extract_body_text, extract_sections, parse_tei
-from app.utils.normalization import normalize_title
+from app.utils.normalization import normalize_doi, normalize_title
 
 # fetch_tei takes the PDF path and returns raw TEI XML (the GROBID call, injected for testing).
 TeiFetcher = Callable[[Path], str]
@@ -129,7 +129,7 @@ def store_parsed_extraction(
 
     doi_canonical = bool(promotable and parsed.doi and not work.doi)
     if doi_canonical:
-        work.doi = parsed.doi
+        work.doi = normalize_doi(parsed.doi)  # S3: never store a decorated DOI on the work
         promoted.append("doi")
     assert_field("doi", parsed.doi, canonical=doi_canonical)
 

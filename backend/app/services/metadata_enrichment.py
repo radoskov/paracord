@@ -24,7 +24,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.audit import record_event
 from app.services.identifiers import backfill_identifiers
-from app.utils.normalization import normalize_title
+from app.utils.normalization import arxiv_base_id, normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,6 @@ SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper"
 SEMANTIC_SCHOLAR_FIELDS = "title,abstract,year,venue,authors,externalIds,citationCount"
 ATOM_NS = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 
-_ARXIV_VERSION_SUFFIX = re.compile(r"v\d+$", re.IGNORECASE)
 
 # Work columns that an external assertion may be promoted into.
 PROMOTABLE_FIELDS = ("title", "abstract", "year", "venue", "doi")
@@ -313,9 +312,8 @@ def fetch_semantic_scholar(
 
 
 def _arxiv_base(arxiv_id: str) -> str:
-    """Normalize a stored arXiv id to its bare, version-less form for lookups."""
-    cleaned = arxiv_id.strip().removeprefix("arXiv:").removeprefix("https://arxiv.org/abs/")
-    return _ARXIV_VERSION_SUFFIX.sub("", cleaned)
+    """Normalize a stored arXiv id to its bare, version-less form for lookups (S3: one parser)."""
+    return arxiv_base_id(arxiv_id) or arxiv_id.strip()
 
 
 # --- merge into the work ----------------------------------------------------
