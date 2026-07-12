@@ -57,8 +57,12 @@ Reference→library matching ("likely local" citations) + reference-graph fixes.
   section with the `use_fuzzy_match_as_confirmed` checkbox (exposed in `AppConfigOut`/`Update` +
   `PATCH /app-config`); turning it ON enqueues a library-wide rescan to promote existing likely
   matches.
-- **Phases 4–5 (todo).** Authors **display** (#4 — persist + match already done in Phase 2);
-  `likely_local` graph colour + citing/external overlap-collapse (#7).
+- **Phase 4 (done) — authors (#4/#5/#6).** Persist + match landed in Phase 2 (`Reference.authors`,
+  `author_matching`); this adds **display**: `ReferenceRead`/`ReferenceRecord` carry `authors`, and
+  the References panel shows a reference's authors. Citing papers already show their authors
+  (`ExternalPaper.authors`); graph-tooltip authors ship with Phase 5.
+- **Phase 5 (todo).** `likely_local` node kind + lighter-tint colour; citing/external
+  overlap-collapse in `referenceGraph.ts` (+ author tooltips).
 
 ## issue_batch_11 (2026-07-10)
 

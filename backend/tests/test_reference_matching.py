@@ -274,6 +274,22 @@ def test_library_wide_rescan_enqueues_and_audits(client, auth_headers, db, monke
     assert len(events) == 1
 
 
+def test_reference_list_exposes_authors(client, auth_headers, db, make_reference) -> None:
+    citing = _work(db, "Citing Paper", year=2021)
+    make_reference(
+        db,
+        citing_work_id=citing.id,
+        title="A Cited Paper",
+        year=2019,
+        authors=["Tenorth, M.", "Beetz, M."],
+    )
+    db.commit()
+    refs = client.get(
+        f"/api/v1/works/{citing.id}/references", headers=auth_headers("reader")
+    ).json()
+    assert refs[0]["authors"] == ["Tenorth, M.", "Beetz, M."]
+
+
 def test_per_paper_rescan_requires_contributor(client, auth_headers, db, make_reference) -> None:
     citing = _work(db, "Citing Paper", year=2021)
     db.commit()

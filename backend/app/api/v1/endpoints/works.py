@@ -1499,6 +1499,9 @@ class ReferenceRead(BaseModel):
     doi: str | None = None
     arxiv_id: str | None = None
     year: int | None = None
+    # Parsed citation authors (batch 12), for display + author-overlap matching. NULL for
+    # pre-batch-12 references until re-extraction.
+    authors: list[str] | None = None
     resolution_status: str
     resolved_work_id: uuid.UUID | None = None
     # Unconfirmed fuzzy "likely local" candidate (batch 12): the work this reference *probably* is,

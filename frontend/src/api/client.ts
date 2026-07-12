@@ -823,6 +823,8 @@ export interface ReferenceRecord {
   doi: string | null;
   arxiv_id: string | null;
   year: number | null;
+  // Parsed citation authors (batch 12); null for references extracted before authors were persisted.
+  authors: string[] | null;
   resolution_status: string;
   resolved_work_id: string | null;
   // Unconfirmed fuzzy "likely local" candidate (batch 12): the work this reference probably is.

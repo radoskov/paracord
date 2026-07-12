@@ -1398,6 +1398,9 @@
               {#if ref.shorthand}<span class="ref-marker" title="In-text citation marker for this reference">{ref.shorthand}</span>{/if}
               <span class="ref-title">{ref.title ?? ref.raw_citation ?? 'Untitled reference'}</span>
             </div>
+            {#if ref.authors && ref.authors.length}
+              <small class="muted ref-authors" title="Reference authors">{ref.authors.join(', ')}</small>
+            {/if}
             <small class="muted">
               {ref.year ?? ''}{ref.doi ? ` · doi:${ref.doi}` : ''}{ref.arxiv_id
                 ? ` · arXiv:${ref.arxiv_id}`
@@ -2358,6 +2361,11 @@
 
   .refs-toolbar {
     margin-bottom: 0.5rem;
+  }
+
+  .ref-authors {
+    display: block;
+    font-style: italic;
   }
 
   .ref-actions {
