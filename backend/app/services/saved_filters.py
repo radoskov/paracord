@@ -16,10 +16,10 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.works import build_works_query
 from app.models.saved_filter import SavedFilter
 from app.models.user import User
 from app.models.work import Work
+from app.services.works_query import build_works_query
 
 
 def resolve_saved_filter_work_ids(

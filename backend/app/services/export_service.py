@@ -243,7 +243,7 @@ def _split_authors(value: str | None) -> list[str]:
     return [name.strip() for name in (value or "").split(";") if name.strip()] if value else []
 
 
-def _authors_by_work(db: Session, works: list[Work]) -> dict[uuid.UUID, list[str]]:
+def authors_by_work(db: Session, works: list[Work]) -> dict[uuid.UUID, list[str]]:
     """Resolve authors for all works in **one** query (E1: avoids the per-work N+1).
 
     Orders by entity then best-assertion (canonical, then confidence), so the first row seen for
@@ -821,3 +821,7 @@ def _render_missing_csv(items: Sequence[_MissingItem]) -> str:
             ]
         )
     return buffer.getvalue()
+
+
+# Backward-compat private alias (S4: promoted to public for venue_author_summary).
+_authors_by_work = authors_by_work

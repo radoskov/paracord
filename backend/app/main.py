@@ -98,6 +98,14 @@ def create_app() -> FastAPI:
         """A client import batch over ``max_batch_items`` is rejected with 413 (D1)."""
         return JSONResponse(status_code=413, content={"detail": str(exc)})
 
+    from app.errors import DomainError
+
+    @app.exception_handler(DomainError)
+    async def _domain_error(_request: Request, exc: DomainError) -> JSONResponse:
+        """Domain errors raised by services map to their HTTP status here (S4) — one handler
+        instead of per-endpoint try/except, and services stay framework-free."""
+        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
         """Shared Redis rate limiting (D1). Fails open by default; fails closed with 503 when

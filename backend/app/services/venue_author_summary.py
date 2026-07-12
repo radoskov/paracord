@@ -24,7 +24,7 @@ from app.models.user import User
 from app.services import access
 from app.services.citation_graph import _scope_works
 from app.services.citation_summary import MAX_NODES, SummaryScope
-from app.services.export_service import _authors_by_work
+from app.services.export_service import authors_by_work
 
 DEFAULT_LIMIT = 20
 
@@ -149,12 +149,12 @@ def venue_author_summary(
         )
 
     # --- Authors (from the best 'authors' assertion per work) ---
-    authors_by_work = _authors_by_work(db, works)
+    work_authors = authors_by_work(db, works)
     author_works: dict[str, set] = defaultdict(set)
     author_originals: dict[str, Counter[str]] = defaultdict(Counter)
     papers_without_authors = 0
     for work in works:
-        names = authors_by_work.get(work.id, [])
+        names = work_authors.get(work.id, [])
         if not names:
             papers_without_authors += 1
             continue
