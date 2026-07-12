@@ -126,6 +126,8 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         ]
     if "require_year_match" in reference_matching:
         values["reference_matching_require_year_match"] = reference_matching["require_year_match"]
+    if "year_tolerance" in reference_matching:
+        values["reference_matching_year_tolerance"] = reference_matching["year_tolerance"]
     if "identifier_gate" in reference_matching:
         values["reference_matching_identifier_gate"] = reference_matching["identifier_gate"]
 
@@ -248,8 +250,11 @@ class Settings(BaseSettings):
     # Author-overlap ratio (0-1) a candidate must clear when both sides list authors (Phase 4). The
     # gate is skipped when either side has no authors — a signal you can't compute can't disqualify.
     reference_matching_author_threshold: float = 0.5
-    # When both reference and candidate carry a year they must be equal; unset on either side skips it.
+    # When both reference and candidate carry a year they must agree within this tolerance; unset on
+    # either side skips the gate. 1 accepts the routine preprint-vs-published one-year drift; 0
+    # restores strict equality.
     reference_matching_require_year_match: bool = True
+    reference_matching_year_tolerance: int = 1
     # DOI/arXiv is the authoritative gate: identifiers present on BOTH sides must match exactly (else
     # that candidate is disqualified, no fuzzy fallback). Only when identifiers are absent does fuzzy
     # run. Off = ignore identifiers and always go fuzzy (not recommended).

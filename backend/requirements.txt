@@ -30,13 +30,16 @@ citeproc-py>=0.8  # hard dep: renders the "styled" citation export from bundled 
 yake>=0.4.8
 PyYAML>=6.0
 PyMuPDF>=1.24
+# Fuzzy matching for reference→work and duplicate detection. Required, not optional: the difflib
+# fallback has no token-based scoring, so without this wheel the matcher silently loses its
+# word-reorder and subtitle-truncation tolerance (recall regression), not just speed.
+rapidfuzz>=3.9
 # OCR pre-step (Phase B5, ocr_backend=ocrmypdf): drives the `ocrmypdf` CLI (installed in the base
 # image alongside tesseract-ocr + ghostscript) to add a searchable text layer before GROBID.
 ocrmypdf>=15.0
 
 # Optional AI/perf providers — the app degrades gracefully (guarded imports) when these are absent,
 # so they are intentionally NOT installed by default. Uncomment to enable:
-#   rapidfuzz>=3.9                 # faster fuzzy-title dedup (else stdlib difflib)
 #   sentence-transformers>=3.0     # embedding_provider=sentence_transformers (local embeddings)
 # Ollama (embedding_provider=ollama, summary_llm_enabled) needs no Python dep — just a reachable
 # Ollama daemon at OLLAMA_URL.

@@ -22,7 +22,7 @@ from app.models.organization import RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.services.reference_links import citing_work_ids_subquery
-from app.utils.normalization import normalize_doi
+from app.utils.normalization import arxiv_base_from_doi, normalize_doi
 
 # Non-private shelf access levels (mirrors ``access._OPEN_OR_VISIBLE``): only these shelves may
 # surface as a ``color_by=shelf`` group so a private shelf's name never leaks as a node color.
@@ -356,6 +356,10 @@ def _local_work_index(
             for base in (split_arxiv_id(ref.arxiv_id)["base"] for ref in references if ref.arxiv_id)
             if base
         }
+        # A reference carrying an arXiv DOI can resolve to a work known only by its arXiv id.
+        arxiv_bases |= {
+            base for base in (arxiv_base_from_doi(ref.doi) for ref in references if ref.doi) if base
+        }
         conditions = []
         if dois:
             conditions.append(func.lower(Work.doi).in_(dois))
@@ -380,9 +384,12 @@ def _local_work_index(
 
 def _identifier_keys(*, doi: str | None, arxiv_id: str | None) -> list[str]:
     keys: list[str] = []
+    base = split_arxiv_id(arxiv_id)["base"] if arxiv_id else None
     if doi:
         keys.append(f"doi:{normalize_doi(doi)}")
-    base = split_arxiv_id(arxiv_id)["base"] if arxiv_id else None
+        # An arXiv DOI (10.48550/arXiv.<id>) and a bare arXiv id spell the same paper — emit the
+        # arxiv key too so either spelling on either side still intersects.
+        base = base or arxiv_base_from_doi(doi)
     if base:
         keys.append(f"arxiv:{base}")
     return keys

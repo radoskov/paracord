@@ -417,3 +417,91 @@ def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monk
     assert r.status_code == 200
     assert r.json()["use_fuzzy_match_as_confirmed"] is True
     assert calls == [1]  # flipping ON kicks off a library-wide rescan
+
+
+# --- arXiv-DOI bridging ---------------------------------------------------------------------------
+
+
+def test_arxiv_doi_reference_matches_work_with_bare_arxiv_id(db) -> None:
+    work = _work(db, "A Paper", arxiv_id="2101.00001", arxiv_base_id="2101.00001", year=2021)
+    ref = _ref(db, title="A Paper", doi="10.48550/arXiv.2101.00001")
+    resolve_and_persist(db, ref)
+    assert ref.resolution_status == "local_match"
+    assert ref.resolved_work_id == work.id
+
+
+def test_arxiv_id_reference_matches_work_with_arxiv_doi(db) -> None:
+    work = _work(db, "A Paper", doi="10.48550/arxiv.2101.00001", year=2021)
+    ref = _ref(db, title="A Paper", arxiv_id="arXiv:2101.00001v3")
+    resolve_and_persist(db, ref)
+    assert ref.resolution_status == "local_match"
+    assert ref.resolved_work_id == work.id
+
+
+def test_arxiv_doi_vs_journal_doi_does_not_disqualify_fuzzy(db) -> None:
+    # Preprint (arXiv DOI) cited; the published journal version (different DOI) is in the library.
+    work = _work(db, LOCAL_TITLE, doi="10.1007/s10514-010-9200-5", year=2010)
+    ref = _ref(db, title=CITED_TITLE, doi="10.48550/arXiv.1001.0001", year=2010)
+    match = find_reference_match(db, ref)
+    assert match is not None and match.via == "fuzzy"
+    assert match.work_id == work.id
+
+
+# --- fuzzy recall/precision refinements ------------------------------------------------------------
+
+
+def test_leading_stopword_variant_still_blocks_and_matches(db) -> None:
+    work = _work(db, "The Mathematical Theory of Communication", year=1948)
+    ref = _ref(db, title="Mathematical theory of communication", year=1948)
+    match = find_reference_match(db, ref)
+    assert match is not None and match.work_id == work.id
+
+
+def test_stopword_on_reference_side_still_blocks_and_matches(db) -> None:
+    work = _work(db, "Mathematical Theory of Communication", year=1948)
+    ref = _ref(db, title="The mathematical theory of communication", year=1948)
+    match = find_reference_match(db, ref)
+    assert match is not None and match.work_id == work.id
+
+
+def test_year_off_by_one_still_matches(db) -> None:
+    # Preprint year vs published year — the classic ±1 drift.
+    work = _work(db, LOCAL_TITLE, year=2010)
+    ref = _ref(db, title=CITED_TITLE, year=2009)
+    match = find_reference_match(db, ref)
+    assert match is not None and match.work_id == work.id
+
+
+def test_year_off_by_two_is_rejected(db) -> None:
+    _work(db, LOCAL_TITLE, year=2010)
+    ref = _ref(db, title=CITED_TITLE, year=2008)
+    assert find_reference_match(db, ref) is None
+
+
+def test_short_generic_title_does_not_containment_match(db) -> None:
+    # "Deep learning" is a strict token subset of the work title; token_set alone would score 100.
+    _work(db, "Deep learning for medical imaging a survey", year=None)
+    ref = _ref(db, title="Deep learning", year=None)
+    assert find_reference_match(db, ref) is None
+
+
+def test_long_subtitle_truncation_still_matches(db) -> None:
+    work = _work(
+        db, "Generative adversarial networks for image synthesis: methods and results", year=2019
+    )
+    ref = _ref(db, title="Generative adversarial networks for image synthesis", year=2019)
+    match = find_reference_match(db, ref)
+    assert match is not None and match.work_id == work.id
+
+
+def test_reverse_rescan_picks_up_reference_by_arxiv_id(db) -> None:
+    ref = _ref(
+        db,
+        title="Completely Different Spelling Of The Title",
+        arxiv_id="arXiv:2101.00001v2",
+        resolution_status="external",
+    )
+    new_work = _work(db, "A Paper", arxiv_id="2101.00001", arxiv_base_id="2101.00001", year=2021)
+    changed = rescan_references_for_new_work(db, new_work)
+    assert changed == 1
+    assert ref.resolved_work_id == new_work.id

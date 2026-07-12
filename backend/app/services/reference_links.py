@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models.citation import Reference, ReferenceCitation
 from app.services.duplicate_detection import split_arxiv_id
-from app.utils.normalization import normalize_doi, normalize_title
+from app.utils.normalization import arxiv_base_from_doi, normalize_doi, normalize_title
 
 # ``Reference.dedup_key`` is ``String(512)`` and indexed. A real-world reference can carry a very long
 # (or mis-parsed, whole-citation-as-title) title, so the title-based key must be capped or the value
@@ -34,12 +34,18 @@ def reference_dedup_key(
     year: int | None = None,
 ) -> str | None:
     """Stable identity for deduping a reference: normalized DOI → arXiv base → title+year.
+    An arXiv DOI (10.48550/arXiv.<id>) keys as its arXiv base, not as a DOI.
 
     Returns ``None`` when there is neither an identifier nor a usable title — such a reference
     carries no signal to dedup on, so it is always stored as its own row.
     """
     if doi:
         nd = normalize_doi(doi)
+        # An arXiv DOI (10.48550/arXiv.<id>) and a bare arXiv id spell the same paper — key both
+        # as ``arxiv:<base>`` so they consolidate to one canonical reference row.
+        arxiv_base = arxiv_base_from_doi(nd) if nd else None
+        if arxiv_base:
+            return f"arxiv:{arxiv_base}"
         if nd:
             return f"doi:{nd}"
     if arxiv_id:
@@ -76,9 +82,14 @@ def find_or_create_reference(
     key = reference_dedup_key(doi=doi, arxiv_id=arxiv_id, normalized_title=nt, year=year)
     existing: Reference | None = None
     if key is not None:
+        # Rows written before the arXiv-DOI bridge keyed an arXiv DOI as ``doi:10.48550/arxiv.<b>``;
+        # keep finding them so no duplicate canonical row is created for live data.
+        keys = [key]
+        if key.startswith("arxiv:"):
+            keys.append(f"doi:10.48550/arxiv.{key.removeprefix('arxiv:')}")
         existing = db.scalars(
             select(Reference)
-            .where(Reference.dedup_key == key)
+            .where(Reference.dedup_key.in_(keys))
             .order_by(Reference.created_at, Reference.id)
         ).first()
     if existing is not None:

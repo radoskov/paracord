@@ -11,9 +11,11 @@ Pipeline (owner decisions D1/D2, §Workplan batch 12):
   identifier of the same kind *differs* is disqualified from the fuzzy fallback — an occasional
   workshop-vs-journal false positive is far less annoying than the current mass of false
   "external/missing" flags. Only when identifiers are absent on one/both sides does fuzzy run.
-* **Fuzzy title(+year+author).** ``similarity_pct`` over ``canonical_title`` (D1), first-token
-  blocking (``_blocking_key``), an equal-year gate when both years are present, and (Phase 4) an
-  author-overlap gate that is skipped when either side lists no authors.
+* **Fuzzy title(+year+author).** ``title_similarity_pct`` over ``canonical_title`` (D1),
+  stopword-tolerant first-content-token blocking (``_relaxed_blocking_key``/``_block_conditions``),
+  a ±``year_tolerance`` year gate when both years are present (preprint vs published drift), and
+  (Phase 4) an author-overlap gate that is skipped when either side lists no authors. arXiv DOIs
+  (``10.48550/arXiv.…``) are bridged to bare arXiv ids in both the exact stage and the gate.
 
 Persistence follows the batch-12 status rules (item #4): a **confirmed** match is locked (never
 touched by a rescan); a **rejected** candidate is never re-proposed (though a *different, better*
@@ -38,8 +40,13 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.author_matching import author_overlap_ratio
 from app.services.citation_graph import _identifier_keys
-from app.services.duplicate_detection import _blocking_key, split_arxiv_id
-from app.utils.normalization import normalize_doi, normalize_title, similarity_pct
+from app.services.duplicate_detection import split_arxiv_id
+from app.utils.normalization import (
+    arxiv_base_from_doi,
+    normalize_doi,
+    normalize_title,
+    title_similarity_pct,
+)
 
 # Statuses set/left by the matcher. A confirmed match is locked; a rejected candidate is remembered.
 _LOCKED_STATUS = "confirmed_match"
@@ -68,14 +75,35 @@ def _work_arxiv_base(work: Work) -> str | None:
     return split_arxiv_id(work.arxiv_id)["base"] if work.arxiv_id else None
 
 
+def _arxiv_base_of(*, arxiv_id: str | None, doi: str | None) -> str | None:
+    """Effective arXiv base id from a bare arXiv id or an arXiv DOI (10.48550/arXiv.<id>)."""
+    base = split_arxiv_id(arxiv_id)["base"] if arxiv_id else None
+    if not base and doi:
+        base = arxiv_base_from_doi(doi)
+    return base
+
+
 def _identifier_gate_ok(reference: Reference, work: Work, *, gate_enabled: bool) -> bool:
-    """A candidate is disqualified when an identifier present on *both* sides differs (D2)."""
+    """A candidate is disqualified when an identifier present on *both* sides differs (D2).
+
+    An arXiv DOI is compared as an *arXiv id*, not as a DOI: the preprint (arXiv DOI) and the
+    published version (journal DOI) of the same paper legitimately carry different DOIs, so a
+    DOI-kind mismatch involving an arXiv DOI must not disqualify the fuzzy fallback.
+    """
     if not gate_enabled:
         return True
-    if reference.doi and work.doi and normalize_doi(reference.doi) != normalize_doi(work.doi):
+    ref_doi = normalize_doi(reference.doi) if reference.doi else None
+    work_doi = normalize_doi(work.doi) if work.doi else None
+    if (
+        ref_doi
+        and work_doi
+        and ref_doi != work_doi
+        and not arxiv_base_from_doi(ref_doi)
+        and not arxiv_base_from_doi(work_doi)
+    ):
         return False
-    ref_base = split_arxiv_id(reference.arxiv_id)["base"] if reference.arxiv_id else None
-    work_base = _work_arxiv_base(work)
+    ref_base = _arxiv_base_of(arxiv_id=reference.arxiv_id, doi=reference.doi)
+    work_base = _work_arxiv_base(work) or (arxiv_base_from_doi(work.doi) if work.doi else None)
     return not (ref_base and work_base and ref_base != work_base)
 
 
@@ -83,7 +111,9 @@ def _year_ok(reference: Reference, work: Work, settings: Settings) -> bool:
     if not settings.reference_matching_require_year_match:
         return True
     if reference.year is not None and work.year is not None:
-        return reference.year == work.year
+        # Tolerate a small offset: preprint vs published year (and citation-style year drift)
+        # routinely differ by one while still being the same paper.
+        return abs(reference.year - work.year) <= settings.reference_matching_year_tolerance
     return True
 
 
@@ -124,28 +154,57 @@ def _works_by_identifier(db: Session, reference: Reference) -> list[Work]:
     conditions = []
     if reference.doi:
         conditions.append(func.lower(Work.doi) == normalize_doi(reference.doi))
-    base = split_arxiv_id(reference.arxiv_id)["base"] if reference.arxiv_id else None
+    base = _arxiv_base_of(arxiv_id=reference.arxiv_id, doi=reference.doi)
     if base:
         conditions.append(Work.arxiv_base_id == base)
+        # Bridge the other spelling too: a work whose only identifier is the arXiv DOI.
+        conditions.append(func.lower(Work.doi) == f"10.48550/arxiv.{base}")
     if not conditions:
         return []
     return list(db.scalars(select(Work).where(or_(*conditions))).all())
 
 
-def _blocking_candidates(db: Session, normalized_title: str) -> list[Work]:
-    block = _blocking_key(normalized_title)
+# Leading function words that citation styles add/drop freely ("The mathematical theory of…" vs
+# "Mathematical theory of…"). Blocking must not let such a variant land in a different block, or
+# the pair is never even fuzzy-compared.
+_LEADING_STOPWORDS = ("a", "an", "the", "on", "of", "in", "for", "to", "toward", "towards")
+
+
+def _relaxed_blocking_key(normalized_title: str) -> str:
+    """First *content* token of a normalized title: leading stopwords are skipped.
+
+    Falls back to the plain first token when the whole title is stopwords.
+    """
+    tokens = normalized_title.split()
+    for token in tokens:
+        if token not in _LEADING_STOPWORDS:
+            return token
+    return tokens[0] if tokens else ""
+
+
+def _block_conditions(column, normalized_title: str) -> list:
+    """SQL conditions matching titles in ``normalized_title``'s block, stopword-tolerantly.
+
+    The stored ``normalized_title`` column keeps leading stopwords, so the block query must accept
+    both the bare block ("mathematical theory …") and every "<stopword> block …" variant — a
+    bounded OR list, cheap at library scale.
+    """
+    block = _relaxed_blocking_key(normalized_title)
     if not block:
         return []
-    return list(
-        db.scalars(
-            select(Work).where(
-                or_(
-                    Work.normalized_title == block,
-                    Work.normalized_title.like(block.replace("%", r"\%") + " %"),
-                )
-            )
-        ).all()
-    )
+    escaped = block.replace("%", r"\%")
+    conditions = [column == block, column.like(escaped + " %")]
+    for stopword in _LEADING_STOPWORDS:
+        conditions.append(column == f"{stopword} {block}")
+        conditions.append(column.like(f"{stopword} {escaped} %"))
+    return conditions
+
+
+def _blocking_candidates(db: Session, normalized_title: str) -> list[Work]:
+    conditions = _block_conditions(Work.normalized_title, normalized_title)
+    if not conditions:
+        return []
+    return list(db.scalars(select(Work).where(or_(*conditions))).all())
 
 
 def find_reference_match(
@@ -191,7 +250,7 @@ def find_reference_match(
             continue
         if not _identifier_gate_ok(reference, work, gate_enabled=gate):
             continue
-        score = similarity_pct(ref_title, work.canonical_title)
+        score = title_similarity_pct(ref_title, work.canonical_title)
         if score < settings.reference_matching_title_threshold:
             continue
         if not _year_ok(reference, work, settings):
@@ -326,11 +385,14 @@ def rescan_references_for_new_work(
     conditions = []
     if work.doi:
         conditions.append(Reference.doi == normalize_doi(work.doi))
+    base = _work_arxiv_base(work) or (arxiv_base_from_doi(work.doi) if work.doi else None)
+    if base:
+        # Stored reference arXiv ids keep their raw decorations ("arXiv:…vN"), so match by
+        # containment; references carrying the arXiv-DOI spelling are matched exactly.
+        conditions.append(Reference.arxiv_id.ilike(f"%{base}%"))
+        conditions.append(Reference.doi == f"10.48550/arxiv.{base}")
     if work.normalized_title:
-        block = _blocking_key(work.normalized_title)
-        if block:
-            conditions.append(Reference.normalized_title == block)
-            conditions.append(Reference.normalized_title.like(block.replace("%", r"\%") + " %"))
+        conditions.extend(_block_conditions(Reference.normalized_title, work.normalized_title))
     if not conditions:
         return 0
 
