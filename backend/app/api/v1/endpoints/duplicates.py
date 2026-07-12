@@ -13,7 +13,7 @@ from app.api.deps import require_authenticated_user, require_min_role
 from app.core.security import Role
 from app.db.session import get_db
 from app.models.duplicate import DuplicateCandidate
-from app.models.file import File, FileWorkLink
+from app.models.file import File
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
@@ -158,7 +158,8 @@ def scan_duplicates(
 
     A full-library scan (no specific work/file) is a minutes-long job at scale, so it is **always**
     run on the background worker and returns a queued shape (D15); the ``background`` flag is only a
-    hint and full scans ignore it. Single-work/-file scans stay synchronous and inline."""
+    hint and full scans ignore it. Single-work/-file scans stay synchronous and scan **only** the
+    given entity (S5): an absent selector no longer expands to every work/file in the library."""
     # D15: force full-library scans onto the worker regardless of the ``background`` flag.
     if payload.work_id is None and payload.file_id is None:
         from app.workers.queue import enqueue_duplicate_scan
@@ -316,8 +317,14 @@ def update_duplicate_candidate(
 
 
 def _selected_works(db: Session, work_id: uuid.UUID | None, *, actor: User) -> list[Work]:
+    """The single work a targeted scan asked for (S5: an absent selector means *no* works).
+
+    A full-library sweep never reaches here — the both-None case is routed to the background
+    worker before selection. Previously ``None`` expanded to every visible work, so a
+    file-only scan silently swept the whole works table inside the request.
+    """
     if work_id is None:
-        return list(db.scalars(access.visible_works_query(db, actor)).all())
+        return []
     work = db.get(Work, work_id)
     if work is None or not access.can_see_work(db, actor, work):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
@@ -325,27 +332,9 @@ def _selected_works(db: Session, work_id: uuid.UUID | None, *, actor: User) -> l
 
 
 def _selected_files(db: Session, file_id: uuid.UUID | None, *, actor: User) -> list[File]:
+    """The single file a targeted scan asked for (S5: an absent selector means *no* files)."""
     if file_id is None:
-        files = list(db.scalars(select(File)).all())
-        if access.is_admin_or_owner(actor):
-            return files
-        # Batched visibility: compute the visible-work set once and fetch all file->work links
-        # in one IN() query (instead of a can_see_file scan per file).
-        visible = access.visible_work_ids(db, actor)
-        linked_works: dict[uuid.UUID, list[uuid.UUID]] = {}
-        for fid, wid in db.execute(
-            select(FileWorkLink.file_id, FileWorkLink.work_id).where(
-                FileWorkLink.file_id.in_([f.id for f in files])
-            )
-        ):
-            linked_works.setdefault(fid, []).append(wid)
-        return [
-            f
-            for f in files
-            if f.id not in linked_works  # loose file -> open
-            or visible is None
-            or any(wid in visible for wid in linked_works[f.id])
-        ]
+        return []
     file = db.get(File, file_id)
     if file is None or not access.can_see_file(db, actor, file_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
