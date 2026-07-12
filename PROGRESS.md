@@ -9,6 +9,41 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Citation/reference matcher improvements (2026-07-12)
+
+Audit + upgrade of the local reference/citation matcher (owner request): F1 (precision *and*
+recall) improvements, coverage of BOTH directions, lifecycle fixes, count sync. On `main` (not
+pushed); commits `be35fc2` / `6055185` / `9aff7b2`. Handoff:
+`docs/agent_handoffs/2026-07-12-citation-reference-matcher-improvements.md`.
+
+- **Matcher F1.** rapidfuzz promoted to a **required** dependency (it was optional and absent from
+  the deployed image — the fuzzy matcher silently ran on the token-less difflib fallback; rebuild
+  api/worker images). New `title_similarity_pct` (punctuation-normalized, word-order tolerant,
+  length-guarded containment so short generic titles can't match superset titles). arXiv-DOI
+  (`10.48550/arXiv.*`) ⇔ bare-arXiv-id bridging across the exact stage, the D2 gate (preprint DOI
+  vs journal DOI no longer disqualifies fuzzy), dedup keys (with legacy-key lookup), and the
+  citation graph. Stopword-tolerant title blocking ("The X…" vs "X…" now compared at all). Year
+  gate accepts ±1 (`reference_matching.year_tolerance`).
+- **Incoming direction.** `external_papers` gains `resolved_work_id` + `arxiv_id` (migration
+  `0064`, additive): every fetched citing paper runs through the same matcher/gates, so in-library
+  citers are recognized — surfaced on the citing-papers endpoints, reference-graph citing nodes,
+  and an "in library" badge in the UI. Self-match guarded; the rescan-all job backfills.
+- **Pipeline reverse-rescan.** Extraction + enrichment (the moments a work actually gains
+  title/DOI) now reverse-rescan still-external references and cached citing papers — previously
+  only manual create/import did, so uploaded papers were never linked as targets until a full
+  library rescan.
+- **Lifecycle.** Merge moves incoming external citation links (dedup-aware, exactly reversed on
+  unmerge) and repoints matcher-resolved external papers; delete prunes external papers whose only
+  citer link was the deleted work and re-resolves references whose soft *suggestion* pointed at it.
+- **Count sync.** `POST /works/{id}/citing-papers/fetch` now refreshes the cached
+  `citation_count/_source/_fetched_at` from the provider's full total (OpenAlex `meta.count`; S2
+  one cheap follow-up), so the list and the count snapshot can't drift. `_bare_doi` delegates to
+  `normalize_doi` (no more duplicate external rows from `dx.doi.org`/`doi:` decorations).
+
+Verified in-container: backend `-m "not safety"` 1107 passed / 4 skipped; frontend 274 + build;
+alembic chain to 0064 on a scratch pgvector:pg17. Migration **not yet applied** to the live DB
+(entrypoint applies on next restart; rebuild images first).
+
 ## issue_batch_12 (2026-07-11)
 
 Reference→library matching ("likely local" citations) + reference-graph fixes. Plan:
