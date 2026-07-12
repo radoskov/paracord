@@ -13,9 +13,7 @@
     type GrantTargetType,
     type Group,
     type GroupMember,
-    type Rack,
     type ServerImportRoot,
-    type Shelf,
     type UserRole,
     type WebFindAllowedHost,
     type WebFindDownloadPolicy,
@@ -23,6 +21,7 @@
   import { get } from 'svelte/store';
 
   import Modal from '../components/Modal.svelte';
+  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
   import { canManageUsers, currentUser, isOwner } from '../lib/session';
   import { loadCustomThemes } from '../lib/theme/store';
   import { bundledThemes, bundledThemeYaml } from '../lib/theme/themes.generated';
@@ -173,8 +172,6 @@
   ];
 
   let groups: Group[] = [];
-  let racks: Rack[] = [];
-  let shelves: Shelf[] = [];
   let newGroupName = '';
 
   // The currently-expanded group + its loaded members and grants.
@@ -193,7 +190,7 @@
 
   // Target label lookup for grant rows (rack/shelf name from the loaded lists).
   function targetLabel(type: GrantTargetType, id: string): string {
-    const list = type === 'rack' ? racks : shelves;
+    const list = type === 'rack' ? $racks : $shelves;
     return list.find((t) => t.id === id)?.name ?? `${type} ${id.slice(0, 8)}`;
   }
 
@@ -227,10 +224,11 @@
       if (get(isOwner)) downloadPolicy = (await client.getWebFindDownloadPolicy()).policy;
       // Groups, racks/shelves (for grant pickers) and default settings are admin-or-owner.
       if (get(canManageUsers)) {
-        [groups, racks, shelves, defaultGrants] = await Promise.all([
+        // Prime the shared catalog stores so newly created shelves/racks appear in the grant pickers live.
+        [groups, , , defaultGrants] = await Promise.all([
           client.listGroups(),
-          client.listRacks(),
-          client.listShelves(),
+          ensureRacks(client),
+          ensureShelves(client),
           client.listDefaultGrants(),
         ]);
         defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
@@ -1202,7 +1200,7 @@
                       </select>
                       <select bind:value={pickGrantTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant">
                         <option value="">Choose a {grantTargetType}…</option>
-                        {#each (grantTargetType === 'rack' ? racks : shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+                        {#each (grantTargetType === 'rack' ? $racks : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
                       </select>
                       <button type="button" on:click={addGrant} disabled={loading || !pickGrantTargetId}
                         title={pickGrantTargetId ? 'Grant this group access' : 'Choose a target first'}>Add grant</button>
@@ -1258,7 +1256,7 @@
           </select>
           <select bind:value={pickDefaultTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant to new users">
             <option value="">Choose a {defaultGrantType}…</option>
-            {#each (defaultGrantType === 'rack' ? racks : shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+            {#each (defaultGrantType === 'rack' ? $racks : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
           </select>
           <button type="button" on:click={addDefaultGrant} disabled={loading || !pickDefaultTargetId}
             title={pickDefaultTargetId ? 'Add this default grant' : 'Choose a target first'}>Add default grant</button>

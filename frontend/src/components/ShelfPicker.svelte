@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  import { ApiClient, type Shelf } from '../api/client';
+  import { ApiClient } from '../api/client';
+  import { ensureShelves, refreshShelves, shelves } from '../lib/catalog';
   import { focusOnMount } from '../lib/focus';
+  import { canManageStructure } from '../lib/session';
 
   export let client: ApiClient;
   // Focus the shelf select on mount (when opened inside a popup) — batch10 #6.
@@ -18,14 +20,20 @@
   // Inbox makes no sense. Default false so import/other callers still see it.
   export let excludeDefault = false;
 
-  let shelves: Shelf[] = [];
   let filter = '';
   let loaded = false;
   let error = '';
 
+  // Inline "create shelf" (so you can make one and pick it without leaving the import/paper context,
+  // which a page reload would clear). Gated on canManageStructure to match the backend's floor.
+  let creating = false;
+  let newName = '';
+  let createBusy = false;
+  let createError = '';
+
   onMount(async () => {
     try {
-      shelves = await client.listShelves();
+      await ensureShelves(client);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Could not load shelves';
     } finally {
@@ -33,10 +41,29 @@
     }
   });
 
+  async function createShelf(): Promise<void> {
+    const name = newName.trim();
+    if (!name || createBusy) return;
+    createBusy = true;
+    createError = '';
+    try {
+      const shelf = await client.createShelf({ name });
+      // Publish to every subscribed dropdown, then select the new shelf here.
+      await refreshShelves(client);
+      value = shelf.id;
+      newName = '';
+      creating = false;
+    } catch (e) {
+      createError = e instanceof Error ? e.message : 'Could not create shelf';
+    } finally {
+      createBusy = false;
+    }
+  }
+
   // The server lists shelves the caller may SEE and (since Phase N) flags which are modifiable.
   // When `modifiableOnly`, drop the ones the caller can't modify so the picker can't offer a
   // doomed add; otherwise show all visible shelves and rely on the backend's 403 at commit time.
-  $: visible = shelves
+  $: visible = $shelves
     .filter((s) => !modifiableOnly || s.can_modify)
     .filter((s) => !excludeDefault || !s.is_default);
   $: filtered = filter.trim()
@@ -47,7 +74,7 @@
 <div class="shelf-picker">
   <label>
     <span>{label}</span>
-    {#if shelves.length > 6}
+    {#if $shelves.length > 6}
       <input
         type="search"
         bind:value={filter}
@@ -63,10 +90,42 @@
       {/each}
     </select>
   </label>
-  {#if loaded && shelves.length === 0 && !error}
-    <p class="hint">No shelves yet — create one under Shelves first.</p>
+  {#if loaded && $shelves.length === 0 && !error}
+    <p class="hint">No shelves yet — create one below.</p>
   {/if}
   {#if error}<p class="hint warn">{error}</p>{/if}
+
+  {#if $canManageStructure}
+    {#if creating}
+      <form class="inline-create" on:submit|preventDefault={createShelf}>
+        <input
+          type="text"
+          bind:value={newName}
+          placeholder="New shelf name"
+          aria-label="New shelf name"
+          disabled={createBusy || disabled}
+        />
+        <button type="submit" class="secondary" disabled={!newName.trim() || createBusy || disabled}>
+          {createBusy ? 'Creating…' : 'Create'}
+        </button>
+        <button
+          type="button"
+          class="link"
+          on:click={() => {
+            creating = false;
+            createError = '';
+            newName = '';
+          }}
+          disabled={createBusy}>Cancel</button
+        >
+      </form>
+      {#if createError}<p class="hint warn">{createError}</p>{/if}
+    {:else}
+      <button type="button" class="link add-shelf" on:click={() => (creating = true)} {disabled}>
+        + New shelf
+      </button>
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -93,5 +152,36 @@
 
   .warn {
     color: var(--status-warning);
+  }
+
+  .inline-create {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-top: 0.4rem;
+  }
+
+  .inline-create input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent, var(--ink-muted));
+    cursor: pointer;
+    font-size: 0.8rem;
+    text-decoration: underline;
+  }
+
+  .link:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .add-shelf {
+    margin-top: 0.4rem;
   }
 </style>

@@ -8,14 +8,13 @@
     type GraphScopeType,
     type MissingDecision,
     type MissingWork,
-    type Rack,
     type RankedWork,
-    type Shelf,
     type VenueAuthorSummary,
     type Work,
   } from '../api/client';
   import Modal from '../components/Modal.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
+  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
@@ -28,8 +27,6 @@
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let searchQuery = '';
-  let shelves: Shelf[] = [];
-  let racks: Rack[] = [];
 
   let summary: CitationSummary | null = null;
   let busy = false;
@@ -77,7 +74,8 @@
 
   onMount(async () => {
     try {
-      [shelves, racks] = await Promise.all([client.listShelves(), client.listRacks()]);
+      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
+      await Promise.all([ensureShelves(client), ensureRacks(client)]);
     } catch (error) {
       message = errorMessage(error);
     }
@@ -282,14 +280,14 @@
         <label>Shelf
           <select bind:value={scopeId} data-testid="summary-scope-id">
             <option value="">Choose a shelf…</option>
-            {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
+            {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
         </label>
       {:else if scopeType === 'rack'}
         <label>Rack
           <select bind:value={scopeId} data-testid="summary-scope-id">
             <option value="">Choose a rack…</option>
-            {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
+            {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
         </label>
       {:else if scopeType === 'search_result'}

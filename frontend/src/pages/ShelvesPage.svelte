@@ -4,6 +4,7 @@
 
   import { ApiClient, type AccessLevel, type Shelf, type Work } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { refreshShelves, shelves } from '../lib/catalog';
   import { selectedShelfId } from '../lib/selection';
   import { canManageStructure, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
@@ -17,7 +18,6 @@
     { value: 'private', label: 'Private — only granted groups may see or modify' },
   ];
 
-  let shelves: Shelf[] = [];
   let selected: Shelf | null = null;
   let shelfWorks: Work[] = [];
   let allWorks: Work[] = [];
@@ -52,18 +52,17 @@
 
   async function load(): Promise<void> {
     await run(async () => {
-      const [shelfList, worksPage] = await Promise.all([
-        client.listShelves(),
+      const [, worksPage] = await Promise.all([
+        refreshShelves(client),
         client.listWorks({ perPage: 500 }),
       ]);
-      shelves = shelfList;
       allWorks = worksPage.items;
-      if (selected) selected = shelves.find((s) => s.id === selected?.id) ?? null;
+      if (selected) selected = get(shelves).find((s) => s.id === selected?.id) ?? null;
     });
     // Restore the shelf left open on a previous visit to this tab.
     if (!selected) {
       const remembered = get(selectedShelfId);
-      const shelf = remembered ? shelves.find((s) => s.id === remembered) : undefined;
+      const shelf = remembered ? get(shelves).find((s) => s.id === remembered) : undefined;
       if (shelf) await select(shelf);
     }
   }
@@ -85,7 +84,7 @@
     const shelf = selected;
     await run(async () => {
       const updated = await client.updateShelf(shelf.id, { name });
-      shelves = shelves.map((s) => (s.id === updated.id ? updated : s));
+      $shelves = $shelves.map((s) => (s.id === updated.id ? updated : s));
       if (selected?.id === updated.id) selected = updated;
     }, 'Shelf renamed');
   }
@@ -95,7 +94,7 @@
       const shelf = await client.createShelf({ name: newShelfName, access_level: newShelfAccess });
       newShelfName = '';
       newShelfAccess = 'open';
-      shelves = await client.listShelves();
+      await refreshShelves(client);
       await select(shelf);
     }, 'Shelf created');
   }
@@ -104,7 +103,7 @@
     if (accessLevel === shelf.access_level) return;
     await run(async () => {
       const updated = await client.updateShelf(shelf.id, { access_level: accessLevel });
-      shelves = shelves.map((s) => (s.id === updated.id ? updated : s));
+      $shelves = $shelves.map((s) => (s.id === updated.id ? updated : s));
       if (selected?.id === updated.id) selected = updated;
     }, 'Shelf access level updated');
   }
@@ -138,7 +137,7 @@
       selected = null;
       selectedShelfId.set(null);
       shelfWorks = [];
-      shelves = await client.listShelves();
+      await refreshShelves(client);
     }, 'Shelf archived');
   }
 
@@ -157,7 +156,7 @@
       selected = null;
       selectedShelfId.set(null);
       shelfWorks = [];
-      shelves = await client.listShelves();
+      await refreshShelves(client);
     }, 'Shelf deleted');
   }
 </script>
@@ -182,11 +181,11 @@
       </select>
       {#if !$canManageStructure}<p class="hintline">{INSUFFICIENT_ROLE} — only librarians and admins can create shelves.</p>{/if}
     </form>
-    {#if shelves.length === 0}
+    {#if $shelves.length === 0}
       <p class="empty">No shelves yet. Create one to group related papers.</p>
     {:else}
       <ul class="shelf-list">
-        {#each shelves as shelf (shelf.id)}
+        {#each $shelves as shelf (shelf.id)}
           <li>
             <button
               type="button"

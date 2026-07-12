@@ -4,6 +4,7 @@
 
   import { ApiClient, type AccessLevel, type Rack, type Shelf } from '../api/client';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { racks, refreshRacks, refreshShelves, shelves } from '../lib/catalog';
   import { selectedRackId } from '../lib/selection';
   import { canManageStructure, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
@@ -17,10 +18,8 @@
     { value: 'private', label: 'Private — only granted groups may see or modify' },
   ];
 
-  let racks: Rack[] = [];
   let selected: Rack | null = null;
   let rackShelves: Shelf[] = [];
-  let allShelves: Shelf[] = [];
   let newRackName = '';
   let newRackAccess: AccessLevel = 'open';
   let renameName = '';
@@ -30,7 +29,7 @@
 
   onMount(load);
 
-  $: availableShelves = allShelves.filter((s) => !rackShelves.some((rs) => rs.id === s.id));
+  $: availableShelves = $shelves.filter((s) => !rackShelves.some((rs) => rs.id === s.id));
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -47,12 +46,12 @@
 
   async function load(): Promise<void> {
     await run(async () => {
-      [racks, allShelves] = await Promise.all([client.listRacks(), client.listShelves()]);
-      if (selected) selected = racks.find((r) => r.id === selected?.id) ?? null;
+      await Promise.all([refreshRacks(client), refreshShelves(client)]);
+      if (selected) selected = get(racks).find((r) => r.id === selected?.id) ?? null;
     });
     if (!selected) {
       const remembered = get(selectedRackId);
-      const rack = remembered ? racks.find((r) => r.id === remembered) : undefined;
+      const rack = remembered ? get(racks).find((r) => r.id === remembered) : undefined;
       if (rack) await select(rack);
     }
   }
@@ -74,7 +73,7 @@
     const rack = selected;
     await run(async () => {
       const updated = await client.updateRack(rack.id, { name });
-      racks = racks.map((r) => (r.id === updated.id ? updated : r));
+      $racks = $racks.map((r) => (r.id === updated.id ? updated : r));
       if (selected?.id === updated.id) selected = updated;
     }, 'Rack renamed');
   }
@@ -84,7 +83,7 @@
       const rack = await client.createRack({ name: newRackName, access_level: newRackAccess });
       newRackName = '';
       newRackAccess = 'open';
-      racks = await client.listRacks();
+      await refreshRacks(client);
       await select(rack);
     }, 'Rack created');
   }
@@ -93,7 +92,7 @@
     if (accessLevel === rack.access_level) return;
     await run(async () => {
       const updated = await client.updateRack(rack.id, { access_level: accessLevel });
-      racks = racks.map((r) => (r.id === updated.id ? updated : r));
+      $racks = $racks.map((r) => (r.id === updated.id ? updated : r));
       if (selected?.id === updated.id) selected = updated;
     }, 'Rack access level updated');
   }
@@ -126,7 +125,7 @@
       selected = null;
       selectedRackId.set(null);
       rackShelves = [];
-      racks = await client.listRacks();
+      await refreshRacks(client);
     }, 'Rack archived');
   }
 
@@ -155,7 +154,9 @@
       selected = null;
       selectedRackId.set(null);
       rackShelves = [];
-      racks = await client.listRacks();
+      await refreshRacks(client);
+      // Cascade deleted the contained shelves too — refresh the shared shelf store so pickers drop them.
+      if (deleteShelves) await refreshShelves(client);
     }, deleteShelves ? 'Rack and its shelves deleted' : 'Rack deleted');
   }
 </script>
@@ -180,11 +181,11 @@
       </select>
       {#if !$canManageStructure}<p class="hintline">{INSUFFICIENT_ROLE} — only librarians and admins can create racks.</p>{/if}
     </form>
-    {#if racks.length === 0}
+    {#if $racks.length === 0}
       <p class="empty">No racks yet. A rack groups several shelves together.</p>
     {:else}
       <ul class="rack-list">
-        {#each racks as rack (rack.id)}
+        {#each $racks as rack (rack.id)}
           <li>
             <button
               type="button"

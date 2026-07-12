@@ -4,8 +4,6 @@
   import {
     ApiClient,
     type GraphScopeType,
-    type Rack,
-    type Shelf,
     type VizPayload,
   } from '../api/client';
   import { getRenderer, registeredViewTypes } from '../lib/viz/registry';
@@ -20,6 +18,7 @@
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
+  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
 
   export let client: ApiClient;
   // Whether the tab is visible (#9): ECharts mis-sizes when built while display:none, so resize
@@ -31,8 +30,6 @@
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let searchQuery = '';
-  let shelves: Shelf[] = [];
-  let racks: Rack[] = [];
 
   let xAxis = 'year';
   let yAxis = 'local_degree';
@@ -121,9 +118,10 @@
 
   onMount(async () => {
     try {
-      [shelves, racks, viewTypes] = await Promise.all([
-        client.listShelves(),
-        client.listRacks(),
+      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
+      [, , viewTypes] = await Promise.all([
+        ensureShelves(client),
+        ensureRacks(client),
         client.listVizViewTypes().catch(() => registeredViewTypes()),
       ]);
     } catch (error) {
@@ -313,14 +311,14 @@
         <label>Shelf
           <select bind:value={scopeId} data-testid="viz-scope-id">
             <option value="">Choose a shelf…</option>
-            {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
+            {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
         </label>
       {:else if scopeType === 'rack'}
         <label>Rack
           <select bind:value={scopeId} data-testid="viz-scope-id">
             <option value="">Choose a rack…</option>
-            {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
+            {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
         </label>
       {:else if scopeType === 'search_result'}

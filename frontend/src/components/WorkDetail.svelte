@@ -15,7 +15,6 @@
     type ReferenceRecord,
     type RelatedWork,
     type Summary,
-    type Tag,
     type WebCandidate,
     type WebFindDownloadItem,
     type WebFindDownloadResult,
@@ -30,8 +29,9 @@
     setFindWebCache,
     type SourceProgress,
   } from '../lib/findWebCache';
+  import { ensureTags, refreshTags, tags } from '../lib/catalog';
   import { pendingLibrarySearch } from '../lib/selection';
-  import { canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
+  import { canEdit, canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
   import PdfReader from './PdfReader.svelte';
@@ -63,9 +63,13 @@
   let references: ReferenceRecord[] = [];
   let annotations: Annotation[] = [];
   let summaries: Summary[] = [];
-  let tags: Tag[] = [];
   let appliedTags: AppliedTag[] = [];
   let applyTagId = '';
+  // Inline "create tag" (make + apply without leaving the paper). Gated on canEdit (contributor).
+  let creatingTag = false;
+  let newTagName = '';
+  let tagCreateBusy = false;
+  let tagCreateError = '';
   let attachFile: File | null = null;
 
   // Find-on-web (#5 / v2): picker modal state.
@@ -260,7 +264,8 @@
       reading_status: w.reading_status,
     };
     await run(async () => {
-      [fields, files, contexts, references, annotations, summaries, tags, appliedTags] =
+      // Trailing ensureTags() primes the shared tag store in parallel; its result isn't destructured.
+      [fields, files, contexts, references, annotations, summaries, appliedTags] =
         await Promise.all([
           client.listWorkMetadata(w.id),
           client.listWorkFiles(w.id),
@@ -268,8 +273,8 @@
           client.listWorkReferences(w.id),
           client.listAnnotations(w.id),
           client.listSummaries(w.id),
-          client.listTags(),
           client.listWorkTags(w.id),
+          ensureTags(client),
         ]);
     });
     // Seed the editable Authors field from the loaded 'authors' assertion (no Work column exists).
@@ -962,6 +967,26 @@
     }, 'Tag removed');
   }
 
+  // Create a tag inline and select it in the dropdown (the shared store then updates every other
+  // tag dropdown live). Kept separate from run() so its own busy/error state stays local.
+  async function createTagInline(): Promise<void> {
+    const name = newTagName.trim();
+    if (!name || tagCreateBusy) return;
+    tagCreateBusy = true;
+    tagCreateError = '';
+    try {
+      const tag = await client.createTag({ name });
+      await refreshTags(client);
+      applyTagId = tag.id;
+      newTagName = '';
+      creatingTag = false;
+    } catch (e) {
+      tagCreateError = e instanceof Error ? e.message : 'Could not create tag';
+    } finally {
+      tagCreateBusy = false;
+    }
+  }
+
   async function createAnnotation(payload: AnnotationCreate): Promise<void> {
     await run(async () => {
       await client.createAnnotation(work.id, {
@@ -1334,12 +1359,28 @@
     <div class="tags">
       <select bind:value={applyTagId} aria-label="Tag" title="Choose a tag to apply to this paper">
         <option value="">Choose a tag…</option>
-        {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
+        {#each $tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
       <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !canModify}
         title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>
     </div>
-    <p class="hintline">Create tags on the Tags tab, then apply them here.</p>
+    {#if $canEdit}
+      {#if creatingTag}
+        <form class="tag-create" on:submit|preventDefault={createTagInline}>
+          <input type="text" bind:value={newTagName} placeholder="New tag name" aria-label="New tag name"
+            disabled={tagCreateBusy} />
+          <button type="submit" class="secondary" disabled={!newTagName.trim() || tagCreateBusy}>
+            {tagCreateBusy ? 'Creating…' : 'Create'}</button>
+          <button type="button" class="linkbtn" on:click={() => { creatingTag = false; tagCreateError = ''; newTagName = ''; }}
+            disabled={tagCreateBusy}>Cancel</button>
+        </form>
+        {#if tagCreateError}<p class="hintline warn">{tagCreateError}</p>{/if}
+      {:else}
+        <button type="button" class="linkbtn" on:click={() => (creatingTag = true)}>+ New tag</button>
+      {/if}
+    {:else}
+      <p class="hintline">Create tags on the Tags tab, then apply them here.</p>
+    {/if}
   </details>
 
   <details on:toggle={(e) => e.currentTarget.open && !locationsLoaded && loadLocations()}>
@@ -1948,6 +1989,34 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.5rem;
+  }
+
+  .tag-create {
+    align-items: center;
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+
+  .tag-create input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .linkbtn {
+    background: none;
+    border: none;
+    color: var(--accent, var(--ink-muted));
+    cursor: pointer;
+    font-size: 0.8rem;
+    margin-top: 0.4rem;
+    padding: 0;
+    text-decoration: underline;
+  }
+
+  .linkbtn:disabled {
+    cursor: default;
+    opacity: 0.5;
   }
 
   .applied-tags {

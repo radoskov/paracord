@@ -17,6 +17,7 @@
   import TagsPage from './pages/TagsPage.svelte';
   import VisualizationsPage from './pages/VisualizationsPage.svelte';
   import CitationSummaryPage from './pages/CitationSummaryPage.svelte';
+  import { resetCatalog } from './lib/catalog';
   import { currentUser } from './lib/session';
   import { deriveJobsBadge } from './lib/jobsHealth';
   import { loadCustomThemes, reconcileTheme } from './lib/theme/store';
@@ -217,6 +218,7 @@
     // Drop cached tabs so a fresh sign-in starts clean (state reset on logout is intended, #9).
     visited = new Set<string>();
     currentUser.set(null);
+    resetCatalog();
     window.localStorage.removeItem('paracord_token');
   }
 

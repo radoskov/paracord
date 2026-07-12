@@ -4,11 +4,8 @@
 
   import {
     ApiClient,
-    type Rack,
     type ReadingStatus,
     type SavedFilter,
-    type Shelf,
-    type Tag,
     type Work,
     type WorkSortKey,
   } from '../api/client';
@@ -26,6 +23,7 @@
     saveColumnPrefs,
     visibleColumnDefs,
   } from '../lib/columns';
+  import { ensureRacks, ensureShelves, ensureTags, racks, shelves, tags } from '../lib/catalog';
   import {
     pendingLibraryOpen,
     pendingLibrarySearch,
@@ -44,9 +42,6 @@
   let totalPages = 1;
   let totalWorks = 0;
   let perPage = 0;
-  let shelves: Shelf[] = [];
-  let racks: Rack[] = [];
-  let tags: Tag[] = [];
   let savedFilters: SavedFilter[] = [];
   // Bound to the "Apply saved filter…" dropdown; reset to '' after applying so it stays a prompt.
   let applyFilterId = '';
@@ -178,10 +173,12 @@
 
   onMount(async () => {
     await run(async () => {
-      [shelves, racks, tags, savedFilters] = await Promise.all([
-        client.listShelves(),
-        client.listRacks(),
-        client.listTags(),
+      // Prime the shared catalog stores (so newly created shelves/racks/tags appear in these filter
+      // dropdowns live); keep savedFilters local. Leading commas discard the ensure* return values.
+      [, , , savedFilters] = await Promise.all([
+        ensureShelves(client),
+        ensureRacks(client),
+        ensureTags(client),
         client.listSavedFilters().catch(() => [] as SavedFilter[]),
       ]);
     });
@@ -708,17 +705,17 @@
           <select bind:value={shelfFilter} on:change={reload} aria-label="Shelf"
             title="Filter the list by shelf">
             <option value="">Any shelf</option>
-            {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
+            {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
           <select bind:value={rackFilter} on:change={reload} aria-label="Rack"
             title="Filter the list by rack">
             <option value="">Any rack</option>
-            {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
+            {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
           <select bind:value={tagFilter} on:change={reload} aria-label="Tag"
             title="Filter the list by tag">
             <option value="">Any tag</option>
-            {#each tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
+            {#each $tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
           </select>
           <button type="button" class="secondary" on:click={() => (showMoreFilters = !showMoreFilters)}
             title="Filter by extraction / metadata completeness">

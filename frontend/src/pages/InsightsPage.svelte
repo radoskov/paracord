@@ -7,14 +7,13 @@
     type GraphNodeMode,
     type GraphScopeType,
     type ImportBatch,
-    type Rack,
     type SavedFilter,
     type ScopeSummaryResponse,
-    type Shelf,
     type Topic,
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
+  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
   import { pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -23,8 +22,6 @@
   // relayout Cytoscape after the tab is shown again (it mis-sizes while hidden).
   export let visible = true;
 
-  let shelves: Shelf[] = [];
-  let racks: Rack[] = [];
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let topics: Topic[] = [];
@@ -44,9 +41,10 @@
 
   onMount(async () => {
     await run(async () => {
-      [shelves, racks, batches, savedFilters] = await Promise.all([
-        client.listShelves(),
-        client.listRacks(),
+      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
+      [, , batches, savedFilters] = await Promise.all([
+        ensureShelves(client),
+        ensureRacks(client),
         client.listImportBatches().catch(() => [] as ImportBatch[]),
         client.listSavedFilters().catch(() => [] as SavedFilter[]),
       ]);
@@ -195,12 +193,12 @@
       {#if scopeType === 'shelf'}
         <select bind:value={scopeId} aria-label="Shelf" title="Choose the shelf to analyse">
           <option value="">Choose a shelf…</option>
-          {#each shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
+          {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
         </select>
       {:else if scopeType === 'rack'}
         <select bind:value={scopeId} aria-label="Rack" title="Choose the rack to analyse">
           <option value="">Choose a rack…</option>
-          {#each racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
+          {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
         </select>
       {:else if scopeType === 'search_result'}
         <input

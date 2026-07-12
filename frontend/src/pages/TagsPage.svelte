@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
 
   import { ApiClient, type Tag } from '../api/client';
+  import { refreshTags, tags } from '../lib/catalog';
   import { canEdit, isEditor, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -18,7 +19,6 @@
     wasVisible = false;
   }
 
-  let tags: Tag[] = [];
   let newTagName = '';
   let newTagColor = '';
   let newTagDescription = '';
@@ -48,7 +48,7 @@
 
   async function load(): Promise<void> {
     await run(async () => {
-      tags = await client.listTags();
+      await refreshTags(client);
     });
   }
 
@@ -62,7 +62,7 @@
       newTagName = '';
       newTagColor = '';
       newTagDescription = '';
-      tags = await client.listTags();
+      await refreshTags(client);
     }, 'Tag created');
   }
 
@@ -87,7 +87,7 @@
         description: editDescription.trim() || null,
       });
       editingId = null;
-      tags = await client.listTags();
+      await refreshTags(client);
     }, 'Tag updated');
   }
 
@@ -98,7 +98,7 @@
     await run(async () => {
       await client.deleteTag(tag.id);
       if (editingId === tag.id) editingId = null;
-      tags = await client.listTags();
+      await refreshTags(client);
     }, 'Tag deleted');
   }
 </script>
@@ -125,13 +125,13 @@
   <div class="card">
     <div class="head">
       <h2>Tags</h2>
-      <span class="muted">{tags.length}</span>
+      <span class="muted">{$tags.length}</span>
     </div>
-    {#if tags.length === 0}
+    {#if $tags.length === 0}
       <p class="empty">No tags yet — create one above.</p>
     {:else}
       <ul class="tag-list">
-        {#each tags as tag (tag.id)}
+        {#each $tags as tag (tag.id)}
           <li>
             {#if editingId === tag.id}
               <form on:submit|preventDefault={saveEdit} class="edit-tag">
