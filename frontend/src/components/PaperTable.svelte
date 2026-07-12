@@ -160,6 +160,16 @@
               <td>{formatDate(work.created_at)}</td>
             {:else if col.id === 'doi'}
               <td>{work.doi ?? '-'}</td>
+            {:else if col.id === 'arxiv_id'}
+              <td>{work.arxiv_id ?? '-'}</td>
+            {:else if col.id === 'reference_count'}
+              <td class="num">{work.reference_count ?? 0}</td>
+            {:else if col.id === 'citation_count'}
+              <td class="num">{work.citation_count ?? '-'}</td>
+            {:else if col.id === 'local_reference_count'}
+              <td class="num">{work.local_reference_count ?? 0}</td>
+            {:else if col.id === 'local_citation_count'}
+              <td class="num">{work.local_citation_count ?? 0}</td>
             {:else if col.id === 'keywords'}
               <td>
                 {#if work.keywords?.length}

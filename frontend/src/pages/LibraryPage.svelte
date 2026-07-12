@@ -372,6 +372,16 @@
           return w.reading_status;
         case 'added_at':
           return w.created_at ?? '';
+        case 'file_count':
+          return w.file_count ?? 0;
+        case 'reference_count':
+          return w.reference_count ?? 0;
+        case 'citation_count':
+          return w.citation_count ?? -Infinity;
+        case 'local_reference_count':
+          return w.local_reference_count ?? 0;
+        case 'local_citation_count':
+          return w.local_citation_count ?? 0;
         case 'updated_at':
         default:
           return w.updated_at ?? '';

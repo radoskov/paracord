@@ -252,6 +252,13 @@ class WorkRead(BaseModel):
     file_count: int = 0
     tags: list[WorkTagRef] = []
     badges: list[str] = []
+    # Reference/citation count columns (batch 12). ``reference_count`` = references this paper cites;
+    # ``local_reference_count`` = distinct OTHER local papers it references; ``local_citation_count`` =
+    # distinct OTHER local papers that reference it. (External ``citation_count`` is above.) Populated
+    # by ``list_works`` (batched across the page); other endpoints leave them 0.
+    reference_count: int = 0
+    local_reference_count: int = 0
+    local_citation_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -345,8 +352,47 @@ _MISSING_FIELDS = {
     "arxiv_id": Work.arxiv_id,
 }
 
-# SAFE sort allowlist: client sort key → Work column. The raw `sort` string is NEVER interpolated
-# into the query; an unknown/None key falls back to the default below. This blocks column injection.
+# Count-based sort expressions (library count columns). Correlated scalar subqueries so a page can be
+# ordered by a per-work count at the SQL level (before pagination). Counts are 0-based (never NULL);
+# self-references/-citations are excluded so the counts mean "how many OTHER local papers".
+_FILE_COUNT_SORT = (
+    select(func.count(FileWorkLink.file_id))
+    .where(FileWorkLink.work_id == Work.id)
+    .correlate(Work)
+    .scalar_subquery()
+)
+_REFERENCE_COUNT_SORT = (
+    select(func.count(ReferenceCitation.id))
+    .where(ReferenceCitation.citing_work_id == Work.id)
+    .correlate(Work)
+    .scalar_subquery()
+)
+_LOCAL_REFERENCE_COUNT_SORT = (
+    select(func.count(func.distinct(Reference.resolved_work_id)))
+    .select_from(ReferenceCitation)
+    .join(Reference, Reference.id == ReferenceCitation.reference_id)
+    .where(
+        ReferenceCitation.citing_work_id == Work.id,
+        Reference.resolved_work_id.is_not(None),
+        Reference.resolved_work_id != Work.id,
+    )
+    .correlate(Work)
+    .scalar_subquery()
+)
+_LOCAL_CITATION_COUNT_SORT = (
+    select(func.count(func.distinct(ReferenceCitation.citing_work_id)))
+    .select_from(Reference)
+    .join(ReferenceCitation, ReferenceCitation.reference_id == Reference.id)
+    .where(
+        Reference.resolved_work_id == Work.id,
+        ReferenceCitation.citing_work_id != Work.id,
+    )
+    .correlate(Work)
+    .scalar_subquery()
+)
+
+# SAFE sort allowlist: client sort key → Work column / expression. The raw `sort` string is NEVER
+# interpolated into the query; an unknown/None key falls back to the default below (blocks injection).
 _SORT_COLUMNS = {
     "title": Work.canonical_title,
     "year": Work.year,
@@ -354,6 +400,20 @@ _SORT_COLUMNS = {
     "added_at": Work.created_at,
     "updated_at": Work.updated_at,
     "reading_status": Work.reading_status,
+    "file_count": _FILE_COUNT_SORT,
+    "reference_count": _REFERENCE_COUNT_SORT,
+    "citation_count": Work.citation_count,
+    "local_reference_count": _LOCAL_REFERENCE_COUNT_SORT,
+    "local_citation_count": _LOCAL_CITATION_COUNT_SORT,
+}
+# These sorts can carry NULL (Work.citation_count) — order NULLs last regardless of direction so
+# "unknown" never floats to the top. The count subqueries are 0-based, so this is a harmless no-op.
+_NULLS_LAST_SORTS = {
+    "file_count",
+    "reference_count",
+    "citation_count",
+    "local_reference_count",
+    "local_citation_count",
 }
 _DEFAULT_SORT_COLUMN = Work.updated_at
 
@@ -759,6 +819,65 @@ def _batch_library_columns(
     return file_counts, work_tags, badges
 
 
+def _batch_reference_counts(
+    db: Session, works: list[Work]
+) -> tuple[dict[uuid.UUID, int], dict[uuid.UUID, int], dict[uuid.UUID, int]]:
+    """Batch-load the reference/citation counts for a page of works (3 grouped queries, no N+1).
+
+    Returns ``(reference_count, local_reference_count, local_citation_count)`` per work id:
+    references this paper cites, distinct OTHER local papers it references, and distinct OTHER local
+    papers that reference it. Self-references/-citations are excluded so the local counts mean
+    "how many other local papers".
+    """
+    ref_counts: dict[uuid.UUID, int] = {}
+    local_ref_counts: dict[uuid.UUID, int] = {}
+    local_cit_counts: dict[uuid.UUID, int] = {}
+    work_ids = [w.id for w in works]
+    if not work_ids:
+        return ref_counts, local_ref_counts, local_cit_counts
+
+    # Total references this work cites.
+    for wid, n in db.execute(
+        select(ReferenceCitation.citing_work_id, func.count(ReferenceCitation.id))
+        .where(ReferenceCitation.citing_work_id.in_(work_ids))
+        .group_by(ReferenceCitation.citing_work_id)
+    ).all():
+        ref_counts[wid] = int(n)
+
+    # Distinct OTHER local works this work references (reference resolved to a local work != itself).
+    for wid, n in db.execute(
+        select(
+            ReferenceCitation.citing_work_id,
+            func.count(func.distinct(Reference.resolved_work_id)),
+        )
+        .join(Reference, Reference.id == ReferenceCitation.reference_id)
+        .where(
+            ReferenceCitation.citing_work_id.in_(work_ids),
+            Reference.resolved_work_id.is_not(None),
+            Reference.resolved_work_id != ReferenceCitation.citing_work_id,
+        )
+        .group_by(ReferenceCitation.citing_work_id)
+    ).all():
+        local_ref_counts[wid] = int(n)
+
+    # Distinct OTHER local works that reference this work.
+    for wid, n in db.execute(
+        select(
+            Reference.resolved_work_id,
+            func.count(func.distinct(ReferenceCitation.citing_work_id)),
+        )
+        .join(ReferenceCitation, ReferenceCitation.reference_id == Reference.id)
+        .where(
+            Reference.resolved_work_id.in_(work_ids),
+            ReferenceCitation.citing_work_id != Reference.resolved_work_id,
+        )
+        .group_by(Reference.resolved_work_id)
+    ).all():
+        local_cit_counts[wid] = int(n)
+
+    return ref_counts, local_ref_counts, local_cit_counts
+
+
 @router.get("", response_model=PaginatedWorks)
 def list_works(
     q: str | None = Query(default=None),
@@ -821,7 +940,11 @@ def list_works(
     # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
     # order when the sort column has ties.
     sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
-    direction = sort_column.asc() if order == "asc" else sort_column.desc()
+    base_direction = sort_column.asc() if order == "asc" else sort_column.desc()
+    # NULL-carrying sorts (citation_count) order NULLs last regardless of direction.
+    direction = (
+        base_direction.nullslast() if (sort or "") in _NULLS_LAST_SORTS else base_direction
+    )
     stmt = (
         stmt.order_by(direction, Work.id)
         .offset((page - 1) * effective_per_page)
@@ -830,6 +953,7 @@ def list_works(
     works = list(db.scalars(stmt).all())
     work_shelves, work_racks = _batch_shelf_rack_refs(db, actor, [w.id for w in works])
     file_counts, work_tags, work_badges = _batch_library_columns(db, works)
+    ref_counts, local_ref_counts, local_cit_counts = _batch_reference_counts(db, works)
     items = [
         WorkRead.model_validate(w).model_copy(
             update={
@@ -838,6 +962,9 @@ def list_works(
                 "file_count": file_counts.get(w.id, 0),
                 "tags": work_tags.get(w.id, []),
                 "badges": work_badges.get(w.id, []),
+                "reference_count": ref_counts.get(w.id, 0),
+                "local_reference_count": local_ref_counts.get(w.id, 0),
+                "local_citation_count": local_cit_counts.get(w.id, 0),
             }
         )
         for w in works

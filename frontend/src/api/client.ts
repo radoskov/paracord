@@ -63,6 +63,13 @@ export interface Work {
   file_count?: number;
   tags?: WorkTagRef[];
   badges?: string[];
+  // Reference/citation count columns (batch 12); only populated by listWorks. reference_count =
+  // references this paper cites; local_reference_count = distinct other local papers it references;
+  // local_citation_count = distinct other local papers that reference it. (External citation_count
+  // is above.)
+  reference_count?: number;
+  local_reference_count?: number;
+  local_citation_count?: number;
 }
 
 // A tag applied to a paper (Library "Tags" column).
@@ -927,7 +934,17 @@ export interface MergePreview {
 
 // Sort keys the backend list_works endpoint accepts (SAFE allowlist, mirrored server-side).
 export type WorkSortKey =
-  "title" | "year" | "venue" | "added_at" | "updated_at" | "reading_status";
+  | "title"
+  | "year"
+  | "venue"
+  | "added_at"
+  | "updated_at"
+  | "reading_status"
+  | "file_count"
+  | "reference_count"
+  | "citation_count"
+  | "local_reference_count"
+  | "local_citation_count";
 
 export interface WorkQuery {
   q?: string;

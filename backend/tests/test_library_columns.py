@@ -85,3 +85,63 @@ def test_library_columns_file_count_tags_and_badges(client, auth_headers, db):
 
     assert items[str(c.id)]["file_count"] == 0
     assert items[str(c.id)]["badges"] == ["not_extracted"]
+
+
+def test_library_reference_and_citation_counts(client, auth_headers, db, make_reference):
+    # A references B and C (both local) + one external ref → reference_count 3, local_reference 2.
+    a = _work(db, "Alpha")
+    b = _work(db, "Beta")
+    c = _work(db, "Gamma")
+    make_reference(db, citing_work_id=a.id, title="Beta", resolved_work_id=b.id)
+    make_reference(db, citing_work_id=a.id, title="Gamma", resolved_work_id=c.id)
+    make_reference(db, citing_work_id=a.id, title="Some external paper")
+    db.commit()
+
+    items = _items_by_id(client.get("/api/v1/works", headers=auth_headers("owner")).json())
+    assert items[str(a.id)]["reference_count"] == 3
+    assert items[str(a.id)]["local_reference_count"] == 2  # B and C
+    assert items[str(a.id)]["local_citation_count"] == 0
+    # B is referenced by A → one local citation, and cites nothing itself.
+    assert items[str(b.id)]["local_citation_count"] == 1
+    assert items[str(b.id)]["reference_count"] == 0
+    assert items[str(b.id)]["local_reference_count"] == 0
+
+
+def test_library_sort_by_reference_count(client, auth_headers, db, make_reference):
+    few = _work(db, "Few refs")
+    many = _work(db, "Many refs")
+    make_reference(db, citing_work_id=few.id, title="r1")
+    for i in range(3):
+        make_reference(db, citing_work_id=many.id, title=f"m{i}")
+    db.commit()
+
+    ordered = client.get(
+        "/api/v1/works?sort=reference_count&order=desc", headers=auth_headers("owner")
+    ).json()["items"]
+    ids = [it["id"] for it in ordered]
+    assert ids.index(str(many.id)) < ids.index(str(few.id))  # most references first
+
+    ordered_asc = client.get(
+        "/api/v1/works?sort=reference_count&order=asc", headers=auth_headers("owner")
+    ).json()["items"]
+    ids_asc = [it["id"] for it in ordered_asc]
+    assert ids_asc.index(str(few.id)) < ids_asc.index(str(many.id))
+
+
+def test_library_sort_by_local_citation_count(client, auth_headers, db, make_reference):
+    popular = _work(db, "Popular")
+    lonely = _work(db, "Lonely")
+    citer1 = _work(db, "Citer one")
+    citer2 = _work(db, "Citer two")
+    make_reference(db, citing_work_id=citer1.id, title="Popular", resolved_work_id=popular.id)
+    make_reference(db, citing_work_id=citer2.id, title="Popular", resolved_work_id=popular.id)
+    db.commit()
+
+    ordered = client.get(
+        "/api/v1/works?sort=local_citation_count&order=desc", headers=auth_headers("owner")
+    ).json()["items"]
+    ids = [it["id"] for it in ordered]
+    assert ids[0] == str(popular.id)  # cited by two local papers → top
+    by_id = _items_by_id({"items": ordered})
+    assert by_id[str(popular.id)]["local_citation_count"] == 2
+    assert by_id[str(lonely.id)]["local_citation_count"] == 0

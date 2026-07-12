@@ -31,6 +31,13 @@ The format follows Keep a Changelog style conventions, but the project is curren
 
 ### Added
 
+- **New sortable Library columns: arXiv ID, References, Citations, Local refs, Local cites.** The
+  Library table gains opt-in columns (enable them in the column picker) for a paper's arXiv id, the
+  number of references it cites, its external citation count, how many **local** papers it references,
+  and how many **local** papers reference it. The four count columns — plus the existing Files
+  column — are now sortable by clicking their header (server-side, so it sorts the whole library, not
+  just the current page). The local counts are powered by the batch-12 reference matcher.
+
 - **"Likely local" reference matching.** Extracted bibliography references are now matched against
   the library so a cited paper that's already present stops showing as "external" (and its Import
   stops creating a near-duplicate). A DOI/arXiv identifier is the authoritative gate — present on

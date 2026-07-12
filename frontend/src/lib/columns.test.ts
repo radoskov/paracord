@@ -51,6 +51,30 @@ describe('column prefs registry + validation', () => {
     expect(prefs.sort).toEqual({ key: 'updated_at', order: 'desc' });
   });
 
+  it('registers the batch-12 count columns as sortable, opt-in extras', () => {
+    const prefs = normalizeColumnPrefs({});
+    for (const id of [
+      'arxiv_id',
+      'reference_count',
+      'citation_count',
+      'local_reference_count',
+      'local_citation_count',
+    ]) {
+      expect(prefs.order).toContain(id); // present in the registry
+      expect(prefs.visible).not.toContain(id); // but hidden by default
+    }
+    // The count columns (and Files) are accepted as valid sort keys.
+    for (const key of [
+      'file_count',
+      'reference_count',
+      'citation_count',
+      'local_reference_count',
+      'local_citation_count',
+    ] as const) {
+      expect(normalizeColumnPrefs({ sort: { key, order: 'desc' } }).sort.key).toBe(key);
+    }
+  });
+
   it('returns defaults for garbage input', () => {
     expect(normalizeColumnPrefs(null)).toEqual(defaultColumnPrefs());
     expect(normalizeColumnPrefs(42)).toEqual(defaultColumnPrefs());

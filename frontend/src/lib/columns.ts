@@ -16,10 +16,15 @@ export type ColumnId =
   | 'status'
   | 'added_at'
   | 'doi'
+  | 'arxiv_id'
   | 'keywords'
   | 'shelves'
   | 'racks'
   | 'file_count'
+  | 'reference_count'
+  | 'citation_count'
+  | 'local_reference_count'
+  | 'local_citation_count'
   | 'topics'
   | 'badges'
   | 'tags';
@@ -43,11 +48,27 @@ export const LIBRARY_COLUMNS: ColumnDef[] = [
   { id: 'status', label: 'Status', sortKey: 'reading_status', default: true },
   { id: 'added_at', label: 'Added', sortKey: 'added_at', default: true },
   { id: 'doi', label: 'DOI', default: true },
+  { id: 'arxiv_id', label: 'arXiv ID', default: false },
   { id: 'keywords', label: 'Keywords', default: false },
   { id: 'shelves', label: 'Shelves', default: false },
   { id: 'racks', label: 'Racks', default: false },
   // batch10 columns — all opt-in (hidden by default so they don't push past the soft cap).
-  { id: 'file_count', label: 'Files', default: false },
+  { id: 'file_count', label: 'Files', sortKey: 'file_count', default: false },
+  // batch12 reference/citation count columns — opt-in, all sortable server-side.
+  { id: 'reference_count', label: 'References', sortKey: 'reference_count', default: false },
+  { id: 'citation_count', label: 'Citations', sortKey: 'citation_count', default: false },
+  {
+    id: 'local_reference_count',
+    label: 'Local refs',
+    sortKey: 'local_reference_count',
+    default: false,
+  },
+  {
+    id: 'local_citation_count',
+    label: 'Local cites',
+    sortKey: 'local_citation_count',
+    default: false,
+  },
   { id: 'topics', label: 'Topics', default: false },
   { id: 'badges', label: 'Badges', default: false },
   { id: 'tags', label: 'Tags', default: false },
