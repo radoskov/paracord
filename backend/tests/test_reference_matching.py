@@ -236,15 +236,15 @@ def test_disabled_matcher_does_nothing(db, monkeypatch) -> None:
 # --- endpoints (D3 rescan) ------------------------------------------------------------------------
 
 
-def test_per_paper_rescan_endpoint_links_reference(client, auth_headers, db, make_reference) -> None:
+def test_per_paper_rescan_endpoint_links_reference(
+    client, auth_headers, db, make_reference
+) -> None:
     citing = _work(db, "Citing Paper", year=2021)
     target = _work(db, LOCAL_TITLE, year=2010)
     make_reference(db, citing_work_id=citing.id, title=CITED_TITLE, year=2010)
     db.commit()
 
-    r = client.post(
-        f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor")
-    )
+    r = client.post(f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor"))
     assert r.status_code == 200
     body = r.json()
     assert body["scanned"] == 1 and body["changed"] == 1
@@ -293,9 +293,7 @@ def test_reference_list_exposes_authors(client, auth_headers, db, make_reference
 def test_per_paper_rescan_requires_contributor(client, auth_headers, db, make_reference) -> None:
     citing = _work(db, "Citing Paper", year=2021)
     db.commit()
-    r = client.post(
-        f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("reader")
-    )
+    r = client.post(f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("reader"))
     assert r.status_code == 403
 
 
@@ -353,7 +351,9 @@ def test_reject_action_keeps_suggestion(client, auth_headers, db, make_reference
 
 def test_link_without_suggestion_is_conflict(client, auth_headers, db, make_reference) -> None:
     citing = _work(db, "Citing Paper", year=2021)
-    ref = make_reference(db, citing_work_id=citing.id, title="Orphan ref", resolution_status="external")
+    ref = make_reference(
+        db, citing_work_id=citing.id, title="Orphan ref", resolution_status="external"
+    )
     db.commit()
     r = client.patch(
         f"/api/v1/works/{citing.id}/references/{ref.id}",
@@ -366,7 +366,11 @@ def test_link_without_suggestion_is_conflict(client, auth_headers, db, make_refe
 def test_import_action_creates_work(client, auth_headers, db, make_reference) -> None:
     citing = _work(db, "Citing Paper", year=2021)
     ref = make_reference(
-        db, citing_work_id=citing.id, title="A Missing Paper", year=2018, resolution_status="external"
+        db,
+        citing_work_id=citing.id,
+        title="A Missing Paper",
+        year=2018,
+        resolution_status="external",
     )
     db.commit()
     r = client.patch(
@@ -380,10 +384,14 @@ def test_import_action_creates_work(client, auth_headers, db, make_reference) ->
     assert body["resolved_work_id"] is not None
 
 
-def test_action_on_reference_not_cited_by_work_is_404(client, auth_headers, db, make_reference) -> None:
+def test_action_on_reference_not_cited_by_work_is_404(
+    client, auth_headers, db, make_reference
+) -> None:
     citing = _work(db, "Citing Paper", year=2021)
     other = _work(db, "Other Paper", year=2021)
-    ref = make_reference(db, citing_work_id=other.id, title="Elsewhere", resolution_status="external")
+    ref = make_reference(
+        db, citing_work_id=other.id, title="Elsewhere", resolution_status="external"
+    )
     db.commit()
     r = client.patch(
         f"/api/v1/works/{citing.id}/references/{ref.id}",
@@ -400,9 +408,7 @@ def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monk
     monkeypatch.setattr(queue_mod, "enqueue_reference_rescan", lambda: calls.append(1) or "job-1")
     admin = auth_headers("owner")
     assert (
-        client.get("/api/v1/admin/app-config", headers=admin).json()[
-            "use_fuzzy_match_as_confirmed"
-        ]
+        client.get("/api/v1/admin/app-config", headers=admin).json()["use_fuzzy_match_as_confirmed"]
         is False
     )
     r = client.patch(

@@ -58,7 +58,7 @@ def upgrade() -> None:
     # 2) Lossless 1:1 backfill — one link per existing reference (server-side UUIDs, set-based).
     op.execute(
         sa.text(
-            'INSERT INTO reference_citations '
+            "INSERT INTO reference_citations "
             "(id, reference_id, citing_work_id, source_tei_id, created_at) "
             "SELECT gen_random_uuid(), id, citing_work_id, source_tei_id, created_at "
             'FROM "references"'

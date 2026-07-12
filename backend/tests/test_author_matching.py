@@ -42,7 +42,9 @@ def test_overlap_ratio_without_et_al_is_ref_side_fraction() -> None:
 
 def test_overlap_ratio_with_et_al_validates_single_best_author() -> None:
     # "et al" (#6): one confirmed shared author is enough, regardless of the truncated rest.
-    assert author_overlap_ratio(["Smith, J.", "et al."], ["John Smith", "Alice Doe", "Bob Roe"]) == 1.0
+    assert (
+        author_overlap_ratio(["Smith, J.", "et al."], ["John Smith", "Alice Doe", "Bob Roe"]) == 1.0
+    )
     # ...but the one named author must actually match.
     assert author_overlap_ratio(["Berlin, Z.", "et al."], ["John Smith", "Alice Doe"]) == 0.0
 

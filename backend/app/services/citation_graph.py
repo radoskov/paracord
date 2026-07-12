@@ -133,9 +133,7 @@ def build_citation_graph(
         )
     ).all():
         citing_by_ref[ref_id].append(citing_wid)
-    references = db.scalars(
-        select(Reference).where(Reference.id.in_(citing_by_ref.keys()))
-    ).all()
+    references = db.scalars(select(Reference).where(Reference.id.in_(citing_by_ref.keys()))).all()
 
     local_index = _local_work_index(
         db,

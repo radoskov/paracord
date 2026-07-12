@@ -883,6 +883,10 @@
           "rq_worker_count": {
             "title": "Rq Worker Count",
             "type": "integer"
+          },
+          "use_fuzzy_match_as_confirmed": {
+            "title": "Use Fuzzy Match As Confirmed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -891,7 +895,8 @@
           "rate_limit_global_per_min",
           "max_batch_items",
           "rq_worker_count",
-          "max_queue_len"
+          "max_queue_len",
+          "use_fuzzy_match_as_confirmed"
         ],
         "title": "AppConfigOut",
         "type": "object"
@@ -969,6 +974,17 @@
               }
             ],
             "title": "Rq Worker Count"
+          },
+          "use_fuzzy_match_as_confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Fuzzy Match As Confirmed"
           }
         },
         "title": "AppConfigUpdate",
@@ -4611,6 +4627,25 @@
         "title": "RankedWorkModel",
         "type": "object"
       },
+      "ReferenceActionRequest": {
+        "description": "A confirm/reject/import action on a (canonical) reference (batch 12, item #4).",
+        "properties": {
+          "action": {
+            "enum": [
+              "link",
+              "reject",
+              "import"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ReferenceActionRequest",
+        "type": "object"
+      },
       "ReferenceRead": {
         "properties": {
           "arxiv_id": {
@@ -4623,6 +4658,20 @@
               }
             ],
             "title": "Arxiv Id"
+          },
+          "authors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authors"
           },
           "doi": {
             "anyOf": [
@@ -4639,6 +4688,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "match_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score"
           },
           "raw_citation": {
             "anyOf": [
@@ -4678,6 +4738,18 @@
             ],
             "title": "Shorthand"
           },
+          "suggested_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Work Id"
+          },
           "title": {
             "anyOf": [
               {
@@ -4706,6 +4778,39 @@
           "resolution_status"
         ],
         "title": "ReferenceRead",
+        "type": "object"
+      },
+      "ReferenceRescanResult": {
+        "description": "Outcome of a reference→library rematch (batch 12).",
+        "properties": {
+          "changed": {
+            "default": 0,
+            "title": "Changed",
+            "type": "integer"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
+          },
+          "scanned": {
+            "default": 0,
+            "title": "Scanned",
+            "type": "integer"
+          }
+        },
+        "title": "ReferenceRescanResult",
         "type": "object"
       },
       "RejectTeleportRequest": {
@@ -18804,6 +18909,56 @@
         ]
       }
     },
+    "/api/v1/works/references/rescan-all": {
+      "post": {
+        "description": "Re-run reference→library matching across the WHOLE library (batch 12, D3).\n\nA full rematch is a minutes-long job at scale, so it is always enqueued on the background worker\n(mirrors ``POST /duplicates/scan``). Audited as a bulk action.",
+        "operationId": "rescan_all_references_api_v1_works_references_rescan_all_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceRescanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rescan All References",
+        "tags": [
+          "works"
+        ]
+      }
+    },
     "/api/v1/works/{work_id}": {
       "delete": {
         "description": "Delete a paper and its dependent rows (contributors may delete only their own papers).\n\nRemoves links and derived data (memberships, tags, assertions, summaries, embeddings,\nreferences, mentions, annotations, versions, duplicate candidates). The underlying File\nrows and managed PDFs are content-addressed and may be shared, so they are kept; only the\nfile↔work links are removed.",
@@ -21014,6 +21169,146 @@
           }
         },
         "summary": "List Work References",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/references/rescan": {
+      "post": {
+        "description": "Re-run reference→library matching for one paper's bibliography (batch 12, D3).\n\nSynchronous (a single paper's references are few). Respects the batch-12 status rules: a\nconfirmed match stays locked; a rejected candidate is not re-proposed. Uses the current\n``use_fuzzy_match_as_confirmed`` toggle.",
+        "operationId": "rescan_work_references_api_v1_works__work_id__references_rescan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceRescanResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rescan Work References",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/references/{reference_id}": {
+      "patch": {
+        "description": "Confirm / reject / import a reference's \"likely local\" match (batch 12, item #4).\n\nBecause references are canonical (shared across citing works), the action applies to **all**\nciting works at once; ``work_id`` scopes authorization and confirms this paper actually cites the\nreference. Actions:\n\n* ``link`` — confirm the suggested candidate: ``resolved_work_id = suggested_work_id``, status\n  ``confirmed_match`` (LOCKED — a rescan never reverts or re-suggests it).\n* ``reject`` — status ``rejected_match``; the suggestion is kept so a rescan won't re-propose the\n  *same* candidate (a different, better one may still surface).\n* ``import`` — create a library work from the reference (the existing from-reference path).",
+        "operationId": "act_on_reference_api_v1_works__work_id__references__reference_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "reference_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reference Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Act On Reference",
         "tags": [
           "works"
         ]

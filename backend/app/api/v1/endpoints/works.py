@@ -593,9 +593,7 @@ def build_works_query(
         stmt = stmt.where(has_file if has_pdf else ~has_file)
     if has_references is not None:
         has_refs = (
-            select(ReferenceCitation.id)
-            .where(ReferenceCitation.citing_work_id == Work.id)
-            .exists()
+            select(ReferenceCitation.id).where(ReferenceCitation.citing_work_id == Work.id).exists()
         )
         stmt = stmt.where(has_refs if has_references else ~has_refs)
     if parsed.has_annotations:  # has:notes / has:annotations — ≥1 annotation on the work
@@ -1629,7 +1627,9 @@ def act_on_reference(
             actor_user_id=actor.id,
             entity_type="reference",
             entity_id=str(reference.id),
-            details={"work_id": str(reference.suggested_work_id) if reference.suggested_work_id else None},
+            details={
+                "work_id": str(reference.suggested_work_id) if reference.suggested_work_id else None
+            },
         )
     else:  # import
         import_reference_as_work(reference_id=reference_id, db=db, actor=actor)

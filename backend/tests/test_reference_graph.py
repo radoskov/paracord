@@ -66,9 +66,7 @@ def test_reference_graph_splits_local_external_with_section_counts(
     assert set(by_label["Local Cited"]) >= {"citation_count", "local_degree", "topic_similarity"}
 
 
-def test_reference_graph_marks_likely_local_nodes(
-    client, auth_headers, db, make_reference
-) -> None:
+def test_reference_graph_marks_likely_local_nodes(client, auth_headers, db, make_reference) -> None:
     """Batch 12: a soft fuzzy match gets a `likely_local` node kind carrying the suggested work +
     score, but stays unresolved so local-only metrics aren't computed on the guess."""
     base = Work(canonical_title="Base", normalized_title="base", year=2020)

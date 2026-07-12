@@ -194,7 +194,11 @@ def _wire_full_source(db_session, base, source, make_reference):
     db_session.flush()
     ref_out = make_reference(db_session, citing_work_id=source.id, raw_citation="out")
     ref_in = make_reference(
-        db_session, citing_work_id=citer.id, resolved_work_id=source.id, raw_citation="in", title="t"
+        db_session,
+        citing_work_id=citer.id,
+        resolved_work_id=source.id,
+        raw_citation="in",
+        title="t",
     )
     db_session.flush()
     mention_out = CitationMention(citing_work_id=source.id, reference_id=ref_out.id)

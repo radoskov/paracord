@@ -102,7 +102,10 @@ def test_missing_but_cited_aggregation(db_session, make_reference) -> None:
     # work is cited once. Neither DOI resolves to any in-library work.
     make_reference(db_session, citing_work_id=p1.id, doi="10.9/missing", title="Missing Popular")
     make_reference(
-        db_session, citing_work_id=p2.id, doi="https://doi.org/10.9/MISSING", title="Missing Popular"
+        db_session,
+        citing_work_id=p2.id,
+        doi="https://doi.org/10.9/MISSING",
+        title="Missing Popular",
     )
     make_reference(db_session, citing_work_id=p1.id, title="Lonely uncollected paper")
     db_session.commit()

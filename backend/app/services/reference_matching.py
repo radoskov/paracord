@@ -170,7 +170,9 @@ def find_reference_match(
 
     # Stage A — identifier exact match (authoritative, rescan-safe).
     if ref_keys:
-        works = candidate_works if candidate_works is not None else _works_by_identifier(db, reference)
+        works = (
+            candidate_works if candidate_works is not None else _works_by_identifier(db, reference)
+        )
         for work in works:
             if work.merged_into_id is not None:
                 continue
@@ -208,8 +210,7 @@ def find_reference_match(
 
 def _set_local(reference: Reference, match: ReferenceMatch) -> bool:
     changed = (
-        reference.resolved_work_id != match.work_id
-        or reference.resolution_status != "local_match"
+        reference.resolved_work_id != match.work_id or reference.resolution_status != "local_match"
     )
     reference.resolved_work_id = match.work_id
     reference.suggested_work_id = None
@@ -263,9 +264,7 @@ def resolve_and_persist(
     if status == _LOCKED_STATUS:
         return False
 
-    match = find_reference_match(
-        db, reference, settings=settings, candidate_works=candidate_works
-    )
+    match = find_reference_match(db, reference, settings=settings, candidate_works=candidate_works)
 
     if match is not None and match.via == "identifier":
         return _set_local(reference, match)
