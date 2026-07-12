@@ -163,9 +163,11 @@ def build_citation_graph(
         ):
             unresolved += len(citing_wids)
             continue
-        # Persist the resolution result so subsequent queries don't need to re-resolve.
-        if reference.resolution_status == "unresolved":
-            reference.resolution_status = resolution
+        # Read-only: reference→work resolution is owned and persisted by the matcher
+        # (app.services.reference_matching) on the write path — extraction, new-work reverse-rescan,
+        # merge/delete re-resolve, and the manual/startup full rescan. The graph trusts the stored
+        # ``resolved_work_id`` (see ``_resolve_reference``) and never mutates it here, so building a
+        # graph is a pure read (safe under concurrency and on a read-only connection).
         # In local_only mode keep only edges that stay inside the scope.
         if node_mode == "local_only" and (
             resolution == "external" or target_node.work_id not in scope_works

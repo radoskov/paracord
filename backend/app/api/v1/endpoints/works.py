@@ -1461,12 +1461,19 @@ def delete_work(
             )
         )
     )
-    # Detach references/mentions in *other* works that resolved to this one.
-    db.execute(
-        update(Reference)
-        .where(Reference.resolved_work_id == work_id)
-        .values(resolved_work_id=None, resolution_status="unresolved")
+    # References in *other* works that resolved to this one must be re-resolved now it's gone.
+    # Capture them and clear the link (also clears any confirmed lock — the target no longer
+    # exists); after the work is deleted below we re-run the matcher so each lands at its correct
+    # new status (external, or a fresh local_match if a duplicate still covers it), keeping the
+    # stored resolution accurate instead of leaving a stale one until the next rescan.
+    orphaned_refs = list(
+        db.scalars(select(Reference).where(Reference.resolved_work_id == work_id)).all()
     )
+    for ref in orphaned_refs:
+        ref.resolved_work_id = None
+        ref.suggested_work_id = None
+        ref.match_score = None
+        ref.resolution_status = "unresolved"
     db.execute(
         update(CitationMention)
         .where(CitationMention.resolved_cited_work_id == work_id)
@@ -1479,6 +1486,13 @@ def delete_work(
     db.execute(delete(AgentFile).where(AgentFile.work_id == work_id))
 
     db.delete(work)
+    # Re-resolve the detached references now the work is gone (flush first so the matcher's
+    # candidate queries can't re-link to the row being deleted). Uses the current fuzzy toggle.
+    if orphaned_refs:
+        db.flush()
+        run_matching_for_references(
+            db, orphaned_refs, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        )
     record_event(
         db,
         "work.deleted",
