@@ -87,7 +87,7 @@ Detailed data flow in [05 — Pipelines & workers](05_pipelines_workers.md); the
 
 | Module | Responsibility & algorithm |
 |--------|---------------------------|
-| **utils/normalization.py** | `normalize_title`, `normalize_doi`, `similarity_pct` (rapidfuzz `max(ratio, token_set_ratio)`, difflib fallback). ⚠️ `normalize_title` drops non-ASCII rather than folding. |
+| **utils/normalization.py** | `normalize_title`, `normalize_doi`, `arxiv_base_from_doi` (10.48550 arXiv-DOI ⇔ arXiv-id bridge), `similarity_pct` (generic fields), `title_similarity_pct` (matcher-tuned: normalize_title'd inputs, ratio+token_sort, containment only when the shorter title has ≥5 tokens). rapidfuzz is a **required** dep (the difflib fallback has no token scoring). ⚠️ `normalize_title` drops non-ASCII rather than folding. |
 | **identifiers.py** | `arxiv_base_id`, `backfill_identifiers` (fills only empty, non-locked fields). ⚠️ a *second* arXiv parser distinct from `duplicate_detection.split_arxiv_id`. |
 | **author_matching.py** | `parse_author_name` (NFKD-fold surname + initial), `names_match`, `author_overlap_ratio`. ⚠️ missing-initial treated as agreement → over-matches common surnames. |
 | **metadata_enrichment.py** | External enrichment. Parsers + fetchers for **arXiv / Crossref / OpenAlex / Semantic Scholar**; `enrich_work` queries a source only when the matching identifier exists (exact, no fuzzy), stores each value as a `MetadataAssertion`, promotes to canonical only for `PROMOTABLE_FIELDS` when not user-locked (`confidence=0.9`). SSRF-hardened `_get` refuses cross-host redirects. Citation-count priority openalex→s2→crossref. |
@@ -99,11 +99,11 @@ Detailed data flow in [05 — Pipelines & workers](05_pipelines_workers.md); the
 
 | Module | Responsibility |
 |--------|---------------|
-| **citation_graph.py** | The cluster hub. `build_citation_graph(scope, node_mode, collapse_versions, color_by, visible_ids)` and `build_citation_neighborhood(work_id, hops≤3)`. Resolves 7 scope types, clamps shadows + `visible_ids`; references resolved via persisted `resolved_work_id`; pure-Python PageRank (0.85) + exact Brandes betweenness; node caps (500). ⚠️ **Read path persists `resolution_status` mid-read** (concurrency race). |
+| **citation_graph.py** | The cluster hub. `build_citation_graph(scope, node_mode, collapse_versions, color_by, visible_ids)` and `build_citation_neighborhood(work_id, hops≤3)`. Resolves 7 scope types, clamps shadows + `visible_ids`; references resolved via persisted `resolved_work_id`; pure-Python PageRank (0.85) + exact Brandes betweenness; node caps (500). Read-only (F2 fix): the matcher owns `resolution_status`; the graph no longer writes it, and a work delete re-resolves affected references. |
 | **reference_graph.py** | Per-paper reference "star": classifies each ref local / likely_local / external / citing, per-section weighted mention counts, per-local metrics (citation count, degree, topic Jaccard). |
 | **reference_links.py** | Canonical-reference helpers (batch 12): `reference_dedup_key` (DOI→arXiv→`title:...|year`, capped at 512), `find_or_create_reference`, `references_for_work`. |
-| **reference_matching.py** | Reference→library "likely local" matcher. Stage A identifier gate (authoritative, score 100); Stage B fuzzy title+year+author (blocking, Settings thresholds). Honors `confirmed_match`/`rejected_match` and the `use_fuzzy_match_as_confirmed` toggle. ⚠️ callers must pass `visible_ids` if results are user-facing. |
-| **citing_papers.py** | Incoming-citation fetcher: OpenAlex `filter=cites:` primary, S2 fallback; caps 100; caches `ExternalPaper`/`ExternalCitationLink`. ⚠️ empty-list call **wipes** existing links (destructive replace). |
+| **reference_matching.py** | Reference→library "likely local" matcher, shared by BOTH directions via the `MatchFields` adapter (references and external citing papers). Stage A identifier match (score 100, arXiv-DOI bridged); Stage B fuzzy `title_similarity_pct` + ±`year_tolerance` year gate + author gate, with stopword-tolerant first-content-token blocking. D2 gate treats an arXiv DOI as an arXiv id (preprint-vs-journal DOI pairs stay fuzzy-eligible). Honors `confirmed_match`/`rejected_match` and the `use_fuzzy_match_as_confirmed` toggle. Reverse-rescan (`rescan_references_for_new_work`) matches by DOI/arXiv/title-block and runs from create/import AND extraction/enrichment. ⚠️ callers must pass `visible_ids` if results are user-facing. |
+| **citing_papers.py** | Incoming-citation fetcher: OpenAlex `filter=cites:` primary, S2 fallback; caps 100; caches `ExternalPaper`/`ExternalCitationLink`; returns the provider's full `total` and refreshes `work.citation_count/_source/_fetched_at` on store (list and snapshot can't drift). Each stored paper is run through the local matcher (`resolve_external_paper` → `resolved_work_id`; self-match guarded); `rescan_external_papers_for_new_work` is the incoming-direction reverse-rescan. ⚠️ empty-list call **wipes** existing links (destructive replace). |
 | **citation_summary.py** | Scoped analytics (SEE-clamped): most-cited local/external, bridge (betweenness), isolated, frequently-cited-missing + coverage, chronological. ⚠️ `_SUMMARY_CACHE` is an **unbounded** in-process dict. |
 | **citation_worklist.py** | Per-(user, missing_key) `import`/`ignore` decisions on cited-but-missing works. |
 
@@ -150,7 +150,7 @@ dependency-free and deterministic._
 
 | Module | Responsibility |
 |--------|---------------|
-| **export_service.py** | Bibliography export in ~11 formats (bibtex/biblatex/ris/csl-json/markdown/html/text/styled/latex/pandoc). Batched author/meta queries; citation keys = surname+year with collision suffixes; visibility clamp on every scope. ⚠️ **user-supplied `citation_keys` are injected verbatim** — sanitize to `[A-Za-z0-9_-]`. |
+| **export_service.py** | Bibliography export in ~11 formats (bibtex/biblatex/ris/csl-json/markdown/html/text/styled/latex/pandoc). Batched author/meta queries; citation keys = surname+year with collision suffixes; visibility clamp on every scope. User `citation_keys` are sanitised (F1 fix): structural chars neutralised, Unicode/`. : + / _ -` preserved, then de-duplicated. |
 | **csl/engine.py** | Real CSL rendering via `citeproc-py` for APA/IEEE/Chicago/MLA/Harvard/Vancouver/Nature; layered fallback on failure. |
 | **visualization.py** | Viz provider registry (5 views: temporal_map, embedding_cluster [PCA/UMAP + k-means], co_citation, topic_river, similarity_heatmap). `MAX_NODES=500`; clamps `visible_work_ids` before scope resolution. ⚠️ `_LAYOUT_CACHE` unbounded. |
 | **bibtex.py** | Dependency-free BibTeX **import** (balanced-brace scanner). ⚠️ `_clean_value` strips all braces (destroys `{DNA}` casing protection). |
@@ -201,7 +201,7 @@ flowchart TB
     extraction -->|injected| grobid_client
     reference_matching --> author_matching & citation_graph & duplicate_detection & normalization
     citation_summary --> citation_graph & access
-    citing_papers --> metadata_enrichment
+    citing_papers --> metadata_enrichment & reference_matching
     web_find --> metadata_enrichment & web_find_allowed_hosts & web_find_settings & storage
     external_preview --> metadata_enrichment
     hybrid_search --> bm25_index & chunk_search & embeddings & embedding_registry

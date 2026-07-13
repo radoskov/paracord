@@ -117,10 +117,11 @@ doesn't un-index the still-present local file.
 
 ## 6. Agent revision flags (see [§11](11_future_and_revision_notes.md#agent))
 
-1. **`config/agent.example.yaml` documents a schema the real `AgentConfig` does not use** (wrong
-   keys) — hand-editing it has no effect. High-value doc fix.
-2. **`systemd/paperracks-agent.service.example` is broken** — invokes a non-existent `serve` command
-   with a non-existent `--config` flag.
+1. ✅ **RESOLVED (F4)** — `config/agent.example.yaml` rewritten to the real `AgentConfig` schema,
+   with `agent/tests/test_example_config.py` guarding against future drift.
+2. ✅ **RESOLVED (F4)** — `systemd/paperracks-agent.service.example` fixed to run `paracord-agent
+   start` with a valid config mechanism + `User=`; documents that `--daemon` is a reserved no-op.
 3. Web GUI token compare uses `==`, not `secrets.compare_digest` (timing side-channel; low risk on
-   loopback).
+   loopback). *(still open)*
 4. Monitoring is polling only despite the "watcher" naming; latency bounded by `refresh_interval`.
+   *(still open)*

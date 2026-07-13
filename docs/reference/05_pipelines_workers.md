@@ -67,10 +67,13 @@ context + `pdf_coordinates`.
 canonical promotion **only when `not user_confirmed` and the field is empty**; raw TEI stored;
 references/mentions rebuilt idempotently (delete this work's edges → `find_or_create_reference` per
 ref → add `ReferenceCitation` → prune orphan `Reference`); `run_matching_for_references` resolves
-`resolved_work_id` **before** mentions so a mention inherits it; keywords computed inline.
+`resolved_work_id` **before** mentions so a mention inherits it; keywords computed inline. Then the
+**reverse-rescan**: still-external references and cached citing papers elsewhere in the library are
+re-matched against THIS work (it may have just gained the title/DOI they cite).
 
-**G · Enrichment** (`enrich_work_job`): best-effort external metadata; in a `finally` block (runs
-even on failure) enqueues chunking **then** embedding.
+**G · Enrichment** (`enrich_work_job`): best-effort external metadata; when it promotes fields it
+also reverse-rescans references + citing papers (identifiers often first arrive here); in a
+`finally` block (runs even on failure) enqueues chunking **then** embedding.
 
 **H · Chunking** (`chunk_work_job` → `chunking.rechunk_work`): delete + rebuild `WorkChunk` rows from
 title/abstract/TEI sections; deterministic ⇒ idempotent.
@@ -118,16 +121,17 @@ flowchart LR
 
 | Mechanism | What it does |
 |---|---|
-| **Owed-extraction sweep (D7)** | On API startup and via `POST /jobs/reprocess-pending`, `sweep_owed_extractions()` re-enqueues files with `extraction_requested_at` set (idempotent). Skips if Redis unreachable. |
+| **Transient-extraction retries (F2)** | `GrobidUnavailableError`/`OperationalError` are *transient*: the job keeps the owed marker and re-raises, so RQ `Retry(max=2, interval=[15,60])` re-runs it automatically. Terminal failures (DOI conflict, corrupt PDF) zero `retries_left` so RQ doesn't re-run GROBID, but still raise → visible in the failed-jobs list. A durable `File.extraction_attempts` (cap `MAX_EXTRACTION_ATTEMPTS=3`) bounds retries across restarts; a user re-extract resets it. |
+| **Owed-extraction sweep (D7)** | On API startup and via `POST /jobs/reprocess-pending`, `sweep_owed_extractions()` re-enqueues files with `extraction_requested_at` set and `extraction_attempts` below the cap (idempotent; self-healing via the live-job guard, so no durable "extracting" status is needed). Skips if Redis unreachable. |
+| **Downstream recovery sweep (F2)** | `sweep_owed_downstream()` (same triggers) derives owed work from state — an *extracted* file with **zero `WorkChunk`** → re-enqueue chunking; extracted with **no `Embedding`** → re-enqueue embedding — so a crash/flap between stages can't leave a paper un-indexed. |
 | **Stuck-job recovery** | `queue.recover_stuck_jobs` (`POST /jobs/reset-workers`) requeues jobs stranded in the `StartedJobRegistry` (worker died mid-job) and clears the `FailedJobRegistry`. |
-| **Admin helpers** | `clear_jobs`, `empty_queue`, `queue_status` (counts, worker count, recent jobs enriched with paper title/sha). |
+| **Loud non-recovered stages (F2)** | enrich/keyword/topic aren't auto-recovered (by decision) but fail loudly: a failure sets a per-paper `Work.processing_error` (a "processing failed" badge) on top of the `job.failed` audit + failed-jobs list. |
+| **Admin helpers** | `clear_jobs`, `empty_queue`, `queue_status` (counts, worker count, recent jobs enriched with paper title/sha + RQ `retries_left`). |
 
-⚠️ **No RQ auto-retries are configured.** A transient GROBID/network failure fails the job into the
-`FailedJobRegistry`; for extraction `_mark_failed` clears the owed marker, so a transient GROBID
-outage becomes a **terminal `extract_failed`** needing a manual re-extract. Also, **only extraction
-has a recovery sweep** — if the worker dies between the extraction commit and `enqueue_enrichment`,
-the work is extracted but never enriched/chunked/embedded and nothing recovers it. See
-[§11 robustness](11_future_and_revision_notes.md#pipeline--workers).
+The extract → enrich → chunk → embed chain is still linked by fire-and-forget enqueues, so the
+downstream sweep (not a per-stage owed marker) is what closes the "worker died between stages" gap;
+enrichment itself is best-effort and intentionally not auto-recovered (a missed enrich is a manual
+"Enrich" click away, and a hard failure now shows on the paper).
 
 ## 4. OCR, embeddings, and chunking specifics
 
@@ -149,5 +153,6 @@ the work is extracted but never enriched/chunked/embedded and nothing recovers i
 - Single **GROBID** container is the shared throughput bottleneck (a per-PDF 120 s-timeout sync
   call); raising `rq_worker_count` parallelizes extraction only up to GROBID's capacity.
 - **OCR** is the heaviest per-file CPU step (page rasterization); bounded by a timeout.
+- `rescan_reference_matches_job` also rematches every cached `ExternalPaper` (incoming direction).
 - `scan_duplicates_job` and `rescan_reference_matches_job` load the **entire corpus** into one
   transaction (O(N) memory, one big commit) — will not scale to a large library without pagination.

@@ -170,7 +170,8 @@ The headline items:
 5. **XXE safety depends on implicit lxml defaults** *(Low)* — pin an explicit hardened parser.
 6. **`topic_graph` visibility depends on the caller passing `visible_ids`** *(audit item)* — verify
    every endpoint that builds it clamps to the actor's visible set.
-7. **`export_service` injects user `citation_keys` verbatim** *(Low)* — sanitize to `[A-Za-z0-9_-]`.
+7. ✅ **RESOLVED (F1)** — `export_service` no longer injects user `citation_keys` verbatim; they're
+   sanitised (structural chars neutralised, Unicode/`. : + / _ -` preserved) and de-duplicated.
 
 Run `make test-safety` before shipping anything touching auth, access control, file access, or
 egress; run it where the nginx config is reachable so the CSP test doesn't silently skip.

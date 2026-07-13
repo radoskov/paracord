@@ -118,7 +118,7 @@ two important refinements:
 
 ## 1.4 Persistence & the dual-schema strategy
 
-- **Production** runs the Alembic migrations (61 revisions) on PostgreSQL. Optional **pgvector**
+- **Production** runs the Alembic migrations (64 revisions) on PostgreSQL. Optional **pgvector**
   columns (`embeddings.vector_pg`, `work_chunks.vec_*`) are added by best-effort, Postgres-only
   migrations and are kept **off the ORM** — read/written via raw, injection-guarded SQL.
 - **Unit tests** build the schema from `Base.metadata` on **SQLite**. Postgres-only features

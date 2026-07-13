@@ -65,7 +65,7 @@ backend/app/
   workers/            RQ jobs, queue, supervisor, recovery → 05
   core/               config.py, security.py          → 01, 08
   utils/              normalization, table_presence    → 03
-  alembic/versions/   61 migrations                   → 02
+  alembic/versions/   64 migrations                   → 02
 agent/paperracks_agent/  14 modules (local agent)     → 06
 frontend/src/         Svelte app, ~120 files           → 07
 ```

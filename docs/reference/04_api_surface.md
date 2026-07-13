@@ -124,7 +124,7 @@ Read routes call `_guard_see_work` (404 if not see-able); mutations call `_guard
 | GET | `/{id}/references`, PATCH `/{id}/references/{ref_id}`, POST `/{id}/references/rescan` | auth / contrib | Bibliography + link/reject/import + rescan |
 | POST | `/references/rescan-all` | **editor** | Library-wide rematch (queued) |
 | GET | `/{id}/reference-graph`, `/{id}/citation-neighborhood`, `/{id}/citation-contexts` | auth | Per-paper graphs & contexts |
-| GET | `/{id}/citing-papers`, POST `/{id}/citing-papers/fetch` | auth / contrib | Incoming citers (fetch = egress) |
+| GET | `/{id}/citing-papers`, POST `/{id}/citing-papers/fetch` | auth / contrib | Incoming citers (fetch = egress; refreshes the `citation_count` snapshot; items carry `resolved_work_id` for in-library citers) |
 | GET/POST/DELETE | `/{id}/files`, PUT `/{id}/main-file/{fid}`, POST `/{id}/files/{fid}/move` | auth / contrib | Attached files |
 | GET/POST/DELETE | `/{id}/annotations`, GET `/annotations/search`, `/{id}/annotations/export` | auth / contrib | Reader annotations |
 | GET/POST | `/{id}/summaries` | auth / contrib | Per-paper summaries |
@@ -181,8 +181,10 @@ Scope SEE-checked, nodes/edges clamped to visible works.
 (**editor**, queued), `POST /warm`.
 
 ### jobs — `/jobs`
-`GET ``` (**auth only — no role floor**, queue status + recent jobs), `POST /clear` (editor),
-`/reprocess-pending`/`/clear-queue`/`/reset-workers` (**admin**).
+`GET ``` (**auth only — no role floor**, queue status + recent jobs, incl. RQ `retries_left` and
+scheduled retries — F2), `POST /clear` (editor), `/reprocess-pending` (**admin**; runs both the D7
+owed-extraction sweep **and** the F2 downstream chunk/embed recovery sweep) / `/clear-queue` /
+`/reset-workers` (**admin**).
 
 ### preferences · themes (read) · saved-filters
 `GET/PUT /preferences` (auth, own YAML blob). `GET /themes`, `/themes/{slug}`, `/themes/{slug}/source`

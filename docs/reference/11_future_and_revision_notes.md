@@ -10,6 +10,17 @@ egress-facing issues are ranked higher than pure single-user ones.
 Legend: 🔴 high · 🟠 medium · 🟡 low. Categories: **Sec**urity · **Alg**orithmic · **Perf** ·
 **Rob**ustness · **Stab**ility · **UX** · **Tech**-debt · **Doc**.
 
+> **Update — 2026-07-12 (audit fixes F1–F4 landed).** All four 🔴 items this register surfaced have
+> been implemented and are annotated **✅ RESOLVED** inline below:
+> **F1** export citation-key injection (sanitised, preserving Unicode/DOI/DBLP punctuation);
+> **F4** stale agent `config`/`systemd` examples (rewritten to the real schema + a staleness test);
+> **F3a** the citation-graph read-path write (removed → graph is read-only; delete now re-resolves
+> references; owner rescan-on-startup toggle + manual "rescan whole library" control);
+> **F2** job retries + downstream recovery (bounded transient-extraction retries, chunk/embed
+> derive-from-state recovery sweep, per-paper failure indicator + jobs-tab retry surfacing).
+> **Still open from those:** the three unbounded in-process caches (the F3b half of the "read paths
+> that leak" item). Everything else below stands.
+
 ---
 
 ## Cross-cutting: documentation drift (fix first — cheap, high-value)
@@ -22,12 +33,13 @@ them (this `docs/reference/` set is the new source of truth):
   stub, only ~7 migrations. All long superseded.
 - 🟠 **Doc** — `FILE_TREE.md` lists ~7 migrations and a fraction of the real models/services/
   endpoints/tests. Regenerate or delete.
-- 🔴 **Doc/Rob** — `config/agent.example.yaml` documents a schema the real `AgentConfig` pydantic
-  model **does not use** (`token_file`, `poll_interval_seconds`, `filesystem.allowed_roots`, …).
-  Hand-editing it silently does nothing. Rewrite to the real keys (`server_url`, `refresh_interval`,
-  `folders`/`files`, `web_port`, `default_action`, …).
-- 🔴 **Doc/Rob** — `agent/systemd/paperracks-agent.service.example` invokes a non-existent `serve`
-  command with a non-existent `--config` flag; the unit would fail to start. Fix to `start`.
+- ✅ **RESOLVED (F4)** — `config/agent.example.yaml` rewritten to the real `AgentConfig` schema
+  (`server_url`, `refresh_interval`, `folders`/`files`, `web_port`, `default_action`, …), with a new
+  `agent/tests/test_example_config.py` that fails if the example ever drifts from the model (keys
+  must be real fields — pydantic silently ignores unknown ones, which was the original bug).
+- ✅ **RESOLVED (F4)** — `agent/systemd/paperracks-agent.service.example` fixed to run
+  `paracord-agent start` (with the real config mechanism), a valid `User=`, and a note that
+  `--daemon` is a reserved no-op.
 - 🟠 **Doc** — `config/server.example.yaml` has a large **documentation-only** key surface: only a
   whitelist is parsed by `_server_settings_from_yaml`. Keys under `processing.*`, `summaries.*`,
   `topics.*`, `audit.*`, `agents.*`, `keywords.*`, `credential_recovery.*`, `security.failed_login_
@@ -86,15 +98,18 @@ them (this `docs/reference/` set is the new source of truth):
 
 ## Pipeline & workers
 
-- 🔴 **Rob** — **No RQ retries.** A transient GROBID/network failure fails the job; for extraction
-  `_mark_failed` clears the owed marker, so a *transient* outage becomes a **terminal `extract_failed`
-  needing a manual re-extract**. Distinguish transient (retryable) vs terminal failures.
-- 🔴 **Rob** — **Only extraction has a recovery sweep.** If the worker dies between the extraction
-  commit and `enqueue_enrichment` (or between chunking/embedding enqueues), the work is extracted but
-  never enriched/chunked/embedded, and nothing recovers it. Add an "owed enrichment/embedding" marker
-  analogous to D7.
-- 🟡 **Stab** — `_SKIP_STATUSES={"extracting"}` is dead — no code sets `status="extracting"`, so the
-  mid-flight guard relies entirely on the deterministic job id.
+- ✅ **RESOLVED (F2)** — transient failures (`GrobidUnavailableError`/`OperationalError`) now retry
+  automatically (RQ `Retry`) and keep the owed marker; terminal failures (DOI conflict, corrupt PDF,
+  cap reached) mark `extract_failed` without wasteful re-runs but stay visible in the failed-jobs
+  list. A durable `File.extraction_attempts` (cap 3, reset by a manual re-extract) bounds retries
+  across restarts.
+- ✅ **RESOLVED (F2)** — the recovery sweep now also recovers the downstream stages: a derive-from-
+  state sweep (`sweep_owed_downstream`, startup + `/jobs/reprocess-pending`) re-enqueues chunk/embed
+  for works extracted-but-never-indexed. Enrich/keyword/topic aren't auto-recovered by decision, but
+  now fail **loudly** — a per-paper `Work.processing_error` badge on top of the `job.failed` audit.
+- ✅ **RESOLVED (F2)** — the dead `_SKIP_STATUSES={"extracting"}` was **removed** (rather than made
+  real, which would have regressed auto-recovery on worker death); the deterministic-job-id
+  live-guard is the sole, self-healing in-flight protection.
 - 🟠 **Perf/Rob** — `scan_duplicates_job` / `rescan_reference_matches_job` load the whole corpus in
   one transaction (Perf M2). Paginate with `commit_every`.
 - 🟡 **Stab** — `find_or_create_reference` + orphan prune could race if two works citing the same new
@@ -106,18 +121,25 @@ them (this `docs/reference/` set is the new source of truth):
 
 ## Services (algorithmic & correctness)
 
-- 🔴 **Sec** — **`export_service` injects user `citation_keys` verbatim** into `@article{<key>,` /
-  `\cite{}` / `[@key]` — a crafted key can break out. Sanitize to `[A-Za-z0-9_-]`. Also
-  markdown/pandoc titles/authors aren't escaped.
-- 🔴 **Stab** — **Read paths that mutate or leak.** `citation_graph.build_citation_graph` persists
-  `reference.resolution_status` mid-read (concurrent-read race); `citation_summary._SUMMARY_CACHE`,
-  `visualization._LAYOUT_CACHE`, `external_preview._PREVIEW_CACHE` are unbounded in-process dicts
-  (memory leak on long-lived processes). Move the write off the read path; LRU-bound the caches.
+- ✅ **RESOLVED (F1)** — user-supplied `citation_keys` are now sanitised (`_safe_citation_key`):
+  structural breakout characters are neutralised while Unicode letters and real key punctuation
+  (`. : + / _ -`) are **preserved** (so DBLP/DOI-style and accented keys survive), then de-duplicated.
+  *(Still open, lower severity: markdown/pandoc field **values** — titles/authors — aren't escaped.)*
+- ⚠️ **PARTIALLY RESOLVED — F3a done, F3b open.** ✅ The read-path write is gone:
+  `citation_graph.build_citation_graph` is now read-only (the matcher owns `resolution_status`; a
+  work delete re-resolves affected references). ❌ **Still open (F3b):** the three unbounded
+  in-process caches — `citation_summary._SUMMARY_CACHE`, `visualization._LAYOUT_CACHE`,
+  `external_preview._PREVIEW_CACHE` — are not yet LRU/TTL-bounded (memory creep on a long-lived
+  process). This was deferred; discuss before implementing.
 - 🟠 **Sec** — **`topic_graph` visibility depends on the caller passing `visible_ids`.** With
   `work_ids` set and `visible_ids=None`, only shadow-filtering applies → IDOR risk if an endpoint
   forgets it. Audit every caller; consider requiring `visible_ids`.
-- 🟠 **Rob** — **`citing_papers.store_citing_papers` wipes links when called with an empty list**
-  (destructive replace). Guard against an empty fetch overwriting good data.
+- ✅ **Rob** — ~~`citing_papers.store_citing_papers` wipes links when called with an empty list~~
+  **Resolved 2026-07-13 (S12):** the fetch now distinguishes three outcomes — a provider that
+  listed citers (replace), an *authoritative zero* answer (replace with empty + stamp
+  `works.citing_fetched_at/_source`, migration 0066), and no answer at all (cache kept, failure
+  surfaced). A failed fetch can no longer wipe good data, and a genuinely-zero answer no longer
+  leaves a stale list forever.
 - 🟠 **Alg** — **`agent_protocol.validate_agent_file_id` always returns `False`** (dead stub) — a
   caller relying on it rejects every file. Wire up or delete.
 - 🟠 **Sec** — **`model_management` performs no integrity verification of downloaded weights**

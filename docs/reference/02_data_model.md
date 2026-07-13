@@ -120,6 +120,7 @@ classDiagram
         +int year
         +String work_type = "unknown"
         +String reading_status = "unread"
+        +Text processing_error  «F2 per-paper job failure»
         +int queue_position
         +bool user_confirmed
         +JSONB confirmed_fields  «per-field locks»
@@ -143,6 +144,7 @@ classDiagram
         +Text preview_text
         +String text_fingerprint
         +datetime extraction_requested_at  «D7 owed marker»
+        +int extraction_attempts  «F2 retry cap»
     }
     class FileWorkLink {
         +UUID file_id → File
@@ -257,9 +259,10 @@ classDiagram
     class ExternalPaper {
         +String dedup_key  «unique»
         +String source / external_id
-        +String doi / title / venue
+        +String doi / arxiv_id / title / venue
         +Text authors  «"; "-joined»
         +int year
+        +UUID resolved_work_id → Work  «in-library citer (local matcher), SET NULL»
     }
     class ExternalCitationLink {
         +UUID external_paper_id → ExternalPaper
@@ -285,7 +288,9 @@ Two citation directions are modeled distinctly:
 - **Outgoing** (what a work cites) → canonical shared `Reference` + per-work `ReferenceCitation`
   edges + per-work `CitationMention` (in-text context with PDF coordinates).
 - **Incoming** (who cites a work) → `ExternalPaper` + `ExternalCitationLink`, fetched from
-  OpenAlex/Semantic-Scholar.
+  OpenAlex/Semantic-Scholar. Since migration `0064`, each external paper also runs through the same
+  local matcher as references: `resolved_work_id` marks a citing paper that IS a library work
+  (recomputed on every fetch/rescan, repointed on merge, SET NULL on delete).
 
 `MissingWorkDecision` records a per-user `import`/`ignore` decision on frequently-cited-but-missing
 works, keyed by a stable normalized `missing_key`.
@@ -400,7 +405,7 @@ allowlist), `ImportRoot` (GUI-added scan roots), `CustomTheme` (runtime YAML the
 
 ## 2.6 Migration history at a glance
 
-61 revisions, from `0001` (users + audit) through `0060` (fuzzy-match-as-confirmed) plus one
+64 revisions, from `0001` (users + audit) through `0063` (F2 per-paper processing error) plus one
 hash-named `6a310e33c3d6` (timestamptz conversion). Milestones worth knowing:
 
 - `0003` core library · `0004`/`0005` extraction + raw TEI + mentions · `0006` dup candidates
@@ -409,6 +414,8 @@ hash-named `6a310e33c3d6` (timestamptz conversion). Milestones worth knowing:
   vectors + model registry
 - `0056` import staging · `0057`→`0058` external citations (denormalized → normalized) · `0059`
   canonical references · `0060` fuzzy-match toggle
+- `0061` reference-rescan-on-startup toggle (F3a) · `0062` `files.extraction_attempts` (F2 retry cap)
+  · `0063` `works.processing_error` (F2 loud per-paper failures)
 
 > Two entries show schema churn worth noting when reading migration history: `0057` created a
 > denormalized `external_citations` table that `0058` immediately restructured into
