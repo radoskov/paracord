@@ -79,16 +79,27 @@ def enroll_agent(db: Session, *, token: str, name: str) -> Agent:
     return agent
 
 
-def approve_agent(db: Session, *, agent_id: uuid.UUID, owner: User) -> tuple[str, Agent]:
-    """Approve a pending agent and mint its scoped access token (returned once)."""
+def approve_agent(
+    db: Session, *, agent_id: uuid.UUID, owner: User, token_ttl_days: int | None = None
+) -> tuple[str, Agent]:
+    """Approve a pending agent and mint its scoped access token (returned once).
+
+    ``token_ttl_days`` (D3) makes the token expire — hand short-lived tokens to temporary users;
+    ``None`` keeps the permanent-token default for the owner's own trusted agents.
+    """
     agent = db.get(Agent, agent_id)
     if agent is None:
         raise LookupError("Agent not found")
     if agent.status != "pending":
         raise ValueError(f"Agent is not pending (status={agent.status})")
+    if token_ttl_days is not None and token_ttl_days < 1:
+        raise ValueError("token_ttl_days must be >= 1")
 
     raw_token = secrets.token_urlsafe(32)
     agent.token_hash = hash_token(raw_token)
+    agent.token_expires_at = (
+        datetime.now(UTC) + timedelta(days=token_ttl_days) if token_ttl_days else None
+    )
     agent.status = "approved"
     agent.approved_at = datetime.now(UTC)
     agent.approved_by_user_id = owner.id

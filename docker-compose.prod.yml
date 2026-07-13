@@ -9,6 +9,9 @@
 #   * removes the source-code bind-mounts so the built image is self-contained
 #   * sets PARACORD_ENV=production
 #   * binds services to 127.0.0.1 for LAN-proxied deployments (adjust for your setup)
+#   * adds a Caddy TLS reverse proxy (AUDIT D3): copy config/Caddyfile.example to
+#     config/Caddyfile, set your LAN name/IP, and reach the app at https://... —
+#     session + agent tokens then never cross the LAN in the clear.
 #
 # Credentials still come from .env — never store secrets in this file.
 services:
@@ -47,3 +50,24 @@ services:
     ports:
       - "127.0.0.1:80:80"
     volumes: []    # Static bundle is baked into the image.
+
+  # TLS termination (AUDIT D3). Caddy serves https for the SPA + API and proxies to the internal
+  # services; with `tls internal` it runs a local CA for LAN certificates (trust its root.crt on
+  # client machines + in the agent's `ca_cert`). Remove this service only for loopback-only use.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  caddy_data:
+  caddy_config:

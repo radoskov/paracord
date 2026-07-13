@@ -26,7 +26,12 @@ from paperracks_agent.watcher import iter_pdf_files
 def _client_and_state(args: argparse.Namespace):
     config = load_config(getattr(args, "config", None))
     server = getattr(args, "server", None) or config.server_url
-    client = PaRacORDServerClient(server, token=resolve_token(getattr(args, "token", None)))
+    client = PaRacORDServerClient(
+        server,
+        token=resolve_token(getattr(args, "token", None)),
+        allow_insecure_http=config.allow_insecure_http,
+        ca_cert=config.ca_cert,
+    )
     state = AgentState(getattr(args, "state", None))
     return config, client, state
 
@@ -38,7 +43,9 @@ async def _enroll(args: argparse.Namespace) -> None:
     config = load_config(args.config)
     server = args.server or config.server_url
     name = args.name or config.name
-    result = await PaRacORDServerClient(server).enroll(args.token, name)
+    result = await PaRacORDServerClient(
+        server, allow_insecure_http=config.allow_insecure_http, ca_cert=config.ca_cert
+    ).enroll(args.token, name)
     config.server_url = server
     config.name = name
     config.agent_id = result["agent_id"]

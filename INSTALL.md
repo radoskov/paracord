@@ -64,3 +64,26 @@ make frontend-test
 ## Notes
 
 The tests are intentionally contract-oriented. They avoid brittle timing checks, exact k-means cluster-size expectations, and fixed sleeps. Where eventual consistency is relevant, E2E tests use Playwright's retry assertions.
+
+## TLS on the LAN (AUDIT D3)
+
+Out of the box the server speaks plaintext HTTP — fine on loopback, but on a LAN every session
+JWT and agent bearer token crosses the network readable by any sniffer. The production overlay
+ships a Caddy TLS proxy:
+
+1. `cp config/Caddyfile.example config/Caddyfile` and set your server's LAN name/IP.
+2. `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` — the app is now at
+   `https://<your-host>`; Caddy's `tls internal` mints certificates from a local CA (no public
+   domain needed). With a real domain, drop `tls internal` for automatic Let's Encrypt.
+3. Trust the local CA on client machines:
+   `docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt` — import it in the
+   browser, and point the agent at it via `ca_cert: /path/to/root.crt` in the agent config.
+4. Update `server.public_base_url` (and the agent's `server_url`) to the `https://` address.
+
+Transport guards: the agent **refuses** plaintext HTTP to a non-loopback server unless the agent
+config sets `allow_insecure_http: true`; the server logs a loud startup warning in the same
+situation unless `PARACORD_ALLOW_INSECURE_HTTP=true` acknowledges it.
+
+Agent tokens (D3): approval mints a **permanent** token by default (right for your own trusted
+machines). To hand a temporary user a short-lived token, approve their agent with a
+`token_ttl_days` value (Admin → Agents); expired tokens are rejected with 401 until re-approval.

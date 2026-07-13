@@ -155,10 +155,19 @@ def require_agent_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or unapproved agent token"
         )
-    # Liveness tracking (SPEC §9.3), throttled (E3): only stamp + commit when the last_seen value
-    # is stale by more than a minute, so a busy agent doesn't write+commit on every request.
     from datetime import UTC, datetime, timedelta
 
+    expires = agent.token_expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires <= datetime.now(UTC):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Agent token expired — ask the owner to re-approve this agent",
+            )
+    # Liveness tracking (SPEC §9.3), throttled (E3): only stamp + commit when the last_seen value
+    # is stale by more than a minute, so a busy agent doesn't write+commit on every request.
     now = datetime.now(UTC)
     last = agent.last_seen_at
     if last is not None and last.tzinfo is None:

@@ -37,6 +37,12 @@ class AgentConfig(BaseModel):
 
     name: str = "workstation-agent"
     server_url: str = "http://127.0.0.1:8000"
+    # D3 transport hardening: plaintext http to a NON-loopback server is refused unless explicitly
+    # acknowledged (the bearer token would cross the network sniffable) …
+    allow_insecure_http: bool = False
+    # … and a self-signed/internal-CA TLS server (the normal LAN setup, e.g. Caddy's local CA)
+    # verifies against this CA bundle path. None = system trust store.
+    ca_cert: str | None = None
     agent_id: str | None = None
     refresh_interval: int = 30
     web_port: int = 8765

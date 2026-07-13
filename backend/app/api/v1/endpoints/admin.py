@@ -489,15 +489,30 @@ def delete_agent(
     db.commit()
 
 
+class AgentApproveIn(BaseModel):
+    # D3: optional token lifetime in days — omit for a permanent token (the owner's own agents);
+    # set it to hand a short-lived token to a temporary user.
+    token_ttl_days: int | None = Field(default=None, ge=1, le=3650)
+
+
 @router.post("/agents/{agent_id}/approve", response_model=AgentApprovedOut)
 def approve_agent(
     agent_id: uuid.UUID,
+    payload: AgentApproveIn | None = None,
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> AgentApprovedOut:
-    """Approve a pending agent and return its scoped access token once (owner or admin)."""
+    """Approve a pending agent and return its scoped access token once (owner or admin).
+
+    An optional ``token_ttl_days`` makes the token expire (D3); the default stays permanent.
+    """
     try:
-        raw_token, agent = agent_service.approve_agent(db, agent_id=agent_id, owner=actor)
+        raw_token, agent = agent_service.approve_agent(
+            db,
+            agent_id=agent_id,
+            owner=actor,
+            token_ttl_days=payload.token_ttl_days if payload else None,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

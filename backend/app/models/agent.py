@@ -36,6 +36,12 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # D3: when set, the bearer token stops working at this instant (mint short-lived tokens for
+    # temporary users). NULL = permanent (the pre-existing behavior, right for the owner's own
+    # long-trusted agents).
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

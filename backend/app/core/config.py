@@ -158,6 +158,9 @@ class Settings(BaseSettings):
     bind_host: str = Field(default="127.0.0.1", alias="PARACORD_BIND_HOST")
     bind_port: int = Field(default=8000, alias="PARACORD_BIND_PORT")
     lan_mode: bool = Field(default=False, alias="PARACORD_LAN_MODE")
+    # D3: acknowledge running plaintext HTTP on a non-loopback bind (tokens cross the LAN in the
+    # clear). Without it the server logs a loud startup warning pointing at the TLS setup notes.
+    allow_insecure_http: bool = Field(default=False, alias="PARACORD_ALLOW_INSECURE_HTTP")
     public_base_url: str = Field(
         default="http://127.0.0.1:8000",
         alias="PARACORD_PUBLIC_BASE_URL",

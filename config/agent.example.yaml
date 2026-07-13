@@ -9,7 +9,9 @@
 # (or a 0600 secrets file), set via `paracord-agent set-token`.
 
 name: workstation-agent              # display name shown in the server's Admin -> Agents
-server_url: http://127.0.0.1:8000    # PaRacORD server base URL
+server_url: http://127.0.0.1:8000    # PaRacORD server base URL (https strongly recommended off-loopback)
+allow_insecure_http: false           # D3: must be true to talk plaintext http BEYOND loopback (token is sniffable)
+ca_cert: null                        # path to a CA bundle for self-signed/internal-CA TLS (e.g. Caddy local CA)
 agent_id: null                       # set automatically on `paracord-agent enroll`
 refresh_interval: 30                 # seconds between scan+sync cycles in `paracord-agent start`
 web_port: 8765                       # local-only web GUI port (`paracord-agent web up`)

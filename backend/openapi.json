@@ -140,6 +140,25 @@
         "title": "AccessSettingsUpdate",
         "type": "object"
       },
+      "AgentApproveIn": {
+        "properties": {
+          "token_ttl_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Ttl Days"
+          }
+        },
+        "title": "AgentApproveIn",
+        "type": "object"
+      },
       "AgentApprovedOut": {
         "properties": {
           "agent_id": {
@@ -9491,7 +9510,7 @@
     },
     "/api/v1/admin/agents/{agent_id}/approve": {
       "post": {
-        "description": "Approve a pending agent and return its scoped access token once (owner or admin).",
+        "description": "Approve a pending agent and return its scoped access token once (owner or admin).\n\nAn optional ``token_ttl_days`` makes the token expire (D3); the default stays permanent.",
         "operationId": "approve_agent_api_v1_admin_agents__agent_id__approve_post",
         "parameters": [
           {
@@ -9521,6 +9540,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentApproveIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

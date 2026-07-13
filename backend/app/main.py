@@ -54,6 +54,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.info("Startup downstream recovery: %s", downstream)
     except Exception as exc:  # noqa: BLE001 - startup must not fail on a recovery hiccup
         logger.warning("Startup downstream recovery skipped: %s", exc)
+    # D3 — plaintext-transport warning: session JWTs and agent bearer tokens cross the network
+    # unencrypted when the server is reachable beyond loopback over http. Not fatal (that would
+    # break existing LAN deployments), but loud, and silenceable only by explicit opt-in.
+    try:
+        settings = get_settings()
+        loopback = settings.bind_host in ("127.0.0.1", "::1", "localhost")
+        plaintext = settings.public_base_url.startswith("http://")
+        if plaintext and not loopback and not settings.allow_insecure_http:
+            logger.warning(
+                "SECURITY (D3): serving plaintext HTTP on a non-loopback bind (%s) — session and "
+                "agent tokens are sniffable on this network. Put a TLS proxy in front (see "
+                "INSTALL.md 'TLS on the LAN') or set PARACORD_ALLOW_INSECURE_HTTP=true to "
+                "acknowledge the risk and silence this warning.",
+                settings.bind_host,
+            )
+    except Exception:  # noqa: BLE001 - a warning must never break startup
+        pass
     # S13/S14 — consolidate duplicate canonical references once per startup (owner decision:
     # unconditional). Best-effort + coalesced (deterministic job id); a dead Redis just skips it.
     # Contradictions are never auto-folded — they land in Admin → Reference dupes for review.

@@ -41,7 +41,12 @@ def create_app(
         return load_config(config_path)
 
     def _client(config):
-        return PaRacORDServerClient(config.server_url, token=resolve_token(None))
+        return PaRacORDServerClient(
+            config.server_url,
+            token=resolve_token(None),
+            allow_insecure_http=config.allow_insecure_http,
+            ca_cert=config.ca_cert,
+        )
 
     def _state():
         return AgentState(state_path)
@@ -153,7 +158,9 @@ def create_app(
         server = body.get("url") or config.server_url
         name = body.get("name") or config.name
         try:
-            result = await PaRacORDServerClient(server).enroll(body["token"], name)
+            result = await PaRacORDServerClient(
+                server, allow_insecure_http=config.allow_insecure_http, ca_cert=config.ca_cert
+            ).enroll(body["token"], name)
         except Exception as exc:  # noqa: BLE001
             return JSONResponse({"detail": str(exc)}, status_code=400)
         config.server_url = server

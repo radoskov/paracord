@@ -1,14 +1,49 @@
 """HTTP client for server communication."""
 
+from urllib.parse import urlsplit
+
 import httpx2 as httpx
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+class InsecureTransportError(RuntimeError):
+    """Plaintext http to a non-loopback server without explicit opt-in (AUDIT D3)."""
+
+
+def check_transport(server_url: str, *, allow_insecure_http: bool = False) -> None:
+    """Refuse plaintext http beyond loopback unless the config acknowledges the risk (D3).
+
+    The agent bearer token rides every request; over plaintext LAN http it is readable by any
+    sniffer. https, loopback, or an explicit ``allow_insecure_http: true`` all pass.
+    """
+    parts = urlsplit(server_url)
+    if parts.scheme == "https" or (parts.hostname or "") in _LOOPBACK_HOSTS:
+        return
+    if not allow_insecure_http:
+        raise InsecureTransportError(
+            f"Refusing plaintext http to non-loopback server {server_url!r}: the agent token "
+            "would cross the network unencrypted. Use https (see INSTALL.md 'TLS on the LAN') "
+            "or set allow_insecure_http: true in the agent config to acknowledge the risk."
+        )
 
 
 class PaRacORDServerClient:
     """Agent-side API client."""
 
-    def __init__(self, server_url: str, token: str | None = None) -> None:
+    def __init__(
+        self,
+        server_url: str,
+        token: str | None = None,
+        *,
+        allow_insecure_http: bool = False,
+        ca_cert: str | None = None,
+    ) -> None:
+        check_transport(server_url, allow_insecure_http=allow_insecure_http)
         self.server_url = server_url.rstrip("/")
         self.token = token
+        # httpx ``verify``: a CA bundle path (self-signed / internal-CA TLS) or system trust.
+        self.verify: str | bool = ca_cert if ca_cert else True
 
     def _headers(self) -> dict[str, str]:
         if not self.token:
@@ -17,7 +52,7 @@ class PaRacORDServerClient:
 
     async def enroll(self, enrollment_token: str, name: str) -> dict:
         """Enroll with an owner-issued enrollment token (creates a pending agent)."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/enroll-request",
                 json={"token": enrollment_token, "name": name},
@@ -27,7 +62,7 @@ class PaRacORDServerClient:
 
     async def send_manifest(self, payload: dict) -> None:
         """Send a file manifest to the server."""
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=60, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/manifest",
                 json=payload,
@@ -37,7 +72,7 @@ class PaRacORDServerClient:
 
     async def get_pending_teleports(self) -> list[dict]:
         """Return the files a user has requested this agent to teleport (by local_file_id)."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.get(
                 f"{self.server_url}/api/v1/agents/teleports/pending",
                 headers=self._headers(),
@@ -47,7 +82,7 @@ class PaRacORDServerClient:
 
     async def upload_teleport_content(self, local_file_id: str, handle) -> dict:
         """Push the bytes for a requested teleport; the server verifies the hash before storing."""
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, verify=self.verify) as client:
             files = {"file": (f"{local_file_id}.pdf", handle, "application/pdf")}
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/teleports/{local_file_id}/content",
@@ -59,7 +94,7 @@ class PaRacORDServerClient:
 
     async def offer_teleport(self, local_file_id: str, handle) -> dict:
         """Agent-initiated teleport (#12): push bytes directly (requires can_teleport on the server)."""
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, verify=self.verify) as client:
             files = {"file": (f"{local_file_id}.pdf", handle, "application/pdf")}
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/files/{local_file_id}/offer-teleport",
@@ -71,7 +106,7 @@ class PaRacORDServerClient:
 
     async def upload_for_extraction(self, local_file_id: str, handle) -> dict:
         """Push bytes for index_and_extract: the server extracts then discards the PDF."""
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, verify=self.verify) as client:
             files = {"file": (f"{local_file_id}.pdf", handle, "application/pdf")}
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/files/{local_file_id}/extract",
@@ -83,7 +118,7 @@ class PaRacORDServerClient:
 
     async def reject_teleport(self, local_file_id: str, forever: bool = False) -> dict:
         """Reject a pending teleport request (optionally block all future requests)."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/teleports/{local_file_id}/reject",
                 json={"forever": forever},
@@ -94,7 +129,7 @@ class PaRacORDServerClient:
 
     async def unblock_teleport(self, local_file_id: str) -> dict:
         """Clear a reject-forever block."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/teleports/{local_file_id}/unblock",
                 headers=self._headers(),
@@ -104,7 +139,7 @@ class PaRacORDServerClient:
 
     async def get_me(self) -> dict:
         """Return this agent's identity + privileges (also a reachability/auth check)."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.get(
                 f"{self.server_url}/api/v1/agents/me", headers=self._headers()
             )
@@ -113,7 +148,7 @@ class PaRacORDServerClient:
 
     async def get_my_files(self) -> list[dict]:
         """Return this agent's files + their server-side processing/teleport state."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.get(
                 f"{self.server_url}/api/v1/agents/files", headers=self._headers()
             )
@@ -122,7 +157,7 @@ class PaRacORDServerClient:
 
     async def report_source_removed(self, local_file_ids: list[str]) -> dict:
         """Tell the server which files disappeared on the client (kept + flagged)."""
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/files/source-removed",
                 json={"local_file_ids": local_file_ids},
@@ -140,7 +175,7 @@ class PaRacORDServerClient:
         """
         if not hashes:
             return set()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=self.verify) as client:
             response = await client.post(
                 f"{self.server_url}/api/v1/agents/files/known-hashes",
                 json={"sha256": hashes},
