@@ -9,6 +9,16 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Consolidation StaleDataError hotfix (2026-07-13)
+
+The reference-dupes scan failed on the real-data Postgres deployment with
+`StaleDataError: UPDATE on reference_citations matched 0 rows`: the fold bulk-deleted loser
+Reference rows before flushing the repointed link rows, and Postgres's ON DELETE CASCADE ate
+them out from under the session (SQLite tests don't enforce FKs, so CI couldn't see it; the
+failed job rolled back, so no data was harmed). Fixed by flushing links before the delete
+(`fad8ea5`); regression test runs with SQLite `PRAGMA foreign_keys=ON` and was verified to fail
+on the old ordering. Real-data PC: pull + restart, then re-run the scan.
+
 ## Docs source-of-truth + agent-guide merge (S17/S18, 2026-07-13)
 
 `AGENTS.md` now declares `docs/reference/` the engineering source of truth (update it in the same
