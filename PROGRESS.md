@@ -9,6 +9,16 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Docs source-of-truth + agent-guide merge (S17/S18, 2026-07-13)
+
+`AGENTS.md` now declares `docs/reference/` the engineering source of truth (update it in the same
+commit as the code) and keeps `SPECIFICATION.md` as product intent (banner added there);
+`HINTS_FOR_AGENTS.md` merged into `AGENTS.md` and deleted; `docs/architecture/` archived into the
+gitignored `documentation_archive.zip` (`5877681`). Also: failed-job error text now read via
+`job.latest_result()` — the RQ `exc_info` DeprecationWarning in test output is gone (`7ca451e`);
+OpenAPI schema regenerated for the reference-dupes + latest-summary endpoints (`f16f318`).
+S19 (documentation-only YAML keys) inventoried and reported to the owner — pruning decision open.
+
 ## Reference consolidation + admin review (S13/S14, 2026-07-13)
 
 Owner policy B implemented (`64631c5`): a consolidation scan auto-folds conflict-free
