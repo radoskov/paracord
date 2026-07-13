@@ -87,9 +87,30 @@ adaptations in `test_batch_import.py` / `test_auth_hardening.py` (domain errors,
   visibility beyond what the requester could see (test-covered).
 - No new egress surfaces; S20 only pages the existing OpenAlex/S2 endpoints (same `_get` guard).
 
+## Addendum (same day): S13/S14 landed + E2E flake fixed
+
+- **S13/S14** (`64631c5`) — owner decided option B: `services/reference_consolidation.py`
+  auto-folds conflict-free duplicate-reference groups (oldest survives; links/mentions repointed
+  constraint-aware; metadata merged non-null-first; ladder confirmed > rejected > local > likely >
+  external > unresolved; legacy arXiv-DOI keys fold in). Contradictions are parked with a
+  `|conflict:<id8>` dedup-key suffix and reviewed in the new **Admin → Reference dupes** tab
+  (scan button → queued job w/ inline fallback → "X dupes resolved, Y contradictions found" +
+  per-group "Keep this resolution"). The scan also runs once per server startup (best-effort,
+  coalescing job id) — this is how it will first touch the real-data deployment. Everything
+  audited; reruns idempotent; NULL-key rows exempt. Follow-up (deliberate): after the real
+  deployment has a clean scan, a migration adds the `dedup_key` unique index and
+  `find_or_create_reference` switches to upsert-on-conflict.
+- **E2E failure** (user-reported): Playwright timed out on the login form because the Vite dev
+  server was answering `504 Outdated Optimize Dep` — running `npm run build`/`npm test` inside
+  the SAME container as the live dev server invalidates its optimizer cache. Fixed by
+  `rm -rf node_modules/.vite` + frontend container restart (worker restarted too so its
+  long-running Python process imports current code). Full `make e2e`: 33 passed / 3 skipped.
+  Rule of thumb going forward: after running build/tests in the frontend container, restart it
+  (or clear `.vite`) before trusting the dev server.
+
 ## Still open (needs owner discussion)
 
-- **S13/S14** — reference consolidation job (conflict policy + trigger + unique-index commitment).
+- **Unique index + upsert** — the S13/S14 follow-up migration, after a clean real-data scan.
 - **S17/S18/S19** — docs source-of-truth, docs commit hygiene, example-YAML pruning. The
   `docs/reference/*` working-tree edits (incl. the S12 register update) remain uncommitted.
 

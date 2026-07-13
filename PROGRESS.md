@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reference consolidation + admin review (S13/S14, 2026-07-13)
+
+Owner policy B implemented (`64631c5`): a consolidation scan auto-folds conflict-free
+duplicate canonical references (oldest survives, links/mentions repointed, metadata merged,
+resolution ladder) and parks contradictions with a `|conflict:<id8>` dedup-key suffix for the
+new **Admin → Reference dupes** tab (scan button + "X dupes resolved, Y contradictions found" +
+per-group "Keep this resolution"). Scan runs from the button (coalescing queued job, inline
+fallback) and once per server startup. 13 new backend tests + an AdminPage test; full backend
+suite 1150 passed. Follow-up: `dedup_key` unique index + upsert once the real deployment has a
+clean scan. Also fixed the reported E2E failure — a stale Vite optimize-dep cache (504s) from
+running build/tests inside the live dev-server container; after cache clear + restart the full
+`make e2e` battery is green (33 passed / 3 skipped).
+
 ## Structure-audit fixes, S-batch (2026-07-13)
 
 Implements the owner-decided items from the 2026-07-12 structure audit
