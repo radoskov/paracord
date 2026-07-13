@@ -89,7 +89,8 @@ def create_scope_summary(
 
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
-    visible = access.visible_work_ids(db, actor)
+    # E3: a SQL predicate — the scope query filters in the database, no materialized id set.
+    visible = access.visible_work_condition(db, actor)
     try:
         scope_size = count_scope_works(
             db, payload.scope_type, payload.scope_id, visible_ids=visible
@@ -229,7 +230,7 @@ def create_topic_model(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
     cfg = get_ai_config(db)
     backend = payload.backend or cfg.topic_backend
-    visible = access.visible_work_ids(db, actor)
+    visible = access.visible_work_condition(db, actor)  # E3: SQL predicate, not an id set
     try:
         scope_size = count_scope_works(
             db, payload.scope_type, payload.scope_id, visible_ids=visible

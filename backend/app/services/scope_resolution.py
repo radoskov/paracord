@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.orm import Session
 
 from app.models.organization import RackShelf, ShelfWork
@@ -36,9 +36,13 @@ def scope_works_query(
     scope_type: str,
     scope_id: uuid.UUID | None,
     *,
-    visible_ids: set[uuid.UUID] | None,
+    visible_ids: set[uuid.UUID] | ColumnElement | None,
 ) -> Select:
     """A ``Select[Work]`` for the scope's members, shadow-filtered and visibility-clamped.
+
+    ``visible_ids`` may be the materialized id set OR a SQL predicate from
+    ``access.visible_work_condition`` (E3) — the predicate form keeps the whole clamp inside the
+    database (no giant ``IN`` list). ``None`` = deliberate system context / admin.
 
     Raises ``ValueError`` for an unknown scope type or a container scope without an id (callers
     map it to a 400).
@@ -66,7 +70,9 @@ def scope_works_query(
     else:
         raise ValueError(f"Unsupported scope type: {scope_type!r}")
     stmt = stmt.where(Work.merged_into_id.is_(None))
-    if visible_ids is not None:
+    if isinstance(visible_ids, ColumnElement):
+        stmt = stmt.where(visible_ids)
+    elif visible_ids is not None:
         stmt = stmt.where(Work.id.in_(visible_ids))
     return stmt
 
@@ -76,7 +82,7 @@ def resolve_scope_works(
     scope_type: str,
     scope_id: uuid.UUID | None,
     *,
-    visible_ids: set[uuid.UUID] | None,
+    visible_ids: set[uuid.UUID] | ColumnElement | None,
 ) -> list[Work]:
     """The scope's member works, materialized (for callers that genuinely need them all)."""
     return list(db.scalars(scope_works_query(scope_type, scope_id, visible_ids=visible_ids)).all())
@@ -87,7 +93,7 @@ def count_scope_works(
     scope_type: str,
     scope_id: uuid.UUID | None,
     *,
-    visible_ids: set[uuid.UUID] | None,
+    visible_ids: set[uuid.UUID] | ColumnElement | None,
 ) -> int:
     """The scope's member count, without loading a single Work row (SQL ``COUNT`` over the query).
 

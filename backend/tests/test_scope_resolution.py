@@ -84,3 +84,14 @@ def test_bad_scope_raises_value_error(db) -> None:
         resolve_scope_works(db, "shelf", None, visible_ids=None)
     with pytest.raises(ValueError, match="Unsupported scope type"):
         resolve_scope_works(db, "galaxy", uuid.uuid4(), visible_ids=None)
+
+
+def test_visible_ids_accepts_a_sql_predicate(db) -> None:
+    """E3: the clamp can be a SQL condition (from access.visible_work_condition) instead of a
+    materialized id set — same result, filtered inside the database."""
+    a = _work(db, "A")
+    _work(db, "Hidden")
+    predicate = Work.canonical_title == "A"  # stands in for the access EXISTS predicate
+    works = resolve_scope_works(db, "library", None, visible_ids=predicate)
+    assert [w.id for w in works] == [a.id]
+    assert count_scope_works(db, "library", None, visible_ids=predicate) == 1

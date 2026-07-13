@@ -731,7 +731,7 @@ def summarize_scope_job(
             max_sentences=max_sentences,
             model_name=model_name,
             created_by_user_id=actor.id,
-            visible_ids=access.visible_work_ids(db, actor),
+            visible_ids=access.visible_work_condition(db, actor),  # E3: SQL predicate
         )
         db.commit()
         return {"summary_id": str(summary.id), "work_count": work_count}
@@ -771,7 +771,7 @@ def topic_model_job(
             max_topics=max(1, min(max_topics, 20)),
             backend=backend or cfg.topic_backend,
             embedding_model=embedding_model or cfg.topic_embedding_model,
-            visible_ids=access.visible_work_ids(db, actor),
+            visible_ids=access.visible_work_condition(db, actor),  # E3: SQL predicate
         )
         db.commit()
         return {"model_id": result.get("model_id"), "work_count": result.get("work_count")}

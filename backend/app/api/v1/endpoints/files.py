@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.file import File, FileWorkLink
 from app.models.user import User
+from app.models.work import Work
 from app.services import access
 from app.services import ocr as ocr_service
 from app.services.ai_config import get_ai_config
@@ -56,14 +57,18 @@ def list_files(
 ) -> list[File]:
     """List file metadata for the library file view (filtered to files the caller may see)."""
     stmt = select(File).order_by(File.created_at.desc())
-    visible = access.visible_work_ids(db, actor)
-    if visible is not None:
+    # E3: the visibility clamp stays a SQL predicate — no materialized id set / giant IN list.
+    visible_ids_query = access.visible_works_query(db, actor).with_only_columns(Work.id)
+    if not access.is_admin_or_owner(actor):
         # A file is visible when loose (linked to no work) or linked to a visible work.
         linked = select(FileWorkLink.file_id).where(FileWorkLink.file_id == File.id)
         loose = ~linked.exists()
         visible_link = (
             select(FileWorkLink.file_id)
-            .where(FileWorkLink.file_id == File.id, FileWorkLink.work_id.in_(visible))
+            .where(
+                FileWorkLink.file_id == File.id,
+                FileWorkLink.work_id.in_(visible_ids_query),
+            )
             .exists()
         )
         stmt = stmt.where(or_(loose, visible_link))

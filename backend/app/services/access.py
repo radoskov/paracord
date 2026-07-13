@@ -352,15 +352,32 @@ def visible_work_ids(db: Session, user: User) -> set[uuid.UUID] | None:
     """Return the set of work ids the user may see, or ``None`` if unrestricted (admin/owner).
 
     ``None`` is a short-circuit sentinel: callers should treat it as "no filtering needed".
+    Prefer :func:`visible_work_condition` (E3) when the ids are only used to filter a query —
+    a SQL predicate lets the database do the filtering instead of shipping the whole id set to
+    Python and back as a giant ``IN`` list.
     """
     if is_admin_or_owner(user):
         return None
     return set(db.scalars(select(Work.id).where(_visible_work_condition(db, user))).all())
 
 
+def visible_work_condition(db: Session, user: User):
+    """The visibility clamp as a composable SQL predicate, or ``None`` if unrestricted (E3).
+
+    Semantically identical to ``Work.id IN visible_work_ids(...)`` but evaluated inside the
+    database (EXISTS sub-queries), so callers that only *filter* — scope resolution, list
+    endpoints, counts — avoid materializing thousands of ids in Python per request. Callers that
+    genuinely need per-id membership checks in Python (graph node clamps) keep using the set.
+    """
+    if is_admin_or_owner(user):
+        return None
+    return _visible_work_condition(db, user)
+
+
 __all__ = [
     "is_admin_or_owner",
     "user_group_ids",
+    "visible_work_condition",
     "granted_target_ids",
     "can_see_rack",
     "can_see_shelf",
