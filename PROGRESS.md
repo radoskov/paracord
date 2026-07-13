@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Insights audit implementation, chunks A+B (2026-07-13)
+
+Owner decisions on the Insights/Viz/Summaries audit: merge graph engines on ECharts; high
+admin-editable node caps + background-job routing per surface; extend the scope resolver to all
+seven types; keep the three tabs but unify vocabulary.
+
+- **Chunk A** (`f83e945`): scope_resolution handles all SEVEN scope types;
+  `citation_graph._scope_works` is now a dict-shaped shim over it (migrating citation_summary,
+  venue_author_summary, visualization in one move); the six copied endpoint SEE-check +
+  saved-filter blocks collapse into `api/scope_params.resolve_scope_or_404`.
+- **Chunk B** (`f5f27fb`): per-surface node caps (migration `0069`; citation 1500 / topic 400 /
+  viz 500; Admin → Settings) — the citation graph previously ran exact betweenness over an
+  uncapped library scope inline; capped graphs keep the best-connected nodes and report
+  `nodes_hidden`. Scopes above `ai_scope_job_threshold` compute on the worker
+  (`analysis_graph_job`), results held in Redis 1h and fetched via the requester-gated
+  `GET /jobs/{id}/result`; the Insights page resolves queued responses transparently.
+- **Remaining (chunk C, planned):** ECharts-only graph component (drop Cytoscape), shared
+  `<ChartHost>`/`<ScopePicker>` (+ scope-menu parity for Viz/Citation-summary), vocabulary
+  unification, viz client-side restyle, cosine consolidation, lazy venue/author load, surface
+  topic coherence/representatives.
+
+Battery re-run, all green: ready-full (backend 1167 / agent 73 / migrations 4 / frontend 275 +
+build), safety 160, e2e 33. (One local hiccup: root-owned `.vite` from in-container npm runs
+broke `make frontend-install` once — cleaned; note in memory.)
+
 ## Batch: D3/D38/E3 + graph caps + references-panel + migration squash (2026-07-13)
 
 - **D3** (`fe6776b`): Caddy TLS proxy in the prod overlay (`config/Caddyfile.example`, local CA
