@@ -34,9 +34,7 @@ def upgrade() -> None:
         "external_papers",
         sa.Column("resolved_work_id", sa.Uuid(), nullable=True),
     )
-    op.create_index(
-        "ix_external_papers_resolved_work_id", "external_papers", ["resolved_work_id"]
-    )
+    op.create_index("ix_external_papers_resolved_work_id", "external_papers", ["resolved_work_id"])
     op.create_foreign_key(
         "fk_external_papers_resolved_work_id",
         "external_papers",
@@ -49,9 +47,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Revert the migration."""
-    op.drop_constraint(
-        "fk_external_papers_resolved_work_id", "external_papers", type_="foreignkey"
-    )
+    op.drop_constraint("fk_external_papers_resolved_work_id", "external_papers", type_="foreignkey")
     op.drop_index("ix_external_papers_resolved_work_id", table_name="external_papers")
     op.drop_column("external_papers", "resolved_work_id")
     op.drop_column("external_papers", "arxiv_id")

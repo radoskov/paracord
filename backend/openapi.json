@@ -860,6 +860,14 @@
       },
       "AppConfigOut": {
         "properties": {
+          "ai_scope_job_threshold": {
+            "title": "Ai Scope Job Threshold",
+            "type": "integer"
+          },
+          "citing_papers_fetch_cap": {
+            "title": "Citing Papers Fetch Cap",
+            "type": "integer"
+          },
           "max_batch_items": {
             "title": "Max Batch Items",
             "type": "integer"
@@ -900,6 +908,8 @@
           "max_batch_items",
           "rq_worker_count",
           "max_queue_len",
+          "citing_papers_fetch_cap",
+          "ai_scope_job_threshold",
           "use_fuzzy_match_as_confirmed",
           "reference_rescan_on_startup"
         ],
@@ -908,6 +918,30 @@
       },
       "AppConfigUpdate": {
         "properties": {
+          "ai_scope_job_threshold": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Scope Job Threshold"
+          },
+          "citing_papers_fetch_cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citing Papers Fetch Cap"
+          },
           "max_batch_items": {
             "anyOf": [
               {
@@ -1864,6 +1898,18 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "resolved_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Work Id"
           },
           "source": {
             "title": "Source",
@@ -5240,12 +5286,26 @@
       "ScopeSummaryResponse": {
         "properties": {
           "entity_id": {
-            "title": "Entity Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
           },
           "entity_type": {
-            "title": "Entity Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
           },
           "fallback": {
             "default": false,
@@ -5262,6 +5322,17 @@
               }
             ],
             "title": "Fallback Reason"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
           },
           "model_name": {
             "anyOf": [
@@ -5307,26 +5378,39 @@
             ],
             "title": "Provider Used"
           },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
+          },
           "summary_type": {
-            "title": "Summary Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Type"
           },
           "text": {
-            "title": "Text",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
           },
           "work_count": {
+            "default": 0,
             "title": "Work Count",
             "type": "integer"
           }
         },
-        "required": [
-          "entity_type",
-          "entity_id",
-          "summary_type",
-          "text",
-          "work_count"
-        ],
         "title": "ScopeSummaryResponse",
         "type": "object"
       },
@@ -6734,9 +6818,27 @@
             ],
             "title": "Hierarchy"
           },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
           "model_id": {
-            "title": "Model Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           },
           "outlier_work_ids": {
             "default": [],
@@ -6745,6 +6847,11 @@
             },
             "title": "Outlier Work Ids",
             "type": "array"
+          },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
           },
           "scope_id": {
             "anyOf": [
@@ -6784,7 +6891,6 @@
           }
         },
         "required": [
-          "model_id",
           "scope_type",
           "work_count",
           "topics"
@@ -12703,7 +12809,7 @@
     },
     "/api/v1/ai/summaries": {
       "post": {
-        "description": "Generate (replacing prior) an extractive summary over a library/shelf/rack scope.\n\nAccess control: a shelf/rack scope requires SEE on that container, and only papers the caller\nmay SEE feed the summary.",
+        "description": "Generate (replacing prior) an extractive summary over a library/shelf/rack scope.\n\nAccess control: a shelf/rack scope requires SEE on that container, and only papers the caller\nmay SEE feed the summary. Scopes above the admin ``ai_scope_job_threshold`` run on the\nbackground worker instead (202 + job id; poll the Jobs list, then GET /ai/summaries/latest)\nso a library-sized summary can't pin an API worker for minutes (S15/S16).",
         "operationId": "create_scope_summary_api_v1_ai_summaries_post",
         "parameters": [
           {
@@ -12761,9 +12867,90 @@
         ]
       }
     },
+    "/api/v1/ai/summaries/latest": {
+      "get": {
+        "description": "Return the most recent stored summary for a scope (the S15 async-completion read path).",
+        "operationId": "read_latest_scope_summary_api_v1_ai_summaries_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "library",
+                "shelf",
+                "rack"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Latest Scope Summary",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
     "/api/v1/ai/topics": {
       "post": {
-        "description": "Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments.\n\nAccess control: a shelf/rack scope requires SEE on that container, and only papers the caller\nmay SEE are clustered.",
+        "description": "Run the topic model over a scope (TF-IDF baseline or embedding backend) + store assignments.\n\nAccess control: a shelf/rack scope requires SEE on that container, and only papers the caller\nmay SEE are clustered. Scopes above the admin ``ai_scope_job_threshold`` run on the background\nworker instead (202 + job id; assignments land in the topic graph when done) — S15/S16.",
         "operationId": "create_topic_model_api_v1_ai_topics_post",
         "parameters": [
           {
@@ -13947,7 +14134,7 @@
     },
     "/api/v1/duplicates/scan": {
       "post": {
-        "description": "Scan selected or all known work/file identities for duplicate candidates.\n\nOnly papers/files the caller may SEE are scanned (a full-library scan skips hidden works).\n\nA full-library scan (no specific work/file) is a minutes-long job at scale, so it is **always**\nrun on the background worker and returns a queued shape (D15); the ``background`` flag is only a\nhint and full scans ignore it. Single-work/-file scans stay synchronous and inline.",
+        "description": "Scan selected or all known work/file identities for duplicate candidates.\n\nOnly papers/files the caller may SEE are scanned (a full-library scan skips hidden works).\n\nA full-library scan (no specific work/file) is a minutes-long job at scale, so it is **always**\nrun on the background worker and returns a queued shape (D15); the ``background`` flag is only a\nhint and full scans ignore it. Single-work/-file scans stay synchronous and scan **only** the\ngiven entity (S5): an absent selector no longer expands to every work/file in the library.",
         "operationId": "scan_duplicates_api_v1_duplicates_scan_post",
         "parameters": [
           {
