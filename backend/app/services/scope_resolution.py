@@ -1,10 +1,12 @@
 """Shared scope → works resolution (S1/S2; HINTS "Make scopes reusable").
 
-Several features take a user-picked scope — the whole library, one shelf, one rack — and operate
-on every paper in it (summaries, topic models; the richer citation-graph/export resolvers also
-accept tag/author/work-list scopes and may converge here later). This module is the ONE place
-that translates a scope into works, replacing the per-feature copies whose merged-shadow +
-visibility tails silently drifted apart.
+Several features take a user-picked scope and operate on every paper in it (summaries, topic
+models, citation graphs/summaries, visualizations, exports). This module is the ONE place that
+translates a scope into works, replacing the per-feature copies whose merged-shadow + visibility
+tails silently drifted apart. All SEVEN scope kinds are supported (owner decision, 2026-07-13):
+the three container scopes (``library``/``shelf``/``rack``) plus the explicit-id scopes
+(``search_result``/``selected_papers``/``saved_filter`` — the endpoint resolves the ids and
+passes them in) and ``import_batch`` (``Work.import_batch_id``).
 
 Design points:
 
@@ -29,7 +31,18 @@ from sqlalchemy.orm import Session
 from app.models.organization import RackShelf, ShelfWork
 from app.models.work import Work
 
-SCOPE_TYPES = ("library", "shelf", "rack")
+SCOPE_TYPES = (
+    "library",
+    "shelf",
+    "rack",
+    "search_result",
+    "selected_papers",
+    "import_batch",
+    "saved_filter",
+)
+# Scopes resolved from an explicit id list the endpoint supplies (already visibility-shaped for
+# saved filters; the clamp below still applies as defense in depth).
+_EXPLICIT_ID_SCOPES = ("search_result", "selected_papers", "saved_filter")
 
 
 def scope_works_query(
@@ -37,6 +50,7 @@ def scope_works_query(
     scope_id: uuid.UUID | None,
     *,
     visible_ids: set[uuid.UUID] | ColumnElement | None,
+    work_ids: list[uuid.UUID] | None = None,
 ) -> Select:
     """A ``Select[Work]`` for the scope's members, shadow-filtered and visibility-clamped.
 
@@ -49,6 +63,14 @@ def scope_works_query(
     """
     if scope_type == "library":
         stmt = select(Work)
+    elif scope_type in _EXPLICIT_ID_SCOPES:
+        # An explicit set (search result / library selection / resolved saved filter). An empty
+        # list is a valid, empty scope.
+        stmt = select(Work).where(Work.id.in_(work_ids or []))
+    elif scope_type == "import_batch":
+        if scope_id is None:
+            raise ValueError("scope id is required for an import-batch scope")
+        stmt = select(Work).where(Work.import_batch_id == scope_id)
     elif scope_type == "shelf":
         if scope_id is None:
             raise ValueError("scope id is required for a shelf scope")
@@ -83,9 +105,14 @@ def resolve_scope_works(
     scope_id: uuid.UUID | None,
     *,
     visible_ids: set[uuid.UUID] | ColumnElement | None,
+    work_ids: list[uuid.UUID] | None = None,
 ) -> list[Work]:
     """The scope's member works, materialized (for callers that genuinely need them all)."""
-    return list(db.scalars(scope_works_query(scope_type, scope_id, visible_ids=visible_ids)).all())
+    return list(
+        db.scalars(
+            scope_works_query(scope_type, scope_id, visible_ids=visible_ids, work_ids=work_ids)
+        ).all()
+    )
 
 
 def count_scope_works(
@@ -94,11 +121,12 @@ def count_scope_works(
     scope_id: uuid.UUID | None,
     *,
     visible_ids: set[uuid.UUID] | ColumnElement | None,
+    work_ids: list[uuid.UUID] | None = None,
 ) -> int:
     """The scope's member count, without loading a single Work row (SQL ``COUNT`` over the query).
 
     This is the cheap pre-check that lets an endpoint decide "small enough to run inline" vs
     "route to the background worker" (S15/S16) before paying for materialization.
     """
-    stmt = scope_works_query(scope_type, scope_id, visible_ids=visible_ids)
+    stmt = scope_works_query(scope_type, scope_id, visible_ids=visible_ids, work_ids=work_ids)
     return int(db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0)

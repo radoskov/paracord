@@ -15,13 +15,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user
+from app.api.scope_params import resolve_scope_or_404
 from app.db.session import get_db
 from app.models.user import User
-from app.services import access, visualization
-from app.services.saved_filters import (
-    get_owned_saved_filter,
-    resolve_saved_filter_work_ids,
-)
+from app.services import visualization
 from app.services.visualization import VizScope, available_view_types, get_viz
 
 router = APIRouter()
@@ -118,19 +115,9 @@ def get_visualization(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported scope: {scope_type}"
         )
-    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-
-    resolved_work_ids = work_ids
-    if scope_type == "saved_filter":
-        if scope_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, scope_id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        resolved_work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    resolved_work_ids = resolve_scope_or_404(
+        db, actor, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids
+    )
 
     scope = VizScope(type=scope_type, id=scope_id, work_ids=resolved_work_ids)
     params = {

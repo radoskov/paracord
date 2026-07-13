@@ -18,10 +18,11 @@ from sqlalchemy.orm import Session
 from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import FileWorkLink
-from app.models.organization import RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.services.reference_links import citing_work_ids_subquery
+from app.services.scope_resolution import resolve_scope_works
 from app.utils.normalization import arxiv_base_from_doi, normalize_doi
 
 # Non-private shelf access levels (mirrors ``access._OPEN_OR_VISIBLE``): only these shelves may
@@ -316,50 +317,17 @@ def _scope_works(
     work_ids: list[uuid.UUID] | None = None,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> dict[uuid.UUID, Work]:
-    # Flat if/elif so each scope is self-contained and Phase B7 can append ``saved_filter`` as one
-    # more branch. Every branch feeds the single ``visible_ids`` clamp at the tail — the one place
-    # visibility is enforced, so no branch can leak a hidden work as a node/target.
-    if scope_type == "library":
-        works = db.scalars(select(Work)).all()
-    elif scope_type == "shelf":
-        if scope_id is None:
-            raise ValueError("scope id is required for a shelf graph")
-        works = db.scalars(
-            select(Work)
-            .join(ShelfWork, ShelfWork.work_id == Work.id)
-            .where(ShelfWork.shelf_id == scope_id)
-        ).all()
-    elif scope_type == "rack":
-        if scope_id is None:
-            raise ValueError("scope id is required for a rack graph")
-        works = db.scalars(
-            select(Work)
-            .join(ShelfWork, ShelfWork.work_id == Work.id)
-            .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
-            .where(RackShelf.rack_id == scope_id)
-            .distinct()
-        ).all()
-    elif scope_type in ("search_result", "selected_papers", "saved_filter"):
-        # An explicit set of works: a search result set, the library multi-selection, or a saved
-        # filter's resolved ids (Phase B7 — the endpoint resolves + clamps the filter and passes the
-        # ids in, mirroring export's selection/search). An empty set is a valid (empty) scope.
-        if not work_ids:
-            return {}
-        works = db.scalars(select(Work).where(Work.id.in_(work_ids))).all()
-    elif scope_type == "import_batch":
-        if scope_id is None:
-            raise ValueError("scope id is required for an import-batch graph")
-        works = db.scalars(select(Work).where(Work.import_batch_id == scope_id)).all()
-    else:
-        raise ValueError(f"Unsupported graph scope: {scope_type}")
-    # Drop merged shadows (Batch D) unconditionally — they are never a node/target for anyone,
-    # including admin (where ``visible_ids`` is None) — then apply the per-user visibility clamp.
-    works = [
-        work
-        for work in works
-        if work.merged_into_id is None and (visible_ids is None or work.id in visible_ids)
-    ]
+    """Scope members as an id→Work dict — a thin shim over the SHARED resolver (owner decision
+    2026-07-13, L-b): scope semantics, the merged-shadow filter, and the visibility clamp live in
+    ``app.services.scope_resolution`` for every feature; this keeps only the dict shape the graph
+    builders consume. citation_summary / venue_author_summary / visualization import this shim, so
+    the whole citation cluster resolves scopes through one code path.
+    """
+    works = resolve_scope_works(
+        db, scope_type, scope_id, visible_ids=visible_ids, work_ids=work_ids
+    )
     return {work.id: work for work in works}
+
 
 
 def _local_work_index(

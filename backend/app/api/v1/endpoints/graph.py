@@ -8,14 +8,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user
+from app.api.scope_params import resolve_scope_or_404
 from app.db.session import get_db
 from app.models.user import User
 from app.services import access
 from app.services.citation_graph import build_citation_graph
-from app.services.saved_filters import (
-    get_owned_saved_filter,
-    resolve_saved_filter_work_ids,
-)
 from app.services.topic_graph import build_topic_graph
 
 router = APIRouter()
@@ -92,23 +89,13 @@ def citation_graph(
     Access control: hidden works never appear as nodes/edges, and a shelf/rack scope requires SEE
     on that container.
     """
-    if not access.can_see_scope_container(
-        db, actor, scope_type=payload.scope.type, scope_id=payload.scope.id
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-    work_ids = payload.scope.work_ids
-    if payload.scope.type == "saved_filter":
-        # Load the caller's own filter (404 on a missing/foreign one) and resolve it to the ids it
-        # matches for THIS actor — already visibility-clamped by build_works_query, so the graph
-        # can only ever include works the caller may see.
-        if payload.scope.id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, payload.scope.id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    work_ids = resolve_scope_or_404(
+        db,
+        actor,
+        scope_type=payload.scope.type,
+        scope_id=payload.scope.id,
+        work_ids=payload.scope.work_ids,
+    )
     try:
         graph = build_citation_graph(
             db,
@@ -166,20 +153,13 @@ def topic_graph(
     Access control mirrors the citation graph: hidden papers never appear, and a shelf/rack scope
     requires SEE on that container. Edge weight is cosine similarity (inverted semantic distance);
     edges are kNN-sparsified."""
-    if not access.can_see_scope_container(
-        db, actor, scope_type=payload.scope.type, scope_id=payload.scope.id
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-    work_ids = payload.scope.work_ids
-    if payload.scope.type == "saved_filter":
-        if payload.scope.id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, payload.scope.id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    work_ids = resolve_scope_or_404(
+        db,
+        actor,
+        scope_type=payload.scope.type,
+        scope_id=payload.scope.id,
+        work_ids=payload.scope.work_ids,
+    )
     try:
         graph = build_topic_graph(
             db,

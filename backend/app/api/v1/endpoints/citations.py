@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_authenticated_user
+from app.api.scope_params import resolve_scope_or_404
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.citation import Reference, ReferenceCitation
@@ -31,10 +32,6 @@ from app.services.citation_summary import (
 )
 from app.services.export_service import MISSING_EXPORT_FORMATS, render_missing_works
 from app.services.external_preview import external_preview
-from app.services.saved_filters import (
-    get_owned_saved_filter,
-    resolve_saved_filter_work_ids,
-)
 from app.services.venue_author_summary import venue_author_summary
 
 # Missing-list export (Track C C3b) pulls the full missing set, not just the on-screen top rows.
@@ -111,20 +108,9 @@ def get_citation_summary(
     works/references are clamped to the caller's visible works. Cached + versioned by a scope
     signature (see :func:`app.services.citation_summary.citation_summary`).
     """
-    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-
-    resolved_work_ids = work_ids
-    if scope_type == "saved_filter":
-        if scope_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, scope_id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        resolved_work_ids = resolve_saved_filter_work_ids(db, actor, saved)
-
+    resolved_work_ids = resolve_scope_or_404(
+        db, actor, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids
+    )
     scope = SummaryScope(type=scope_type, id=scope_id, work_ids=resolved_work_ids)
     try:
         summary = citation_summary(db, actor, scope, limit=limit)
@@ -186,18 +172,9 @@ def _resolve_summary_scope(
     work_ids: list[uuid.UUID] | None,
 ) -> SummaryScope:
     """Shared scope resolution (SEE check + saved-filter expansion) for the summary endpoints."""
-    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-    resolved_work_ids = work_ids
-    if scope_type == "saved_filter":
-        if scope_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, scope_id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        resolved_work_ids = resolve_saved_filter_work_ids(db, actor, saved)
+    resolved_work_ids = resolve_scope_or_404(
+        db, actor, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids
+    )
     return SummaryScope(type=scope_type, id=scope_id, work_ids=resolved_work_ids)
 
 
@@ -241,18 +218,9 @@ def _resolve_scope_work_ids(
     work_ids: list[uuid.UUID] | None,
 ) -> list[uuid.UUID] | None:
     """SEE-check the scope container and resolve a ``saved_filter`` scope to work ids (404 on miss)."""
-    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-    if scope_type == "saved_filter":
-        if scope_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="scope id is required"
-            )
-        saved = get_owned_saved_filter(db, actor, scope_id)
-        if saved is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-        return resolve_saved_filter_work_ids(db, actor, saved)
-    return work_ids
+    return resolve_scope_or_404(
+        db, actor, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids
+    )
 
 
 # --- external-reference preview (Track C C1) ---------------------------------------------------
