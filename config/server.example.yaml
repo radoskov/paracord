@@ -1,5 +1,4 @@
 server:
-  name: paracord-server
   bind_host: 127.0.0.1
   bind_port: 8000
   public_base_url: http://127.0.0.1:8000
@@ -16,30 +15,14 @@ security:
   # Failed-login throttling (per username, in-process sliding window).
   login_max_failures: 5
   login_lockout_minutes: 15
-  failed_login_lockout:
-    enabled: true
-    max_attempts: 8
-    window_minutes: 15
-  credential_recovery:
-    method: server_console_only
-    script: scripts/reset_admin_password.py
 
 storage:
   managed_library_root: ./storage/library
-  temp_root: ./storage/tmp
-  max_upload_mb: 512
-  content_addressed_layout: sha256_prefix
   # Server-folder imports can only use these configured aliases; APIs never accept
   # arbitrary filesystem paths to scan.
   server_allowed_roots:
     # - alias: papers
     #   path: /srv/paracord/imports/papers
-
-agents:
-  registration_enabled: true
-  token_ttl_days: 180
-  allow_pdf_streaming: true
-  allow_teleport: true
 
 services:
   database_url_env: DATABASE_URL
@@ -62,7 +45,6 @@ metadata_enrichment:
     arxiv: true
     openalex: true
     semantic_scholar: false
-  overwrite_user_fields: false
 
 # Find-on-web (#5): for a paper, search LEGITIMATE scholarly sources by title/authors/year,
 # show candidate matches in a picker, and download+attach the ones the user selects. The
@@ -91,16 +73,10 @@ reference_matching:
   identifier_gate: true             # DOIs/arXiv ids present on both sides must match exactly
 
 processing:
-  # Fast preview path: first-page text/thumbnails before the slower GROBID job.
-  pdf_preview: pymupdf
   grobid:
     consolidate_header: true
     consolidate_citations: true
-    # "crossref" calls the public API; "biblio_glutton" uses a local consolidation service.
-    consolidation_backend: crossref
-    biblio_glutton_url: null
     include_raw_citations: true
-    include_raw_affiliations: true
     include_coordinates:
       - ref
       - biblStruct
@@ -109,8 +85,6 @@ processing:
       - figure
       - formula
     segment_sentences: true
-  keywords:
-    extractor: yake          # or keybert when embeddings are enabled
   ocr:
     # OCR pre-step (Phase B5). backend: none | ocrmypdf | full_ml.
     #   none     — GROBID runs on the PDF as-is (no OCR).
@@ -124,31 +98,51 @@ processing:
     timeout_seconds: 300            # per-file OCR wall-clock cap
     language: eng                   # tesseract language(s); add tesseract-ocr-<lang> to the image
     skip_if_text_layer_good: true   # skip OCR when the PDF already has a good text layer
-  reference_parser_fallback: null   # null | anystyle | refextract
-  advanced_extraction:       # optional ML PDF->text for hard documents (ocr_backend=full_ml)
-    # Enabling either sets ocr_backend=full_ml + extraction_backend. The dep is NEVER installed at
-    # runtime — build the opt-in image with `make build-ml-extraction` first.
-    nougat_enabled: false
-    marker_enabled: false
-  # Paper body summaries are tiered. Tier 0 (abstract) is always available; Tier 1
-  # (extractive) is lightweight and needs no LLM; Tier 2 (local LLM) is opt-in.
-  summaries:
-    default_tier: abstract
-    extractive_enabled: true
-    extractive_engine: textrank          # via sumy (TextRank/LexRank), no LLM/GPU
-    structured_sections: [method, experiment_data, results]
-  ai:
-    enabled: false                       # opt-in Tier-2 abstractive LLM summaries
-    summary_model: qwen3:4b
-    embedding_model: embeddinggemma
-  # Lightweight keyword extraction (processing.keywords above) is the default. BERTopic
-  # topic modeling is heavier and opt-in.
-  topics:
-    enabled: false
-    default_scope: library
 
-audit:
-  enabled: true
-  log_pdf_views: true
-  log_exports: true
-  retention_days: 365
+# =====================================================================================
+# REFERENCE ONLY — nothing below this line is read by the server (S19 inventory,
+# 2026-07-13). These blocks document intended / likely-future knobs; the parsed
+# whitelist lives in backend/app/core/config.py::_server_settings_from_yaml. They are
+# deliberately COMMENTED OUT: repeating a top-level key (e.g. a second `audit:`) would
+# make YAML silently replace the live block above. When a key gains a real reader,
+# move it into the live section and add it to the loader + this file's live area.
+# =====================================================================================
+#
+# server:
+#   name: paracord-server                # display name; nothing reads it yet
+#
+# security:
+#   credential_recovery:                 # recovery is server-console-only by design
+#     method: server_console_only        # (scripts/reset_admin_password.py is the real path)
+#     script: scripts/reset_admin_password.py
+#
+# storage:
+#   temp_root: ./storage/tmp             # temp files currently use the system default
+#   max_upload_mb: 512                   # no upload size cap is enforced from config yet
+#   content_addressed_layout: sha256_prefix  # layout is hardcoded to sha256 prefixes
+#
+# metadata_enrichment:
+#   overwrite_user_fields: false         # hardcoded: enrichment NEVER overwrites user fields
+#
+# processing:
+#   pdf_preview: pymupdf                 # preview engine is hardcoded to PyMuPDF
+#   keywords:
+#     extractor: yake                    # keyword extractor is hardcoded to YAKE
+#   reference_parser_fallback: null      # null | anystyle | refextract (no fallback wired)
+#   advanced_extraction:                 # ML PDF->text needs the opt-in image
+#     nougat_enabled: false              # (`make build-ml-extraction`); selection is via
+#     marker_enabled: false              # the admin OCR backend, not these keys
+#   summaries:                           # summary tiers are runtime-configured (Admin -> AI);
+#     default_tier: abstract             # these YAML knobs were never wired
+#     extractive_enabled: true
+#     extractive_engine: textrank
+#     structured_sections: [method, experiment_data, results]
+#   topics:                              # topic modeling is runtime-configured (Admin -> AI)
+#     enabled: false
+#     default_scope: library
+#
+# audit:
+#   enabled: true                        # auditing is always on; no retention job exists yet
+#   log_pdf_views: true
+#   log_exports: true
+#   retention_days: 365
