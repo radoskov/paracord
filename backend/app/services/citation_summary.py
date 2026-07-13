@@ -382,7 +382,7 @@ def _missing_works(
     References that resolve to nothing (no identifier / unresolvable) are not "resolvable" and are
     excluded from both counts.
     """
-    scope_works = {wid: db.get(Work, wid) for wid in scope_id_set}
+    scope_works = _load_works(db, scope_id_set)  # one IN() query, not a per-id loop
     scope_works = {wid: w for wid, w in scope_works.items() if w is not None}
     local_index = _local_work_index(
         db, scope_works=scope_works, references=references, visible_ids=visible

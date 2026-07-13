@@ -56,7 +56,8 @@ from app.services.topic_modeling import (
 )
 from app.utils.bounded_cache import BoundedTTLCache
 
-# Node cap (mirrors the citation/topic graph's ``MAX_NODES=400`` concept). Bounds the per-request
+# Node cap (topic_graph caps at 400, citation_summary at 500; the citation graph itself is
+# UNCAPPED — tracked in the 2026-07-13 Insights audit). Bounds the per-request
 # compute so a huge scope can't stall the endpoint; the truncation is reported in ``notes``.
 MAX_NODES = 500
 

@@ -18,6 +18,8 @@ Legend: 🔴 high · 🟠 medium · 🟡 low. Categories: **Sec**urity · **Alg*
 > references; owner rescan-on-startup toggle + manual "rescan whole library" control);
 > **F2** job retries + downstream recovery (bounded transient-extraction retries, chunk/embed
 > derive-from-state recovery sweep, per-paper failure indicator + jobs-tab retry surfacing).
+> **Update 2026-07-13:** the F3b caches are now bounded (S10 — `utils/bounded_cache.BoundedTTLCache`
+> in citation_summary / visualization / external_preview). The line below is kept for history.
 > **Still open from those:** the three unbounded in-process caches (the F3b half of the "read paths
 > that leak" item). Everything else below stands.
 
@@ -130,7 +132,8 @@ them (this `docs/reference/` set is the new source of truth):
   *(Still open, lower severity: markdown/pandoc field **values** — titles/authors — aren't escaped.)*
 - ⚠️ **PARTIALLY RESOLVED — F3a done, F3b open.** ✅ The read-path write is gone:
   `citation_graph.build_citation_graph` is now read-only (the matcher owns `resolution_status`; a
-  work delete re-resolves affected references). ❌ **Still open (F3b):** the three unbounded
+  work delete re-resolves affected references). ✅ **F3b resolved 2026-07-13 (S10):** the three
+  formerly-unbounded
   in-process caches — `citation_summary._SUMMARY_CACHE`, `visualization._LAYOUT_CACHE`,
   `external_preview._PREVIEW_CACHE` — are not yet LRU/TTL-bounded (memory creep on a long-lived
   process). This was deferred; discuss before implementing.
