@@ -10,6 +10,7 @@ import pytest
 from app.core.config import Settings
 from app.core.security import hash_password
 from app.db.base import Base
+from app.errors import NotFoundError, PermissionDeniedError
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Shelf, ShelfWork
 from app.models.user import User
@@ -18,7 +19,6 @@ from app.services import batch_import
 from app.services.grobid_client import GrobidUnavailableError
 from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.web_find import WebCandidate
-from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -267,7 +267,9 @@ def test_commit_to_unmodifiable_shelf_403(db):
     actor = _user(db, "contributor")  # contributor cannot modify any shelf structure
     shelf = _shelf(db, access_level="open")
     drafts = [batch_import.ConfirmedDraft(title="Nope", doi="10.1/nope")]
-    with pytest.raises(HTTPException) as exc:
+    # S4: the shelf helper raises a framework-free domain error now (mapped to 403 by the app
+    # handler for HTTP callers).
+    with pytest.raises(PermissionDeniedError) as exc:
         batch_import.commit_drafts(
             db, drafts, actor=actor, engine="lookup", target_shelf_id=shelf.id
         )
@@ -283,7 +285,7 @@ def test_add_work_to_shelf_checked_403_without_modify_access(db):
     work = Work(canonical_title="W", normalized_title="w")
     db.add(work)
     db.commit()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(PermissionDeniedError) as exc:
         add_work_to_shelf_checked(db, shelf_id=shelf.id, work_id=work.id, actor=actor)
     assert exc.value.status_code == 403
 
@@ -293,7 +295,7 @@ def test_add_work_to_shelf_checked_404_missing_shelf(db):
     work = Work(canonical_title="W", normalized_title="w")
     db.add(work)
     db.commit()
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError) as exc:
         add_work_to_shelf_checked(db, shelf_id=uuid.uuid4(), work_id=work.id, actor=actor)
     assert exc.value.status_code == 404
 

@@ -117,6 +117,7 @@ def test_cross_host_redirect_is_refused(monkeypatch):
         def __init__(self, url, history):
             self.url = url
             self.history = history
+            self.status_code = 200  # _get consults it for the S6c rate-limit retry
 
     class _FakeClient:
         def get(self, url, params=None, headers=None):
