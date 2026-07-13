@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Feature batch: backup/restore, batch-import rework, job cancel, staging titles (2026-07-13)
+
+Four owner-requested features (handoff:
+`docs/agent_handoffs/2026-07-13-feature-batch-backup-imports-jobs.md`):
+
+- **Backup/export + restore** (`c8e14a3`): version-tolerant logical archives (JSONL per table +
+  manifest + optional content-addressed PDFs), admin export via the new Admin → Backup tab;
+  OWNER-only restore with merge/replace modes, typed REPLACE confirmation, a pre-restore
+  compatibility report, column-intersection tolerance (defaults backfill new columns, dropped
+  columns counted, _RENAMES map for renames, per-row SAVEPOINTs, same-table FK retry), sha256 PDF
+  pairing from the archive or an import-root alias (unmatched files dropped like a manual delete),
+  and an owner-lockout guard on replace.
+- **Batch import rework** (`46910a6`): partial/sequential commits ("Import selected now" works
+  DURING extraction, repeatedly; imported items leave the preview); the polling GET self-heals
+  items whose worker died and finalizes wedged batches; the frontend polls live and unbounded
+  (was a dead 60s cap).
+- **Job cancel** (`46910a6`): POST /jobs/{id}/cancel + Cancel button for queued/scheduled/deferred
+  jobs. ROOT CAUSE of the never-rerunning scheduled job: workers ran without --with-scheduler, so
+  RQ retry intervals never fired — fixed in the supervisor.
+- **Staging job titles** (`46910a6`): extract_staging_item_job rows show the staged paper's
+  parsed title/filename + sha256 in the Jobs tab.
+
+Verified: full backend suite 1163 passed / 4 skipped; frontend 275 + build. Restart both
+containers on deploy (worker picks up --with-scheduler + new job modules).
+
 ## Consolidation StaleDataError hotfix (2026-07-13)
 
 The reference-dupes scan failed on the real-data Postgres deployment with
