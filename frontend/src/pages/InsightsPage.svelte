@@ -74,6 +74,9 @@
     }
   }
 
+  // Item 1 (2026-07-13): cap on external (cited-but-not-in-library) nodes; server default 50.
+  let maxExternal = 50;
+
   async function loadGraph(
     nodeMode: GraphNodeMode,
     collapseVersions: boolean,
@@ -83,6 +86,7 @@
       // Run the metadata search now and pass the resulting ids as the explicit work set.
       const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
       return client.citationGraph({
+        maxExternal,
         scopeType,
         workIds: works.map((w) => w.id),
         nodeMode,
@@ -92,6 +96,7 @@
     }
     if (scopeType === 'selected_papers') {
       return client.citationGraph({
+        maxExternal,
         scopeType,
         workIds: $selectedPaperIds,
         nodeMode,
@@ -100,13 +105,14 @@
       });
     }
     if (scopeType === 'import_batch') {
-      return client.citationGraph({ scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy });
+      return client.citationGraph({ maxExternal, scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy });
     }
     if (scopeType === 'saved_filter') {
       // The backend loads the caller's saved filter, resolves + visibility-clamps it to work ids.
-      return client.citationGraph({ scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy });
+      return client.citationGraph({ maxExternal, scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy });
     }
     return client.citationGraph({
+      maxExternal,
       scopeType: scope.scopeType,
       scopeId: scope.scopeId,
       nodeMode,
@@ -262,6 +268,12 @@
           {#each savedFilters as filter (filter.id)}<option value={filter.id}>{filter.name}</option>{/each}
         </select>
       {/if}
+      <label class="max-external-label"
+        title="Keep only this many external (not-in-library) cited papers in graphs — the most-cited ones. In-library nodes are never hidden.">
+        Max external
+        <input type="number" min="0" max="500" bind:value={maxExternal}
+          aria-label="Maximum external nodes" style="width:5rem" />
+      </label>
     </div>
     {#if !scopeReady}
       <p class="hintline">

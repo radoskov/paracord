@@ -22,6 +22,7 @@
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
   let includeCiting = true;
+  let maxExternal = 50;
   let yAxis = 'weighted';
   let colorBy = 'kind';
   let showHelp = false;
@@ -102,7 +103,7 @@
     loading = true;
     message = '';
     try {
-      graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting });
+      graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting, maxExternal });
       await render();
     } catch (error) {
       message = errorMessage(error);
@@ -181,6 +182,11 @@
     <label title="Also show the external papers that cite this one (fetched in the paper's Citing-papers panel), as incoming nodes">
       <input type="checkbox" checked={includeCiting} on:change={toggleCiting} data-testid="rg-citing" />
       Show citing papers
+    </label>
+    <label title="Keep only this many external references / citing papers (the most-cited and newest); in-library nodes are never hidden">
+      Max external
+      <input type="number" min="0" max="500" bind:value={maxExternal} on:change={() => loadGraph()}
+        class="max-external" data-testid="rg-max-external" />
     </label>
     <span class="muted"
       >X = year · node size = section-weighted citations (weights in Profile) · the highlighted node

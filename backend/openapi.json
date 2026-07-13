@@ -1786,6 +1786,13 @@
             "title": "Color By",
             "type": "string"
           },
+          "max_external": {
+            "default": 50,
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Max External",
+            "type": "integer"
+          },
           "node_mode": {
             "default": "local_only",
             "enum": [
@@ -22361,6 +22368,18 @@
               "default": false,
               "title": "Include Citing",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_external",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 0,
+              "title": "Max External",
+              "type": "integer"
             }
           },
           {

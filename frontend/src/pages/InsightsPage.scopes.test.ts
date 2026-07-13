@@ -75,6 +75,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
       expect(client.listWorks).toHaveBeenCalledWith({ q: 'attention', perPage: 500 }),
     );
     expect(client.citationGraph).toHaveBeenCalledWith({
+      maxExternal: 50,
       scopeType: 'search_result',
       workIds: ['w1', 'w2'],
       nodeMode: 'local_only',
@@ -94,6 +95,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     await build();
 
     expect(client.citationGraph).toHaveBeenCalledWith({
+      maxExternal: 50,
       scopeType: 'selected_papers',
       workIds: ['s1', 's2', 's3'],
       nodeMode: 'local_only',
@@ -113,6 +115,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     await build();
 
     expect(client.citationGraph).toHaveBeenCalledWith({
+      maxExternal: 50,
       scopeType: 'import_batch',
       scopeId: 'batch-1',
       nodeMode: 'local_only',
@@ -133,6 +136,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     await build();
 
     expect(client.citationGraph).toHaveBeenCalledWith({
+      maxExternal: 50,
       scopeType: 'saved_filter',
       scopeId: 'sf-1',
       nodeMode: 'local_only',

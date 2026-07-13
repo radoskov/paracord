@@ -166,6 +166,7 @@ describe('ApiClient request contracts', () => {
       node_mode: 'local_only',
       collapse_versions: true,
       color_by: 'none',
+      max_external: 50,
     });
   });
 

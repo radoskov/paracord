@@ -1583,6 +1583,7 @@ def get_reference_graph(
     work_id: uuid.UUID,
     include_ref_edges: bool = False,
     include_citing: bool = False,
+    max_external: int = Query(default=50, ge=0, le=500),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> dict:
@@ -1602,6 +1603,7 @@ def get_reference_graph(
         visible_ids=access.visible_work_ids(db, actor),
         include_ref_edges=include_ref_edges,
         include_citing=include_citing,
+        max_external=max_external,
     )
 
 

@@ -71,6 +71,9 @@ def _weighted(counts: dict[str, int], weights: dict[str, float]) -> float:
     return sum(weights.get(bucket, 1.0) * n for bucket, n in counts.items())
 
 
+DEFAULT_MAX_EXTERNAL = 50
+
+
 def build_reference_graph(
     db: Session,
     work: Work,
@@ -78,6 +81,7 @@ def build_reference_graph(
     visible_ids: set[uuid.UUID] | None,
     include_ref_edges: bool = False,
     include_citing: bool = False,
+    max_external: int = DEFAULT_MAX_EXTERNAL,
 ) -> dict:
     """Assemble the base paper + one node per reference, with per-bucket mention counts.
 
@@ -269,4 +273,31 @@ def build_reference_graph(
             )
             edges.append({"source": node_id, "target": base_id})
 
-    return {"base_work_id": base_id, "nodes": nodes, "edges": edges}
+    # Cap the external fan-out (item 1, 2026-07-13): keep the ``max_external`` highest-weighted
+    # external references and the same number of newest citing papers; local/likely/base nodes are
+    # never dropped. Hidden counts ship in the payload so the UI can say "N more hidden".
+    cap = max(0, max_external)
+    external_nodes = [n for n in nodes if n["kind"] == "external"]
+    citing_nodes = [n for n in nodes if n["kind"] == "citing"]
+    dropped_ids: set[str] = set()
+    if len(external_nodes) > cap:
+        external_nodes.sort(key=lambda n: (-(n.get("weighted") or 0.0), n["id"]))
+        dropped_ids.update(n["id"] for n in external_nodes[cap:])
+    if len(citing_nodes) > cap:
+        # Already ordered newest-first by the fetch query.
+        dropped_ids.update(n["id"] for n in citing_nodes[cap:])
+    external_hidden = sum(1 for n in external_nodes[cap:]) if len(external_nodes) > cap else 0
+    citing_hidden = sum(1 for n in citing_nodes[cap:]) if len(citing_nodes) > cap else 0
+    if dropped_ids:
+        nodes = [n for n in nodes if n["id"] not in dropped_ids]
+        edges = [
+            e for e in edges if e["source"] not in dropped_ids and e["target"] not in dropped_ids
+        ]
+
+    return {
+        "base_work_id": base_id,
+        "nodes": nodes,
+        "edges": edges,
+        "external_hidden": external_hidden,
+        "citing_hidden": citing_hidden,
+    }

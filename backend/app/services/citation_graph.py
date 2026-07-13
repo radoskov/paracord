@@ -85,6 +85,9 @@ class CitationGraph:
     summary: dict = field(default_factory=dict)
 
 
+DEFAULT_MAX_EXTERNAL = 50
+
+
 def build_citation_graph(
     db: Session,
     *,
@@ -96,6 +99,7 @@ def build_citation_graph(
     compute_metrics: bool = False,
     color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
+    max_external: int = DEFAULT_MAX_EXTERNAL,
 ) -> CitationGraph:
     """Build the citation graph for a scope.
 
@@ -182,6 +186,29 @@ def build_citation_graph(
             edge_weights[key] += 1
             edge_resolution[key] = resolution
 
+    # Cap the external fan-out (item 1, 2026-07-13): a large scope can drag in thousands of
+    # cited-but-not-in-library nodes that drown the layout. Keep the ``max_external`` most-cited
+    # ones (by total incoming edge weight from the scope) and report how many were hidden.
+    external_hidden = 0
+    external_ids = [nid for nid, node in nodes.items() if node.type == "external"]
+    if node_mode == "include_external" and len(external_ids) > max(0, max_external):
+        weight_into: dict[str, int] = defaultdict(int)
+        for (source, target), weight in edge_weights.items():
+            weight_into[target] += weight
+            _ = source
+        keep = set(
+            sorted(external_ids, key=lambda nid: (-weight_into.get(nid, 0), nid))[
+                : max(0, max_external)
+            ]
+        )
+        dropped = set(external_ids) - keep
+        external_hidden = len(dropped)
+        for nid in dropped:
+            nodes.pop(nid, None)
+        edge_weights = {
+            key: weight for key, weight in edge_weights.items() if key[1] not in dropped
+        }
+
     edges = [
         GraphEdge(
             source=source,
@@ -192,10 +219,12 @@ def build_citation_graph(
         for (source, target), weight in edge_weights.items()
     ]
     node_list = list(nodes.values())
+    summary = _summary(node_list, edges, scope_count=len(scope_works), unresolved=unresolved)
+    summary["external_hidden"] = external_hidden
     graph = CitationGraph(
         nodes=node_list,
         edges=edges,
-        summary=_summary(node_list, edges, scope_count=len(scope_works), unresolved=unresolved),
+        summary=summary,
     )
     if collapse_versions:
         graph = _collapse_versions(db, graph, visible_ids=visible_ids)

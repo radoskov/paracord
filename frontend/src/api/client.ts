@@ -1499,11 +1499,12 @@ export class ApiClient {
 
   async referenceGraph(
     workId: string,
-    opts: { includeRefEdges?: boolean; includeCiting?: boolean } = {},
+    opts: { includeRefEdges?: boolean; includeCiting?: boolean; maxExternal?: number } = {},
   ): Promise<ReferenceGraph> {
     const query = new URLSearchParams();
     if (opts.includeRefEdges) query.set("include_ref_edges", "true");
     if (opts.includeCiting) query.set("include_citing", "true");
+    if (opts.maxExternal !== undefined) query.set("max_external", String(opts.maxExternal));
     const q = query.toString();
     return this.request<ReferenceGraph>(
       `/api/v1/works/${workId}/reference-graph${q ? `?${q}` : ""}`,
@@ -3025,6 +3026,7 @@ export class ApiClient {
     nodeMode: GraphNodeMode;
     collapseVersions?: boolean;
     colorBy?: GraphColorBy;
+    maxExternal?: number;
   }): Promise<CitationGraphResponse> {
     return this.request<CitationGraphResponse>("/api/v1/graphs/citation", {
       method: "POST",
@@ -3037,6 +3039,7 @@ export class ApiClient {
         node_mode: payload.nodeMode,
         collapse_versions: payload.collapseVersions ?? false,
         color_by: payload.colorBy ?? "none",
+        max_external: payload.maxExternal ?? 50,
       },
     });
   }

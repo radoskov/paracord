@@ -915,6 +915,21 @@
   }
 
   // Reference "Find in text" → open the reader and jump to the reference's first in-text mention.
+  // Item 2 (2026-07-13): the References panel used to force itself open on every paper
+  // view/refresh (open={references.length > 0} is reactive), burying the Citing-papers panel
+  // below it. Remember the user's last toggle instead (default: open).
+  const REFS_PANEL_KEY = 'paracord_refs_panel_open';
+  let refsPanelOpen =
+    typeof localStorage === 'undefined' ? true : localStorage.getItem(REFS_PANEL_KEY) !== '0';
+  function rememberRefsPanel(event: Event): void {
+    refsPanelOpen = (event.currentTarget as HTMLDetailsElement).open;
+    try {
+      localStorage.setItem(REFS_PANEL_KEY, refsPanelOpen ? '1' : '0');
+    } catch {
+      // storage unavailable — session-only memory is fine
+    }
+  }
+
   function findReferenceInText(referenceId: string): void {
     const file = readerFile ?? files[0];
     if (file) void openInReader(file, referenceId);
@@ -1417,7 +1432,7 @@
     {/if}
   </details>
 
-  <details class="references-block" open={references.length > 0}>
+  <details class="references-block" open={refsPanelOpen} on:toggle={rememberRefsPanel}>
     <summary>References ({references.length})</summary>
     {#if references.length === 0}
       <p class="empty">
