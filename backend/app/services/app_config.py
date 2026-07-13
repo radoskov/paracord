@@ -16,12 +16,15 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.models.app_config import (
     _DEFAULT_AI_SCOPE_JOB_THRESHOLD,
+    _DEFAULT_CITATION_GRAPH_NODE_CAP,
     _DEFAULT_CITING_PAPERS_FETCH_CAP,
     _DEFAULT_MAX_BATCH_ITEMS,
     _DEFAULT_MAX_QUEUE_LEN,
     _DEFAULT_RATE_LIMIT_GLOBAL_PER_MIN,
     _DEFAULT_RATE_LIMIT_PER_CLIENT_PER_MIN,
     _DEFAULT_RQ_WORKER_COUNT,
+    _DEFAULT_TOPIC_GRAPH_NODE_CAP,
+    _DEFAULT_VIZ_NODE_CAP,
     APP_CONFIG_SINGLETON_ID,
     AppConfig,
 )
@@ -158,6 +161,58 @@ def update_ai_scope_job_threshold(
     row.updated_by_user_id = actor_user_id
     db.flush()
     return row.ai_scope_job_threshold
+
+
+def _effective_int(db: Session, field: str, default: int) -> int:
+    if not _app_config_table_present(db):
+        return default
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    value = getattr(row, field, None) if row is not None else None
+    return default if value is None else value
+
+
+def _update_int(db: Session, field: str, value: int, actor_user_id: uuid.UUID | None) -> int:
+    if value < 1:
+        raise ValueError(f"{field} must be >= 1")
+    row = _ensure_row(db)
+    setattr(row, field, value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return getattr(row, field)
+
+
+def effective_citation_graph_node_cap(db: Session) -> int:
+    """Max nodes the citation graph keeps (highest-degree first; hidden count reported). L-a."""
+    return _effective_int(db, "citation_graph_node_cap", _DEFAULT_CITATION_GRAPH_NODE_CAP)
+
+
+def effective_topic_graph_node_cap(db: Session) -> int:
+    """Max works the topic-similarity graph embeds/keeps (L-a)."""
+    return _effective_int(db, "topic_graph_node_cap", _DEFAULT_TOPIC_GRAPH_NODE_CAP)
+
+
+def effective_viz_node_cap(db: Session) -> int:
+    """Default max nodes for the visualization views (request may lower it). L-a."""
+    return _effective_int(db, "viz_node_cap", _DEFAULT_VIZ_NODE_CAP)
+
+
+def update_citation_graph_node_cap(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new citation-graph node cap (L-a)."""
+    return _update_int(db, "citation_graph_node_cap", value, actor_user_id)
+
+
+def update_topic_graph_node_cap(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new topic-graph node cap (L-a)."""
+    return _update_int(db, "topic_graph_node_cap", value, actor_user_id)
+
+
+def update_viz_node_cap(db: Session, *, value: int, actor_user_id: uuid.UUID | None = None) -> int:
+    """Persist a new visualization node cap (L-a)."""
+    return _update_int(db, "viz_node_cap", value, actor_user_id)
 
 
 def effective_use_fuzzy_match_as_confirmed(

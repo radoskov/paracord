@@ -391,7 +391,9 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
     size_by = params.get("size_by") or DEFAULT_SIZE_BY
     color_by = params.get("color_by") or DEFAULT_COLOR_BY
     include_edges = bool(params.get("include_edges"))
-    cap = int(params.get("max_nodes") or MAX_NODES)
+    from app.services.app_config import effective_viz_node_cap  # noqa: PLC0415 - cycle guard
+
+    cap = int(params.get("max_nodes") or effective_viz_node_cap(db))
 
     visible = access.visible_work_ids(db, actor)
     scope_works = _scope_works(
@@ -759,7 +761,9 @@ def embedding_cluster(db: Session, actor: User, scope: VizScope, params: dict) -
     views don't recompute. The two axes are the fixed PCA components — there is no swappable axis set,
     so ``axis_options`` is omitted.
     """
-    cap = int(params.get("max_nodes") or MAX_NODES)
+    from app.services.app_config import effective_viz_node_cap  # noqa: PLC0415 - cycle guard
+
+    cap = int(params.get("max_nodes") or effective_viz_node_cap(db))
     size_by = params.get("size_by") or DEFAULT_SIZE_BY
     embedding_model = params.get("embedding_model")
     layout = params.get("layout") or DEFAULT_LAYOUT
@@ -924,7 +928,9 @@ def co_citation(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
     if edge_context not in CO_CITATION_CONTEXTS:
         raise ValueError(f"Unknown edge context: {edge_context}")
     color_by = params.get("color_by") or DEFAULT_COLOR_BY
-    cap = int(params.get("max_nodes") or MAX_NODES)
+    from app.services.app_config import effective_viz_node_cap  # noqa: PLC0415 - cycle guard
+
+    cap = int(params.get("max_nodes") or effective_viz_node_cap(db))
 
     visible = access.visible_work_ids(db, actor)
     scope_works = _scope_works(
@@ -1032,7 +1038,9 @@ def topic_river(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
     sum to 1). The frontend renders it as a stacked-area / streamgraph. Papers with no dense vector
     are skipped (reported) and papers with no publication year are excluded from the stream.
     """
-    cap = int(params.get("max_nodes") or MAX_NODES)
+    from app.services.app_config import effective_viz_node_cap  # noqa: PLC0415 - cycle guard
+
+    cap = int(params.get("max_nodes") or effective_viz_node_cap(db))
     embedding_model = params.get("embedding_model")
 
     visible = access.visible_work_ids(db, actor)

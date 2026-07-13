@@ -315,6 +315,9 @@
   let maxQueueLen = '';
   let citingFetchCap = '';
   let aiScopeJobThreshold = '';
+  let citationGraphCap = '';
+  let topicGraphCap = '';
+  let vizCap = '';
   let useFuzzyAsConfirmed = false;
   let referenceRescanOnStartup = false;
   let rescanningLibrary = false;
@@ -335,6 +338,9 @@
     maxQueueLen = String(cfg.max_queue_len);
     citingFetchCap = String(cfg.citing_papers_fetch_cap);
     aiScopeJobThreshold = String(cfg.ai_scope_job_threshold);
+    citationGraphCap = String(cfg.citation_graph_node_cap);
+    topicGraphCap = String(cfg.topic_graph_node_cap);
+    vizCap = String(cfg.viz_node_cap);
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
     referenceRescanOnStartup = cfg.reference_rescan_on_startup;
   }
@@ -389,6 +395,9 @@
     const queueLen = Math.trunc(Number(maxQueueLen));
     const citingCap = Math.trunc(Number(citingFetchCap));
     const aiThreshold = Math.trunc(Number(aiScopeJobThreshold));
+    const capCitation = Math.trunc(Number(citationGraphCap));
+    const capTopic = Math.trunc(Number(topicGraphCap));
+    const capViz = Math.trunc(Number(vizCap));
     for (const [label, v] of [
       ['Per-client rate limit', perClient],
       ['Global rate limit', global],
@@ -397,6 +406,9 @@
       ['Max queue length', queueLen],
       ['Citing-papers fetch cap', citingCap],
       ['AI background-job threshold', aiThreshold],
+      ['Citation graph node cap', capCitation],
+      ['Topic graph node cap', capTopic],
+      ['Visualization node cap', capViz],
     ] as const) {
       if (!Number.isFinite(v) || v < 1) {
         message = `${label} must be a whole number of at least 1`;
@@ -415,6 +427,9 @@
           max_queue_len: queueLen,
           citing_papers_fetch_cap: citingCap,
           ai_scope_job_threshold: aiThreshold,
+          citation_graph_node_cap: capCitation,
+          topic_graph_node_cap: capTopic,
+          viz_node_cap: capViz,
         }),
       );
       overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
@@ -1858,8 +1873,24 @@
           <input type="number" min="1" bind:value={aiScopeJobThreshold} />
         </label>
         <p class="small-help">
-          Topic models and summaries over scopes larger than this many papers run as a background
-          job (watch the Jobs tab) instead of making the browser wait.
+          Topic models, summaries and citation/topic graphs over scopes larger than this many
+          papers run as a background job instead of making the browser wait.
+        </p>
+        <label class="field">
+          Citation graph node cap
+          <input type="number" min="1" bind:value={citationGraphCap} />
+        </label>
+        <label class="field">
+          Topic graph node cap
+          <input type="number" min="1" bind:value={topicGraphCap} />
+        </label>
+        <label class="field">
+          Visualization node cap
+          <input type="number" min="1" bind:value={vizCap} />
+        </label>
+        <p class="small-help">
+          Analysis views keep at most this many papers (the best-connected ones) and say how many
+          were hidden — protects the browser and the server on very large scopes.
         </p>
         <button type="submit" disabled={savingOverload || loading}
           title="Save overload-protection settings">Save</button>

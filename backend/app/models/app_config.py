@@ -46,6 +46,12 @@ _DEFAULT_CITING_PAPERS_FETCH_CAP = 1000
 # instead of inline in the request (S15/S16).
 _DEFAULT_AI_SCOPE_JOB_THRESHOLD = 100
 
+# Out-of-the-box per-surface node caps for the analysis graphs (Insights audit L-a). High and
+# admin-editable; a capped graph keeps its highest-degree nodes and reports the hidden count.
+_DEFAULT_CITATION_GRAPH_NODE_CAP = 1500
+_DEFAULT_TOPIC_GRAPH_NODE_CAP = 400
+_DEFAULT_VIZ_NODE_CAP = 500
+
 
 class AppConfig(Base):
     """Owner-managed runtime application configuration (overlays the static ``Settings`` defaults).
@@ -91,6 +97,16 @@ class AppConfig(Base):
     # AI scope-job threshold (S15/S16): scopes larger than this run topics/summaries on the worker.
     ai_scope_job_threshold: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_AI_SCOPE_JOB_THRESHOLD)
+    )
+    # Per-surface analysis node caps (L-a).
+    citation_graph_node_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_CITATION_GRAPH_NODE_CAP)
+    )
+    topic_graph_node_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_TOPIC_GRAPH_NODE_CAP)
+    )
+    viz_node_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_VIZ_NODE_CAP)
     )
     # Reference→library matching (batch 12, owner item #1). When ON, a fuzzy "likely local" candidate
     # that clears the title threshold + gates becomes a HARD link (``resolved_work_id`` set, counted in

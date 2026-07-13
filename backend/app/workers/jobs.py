@@ -491,6 +491,69 @@ def rescan_reference_matches_job() -> None:
 
 
 @_audited_job
+def analysis_graph_job(kind: str, params: dict, actor_user_id: str | None = None) -> dict:
+    """Compute a citation/topic graph on the worker for scopes above the job threshold (L-a).
+
+    Recomputes the requesting user's visibility (like the S15 scope jobs), runs the same builder
+    the synchronous endpoint uses, and returns the response-shaped payload as the RQ job result —
+    the frontend polls the job, then fetches GET /jobs/{id}/result (requester-gated).
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.user import User
+    from app.services import access
+
+    with SessionLocal() as db:
+        actor = db.get(User, uuid.UUID(actor_user_id)) if actor_user_id else None
+        if actor is None:
+            return {"error": "requesting user no longer exists"}
+        visible = access.visible_work_ids(db, actor)
+        scope_id = uuid.UUID(params["scope_id"]) if params.get("scope_id") else None
+        work_ids = [uuid.UUID(w) for w in params.get("work_ids") or []] or None
+        if kind == "citation":
+            from app.services.app_config import effective_citation_graph_node_cap
+            from app.services.citation_graph import build_citation_graph
+
+            graph = build_citation_graph(
+                db,
+                scope_type=params["scope_type"],
+                scope_id=scope_id,
+                work_ids=work_ids,
+                node_mode=params.get("node_mode", "local_only"),
+                collapse_versions=params.get("collapse_versions", False),
+                compute_metrics=True,
+                color_by=params.get("color_by", "none"),
+                visible_ids=visible,
+                max_external=params.get("max_external", 50),
+                max_nodes=effective_citation_graph_node_cap(db),
+            )
+            return {
+                "nodes": [vars(n) for n in graph.nodes],
+                "edges": [vars(e) for e in graph.edges],
+                "summary": graph.summary,
+            }
+        if kind == "topic":
+            from app.services.app_config import effective_topic_graph_node_cap
+            from app.services.topic_graph import build_topic_graph
+
+            graph = build_topic_graph(
+                db,
+                scope_type=params["scope_type"],
+                scope_id=scope_id,
+                work_ids=work_ids,
+                visible_ids=visible,
+                max_nodes=effective_topic_graph_node_cap(db),
+            )
+            return {
+                "nodes": [vars(n) for n in graph.nodes],
+                "edges": [vars(e) for e in graph.edges],
+                "summary": graph.summary,
+            }
+        raise ValueError(f"Unknown analysis kind: {kind}")
+
+
+@_audited_job
 def export_backup_job(include_pdfs: bool = False, actor_user_id: str | None = None) -> dict:
     """Write a logical backup archive (feature: export/backup). Returns {archive, manifest}."""
     import uuid

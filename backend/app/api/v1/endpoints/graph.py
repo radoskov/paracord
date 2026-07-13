@@ -12,8 +12,15 @@ from app.api.scope_params import resolve_scope_or_404
 from app.db.session import get_db
 from app.models.user import User
 from app.services import access
+from app.services.app_config import (
+    effective_ai_scope_job_threshold,
+    effective_citation_graph_node_cap,
+    effective_topic_graph_node_cap,
+)
 from app.services.citation_graph import build_citation_graph
+from app.services.scope_resolution import count_scope_works
 from app.services.topic_graph import build_topic_graph
+from app.workers.queue import enqueue_analysis_graph
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -75,9 +82,13 @@ class GraphEdgeRead(BaseModel):
 
 
 class CitationGraphResponse(BaseModel):
-    nodes: list[GraphNodeRead]
-    edges: list[GraphEdgeRead]
-    summary: dict
+    nodes: list[GraphNodeRead] = []
+    edges: list[GraphEdgeRead] = []
+    summary: dict = {}
+    # L-a: the scope was above the background-job threshold — poll the job, then fetch
+    # GET /jobs/{job_id}/result for this same payload shape.
+    queued: bool = False
+    job_id: str | None = None
 
 
 @router.post("/citation", response_model=CitationGraphResponse)
@@ -96,6 +107,34 @@ def citation_graph(
         scope_id=payload.scope.id,
         work_ids=payload.scope.work_ids,
     )
+    # L-a: a scope above the background-job threshold computes on the worker (same builder, same
+    # cap); the client polls the job and fetches the stored result. Queue-down falls back inline.
+    try:
+        scope_size = count_scope_works(
+            db,
+            payload.scope.type,
+            payload.scope.id,
+            visible_ids=access.visible_work_condition(db, actor),
+            work_ids=work_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if scope_size > effective_ai_scope_job_threshold(db):
+        job_id = enqueue_analysis_graph(
+            "citation",
+            {
+                "scope_type": payload.scope.type,
+                "scope_id": str(payload.scope.id) if payload.scope.id else None,
+                "work_ids": [str(w) for w in work_ids] if work_ids else None,
+                "node_mode": payload.node_mode,
+                "collapse_versions": payload.collapse_versions,
+                "color_by": payload.color_by,
+                "max_external": payload.max_external,
+            },
+            actor_user_id=str(actor.id),
+        )
+        if job_id is not None:
+            return CitationGraphResponse(queued=True, job_id=job_id)
     try:
         graph = build_citation_graph(
             db,
@@ -108,6 +147,7 @@ def citation_graph(
             color_by=payload.color_by,
             visible_ids=access.visible_work_ids(db, actor),
             max_external=payload.max_external,
+            max_nodes=effective_citation_graph_node_cap(db),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -139,9 +179,11 @@ class TopicGraphEdgeRead(BaseModel):
 
 
 class TopicGraphResponse(BaseModel):
-    nodes: list[TopicGraphNodeRead]
-    edges: list[TopicGraphEdgeRead]
-    summary: dict
+    nodes: list[TopicGraphNodeRead] = []
+    edges: list[TopicGraphEdgeRead] = []
+    summary: dict = {}
+    queued: bool = False
+    job_id: str | None = None
 
 
 @router.post("/topic", response_model=TopicGraphResponse)
@@ -161,6 +203,28 @@ def topic_graph(
         work_ids=payload.scope.work_ids,
     )
     try:
+        scope_size = count_scope_works(
+            db,
+            payload.scope.type,
+            payload.scope.id,
+            visible_ids=access.visible_work_condition(db, actor),
+            work_ids=work_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if scope_size > effective_ai_scope_job_threshold(db):
+        job_id = enqueue_analysis_graph(
+            "topic",
+            {
+                "scope_type": payload.scope.type,
+                "scope_id": str(payload.scope.id) if payload.scope.id else None,
+                "work_ids": [str(w) for w in work_ids] if work_ids else None,
+            },
+            actor_user_id=str(actor.id),
+        )
+        if job_id is not None:
+            return TopicGraphResponse(queued=True, job_id=job_id)
+    try:
         graph = build_topic_graph(
             db,
             scope_type=payload.scope.type,
@@ -170,6 +234,7 @@ def topic_graph(
             visible_ids=access.visible_work_ids(db, actor),
             k=max(1, min(payload.k, 20)),
             min_similarity=max(0.0, min(payload.min_similarity, 1.0)),
+            max_nodes=effective_topic_graph_node_cap(db),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

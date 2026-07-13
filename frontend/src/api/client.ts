@@ -245,6 +245,9 @@ export interface GraphEdge {
 }
 
 export interface CitationGraphResponse {
+  // L-a: set when the scope was routed to a background job — poll getJobResult(job_id).
+  queued?: boolean;
+  job_id?: string | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   summary: Record<string, number>;
@@ -1286,6 +1289,10 @@ export interface AppConfig {
   max_queue_len: number;
   // Citing-papers fetch cap (S20): max external citers fetched+cached per paper.
   citing_papers_fetch_cap: number;
+  // Per-surface analysis node caps (L-a).
+  citation_graph_node_cap: number;
+  topic_graph_node_cap: number;
+  viz_node_cap: number;
   // AI scope-job threshold (S15/S16): scopes above this run topics/summaries as a background job.
   ai_scope_job_threshold: number;
   // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
@@ -2850,6 +2857,12 @@ export class ApiClient {
       method: "PUT",
       body: { default_access_level: defaultAccessLevel },
     });
+  }
+
+  async getJobResult(
+    jobId: string,
+  ): Promise<{ status: string; result?: unknown; error?: string | null }> {
+    return this.request(`/api/v1/jobs/${jobId}/result`);
   }
 
   async cancelJob(jobId: string): Promise<{ cancelled: boolean; job_id: string }> {

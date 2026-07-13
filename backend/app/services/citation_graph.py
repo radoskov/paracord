@@ -101,6 +101,7 @@ def build_citation_graph(
     color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
     max_external: int = DEFAULT_MAX_EXTERNAL,
+    max_nodes: int | None = None,
 ) -> CitationGraph:
     """Build the citation graph for a scope.
 
@@ -220,8 +221,24 @@ def build_citation_graph(
         for (source, target), weight in edge_weights.items()
     ]
     node_list = list(nodes.values())
+    # L-a (owner decision): cap the TOTAL node count, keeping the best-connected nodes, BEFORE the
+    # O(V·E) centrality pass — previously a library scope ran exact betweenness over an unbounded
+    # graph on the request path. The cap is admin-configurable per surface; hidden counts ship in
+    # the summary so the UI can say so.
+    nodes_hidden = 0
+    if max_nodes is not None and len(node_list) > max(1, max_nodes):
+        weight_by_node: dict[str, int] = defaultdict(int)
+        for (source, target), weight in edge_weights.items():
+            weight_by_node[source] += weight
+            weight_by_node[target] += weight
+        node_list.sort(key=lambda n: (-weight_by_node.get(n.id, 0), n.type != "local", n.id))
+        kept_ids = {n.id for n in node_list[: max(1, max_nodes)]}
+        nodes_hidden = len(node_list) - len(kept_ids)
+        node_list = [n for n in node_list if n.id in kept_ids]
+        edges = [e for e in edges if e.source in kept_ids and e.target in kept_ids]
     summary = _summary(node_list, edges, scope_count=len(scope_works), unresolved=unresolved)
     summary["external_hidden"] = external_hidden
+    summary["nodes_hidden"] = nodes_hidden
     graph = CitationGraph(
         nodes=node_list,
         edges=edges,
@@ -327,7 +344,6 @@ def _scope_works(
         db, scope_type, scope_id, visible_ids=visible_ids, work_ids=work_ids
     )
     return {work.id: work for work in works}
-
 
 
 def _local_work_index(

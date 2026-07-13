@@ -77,6 +77,27 @@
   // Item 1 (2026-07-13): cap on external (cited-but-not-in-library) nodes; server default 50.
   let maxExternal = 50;
 
+  // L-a: a large scope answers {queued, job_id}; poll the job and fetch the stored result so
+  // callers (the graph components) transparently get the final payload either way.
+  async function awaitAnalysis<T extends { queued?: boolean; job_id?: string | null }>(
+    response: T,
+  ): Promise<T> {
+    if (!response.queued || !response.job_id) return response;
+    message = 'Large scope — computing on the server in the background…';
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const out = await client.getJobResult(response.job_id);
+      if (out.status === 'finished') {
+        message = '';
+        return out.result as T;
+      }
+      if (out.status === 'failed' || out.status === 'missing' || out.status === 'unavailable') {
+        throw new Error(out.error ?? `Background computation ${out.status}`);
+      }
+    }
+    throw new Error('Background computation timed out — see the Jobs tab');
+  }
+
   async function loadGraph(
     nodeMode: GraphNodeMode,
     collapseVersions: boolean,
@@ -85,40 +106,42 @@
     if (scopeType === 'search_result') {
       // Run the metadata search now and pass the resulting ids as the explicit work set.
       const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
-      return client.citationGraph({
+      return awaitAnalysis(await client.citationGraph({
         maxExternal,
         scopeType,
         workIds: works.map((w) => w.id),
         nodeMode,
         collapseVersions,
         colorBy,
-      });
+      }));
     }
     if (scopeType === 'selected_papers') {
-      return client.citationGraph({
+      return awaitAnalysis(await client.citationGraph({
         maxExternal,
         scopeType,
         workIds: $selectedPaperIds,
         nodeMode,
         collapseVersions,
         colorBy,
-      });
+      }));
     }
     if (scopeType === 'import_batch') {
-      return client.citationGraph({ maxExternal, scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy });
+      return awaitAnalysis(await client.citationGraph({ maxExternal, scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy }));
     }
     if (scopeType === 'saved_filter') {
       // The backend loads the caller's saved filter, resolves + visibility-clamps it to work ids.
-      return client.citationGraph({ maxExternal, scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy });
+      return awaitAnalysis(await client.citationGraph({ maxExternal, scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy }));
     }
-    return client.citationGraph({
-      maxExternal,
-      scopeType: scope.scopeType,
-      scopeId: scope.scopeId,
-      nodeMode,
-      collapseVersions,
-      colorBy,
-    });
+    return awaitAnalysis(
+      await client.citationGraph({
+        maxExternal,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        nodeMode,
+        collapseVersions,
+        colorBy,
+      }),
+    );
   }
 
   // Topic (embedding-similarity) graph over the current scope (#6). Mirrors loadGraph's scope
@@ -126,18 +149,18 @@
   async function loadTopicGraph(): Promise<import('../api/client').TopicGraphResponse> {
     if (scopeType === 'search_result') {
       const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
-      return client.topicGraph({ scopeType, workIds: works.map((w) => w.id) });
+      return awaitAnalysis(await client.topicGraph({ scopeType, workIds: works.map((w) => w.id) }));
     }
     if (scopeType === 'selected_papers') {
-      return client.topicGraph({ scopeType, workIds: $selectedPaperIds });
+      return awaitAnalysis(await client.topicGraph({ scopeType, workIds: $selectedPaperIds }));
     }
     if (scopeType === 'import_batch') {
-      return client.topicGraph({ scopeType, scopeId: batchId || null });
+      return awaitAnalysis(await client.topicGraph({ scopeType, scopeId: batchId || null }));
     }
     if (scopeType === 'saved_filter') {
-      return client.topicGraph({ scopeType, scopeId: savedFilterId || null });
+      return awaitAnalysis(await client.topicGraph({ scopeType, scopeId: savedFilterId || null }));
     }
-    return client.topicGraph({ scopeType: scope.scopeType, scopeId: scope.scopeId });
+    return awaitAnalysis(await client.topicGraph({ scopeType: scope.scopeType, scopeId: scope.scopeId }));
   }
 
   // External graph node → jump to the Library search for its DOI so the user can import it (#8).

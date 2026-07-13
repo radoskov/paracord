@@ -28,6 +28,7 @@ TOPIC_SCOPE_JOB = "app.workers.jobs.topic_model_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
 REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
 REF_CONSOLIDATE_JOB = "app.workers.jobs.consolidate_references_job"
+ANALYSIS_GRAPH_JOB = "app.workers.jobs.analysis_graph_job"
 BACKUP_EXPORT_JOB = "app.workers.jobs.export_backup_job"
 BACKUP_RESTORE_JOB = "app.workers.jobs.restore_backup_job"
 
@@ -232,6 +233,63 @@ def enqueue_reference_consolidation() -> str | None:
         return None
 
 
+def enqueue_analysis_graph(kind: str, params: dict, *, actor_user_id: str) -> str | None:
+    """Best-effort enqueue of a large-scope graph computation (L-a). Returns job id or None.
+
+    The result payload is held in Redis for an hour (``result_ttl``) and fetched via
+    ``GET /jobs/{id}/result``; ``meta.requester`` gates who may read it.
+    """
+    import secrets as _secrets
+
+    job_id = f"analysis-{kind}-{_secrets.token_hex(4)}"
+    try:
+        queue = get_queue()
+        return queue.enqueue(
+            ANALYSIS_GRAPH_JOB,
+            args=(kind, params, actor_user_id),
+            job_id=job_id,
+            result_ttl=3600,
+            meta={"requester": actor_user_id},
+        ).id
+    except Exception as exc:  # noqa: BLE001 - best effort; the endpoint runs inline instead
+        logger.warning("Could not enqueue %s analysis graph: %s", kind, exc)
+        return None
+
+
+def fetch_job_result(job_id: str, *, requester_id: str, is_admin: bool) -> dict:
+    """Status/result of a job for the polling UI: {status, result?, error?}.
+
+    Results can contain scope data, so only the requester recorded at enqueue time (or an
+    admin) may read them; others get status "forbidden".
+    """
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        queue = get_queue()
+        try:
+            job = Job.fetch(job_id, connection=queue.connection)
+        except NoSuchJobError:
+            return {"status": "missing"}
+        requester = (job.get_meta(refresh=False) or {}).get("requester")
+        if requester is not None and requester != requester_id and not is_admin:
+            return {"status": "forbidden"}
+        status = job.get_status(refresh=True)
+        if status == "finished":
+            result = job.latest_result()
+            return {"status": "finished", "result": getattr(result, "return_value", None)}
+        if status == "failed":
+            result = job.latest_result()
+            return {
+                "status": "failed",
+                "error": (getattr(result, "exc_string", None) or "").strip()[-2000:] or None,
+            }
+        return {"status": status}
+    except Exception as exc:  # noqa: BLE001 - a dead Redis reports as unavailable
+        logger.warning("Could not fetch job result %s: %s", job_id, exc)
+        return {"status": "unavailable"}
+
+
 def enqueue_backup_export(*, include_pdfs: bool, actor_user_id: str) -> str | None:
     """Best-effort enqueue of a backup export (fixed id: repeated clicks coalesce)."""
     job_id = "backup-export"
@@ -371,6 +429,7 @@ _FUNC_LABELS = {
     KEYWORDS_JOB: "keywords",
     SUMMARY_SCOPE_JOB: "summary-scope",
     REF_CONSOLIDATE_JOB: "reference-consolidation",
+    ANALYSIS_GRAPH_JOB: "analysis-graph",
     BACKUP_EXPORT_JOB: "backup-export",
     BACKUP_RESTORE_JOB: "backup-restore",
     TOPIC_SCOPE_JOB: "topics-scope",

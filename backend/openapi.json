@@ -883,6 +883,10 @@
             "title": "Ai Scope Job Threshold",
             "type": "integer"
           },
+          "citation_graph_node_cap": {
+            "title": "Citation Graph Node Cap",
+            "type": "integer"
+          },
           "citing_papers_fetch_cap": {
             "title": "Citing Papers Fetch Cap",
             "type": "integer"
@@ -915,9 +919,17 @@
             "title": "Rq Worker Count",
             "type": "integer"
           },
+          "topic_graph_node_cap": {
+            "title": "Topic Graph Node Cap",
+            "type": "integer"
+          },
           "use_fuzzy_match_as_confirmed": {
             "title": "Use Fuzzy Match As Confirmed",
             "type": "boolean"
+          },
+          "viz_node_cap": {
+            "title": "Viz Node Cap",
+            "type": "integer"
           }
         },
         "required": [
@@ -929,6 +941,9 @@
           "max_queue_len",
           "citing_papers_fetch_cap",
           "ai_scope_job_threshold",
+          "citation_graph_node_cap",
+          "topic_graph_node_cap",
+          "viz_node_cap",
           "use_fuzzy_match_as_confirmed",
           "reference_rescan_on_startup"
         ],
@@ -948,6 +963,18 @@
               }
             ],
             "title": "Ai Scope Job Threshold"
+          },
+          "citation_graph_node_cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Graph Node Cap"
           },
           "citing_papers_fetch_cap": {
             "anyOf": [
@@ -1044,6 +1071,18 @@
             ],
             "title": "Rq Worker Count"
           },
+          "topic_graph_node_cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Graph Node Cap"
+          },
           "use_fuzzy_match_as_confirmed": {
             "anyOf": [
               {
@@ -1054,6 +1093,18 @@
               }
             ],
             "title": "Use Fuzzy Match As Confirmed"
+          },
+          "viz_node_cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Viz Node Cap"
           }
         },
         "title": "AppConfigUpdate",
@@ -1834,30 +1885,44 @@
       "CitationGraphResponse": {
         "properties": {
           "edges": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/GraphEdgeRead"
             },
             "title": "Edges",
             "type": "array"
           },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
           "nodes": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/GraphNodeRead"
             },
             "title": "Nodes",
             "type": "array"
           },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
+          },
           "summary": {
             "additionalProperties": true,
+            "default": {},
             "title": "Summary",
             "type": "object"
           }
         },
-        "required": [
-          "nodes",
-          "edges",
-          "summary"
-        ],
         "title": "CitationGraphResponse",
         "type": "object"
       },
@@ -7212,30 +7277,44 @@
       "TopicGraphResponse": {
         "properties": {
           "edges": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/TopicGraphEdgeRead"
             },
             "title": "Edges",
             "type": "array"
           },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
           "nodes": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/TopicGraphNodeRead"
             },
             "title": "Nodes",
             "type": "array"
           },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
+          },
           "summary": {
             "additionalProperties": true,
+            "default": {},
             "title": "Summary",
             "type": "object"
           }
         },
-        "required": [
-          "nodes",
-          "edges",
-          "summary"
-        ],
         "title": "TopicGraphResponse",
         "type": "object"
       },
@@ -17166,6 +17245,67 @@
           }
         },
         "summary": "Cancel Job Endpoint",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/result": {
+      "get": {
+        "description": "Status + stored result of a background analysis job (requester-gated; L-a).\n\nPoll until ``status == \"finished\"``, then use ``result`` — large-scope graphs are computed on\nthe worker and their payloads held in Redis for an hour.",
+        "operationId": "get_job_result_api_v1_jobs__job_id__result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Job Result Api V1 Jobs  Job Id  Result Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Result",
         "tags": [
           "jobs"
         ]

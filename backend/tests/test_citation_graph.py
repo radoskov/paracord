@@ -673,3 +673,58 @@ def test_endpoint_neighborhood_enforces_reader_see_filter(
     )
     assert owner_resp.status_code == 200
     assert str(hidden_cited.id) in {n["work_id"] for n in owner_resp.json()["nodes"]}
+
+
+def test_citation_graph_node_cap_keeps_best_connected(db, make_user) -> None:
+    """L-a: above max_nodes, the highest-degree nodes survive and the hidden count is reported."""
+    from app.models.citation import Reference, ReferenceCitation
+    from app.models.work import Work
+    from app.services.citation_graph import build_citation_graph
+    from app.utils.normalization import normalize_title
+
+    hub = Work(canonical_title="Hub", normalized_title="hub", doi="10.1/hub")
+    db.add(hub)
+    db.flush()
+    citers = []
+    for i in range(4):
+        w = Work(canonical_title=f"Citer {i}", normalized_title=normalize_title(f"Citer {i}"))
+        db.add(w)
+        db.flush()
+        citers.append(w)
+        ref = Reference(
+            title="Hub", doi="10.1/hub", resolution_status="local_match", resolved_work_id=hub.id
+        )
+        db.add(ref)
+        db.flush()
+        db.add(ReferenceCitation(reference_id=ref.id, citing_work_id=w.id))
+    db.commit()
+
+    graph = build_citation_graph(
+        db, scope_type="library", node_mode="local_only", visible_ids=None, max_nodes=3
+    )
+    ids = {n.id for n in graph.nodes}
+    assert str(hub.id) in ids  # the hub is the best-connected node — always kept
+    assert len(graph.nodes) == 3
+    assert graph.summary["nodes_hidden"] == 2
+
+
+def test_large_scope_citation_graph_is_queued(client, auth_headers, db, monkeypatch) -> None:
+    """L-a: a scope above the job threshold answers {queued, job_id} instead of computing inline."""
+    from app.models.work import Work
+    from app.services.app_config import update_ai_scope_job_threshold
+
+    update_ai_scope_job_threshold(db, value=1)
+    db.add_all([Work(canonical_title=f"W{i}", normalized_title=f"w{i}") for i in range(3)])
+    db.commit()
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.graph.enqueue_analysis_graph",
+        lambda kind, params, actor_user_id: f"analysis-{kind}-x",
+    )
+    resp = client.post(
+        "/api/v1/graphs/citation",
+        headers=auth_headers("owner"),
+        json={"scope": {"type": "library"}, "node_mode": "local_only"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queued"] is True and body["job_id"] == "analysis-citation-x"

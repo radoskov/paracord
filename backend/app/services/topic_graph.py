@@ -82,13 +82,15 @@ def build_topic_graph(
     visible_ids: set[uuid.UUID] | None = None,
     k: int = DEFAULT_K,
     min_similarity: float = DEFAULT_MIN_SIMILARITY,
+    max_nodes: int | None = None,
 ) -> TopicGraph:
     """Build a kNN embedding-similarity graph over a scope's papers."""
     all_works = _resolve_works(
         db, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids, visible_ids=visible_ids
     )
-    dropped = max(0, len(all_works) - MAX_NODES)
-    all_works = all_works[:MAX_NODES]
+    cap = MAX_NODES if max_nodes is None else max(1, max_nodes)
+    dropped = max(0, len(all_works) - cap)
+    all_works = all_works[:cap]
     if not all_works:
         return TopicGraph(summary={"node_count": 0, "edge_count": 0, "used_embeddings": False})
 

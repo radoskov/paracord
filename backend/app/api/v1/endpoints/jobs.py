@@ -110,3 +110,23 @@ def cancel_job_endpoint(job_id: str, _: User = EDITOR_DEP) -> dict:
             detail="Job not found, already finished, or already running",
         )
     return {"cancelled": True, "job_id": job_id}
+
+
+@router.get("/{job_id}/result")
+def get_job_result(job_id: str, actor: User = EDITOR_DEP) -> dict:
+    """Status + stored result of a background analysis job (requester-gated; L-a).
+
+    Poll until ``status == "finished"``, then use ``result`` — large-scope graphs are computed on
+    the worker and their payloads held in Redis for an hour.
+    """
+    from app.core.security import Role
+    from app.workers.queue import fetch_job_result
+
+    out = fetch_job_result(
+        job_id,
+        requester_id=str(actor.id),
+        is_admin=actor.role in (Role.OWNER, Role.ADMIN),
+    )
+    if out["status"] == "forbidden":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return out
