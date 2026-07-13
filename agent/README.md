@@ -39,6 +39,18 @@ python -m pip install -e ".[keyring]"
    paracord-agent start          # monitor + sync on the refresh interval (Ctrl-C to stop)
    ```
 
+## Configuration file & running as a service
+
+The tool-managed config lives at `~/.config/paracord/agent.yaml` (override the directory with
+`$PARACORD_AGENT_HOME`). It is normally written by the CLI/web GUI, not by hand;
+[`config/agent.example.yaml`](../config/agent.example.yaml) documents every field it accepts.
+Secrets are **not** stored there — the bearer/web tokens live in the OS keyring or a `0600` file.
+
+To run the agent continuously under systemd, adapt
+[`systemd/paperracks-agent.service.example`](systemd/paperracks-agent.service.example) (it runs
+`paracord-agent start`; set `User=` to the account that owns the watched folders and fix the
+`ExecStart` path). Do not pass `--daemon` — it is a reserved no-op; systemd supervises the process.
+
 ## Import actions
 
 Each managed folder/file carries an **action** (default `index_only`) and a **teleport policy**

@@ -623,6 +623,15 @@ def queue_status(limit: int = 25) -> dict:
                 return "work", str(args[0])
             return None, None
 
+        def _job_error(job) -> str | None:
+            """Failed-job traceback tail via job.latest_result() (job.exc_info is deprecated)."""
+            try:
+                result = job.latest_result()
+            except Exception:  # noqa: BLE001 - result payload may be gone; error text is best-effort
+                return None
+            exc_string = getattr(result, "exc_string", None) if result is not None else None
+            return (exc_string or "").strip()[-2000:] or None
+
         def _collect(job_ids, fallback_status: str) -> list[dict]:
             rows: list[dict] = []
             for job_id in list(job_ids)[:limit]:
@@ -638,9 +647,7 @@ def queue_status(limit: int = 25) -> dict:
                         "status": (job.get_status(refresh=False) or fallback_status),
                         "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
                         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-                        "error": (job.exc_info or "").strip()[-2000:] or None
-                        if fallback_status == "failed"
-                        else None,
+                        "error": _job_error(job) if fallback_status == "failed" else None,
                         "target_kind": kind,
                         "target_id": target_id,
                         "paper_title": None,

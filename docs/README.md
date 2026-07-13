@@ -5,12 +5,21 @@ This folder contains implementation notes, runbooks, diagrams, agent handoffs, a
 ## Contents
 
 ```text
+reference/              Comprehensive engineering + user documentation (START HERE)
 latex/                  LaTeX implementation manual source
 runbooks/               Operational guides
-architecture/           Architecture notes and diagrams
+architecture/           Architecture notes (STALE — superseded by reference/)
 agent_handoffs/         Required task handoff notes from coding agents
 compile_docs.sh         Compiles the LaTeX manual
 ```
+
+## Comprehensive reference documentation
+
+[`reference/`](reference/00_index.md) is the current, code-derived engineering reference and user
+manual (generated 2026-07-12). It covers architecture, the full data model, the service layer, the
+API surface, the async pipeline, the local agent, the frontend, security, efficiency, user
+workflows, and a consolidated future-work / revision register — all with Mermaid diagrams. It
+supersedes the older `architecture/*` notes.
 
 ## Planning & status docs
 
