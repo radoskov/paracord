@@ -504,3 +504,146 @@ def approve_agent(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     return AgentApprovedOut(agent_id=agent.id, status=agent.status, agent_token=raw_token)
+
+
+# --- Reference dupes (S13/S14): consolidation scan + contradiction review -------------------------
+
+
+class ReferenceDupeEntry(BaseModel):
+    id: uuid.UUID
+    title: str | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    year: int | None = None
+    resolution_status: str
+    resolved_work_id: uuid.UUID | None = None
+    resolved_work_title: str | None = None
+    suggested_work_id: uuid.UUID | None = None
+    suggested_work_title: str | None = None
+    citing_count: int = 0
+    parked: bool = False
+
+
+class ReferenceDupeGroup(BaseModel):
+    dedup_key: str
+    references: list[ReferenceDupeEntry]
+
+
+class LastConsolidationScan(BaseModel):
+    at: datetime | None = None
+    groups_scanned: int = 0
+    folded: int = 0
+    conflicts: int = 0
+
+
+class ReferenceDupesOut(BaseModel):
+    last_scan: LastConsolidationScan | None = None
+    conflicts: list[ReferenceDupeGroup]
+
+
+class ReferenceDupesScanOut(BaseModel):
+    queued: bool
+    job_id: str | None = None
+    # Filled when the queue was unavailable and the scan ran inline instead.
+    result: LastConsolidationScan | None = None
+
+
+class ReferenceDupeResolveIn(BaseModel):
+    # The reference whose resolution the admin declares correct for its conflict group.
+    winner_reference_id: uuid.UUID
+
+
+def _last_consolidation_scan(db: Session) -> LastConsolidationScan | None:
+    event = db.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == "reference.consolidation_completed")
+        .order_by(AuditEvent.created_at.desc())
+    ).first()
+    if event is None:
+        return None
+    details = event.details or {}
+    return LastConsolidationScan(
+        at=event.created_at,
+        groups_scanned=details.get("groups_scanned", 0),
+        folded=details.get("folded", 0),
+        conflicts=details.get("conflicts", 0),
+    )
+
+
+@router.get("/reference-dupes", response_model=ReferenceDupesOut)
+def read_reference_dupes(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> ReferenceDupesOut:
+    """The pending reference-contradiction groups + the last consolidation-scan summary."""
+    from app.services.reference_consolidation import list_conflicts
+
+    return ReferenceDupesOut(
+        last_scan=_last_consolidation_scan(db),
+        conflicts=[ReferenceDupeGroup(**group) for group in list_conflicts(db)],
+    )
+
+
+@router.post("/reference-dupes/scan", response_model=ReferenceDupesScanOut)
+def scan_reference_dupes(
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> ReferenceDupesScanOut:
+    """Run the canonical-reference consolidation scan (S13/S14).
+
+    Enqueued on the worker under a deterministic id (repeated clicks coalesce); when the queue is
+    unavailable the scan runs inline instead — it must stay possible on a Redis-less deployment.
+    """
+    from app.workers.queue import enqueue_reference_consolidation
+
+    job_id = enqueue_reference_consolidation()
+    if job_id is not None:
+        record_event(
+            db,
+            "reference.consolidation_requested",
+            actor_user_id=actor.id,
+            entity_type="job",
+            entity_id=job_id,
+        )
+        db.commit()
+        return ReferenceDupesScanOut(queued=True, job_id=job_id)
+
+    from app.services.reference_consolidation import consolidate_references
+
+    result = consolidate_references(db, actor_user_id=actor.id)
+    record_event(
+        db,
+        "reference.consolidation_completed",
+        actor_user_id=actor.id,
+        details={
+            "groups_scanned": result.groups_scanned,
+            "folded": result.folded,
+            "conflicts": result.conflicts,
+        },
+    )
+    db.commit()
+    return ReferenceDupesScanOut(
+        queued=False,
+        result=LastConsolidationScan(
+            groups_scanned=result.groups_scanned,
+            folded=result.folded,
+            conflicts=result.conflicts,
+        ),
+    )
+
+
+@router.post("/reference-dupes/resolve", response_model=ReferenceDupesOut)
+def resolve_reference_dupe(
+    payload: ReferenceDupeResolveIn,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> ReferenceDupesOut:
+    """Fold one contradiction group using the chosen reference's resolution; returns the fresh list."""
+    from app.services.reference_consolidation import list_conflicts, resolve_conflict
+
+    resolve_conflict(db, winner_reference_id=payload.winner_reference_id, actor_user_id=actor.id)
+    db.commit()
+    return ReferenceDupesOut(
+        last_scan=_last_consolidation_scan(db),
+        conflicts=[ReferenceDupeGroup(**group) for group in list_conflicts(db)],
+    )

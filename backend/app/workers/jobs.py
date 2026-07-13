@@ -491,6 +491,37 @@ def rescan_reference_matches_job() -> None:
 
 
 @_audited_job
+def consolidate_references_job() -> dict:
+    """Consolidate duplicate canonical references (S13/S14) — startup hook + admin button.
+
+    Auto-folds conflict-free duplicate groups, parks contradictions with the ``|conflict:``
+    key suffix for admin review, and records a completion audit event the Admin → Reference
+    dupes tab reads back as "X dupes resolved, Y contradictions found".
+    """
+    from app.db.session import SessionLocal
+    from app.services.audit import record_event
+    from app.services.reference_consolidation import consolidate_references
+
+    with SessionLocal() as db:
+        result = consolidate_references(db)
+        record_event(
+            db,
+            "reference.consolidation_completed",
+            details={
+                "groups_scanned": result.groups_scanned,
+                "folded": result.folded,
+                "conflicts": result.conflicts,
+            },
+        )
+        db.commit()
+        return {
+            "groups_scanned": result.groups_scanned,
+            "folded": result.folded,
+            "conflicts": result.conflicts,
+        }
+
+
+@_audited_job
 def reindex_embeddings_job() -> None:
     """Build embeddings for the active provider over every work missing one (WORKPLAN_NEXT 8F).
 

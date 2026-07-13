@@ -1294,6 +1294,45 @@ export interface AppConfig {
   reference_rescan_on_startup: boolean;
 }
 
+// Reference-dupes review (S13/S14): pending contradiction groups + the last scan summary.
+export interface ReferenceDupeEntry {
+  id: string;
+  title: string | null;
+  doi: string | null;
+  arxiv_id: string | null;
+  year: number | null;
+  resolution_status: string;
+  resolved_work_id: string | null;
+  resolved_work_title: string | null;
+  suggested_work_id: string | null;
+  suggested_work_title: string | null;
+  citing_count: number;
+  parked: boolean;
+}
+
+export interface ReferenceDupeGroup {
+  dedup_key: string;
+  references: ReferenceDupeEntry[];
+}
+
+export interface LastConsolidationScan {
+  at: string | null;
+  groups_scanned: number;
+  folded: number;
+  conflicts: number;
+}
+
+export interface ReferenceDupesResponse {
+  last_scan: LastConsolidationScan | null;
+  conflicts: ReferenceDupeGroup[];
+}
+
+export interface ReferenceDupesScanResponse {
+  queued: boolean;
+  job_id: string | null;
+  result: LastConsolidationScan | null;
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
@@ -2615,6 +2654,23 @@ export class ApiClient {
     return this.request<CurrentUser>("/api/v1/auth/me", {
       method: "PATCH",
       body: changes,
+    });
+  }
+
+  async getReferenceDupes(): Promise<ReferenceDupesResponse> {
+    return this.request<ReferenceDupesResponse>("/api/v1/admin/reference-dupes");
+  }
+
+  async scanReferenceDupes(): Promise<ReferenceDupesScanResponse> {
+    return this.request<ReferenceDupesScanResponse>("/api/v1/admin/reference-dupes/scan", {
+      method: "POST",
+    });
+  }
+
+  async resolveReferenceDupe(winnerReferenceId: string): Promise<ReferenceDupesResponse> {
+    return this.request<ReferenceDupesResponse>("/api/v1/admin/reference-dupes/resolve", {
+      method: "POST",
+      body: { winner_reference_id: winnerReferenceId },
     });
   }
 

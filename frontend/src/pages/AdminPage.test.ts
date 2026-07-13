@@ -22,6 +22,12 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     listThemes: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
+    // Reference dupes (S13/S14).
+    getReferenceDupes: vi.fn().mockResolvedValue({ last_scan: null, conflicts: [] }),
+    scanReferenceDupes: vi
+      .fn()
+      .mockResolvedValue({ queued: false, job_id: null, result: { at: null, groups_scanned: 1, folded: 2, conflicts: 0 } }),
+    resolveReferenceDupe: vi.fn().mockResolvedValue({ last_scan: null, conflicts: [] }),
     getAppConfig: vi.fn().mockResolvedValue({
       max_papers_per_page: 500,
       rate_limit_per_client_per_min: 60,
@@ -197,4 +203,22 @@ describe('AdminPage groups section', () => {
 
     await waitFor(() => expect(client.rescanAllReferences).toHaveBeenCalled());
   });
+  it('scans reference dupes from the Reference dupes tab', async () => {
+    const client = makeClient();
+    render(AdminPage, { client: client as never });
+    await waitFor(() => expect(client.listAdminUsers).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reference dupes' }));
+    await waitFor(() => expect(client.getReferenceDupes).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('No contradictions to review.')).toBeTruthy());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Scan for duplicate references' }));
+    await waitFor(() => expect(client.scanReferenceDupes).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        screen.getByText('2 reference dupe(s) resolved, 0 contradiction(s) found.'),
+      ).toBeTruthy(),
+    );
+  });
+
 });

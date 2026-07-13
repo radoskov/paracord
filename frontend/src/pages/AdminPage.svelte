@@ -13,6 +13,7 @@
     type GrantTargetType,
     type Group,
     type GroupMember,
+    type ReferenceDupesResponse,
     type ServerImportRoot,
     type UserRole,
     type WebFindAllowedHost,
@@ -76,6 +77,7 @@
     { id: 'themes', label: 'Themes' },
     { id: 'agents', label: 'Agents' },
     { id: 'settings', label: 'Settings' },
+    { id: 'refdupes', label: 'Reference dupes' },
   ];
   $: visibleAdminTabs = ADMIN_TABS.filter((t) => !t.ownerOnly || $isOwner);
   let activeAdminTab = 'users';
@@ -417,6 +419,72 @@
       overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
     });
     savingOverload = false;
+  }
+
+  // --- Reference dupes (S13/S14) ---
+  let refDupes: ReferenceDupesResponse | null = null;
+  let scanningDupes = false;
+  let dupesMsg = '';
+
+  async function loadRefDupes(): Promise<void> {
+    await run(async () => {
+      refDupes = await client.getReferenceDupes();
+    });
+  }
+
+  // Load the list the first time the tab is opened.
+  $: if (activeAdminTab === 'refdupes' && refDupes === null && !loading) void loadRefDupes();
+
+  async function pollDupesJob(jobId: string): Promise<void> {
+    const active = new Set(['queued', 'started', 'deferred', 'scheduled']);
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const status = await client.getJobs(100);
+        const job = status.jobs.find((j) => j.id === jobId);
+        if (job && job.status === 'failed') {
+          dupesMsg = `Scan failed: ${job.error ?? 'see the Jobs tab'}`;
+          scanningDupes = false;
+          return;
+        }
+        if (!job || !active.has(job.status)) break;
+      } catch {
+        // transient polling error — keep trying
+      }
+    }
+    refDupes = await client.getReferenceDupes();
+    const scan = refDupes.last_scan;
+    dupesMsg = scan
+      ? `${scan.folded} reference dupe(s) resolved, ${scan.conflicts} contradiction(s) found.`
+      : 'Scan finished.';
+    scanningDupes = false;
+  }
+
+  async function scanRefDupes(): Promise<void> {
+    scanningDupes = true;
+    dupesMsg = '';
+    await run(async () => {
+      const response = await client.scanReferenceDupes();
+      if (response.queued && response.job_id) {
+        dupesMsg = 'Scanning in the background…';
+        void pollDupesJob(response.job_id);
+        return;
+      }
+      // Queue unavailable — the scan ran inline; the summary is in the response.
+      refDupes = await client.getReferenceDupes();
+      dupesMsg = response.result
+        ? `${response.result.folded} reference dupe(s) resolved, ${response.result.conflicts} contradiction(s) found.`
+        : 'Scan finished.';
+      scanningDupes = false;
+    });
+    if (!dupesMsg) scanningDupes = false;
+  }
+
+  async function resolveDupe(winnerId: string): Promise<void> {
+    await run(async () => {
+      refDupes = await client.resolveReferenceDupe(winnerId);
+      dupesMsg = 'Conflict resolved.';
+    });
   }
 
   // --- Groups ---
@@ -1425,7 +1493,61 @@
   </section>
 {/if}
 
-{#if activeAdminTab === 'settings' && $canManageUsers}
+{#if activeAdminTab === 'refdupes'}
+    <section class="surface admin-section">
+      <div class="section-head">
+        <h2>Duplicate references</h2>
+      </div>
+      <p class="small-help">
+        The same cited paper can exist as two reference records (old data, or two imports racing).
+        A scan merges the safe duplicates automatically and lists the contradictions — cases where
+        your past confirm/reject decisions disagree — for you to settle. A scan also runs once at
+        every server start.
+      </p>
+      <div class="stack">
+        <button type="button" on:click={scanRefDupes} disabled={scanningDupes || loading}
+          title="Merge duplicate reference records and list contradictions for review">
+          {scanningDupes ? 'Scanning…' : 'Scan for duplicate references'}</button>
+        {#if dupesMsg}<p class="muted" role="status">{dupesMsg}</p>{/if}
+        {#if refDupes?.last_scan}
+          <p class="muted small">
+            Last scan: {refDupes.last_scan.at ? new Date(refDupes.last_scan.at).toLocaleString() : '—'}
+            · {refDupes.last_scan.folded} merged · {refDupes.last_scan.conflicts} contradiction(s)
+          </p>
+        {/if}
+      </div>
+      {#if refDupes && refDupes.conflicts.length === 0}
+        <p class="empty">No contradictions to review.</p>
+      {:else if refDupes}
+        {#each refDupes.conflicts as group (group.dedup_key)}
+          <div class="entry-card">
+            <p class="muted small">Duplicate group · <code>{group.dedup_key}</code></p>
+            <ul class="stack">
+              {#each group.references as ref (ref.id)}
+                <li class="location-row">
+                  <span>
+                    <strong>{ref.title ?? 'Untitled reference'}</strong>
+                    {#if ref.year}&nbsp;({ref.year}){/if}
+                    {#if ref.doi}&nbsp;· doi:{ref.doi}{/if}
+                    — {ref.resolution_status.replace('_', ' ')}
+                    {#if ref.resolved_work_title}&nbsp;→ “{ref.resolved_work_title}”{/if}
+                    {#if !ref.resolved_work_title && ref.suggested_work_title}&nbsp;(rejected: “{ref.suggested_work_title}”){/if}
+                    &nbsp;· cited by {ref.citing_count} paper(s)
+                  </span>
+                  <button type="button" class="secondary small" disabled={loading}
+                    on:click={() => resolveDupe(ref.id)}
+                    title="Merge this group and keep THIS record's resolution">
+                    Keep this resolution</button>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      {/if}
+    </section>
+  {/if}
+
+  {#if activeAdminTab === 'settings' && $canManageUsers}
   <div class="admin-columns">
     <section class="surface admin-section">
       <div class="section-head">

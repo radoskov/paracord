@@ -27,11 +27,14 @@ SUMMARY_SCOPE_JOB = "app.workers.jobs.summarize_scope_job"
 TOPIC_SCOPE_JOB = "app.workers.jobs.topic_model_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
 REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
+REF_CONSOLIDATE_JOB = "app.workers.jobs.consolidate_references_job"
 
 # Deterministic id so a burst of edits coalesces into a single pending rebuild (D13a).
 BM25_REBUILD_JOB_ID = "bm25-rebuild"
 # Deterministic id so repeated "rescan all references" clicks coalesce into one pending job.
 REF_MATCH_JOB_ID = "reference-rescan-all"
+# Deterministic id so the startup hook and the admin button coalesce into one consolidation run.
+REF_CONSOLIDATE_JOB_ID = "reference-consolidation"
 
 
 def get_queue():
@@ -211,6 +214,22 @@ def enqueue_duplicate_scan() -> str | None:
         return None
 
 
+def enqueue_reference_consolidation() -> str | None:
+    """Best-effort enqueue of the canonical-reference consolidation scan (S13/S14). Id or None.
+
+    Fixed id ``reference-consolidation``: the startup hook and repeated admin-button clicks
+    coalesce into one pending run."""
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, REF_CONSOLIDATE_JOB_ID)
+        if existing is not None:
+            return existing
+        return queue.enqueue(REF_CONSOLIDATE_JOB, job_id=REF_CONSOLIDATE_JOB_ID).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue reference consolidation: %s", exc)
+        return None
+
+
 def enqueue_reference_rescan() -> str | None:
     """Best-effort enqueue of a full-library reference→work rematch (batch 12). Returns id or None.
 
@@ -309,6 +328,7 @@ _FUNC_LABELS = {
     TOPIC_JOB: "topic",
     KEYWORDS_JOB: "keywords",
     SUMMARY_SCOPE_JOB: "summary-scope",
+    REF_CONSOLIDATE_JOB: "reference-consolidation",
     TOPIC_SCOPE_JOB: "topics-scope",
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",

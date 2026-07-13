@@ -54,6 +54,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             logger.info("Startup downstream recovery: %s", downstream)
     except Exception as exc:  # noqa: BLE001 - startup must not fail on a recovery hiccup
         logger.warning("Startup downstream recovery skipped: %s", exc)
+    # S13/S14 — consolidate duplicate canonical references once per startup (owner decision:
+    # unconditional). Best-effort + coalesced (deterministic job id); a dead Redis just skips it.
+    # Contradictions are never auto-folded — they land in Admin → Reference dupes for review.
+    try:
+        from app.workers.queue import enqueue_reference_consolidation
+
+        job_id = enqueue_reference_consolidation()
+        if job_id:
+            logger.info("Startup reference consolidation enqueued: %s", job_id)
+    except Exception as exc:  # noqa: BLE001 - startup must not fail on a consolidation hiccup
+        logger.warning("Startup reference consolidation skipped: %s", exc)
     # F3a — optionally re-run a full reference→work rematch on startup (owner toggle) so the stored
     # resolution stays fresh across deploys. Best-effort + coalesced (deterministic job id), so it is
     # safe to run from several API workers; a dead Redis just skips it (enqueue returns None).
