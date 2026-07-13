@@ -1,5 +1,3 @@
-
-
 def test_approve_with_ttl_mints_expiring_token(client, auth_headers, db) -> None:
     """D3: approval may set token_ttl_days; an expired token is rejected with 401."""
     from datetime import UTC, datetime, timedelta

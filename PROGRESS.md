@@ -9,6 +9,36 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Batch: D3/D38/E3 + graph caps + references-panel + migration squash (2026-07-13)
+
+- **D3** (`fe6776b`): Caddy TLS proxy in the prod overlay (`config/Caddyfile.example`, local CA
+  for LAN or Let's Encrypt with a domain; INSTALL.md "TLS on the LAN"); agent refuses plaintext
+  http beyond loopback unless `allow_insecure_http` + new `ca_cert` trust option; server logs a
+  loud startup warning for plaintext non-loopback (PARACORD_ALLOW_INSECURE_HTTP acknowledges);
+  agent tokens (already permanent) can now be minted with `token_ttl_days` at approval
+  (migration `0068`) and expire with a 401.
+- **E3** (`6ed3be0`): `access.visible_work_condition` exposes the visibility clamp as a SQL
+  predicate; scope resolution accepts it interchangeably with the id set; files list + AI scope
+  paths (incl. S15 jobs) filter in the database instead of shipping id sets as IN lists.
+- **D38**: register updated — §10.2 backup/restore delta closed by the Backup feature.
+- **Item 1** (`dd3c651`): citation + reference graphs cap external nodes at `max_external`
+  (default 50, 0-500), keeping the most-cited/newest; controls on Insights + the reference-graph
+  modal; hidden counts in the payload.
+- **Item 2** (`dd3c651`): the References panel remembers its open/collapsed state instead of
+  forcing itself open on every paper view.
+- **Item 4** (`fddffb5` + `25198aa`): the 68-file migration chain squashed into ONE frozen-DDL
+  baseline keeping revision id 0067 (existing DBs = head no-op; fresh DBs build in one step);
+  pg_dump-diff-verified equal incl. server defaults + historical constraint names; the
+  create_all-was-a-moving-target bug caught by pg-integration tests and fixed by pinning static
+  autogenerate output; historical 0029-backfill replay test removed (scenario impossible,
+  runtime invariant covered).
+- **Insights audit quick wins** (`29420f1`): citation_summary N+1 fixed; stale cap comment;
+  register F3b marked resolved. Full audit findings + workplan in the session handoff.
+
+Battery (owner-requested): `make ready-full` (lint clean; backend 1165 passed/4 skipped; agent
+73; migrations 4; frontend 275 + build), `make test-safety` (160 passed/1 skipped),
+`make e2e` (33 passed/3 skipped) — all green, zero pytest warnings.
+
 ## Feature batch: backup/restore, batch-import rework, job cancel, staging titles (2026-07-13)
 
 Four owner-requested features (handoff:
