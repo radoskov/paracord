@@ -3713,6 +3713,39 @@
         "title": "KnownHashesResponse",
         "type": "object"
       },
+      "LastConsolidationScan": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "conflicts": {
+            "default": 0,
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "folded": {
+            "default": 0,
+            "title": "Folded",
+            "type": "integer"
+          },
+          "groups_scanned": {
+            "default": 0,
+            "title": "Groups Scanned",
+            "type": "integer"
+          }
+        },
+        "title": "LastConsolidationScan",
+        "type": "object"
+      },
       "LibraryColumnPrefs": {
         "additionalProperties": true,
         "properties": {
@@ -4706,6 +4739,220 @@
           "action"
         ],
         "title": "ReferenceActionRequest",
+        "type": "object"
+      },
+      "ReferenceDupeEntry": {
+        "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
+          "citing_count": {
+            "default": 0,
+            "title": "Citing Count",
+            "type": "integer"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parked": {
+            "default": false,
+            "title": "Parked",
+            "type": "boolean"
+          },
+          "resolution_status": {
+            "title": "Resolution Status",
+            "type": "string"
+          },
+          "resolved_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Work Id"
+          },
+          "resolved_work_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved Work Title"
+          },
+          "suggested_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Work Id"
+          },
+          "suggested_work_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Work Title"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "resolution_status"
+        ],
+        "title": "ReferenceDupeEntry",
+        "type": "object"
+      },
+      "ReferenceDupeGroup": {
+        "properties": {
+          "dedup_key": {
+            "title": "Dedup Key",
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceDupeEntry"
+            },
+            "title": "References",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dedup_key",
+          "references"
+        ],
+        "title": "ReferenceDupeGroup",
+        "type": "object"
+      },
+      "ReferenceDupeResolveIn": {
+        "properties": {
+          "winner_reference_id": {
+            "format": "uuid",
+            "title": "Winner Reference Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "winner_reference_id"
+        ],
+        "title": "ReferenceDupeResolveIn",
+        "type": "object"
+      },
+      "ReferenceDupesOut": {
+        "properties": {
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ReferenceDupeGroup"
+            },
+            "title": "Conflicts",
+            "type": "array"
+          },
+          "last_scan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastConsolidationScan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "conflicts"
+        ],
+        "title": "ReferenceDupesOut",
+        "type": "object"
+      },
+      "ReferenceDupesScanOut": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastConsolidationScan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "ReferenceDupesScanOut",
         "type": "object"
       },
       "ReferenceRead": {
@@ -11156,6 +11403,166 @@
         "tags": [
           "admin",
           "import-roots"
+        ]
+      }
+    },
+    "/api/v1/admin/reference-dupes": {
+      "get": {
+        "description": "The pending reference-contradiction groups + the last consolidation-scan summary.",
+        "operationId": "read_reference_dupes_api_v1_admin_reference_dupes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceDupesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Reference Dupes",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reference-dupes/resolve": {
+      "post": {
+        "description": "Fold one contradiction group using the chosen reference's resolution; returns the fresh list.",
+        "operationId": "resolve_reference_dupe_api_v1_admin_reference_dupes_resolve_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceDupeResolveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceDupesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Reference Dupe",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reference-dupes/scan": {
+      "post": {
+        "description": "Run the canonical-reference consolidation scan (S13/S14).\n\nEnqueued on the worker under a deterministic id (repeated clicks coalesce); when the queue is\nunavailable the scan runs inline instead — it must stay possible on a Redis-less deployment.",
+        "operationId": "scan_reference_dupes_api_v1_admin_reference_dupes_scan_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceDupesScanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Reference Dupes",
+        "tags": [
+          "admin"
         ]
       }
     },
