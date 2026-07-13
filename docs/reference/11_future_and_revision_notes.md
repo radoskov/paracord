@@ -28,9 +28,10 @@ Legend: 🔴 high · 🟠 medium · 🟡 low. Categories: **Sec**urity · **Alg*
 The following existing docs are **stale** and contradicted by the current code. Update or supersede
 them (this `docs/reference/` set is the new source of truth):
 
-- 🟠 **Doc** — `docs/architecture/{architecture,api_surface,data_model}.md` describe an "M7 audit"
-  state: unauthenticated agent stubs, no pgvector, no access control, `/citations/contexts` dead
-  stub, only ~7 migrations. All long superseded.
+- ✅ **Doc** — ~~`docs/architecture/*` describe an "M7 audit" state~~ **Resolved 2026-07-13
+  (S17):** archived into the gitignored `documentation_archive.zip`; may be refreshed later.
+  `AGENTS.md` now points to `docs/reference/` as the engineering source of truth and keeps
+  `SPECIFICATION.md` as product intent (banner added there).
 - 🟠 **Doc** — `FILE_TREE.md` lists ~7 migrations and a fraction of the real models/services/
   endpoints/tests. Regenerate or delete.
 - ✅ **RESOLVED (F4)** — `config/agent.example.yaml` rewritten to the real `AgentConfig` schema

@@ -4,6 +4,12 @@
 **Document type:** implementation specification and multi-agent build guide
 **Target platform:** Linux server and Linux workstation/agent, with web client usable from any modern browser
 **Document date:** 2026-06-23 (revised 2026-07-01)
+**Role of this document (2026-07-13):** product intent — the agreed feature set and its
+semantics. The **engineering** source of truth (how the system is actually built: schemas,
+services, endpoints, pipelines) is [`docs/reference/`](docs/reference/00_index.md); where this
+document and the code disagree on engineering detail, the reference set wins. Known drift is
+annotated in `docs/reference/11_future_and_revision_notes.md` §stale-docs.
+
 **Status:** v1.0 implementation-ready draft. This is a destination document: it describes the agreed feature set. Most of it is built and shipped, including everything called out in the 2026-07-01 round — access control (groups, the full role ladder, rack/shelf ACL, §7.1.2/§7.9), raw-citation batch import (§8.1.1), and the per-paper topic/keyword actions (§8.15). Later rounds (2026-07-03…07) added the visualization suite, the per-paper reference graph, citation summaries, the four-theme + custom-YAML theming system, reader reading-modes, the reversible duplicate merge/unmerge model, and the local-agent status/reconcile overhaul (see §20). Remaining genuinely-optional / off-by-default items are noted where relevant.
 
 ## Contents

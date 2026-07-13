@@ -42,7 +42,6 @@ CHANGELOG.md         Project changelog
 PROGRESS.md          Current build status and next steps
 AGENTS.md            Coding-agent coordination guide
 WORK_SPLIT.md        Suggested work packages for parallel agents
-HINTS_FOR_AGENTS.md  Practical implementation hints and constraints
 ```
 
 ## Development philosophy

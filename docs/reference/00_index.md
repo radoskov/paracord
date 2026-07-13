@@ -6,7 +6,8 @@
 This documentation set is the **engineering reference** for the application as it exists in the
 current codebase. It is written from the source of truth (the code under `backend/`, `agent/`,
 `frontend/`), not from the older planning documents. Where the older docs
-(`docs/architecture/*`, `FILE_TREE.md`, parts of `SPECIFICATION.md`) have drifted from reality, this
+(`FILE_TREE.md`, parts of `SPECIFICATION.md`; `docs/architecture/*` was archived into the
+gitignored `documentation_archive.zip` on 2026-07-13) have drifted from reality, this
 set supersedes them — see [§11 Future work & revision notes](11_future_and_revision_notes.md) for a
 list of stale documents.
 
