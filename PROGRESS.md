@@ -17,7 +17,10 @@ commit as the code) and keeps `SPECIFICATION.md` as product intent (banner added
 gitignored `documentation_archive.zip` (`5877681`). Also: failed-job error text now read via
 `job.latest_result()` — the RQ `exc_info` DeprecationWarning in test output is gone (`7ca451e`);
 OpenAPI schema regenerated for the reference-dupes + latest-summary endpoints (`f16f318`).
-S19 (documentation-only YAML keys) inventoried and reported to the owner — pruning decision open.
+S19 resolved (`a457f3b`): misleading dead-twin keys + `agents.*` deleted from
+`server.example.yaml`; never-wired blocks moved under a commented-out REFERENCE ONLY divider;
+env-pointer keys kept by design. The example now parses with no unread live keys beyond the five
+deliberate env pointers.
 
 ## Reference consolidation + admin review (S13/S14, 2026-07-13)
 

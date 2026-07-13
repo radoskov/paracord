@@ -41,11 +41,13 @@ them (this `docs/reference/` set is the new source of truth):
 - ✅ **RESOLVED (F4)** — `agent/systemd/paperracks-agent.service.example` fixed to run
   `paracord-agent start` (with the real config mechanism), a valid `User=`, and a note that
   `--daemon` is a reserved no-op.
-- 🟠 **Doc** — `config/server.example.yaml` has a large **documentation-only** key surface: only a
-  whitelist is parsed by `_server_settings_from_yaml`. Keys under `processing.*`, `summaries.*`,
-  `topics.*`, `audit.*`, `agents.*`, `keywords.*`, `credential_recovery.*`, `security.failed_login_
-  lockout.*`, `storage.temp_root/max_upload_mb` are ignored. Wire them up or clearly mark
-  reference-only. Also: the OCR enum comment says `full_ml` but the code accepts `pymupdf`.
+- ✅ **Doc** — ~~`config/server.example.yaml` documentation-only key surface~~ **Resolved
+  2026-07-13 (S19):** misleading dead twins deleted (`failed_login_lockout.*`, `processing.ai.*`,
+  unread grobid consolidation keys, `agents.*` — per-agent DB policy is canon); the never-wired
+  blocks moved under a commented-out "REFERENCE ONLY" divider; env-pointer keys kept by design.
+  The example now parses with no unread live keys beyond the five deliberate env pointers.
+  Still open from the original entry: the OCR enum comment mentions `full_ml` but the code also
+  accepts `pymupdf`.
 
 ---
 
