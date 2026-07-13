@@ -9,6 +9,44 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Structure-audit fixes, S-batch (2026-07-13)
+
+Implements the owner-decided items from the 2026-07-12 structure audit
+(`docs/WORKPLAN_2026-07-12_structure-audit-discussion.md`, decisions recorded at its top). On
+`main` (not pushed), one commit per item; handoff:
+`docs/agent_handoffs/2026-07-13-structure-audit-fixes-s-batch.md`.
+
+- **S5** targeted duplicate scans no longer sweep the whole other table in the request.
+- **S6/S7** enrich/chunk/embed/topic/keyword jobs retry transient failures (`Retry(max=2,
+  [30,120])`); enrich raises on all-sources-failed; `_get` honors a capped `Retry-After` on
+  429/503. Deterministic failures (DOI conflict) still never retry.
+- **S10** the three unbounded in-process caches are now bounded TTL/LRU
+  (`utils/bounded_cache.py`); summaries 128/15 min, layouts 32/30 min, previews 256/15 min.
+- **S11** per-user preference files (`preferences.d/<uuid>.yaml`, legacy file read as fallback) —
+  no more multi-process lost-update race.
+- **S3** one canonical arXiv parser in `utils.normalization` (three divergent copies collapsed);
+  extraction/import-staging normalize promoted DOIs; migration `0065` backfills stored
+  works/references/external_papers identifiers with unique-index collision guards.
+- **S1/S2** shared query-returning scope resolver (`services/scope_resolution.py`) with a
+  **required** `visible_ids` clamp + `count_scope_works`; summarization/topic_modeling delegate.
+- **S8/S9** the full-library rescan job matches references AND external citing papers via
+  in-memory indexes (identifier/blocking/authors, built once) in 500-row commit batches.
+- **S12** three-outcome citing fetch: authoritative-zero replaces the cache and stamps new
+  `works.citing_fetched_at/_source` (migration `0066`); failed fetches keep the cache.
+- **S20** citing fetch pages OpenAlex/S2 up to `app_config.citing_papers_fetch_cap` (default
+  1000, migration `0067`, admin UI).
+- **S15/S16** large-scope topic models/summaries run on the worker (stub jobs filled, per-scope
+  deterministic ids, 202 + job id above `app_config.ai_scope_job_threshold` default 100, admin
+  UI); `GET /ai/summaries/latest` read path; Insights page polls and refreshes.
+- **S4** domain-error hierarchy (`app/errors.py`) + one handler; `shelf_membership` migrated;
+  `build_works_query` moved to `services/works_query.py` (layering inversion fixed);
+  `export_service.authors_by_work` public.
+
+Verified in-container: backend `-m "not safety"` 1137 passed / 4 skipped; frontend 274 + build;
+alembic base→0067 (+ 0064↔0063 round-trip) on scratch pgvector:pg17. Migrations 0064–0067 not
+yet applied to the live DB (apply on next rebuild+restart; back up first — 0065 rewrites
+identifier columns). Open: S13/S14 (consolidation job), S17–S19 (docs decisions).
+
 ## Citation/reference matcher improvements (2026-07-12)
 
 Audit + upgrade of the local reference/citation matcher (owner request): F1 (precision *and*
