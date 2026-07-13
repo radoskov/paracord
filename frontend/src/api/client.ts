@@ -2792,6 +2792,10 @@ export class ApiClient {
     });
   }
 
+  async cancelJob(jobId: string): Promise<{ cancelled: boolean; job_id: string }> {
+    return this.request(`/api/v1/jobs/${jobId}/cancel`, { method: "POST" });
+  }
+
   async getJobs(limit = 25): Promise<QueueStatus> {
     // 15s timeout: this is polled on a timer, so a stalled request must reject (and be retried on
     // the next tick) rather than hang and pile up behind subsequent polls.

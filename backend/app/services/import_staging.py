@@ -206,6 +206,45 @@ def extract_staging_item(
     item.updated_at = datetime.now(UTC)
 
 
+def requeue_stalled_items(db: Session, batch: ImportStagingBatch) -> int:
+    """Re-enqueue staged items whose extraction job died (S-batch item 2 "stuck pending").
+
+    A worker restart / crash mid-extraction leaves items parked in ``pending``/``extracting`` with
+    no live RQ job — previously forever (the batch never reached ``ready`` and the UI showed no
+    actions). Called from the polling GET: for each such item, re-enqueue (the deterministic job id
+    makes this a no-op while a live job exists); if the queue is unavailable, extract ONE item
+    inline per poll so the batch still drains without Redis. Returns how many were kicked.
+    """
+    from app.workers.queue import enqueue_staging_extraction
+
+    stalled = [i for i in _batch_items(db, batch) if i.status in ("pending", "extracting")]
+    if not stalled:
+        return 0
+    kicked = 0
+    inline_done = False
+    for item in stalled:
+        if enqueue_staging_extraction(item.id) is not None:
+            kicked += 1
+        elif not inline_done:
+            # Queue down: drain one item per poll inline (bounded request time).
+            from app.services.grobid_client import GrobidClient
+
+            settings = get_settings()
+            client = GrobidClient(settings.grobid_url, settings=settings)
+            extract_staging_item(
+                db, item=item, fetch_tei=client.process_fulltext_document_sync, settings=settings
+            )
+            inline_done = True
+            kicked += 1
+    return kicked
+
+
+def _batch_items(db: Session, batch: ImportStagingBatch) -> list[ImportStagingItem]:
+    return list(
+        db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).all()
+    )
+
+
 def finalize_if_ready(db: Session, batch: ImportStagingBatch) -> bool:
     """Flip a batch from ``extracting`` to ``ready`` once every item is terminal. Returns True then."""
     if batch.status != "extracting":
@@ -312,6 +351,11 @@ def commit_staging(
     Each decision is ``{item_id, action: accept|skip}``. Only ``pending``/``extracted``/
     ``extract_failed`` items are actionable (already-committed items are left alone). Accepted items
     are added to the batch's target shelf when one was set.
+
+    Sequential/partial commits (S-batch item 2): a commit that leaves undecided or still-extracting
+    items keeps the batch OPEN — the user can import already-extracted items while the rest of the
+    batch is still processing, repeatedly. The batch flips to ``committed`` only once no item
+    remains in ``pending``/``extracting``/``extracted``.
     """
     settings = settings or get_settings()
     by_id = {
@@ -361,7 +405,9 @@ def commit_staging(
         else:
             enrich_ids.append(str(work.id))
 
-    batch.status = "committed"
+    remaining = [i for i in by_id.values() if i.status in ("pending", "extracting", "extracted")]
+    if not remaining:
+        batch.status = "committed"
     batch.updated_at = datetime.now(UTC)
     record_event(
         db,

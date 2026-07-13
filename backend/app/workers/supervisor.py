@@ -110,7 +110,11 @@ def resolve_worker_count() -> int:
 
 def _worker_command() -> list[str]:
     """The ``rq worker`` command each child runs, bound to the configured Redis URL + queue."""
-    return ["rq", "worker", "--url", get_settings().redis_url, QUEUE_NAME]
+    # --with-scheduler is REQUIRED for RQ Retry intervals: a failed job with a retry budget is
+    # parked in the scheduled registry, and only a worker's scheduler thread moves it back to the
+    # queue when due. Without it, "scheduled" retries sit forever (user-visible as a pending job
+    # that never re-runs). Multiple workers race for the scheduler lock safely; one wins.
+    return ["rq", "worker", "--with-scheduler", "--url", get_settings().redis_url, QUEUE_NAME]
 
 
 def _spawn() -> subprocess.Popen:

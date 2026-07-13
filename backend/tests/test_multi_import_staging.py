@@ -188,3 +188,101 @@ def test_upload_multi_direct_skips_duplicate_doi(
     assert item["status"] == "skipped"
     assert "same_doi" in (item["duplicates"] or {})
     assert db.scalar(select(func.count()).select_from(Work)) == 1
+
+
+# --- S-batch item 2: sequential/partial commits + stalled-item self-healing ------------------------
+
+
+def test_partial_commit_keeps_batch_open_for_sequential_imports(db, make_user, managed_root):
+    """Extracted items can be imported while siblings are still processing, repeatedly."""
+    actor = make_user("sequencer", role="editor")
+    batch = import_staging.stage_pdfs(
+        db,
+        actor=actor,
+        uploads=[("a.pdf", _pdf("a")), ("b.pdf", _pdf("b"))],
+        mode="preview",
+    )
+    db.commit()
+    items = list(
+        db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).all()
+    )
+    first, second = items
+    import_staging.extract_staging_item(db, item=first, fetch_tei=lambda _p: TEI)
+    assert first.status == "extracted" and second.status == "pending"
+
+    # Import the ready one while the other is still pending → batch stays open.
+    summary = import_staging.commit_staging(
+        db, actor=actor, batch=batch, decisions=[{"item_id": str(first.id), "action": "accept"}]
+    )
+    db.commit()
+    assert summary["created"] == 1
+    assert first.status == "committed"
+    assert batch.status != "committed"  # still open — second item undecided
+
+    # Second item finishes; a second commit closes the batch.
+    import_staging.extract_staging_item(db, item=second, fetch_tei=lambda _p: TEI_NO_DOI)
+    summary = import_staging.commit_staging(
+        db, actor=actor, batch=batch, decisions=[{"item_id": str(second.id), "action": "accept"}]
+    )
+    db.commit()
+    assert summary["created"] == 1
+    assert batch.status == "committed"
+
+
+def test_requeue_stalled_items_reenqueues_dead_jobs(db, make_user, managed_root, monkeypatch):
+    """Items parked pending/extracting with no live job get kicked on each poll."""
+    from app.workers import queue as queue_mod
+
+    actor = make_user("healer", role="editor")
+    batch = import_staging.stage_pdfs(
+        db, actor=actor, uploads=[("a.pdf", _pdf("a"))], mode="preview"
+    )
+    db.commit()
+    item = db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).one()
+    item.status = "extracting"  # simulate a worker that died mid-job
+    db.commit()
+
+    kicked_ids = []
+    monkeypatch.setattr(
+        queue_mod,
+        "enqueue_staging_extraction",
+        lambda item_id: kicked_ids.append(str(item_id)) or f"stage-extract-{item_id}",
+    )
+    assert import_staging.requeue_stalled_items(db, batch) == 1
+    assert kicked_ids == [str(item.id)]
+
+
+def test_requeue_falls_back_to_inline_extraction_without_queue(
+    db, make_user, managed_root, monkeypatch
+):
+    from app.workers import queue as queue_mod
+
+    actor = make_user("offline", role="editor")
+    batch = import_staging.stage_pdfs(
+        db, actor=actor, uploads=[("a.pdf", _pdf("a"))], mode="preview"
+    )
+    db.commit()
+    item = db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).one()
+
+    monkeypatch.setattr(queue_mod, "enqueue_staging_extraction", lambda _i: None)
+    monkeypatch.setattr(
+        GrobidClient, "process_fulltext_document_sync", lambda self, _p: TEI, raising=True
+    )
+    assert import_staging.requeue_stalled_items(db, batch) == 1
+    db.flush()
+    assert item.status == "extracted"
+
+
+def test_auto_commit_rejected_while_extracting(client, auth_headers, db, make_user, managed_root):
+    actor = make_user("autoer", role="editor")
+    batch = import_staging.stage_pdfs(
+        db, actor=actor, uploads=[("a.pdf", _pdf("a"))], mode="preview"
+    )
+    db.commit()
+    resp = client.post(
+        f"/api/v1/imports/staging/{batch.id}/commit",
+        headers=auth_headers("owner"),
+        json={"auto": True},
+    )
+    assert resp.status_code == 409
+    assert "still extracting" in resp.json()["detail"]

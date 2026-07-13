@@ -1,6 +1,7 @@
 """Import pipeline endpoints."""
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -36,6 +37,7 @@ from app.services.storage import (
 from app.utils.normalization import normalize_title
 from app.workers.queue import enqueue_extraction, enqueue_staging_extraction
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 DB_DEP = Depends(get_db)
 EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
@@ -435,8 +437,22 @@ def upload_pdfs_multi(
 def get_staging_batch(
     batch_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
 ) -> StagingBatchRead:
-    """Return a staging batch and its items (owner/admin only) — poll this for extraction progress."""
+    """Return a staging batch and its items — poll this for extraction progress.
+
+    Self-healing (S-batch item 2): each poll re-enqueues items whose extraction job died (worker
+    restart mid-job left them parked in pending/extracting forever) and finalizes the batch if the
+    last job finished without flipping it — so a batch can no longer wedge in "extracting".
+    """
     batch = _require_own_staging_batch(db, batch_id, actor)
+    changed = False
+    if batch.status == "extracting":
+        try:
+            import_staging.requeue_stalled_items(db, batch)
+        except Exception:  # noqa: BLE001 - self-heal is best-effort; the poll must still answer
+            logger.warning("staging requeue failed for batch %s", batch.id, exc_info=True)
+        changed = import_staging.finalize_if_ready(db, batch)
+    if changed or db.dirty or db.new:
+        db.commit()
     return _staging_read(db, batch)
 
 
@@ -452,6 +468,12 @@ def commit_staging_batch(
     if batch.status == "committed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="This batch was already committed"
+        )
+    if payload.auto and batch.status == "extracting":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Batch is still extracting — auto-commit needs every item processed; "
+            "select specific papers to import them now",
         )
     if payload.auto:
         decisions = import_staging.auto_decisions(_staging_items(db, batch.id))

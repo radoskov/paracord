@@ -15809,7 +15809,7 @@
     },
     "/api/v1/imports/staging/{batch_id}": {
       "get": {
-        "description": "Return a staging batch and its items (owner/admin only) — poll this for extraction progress.",
+        "description": "Return a staging batch and its items — poll this for extraction progress.\n\nSelf-healing (S-batch item 2): each poll re-enqueues items whose extraction job died (worker\nrestart mid-job left them parked in pending/extracting forever) and finalizes the batch if the\nlast job finished without flipping it — so a batch can no longer wedge in \"extracting\".",
         "operationId": "get_staging_batch_api_v1_imports_staging__batch_id__get",
         "parameters": [
           {
@@ -16459,6 +16459,67 @@
           }
         },
         "summary": "Reset Workers",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Cancel a queued/scheduled/deferred job (a started job keeps running).\n\nLets an editor drop a pending retry or a stuck scheduled job from the queue instead of\nwaiting it out.",
+        "operationId": "cancel_job_endpoint_api_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Job Endpoint Api V1 Jobs  Job Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job Endpoint",
         "tags": [
           "jobs"
         ]

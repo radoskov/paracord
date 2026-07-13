@@ -337,6 +337,33 @@ _FUNC_LABELS = {
 }
 
 
+def cancel_job(job_id: str) -> bool:
+    """Cancel a queued/scheduled/deferred job (S-batch item 3). Returns whether it was cancelled.
+
+    Only jobs that have not started run: a started job keeps running (stopping mid-execution risks
+    half-applied work). ``job.cancel()`` removes the job from whichever registry holds it; a
+    scheduled retry is additionally dropped from the scheduled registry.
+    """
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        queue = get_queue()
+        try:
+            job = Job.fetch(job_id, connection=queue.connection)
+        except NoSuchJobError:
+            return False
+        if job.get_status(refresh=True) not in {"queued", "scheduled", "deferred"}:
+            return False
+        job.cancel()
+        with contextlib.suppress(Exception):
+            queue.scheduled_job_registry.remove(job_id)
+        return True
+    except Exception as exc:  # noqa: BLE001 - best effort; a dead Redis just reports "not cancelled"
+        logger.warning("Could not cancel job %s: %s", job_id, exc)
+        return False
+
+
 def clear_jobs(which: str = "finished_failed") -> dict:
     """Clear job history from the registries. Returns counts removed (never raises).
 
@@ -487,19 +514,33 @@ def _resolve_paper_targets(jobs: list[dict]) -> None:
             for j in jobs
             if j.get("target_kind") == "file" and (uid := _as_uuid(j.get("target_id")))
         }
+        staging_ids = {
+            uid
+            for j in jobs
+            if j.get("target_kind") == "staging_item" and (uid := _as_uuid(j.get("target_id")))
+        }
         work_ids = {
             uid
             for j in jobs
             if j.get("target_kind") == "work" and (uid := _as_uuid(j.get("target_id")))
         }
-        if not file_ids and not work_ids:
+        if not file_ids and not work_ids and not staging_ids:
             return
 
         # title := Work.canonical_title; hash := File.sha256 (Work has no hash). Resolve titles/
         # hashes for both file- and work-targeted jobs, batched, in one short-lived session.
         files: dict = {}  # File.id -> (sha256, canonical_title-via-link)
         works: dict = {}  # Work.id -> (canonical_title, sha256-of-primary-file)
+        stagings: dict = {}  # ImportStagingItem.id -> (parsed-title-or-filename, sha256)
         with SessionLocal() as db:
+            if staging_ids:
+                from app.models.import_staging import ImportStagingItem
+
+                for row in db.scalars(
+                    select(ImportStagingItem).where(ImportStagingItem.id.in_(staging_ids))
+                ):
+                    title = (row.parsed or {}).get("title") or row.filename
+                    stagings[row.id] = (title, row.sha256)
             file_links: dict = {}  # File.id -> first linked Work.id
             work_links: dict = {}  # Work.id -> first linked File.id
             if file_ids:
@@ -549,6 +590,12 @@ def _resolve_paper_targets(jobs: list[dict]) -> None:
                 wid = _as_uuid(j.get("target_id"))
                 if wid in works:
                     title, sha = works[wid]
+                    j["paper_title"] = title
+                    j["paper_sha256"] = sha
+            elif kind == "staging_item":
+                sid = _as_uuid(j.get("target_id"))
+                if sid in stagings:
+                    title, sha = stagings[sid]
                     j["paper_title"] = title
                     j["paper_sha256"] = sha
     except Exception as exc:  # noqa: BLE001 - best-effort enrichment; never break the endpoint
@@ -619,6 +666,8 @@ def queue_status(limit: int = 25) -> dict:
                 return None, None
             if job.func_name == EXTRACT_JOB:
                 return "file", str(args[0])
+            if job.func_name == STAGE_EXTRACT_JOB:
+                return "staging_item", str(args[0])
             if job.func_name in (ENRICH_JOB, EMBED_JOB, CHUNK_JOB, TOPIC_JOB, KEYWORDS_JOB):
                 return "work", str(args[0])
             return None, None

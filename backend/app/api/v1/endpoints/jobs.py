@@ -4,7 +4,7 @@ Read-only visibility into the extraction/enrichment queue so the UI can show whe
 queued, running, finished, or failed — and whether the background worker is available at all.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin, require_min_role
@@ -92,3 +92,21 @@ def reset_workers(db: Session = DB_DEP, actor: User = ADMIN_DEP) -> dict:
     )
     db.commit()
     return result
+
+
+@router.post("/{job_id}/cancel")
+def cancel_job_endpoint(job_id: str, _: User = EDITOR_DEP) -> dict:
+    """Cancel a queued/scheduled/deferred job (a started job keeps running).
+
+    Lets an editor drop a pending retry or a stuck scheduled job from the queue instead of
+    waiting it out.
+    """
+    from app.workers.queue import cancel_job
+
+    cancelled = cancel_job(job_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Job not found, already finished, or already running",
+        )
+    return {"cancelled": True, "job_id": job_id}

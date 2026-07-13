@@ -78,6 +78,15 @@
     filter = filter === key ? 'all' : key;
   }
 
+  async function cancelJob(jobId: string): Promise<void> {
+    try {
+      await client.cancelJob(jobId);
+    } catch (error) {
+      message = errorMessage(error);
+    }
+    await refresh();
+  }
+
   async function clean(): Promise<void> {
     if (!window.confirm('Clear finished and failed job history? Running jobs are kept.')) return;
     try {
@@ -239,6 +248,10 @@
                   {/if}
                   <strong>{job.task}</strong>
                   <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
+                  {#if ['queued', 'scheduled', 'deferred'].includes(job.status)}
+                    <button type="button" class="linkish cancel-btn" on:click={() => cancelJob(job.id)}
+                      title="Cancel this pending job (a running job keeps going)">Cancel</button>
+                  {/if}
                 </div>
                 {#if job.paper_title || job.paper_sha256}
                   <div class="paper">

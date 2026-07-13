@@ -132,56 +132,100 @@
     accept = next;
   }
 
-  async function pollStaging(batchId: string): Promise<StagingBatch> {
-    // Extraction usually finishes in-request (inline) but may run on the worker; poll until ready.
-    for (let i = 0; i < 40; i += 1) {
-      const batch = await client.getStagingBatch(batchId);
-      if (batch.status !== 'extracting') return batch;
-      await new Promise((r) => setTimeout(r, 1500));
+  // Add default checkbox states for items that just finished extracting, without clobbering
+  // the user's existing choices (the poll loop calls this on every tick).
+  function mergeAccept(batch: StagingBatch): void {
+    const next = { ...accept };
+    for (const item of batch.items) {
+      if (!(item.id in next)) next[item.id] = item.status === 'extracted' && !itemBlocked(item);
     }
-    return client.getStagingBatch(batchId);
+    accept = next;
+  }
+
+  function summarizeDirect(batch: StagingBatch): void {
+    const created = batch.items.filter((i) => i.created_work_id).length;
+    const skipped = batch.items.filter((i) => i.status === 'skipped').length;
+    commitResult = {
+      created,
+      skipped,
+      warnings: batch.items
+        .filter((i) => i.status === 'skipped' || i.status === 'extract_failed')
+        .map((i) => `${i.filename}: ${i.error ?? dupWarnings(i).join(', ') ?? 'skipped'}`),
+    };
+    message = `Imported ${created} paper(s)${skipped ? `; skipped ${skipped}` : ''}.`;
+  }
+
+  // Live-updating, unbounded poll (S-batch item 2): the preview refreshes while extraction runs,
+  // so already-extracted papers can be imported immediately; the server-side poll also self-heals
+  // items whose worker died. Stops when the user resets the preview or the batch leaves
+  // "extracting".
+  let pollingBatchId: string | null = null;
+  async function pollLoop(batchId: string, mode: 'preview' | 'direct'): Promise<void> {
+    if (pollingBatchId === batchId) return;
+    pollingBatchId = batchId;
+    try {
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!staging || staging.id !== batchId) return;
+        let batch: StagingBatch;
+        try {
+          batch = await client.getStagingBatch(batchId);
+        } catch {
+          continue; // transient poll error — keep trying
+        }
+        mergeAccept(batch);
+        staging = batch;
+        if (batch.status !== 'extracting') break;
+      }
+      if (staging?.id === batchId && staging.status === 'committed' && mode === 'direct') {
+        summarizeDirect(staging);
+        multiFiles = [];
+      }
+    } finally {
+      if (pollingBatchId === batchId) pollingBatchId = null;
+    }
   }
 
   async function startMultiImport(mode: 'preview' | 'direct'): Promise<void> {
     if (!multiFiles.length) return;
     commitResult = null;
     await run(async () => {
-      let batch = await client.uploadPdfsMulti(multiFiles, mode, uploadShelfId || null);
-      if (batch.status === 'extracting') batch = await pollStaging(batch.id);
+      const batch = await client.uploadPdfsMulti(multiFiles, mode, uploadShelfId || null);
       staging = batch;
+      multiFiles = [];
       if (batch.status === 'committed') {
-        // Direct mode: the server already created papers; summarise from the items.
-        const created = batch.items.filter((i) => i.created_work_id).length;
-        const skipped = batch.items.filter((i) => i.status === 'skipped').length;
-        commitResult = {
-          created,
-          skipped,
-          warnings: batch.items
-            .filter((i) => i.status === 'skipped' || i.status === 'extract_failed')
-            .map((i) => `${i.filename}: ${i.error ?? dupWarnings(i).join(', ') ?? 'skipped'}`),
-        };
-        message = `Imported ${created} paper(s)${skipped ? `; skipped ${skipped}` : ''}.`;
-        multiFiles = [];
-      } else {
-        seedAccept(batch);
-        if (!batch.extraction_queued) warning = EXTRACTION_QUEUE_WARNING;
+        summarizeDirect(batch);
+        return;
       }
+      seedAccept(batch);
+      if (!batch.extraction_queued) warning = EXTRACTION_QUEUE_WARNING;
+      if (batch.status === 'extracting') void pollLoop(batch.id, mode);
     });
   }
 
-  async function commitPreview(): Promise<void> {
+  // partial=true: import ONLY the checked, already-extracted items and leave the rest undecided
+  // (the batch stays open — usable repeatedly while extraction continues). partial=false: the
+  // classic closing commit — accept checked, skip everything else.
+  async function commitSelected(partial: boolean): Promise<void> {
     if (!staging) return;
     const batchId = staging.id;
-    const decisions = staging.items.map((i) => ({
-      item_id: i.id,
-      action: (accept[i.id] ? 'accept' : 'skip') as 'accept' | 'skip',
-    }));
+    const decisions = partial
+      ? staging.items
+          .filter((i) => i.status === 'extracted' && accept[i.id])
+          .map((i) => ({ item_id: i.id, action: 'accept' as const }))
+      : staging.items
+          .filter((i) => !['committed', 'skipped'].includes(i.status))
+          .map((i) => ({
+            item_id: i.id,
+            action: (accept[i.id] ? 'accept' : 'skip') as 'accept' | 'skip',
+          }));
+    if (!decisions.length) return;
     await run(async () => {
       const result = await client.commitStagingBatch(batchId, { decisions });
       commitResult = result;
       message = `Created ${result.created} paper(s)${result.skipped ? `; skipped ${result.skipped}` : ''}.`;
       staging = await client.getStagingBatch(batchId);
-      multiFiles = [];
+      if (staging.status === 'extracting') void pollLoop(batchId, 'preview');
     });
   }
 
@@ -263,7 +307,7 @@
         <div class="preview-head" role="row">
           <span>Create</span><span>File / title</span><span>Details</span><span>Status</span>
         </div>
-        {#each staging.items as item (item.id)}
+        {#each staging.items.filter((i) => !['committed', 'skipped'].includes(i.status)) as item (item.id)}
           {@const blocked = itemBlocked(item)}
           {@const warns = dupWarnings(item)}
           <div class="preview-row" role="row">
@@ -289,12 +333,26 @@
           </div>
         {/each}
       </div>
+      {#if staging.items.some((i) => i.status === 'committed')}
+        <p class="hintline">
+          {staging.items.filter((i) => i.status === 'committed').length} paper(s) imported from this
+          batch so far.
+        </p>
+      {/if}
       {#if staging.status === 'extracting'}
-        <p class="hintline">Extracting… this updates automatically.</p>
+        <p class="hintline">Extracting… this updates automatically. You can already import the
+          extracted papers below — the rest keep processing.</p>
+        <div class="row">
+          <button type="button" on:click={() => commitSelected(true)}
+            disabled={loading || !staging.items.some((i) => i.status === 'extracted' && accept[i.id])}
+            title="Import the checked, already-extracted papers now; the rest keep processing"
+            >Import selected now</button>
+          <button type="button" class="secondary" on:click={resetMulti} disabled={loading}>Cancel</button>
+        </div>
       {:else}
         <div class="row">
-          <button type="button" on:click={commitPreview} disabled={loading}
-            title="Create the checked papers">Create selected papers</button>
+          <button type="button" on:click={() => commitSelected(false)} disabled={loading}
+            title="Create the checked papers (unchecked ones are skipped)">Create selected papers</button>
           <button type="button" class="secondary" on:click={resetMulti} disabled={loading}>Cancel</button>
         </div>
       {/if}
