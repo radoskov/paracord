@@ -178,9 +178,14 @@ def _fold_group(db: Session, group: list[Reference], winner: Reference) -> int:
     survivor.dedup_key = canonical_key(survivor)
 
     removed_ids = [str(r.id) for r in losers]
+    # Flush the repointed/deleted link rows BEFORE deleting the loser references: the bulk core
+    # DELETE below runs immediately, and on Postgres the reference_citations FK is ON DELETE
+    # CASCADE — it would eat the still-unflushed link rows out from under the session (the ORM's
+    # pending UPDATE then matches 0 rows → StaleDataError). SQLite tests don't enforce FKs, which
+    # is why only a real Postgres deployment could hit this.
+    db.flush()
     if losers:
         db.execute(delete(Reference).where(Reference.id.in_([r.id for r in losers])))
-    db.flush()
     record_event(
         db,
         "reference.consolidated",

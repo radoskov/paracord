@@ -324,3 +324,36 @@ def test_reference_dupes_requires_admin(client, auth_headers) -> None:
         ).status_code
         == 403
     )
+
+
+def test_fold_survives_postgres_fk_cascade_semantics(db) -> None:
+    """Regression (real-PC failure): with FK enforcement ON (as on Postgres), deleting the loser
+    references must not cascade away link rows the session still has pending — repointed links
+    have to be flushed first, or the fold dies with StaleDataError."""
+    from sqlalchemy import text
+
+    db.execute(text("PRAGMA foreign_keys=ON"))  # make SQLite behave like Postgres here
+    try:
+        citer_a, citer_b = _work(db, "Citer A"), _work(db, "Citer B")
+        older = _ref(db, title="Cascade Paper", doi="10.1/cascade", resolution_status="external")
+        newer = _ref(db, title="Cascade Paper", doi="10.1/cascade", resolution_status="unresolved")
+        _link(db, older, citer_a)
+        _link(db, newer, citer_a)  # duplicate link → ORM delete path
+        _link(db, newer, citer_b)  # repointed link → ORM update path (the row that cascaded away)
+        db.add(CitationMention(citing_work_id=citer_b.id, reference_id=newer.id))
+        db.commit()
+
+        result = consolidate_references(db)
+        db.commit()
+        assert result.folded == 1
+        citers = set(
+            db.scalars(
+                select(ReferenceCitation.citing_work_id).where(
+                    ReferenceCitation.reference_id == older.id
+                )
+            ).all()
+        )
+        assert citers == {citer_a.id, citer_b.id}
+        assert db.scalar(select(CitationMention)).reference_id == older.id
+    finally:
+        db.execute(text("PRAGMA foreign_keys=OFF"))
