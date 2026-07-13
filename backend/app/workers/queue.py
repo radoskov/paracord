@@ -28,6 +28,8 @@ TOPIC_SCOPE_JOB = "app.workers.jobs.topic_model_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
 REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
 REF_CONSOLIDATE_JOB = "app.workers.jobs.consolidate_references_job"
+BACKUP_EXPORT_JOB = "app.workers.jobs.export_backup_job"
+BACKUP_RESTORE_JOB = "app.workers.jobs.restore_backup_job"
 
 # Deterministic id so a burst of edits coalesces into a single pending rebuild (D13a).
 BM25_REBUILD_JOB_ID = "bm25-rebuild"
@@ -230,6 +232,46 @@ def enqueue_reference_consolidation() -> str | None:
         return None
 
 
+def enqueue_backup_export(*, include_pdfs: bool, actor_user_id: str) -> str | None:
+    """Best-effort enqueue of a backup export (fixed id: repeated clicks coalesce)."""
+    job_id = "backup-export"
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        return queue.enqueue(
+            BACKUP_EXPORT_JOB,
+            args=(include_pdfs, actor_user_id),
+            job_id=job_id,
+            job_timeout=3600,
+        ).id
+    except Exception as exc:  # noqa: BLE001 - best effort; the endpoint falls back to inline
+        logger.warning("Could not enqueue backup export: %s", exc)
+        return None
+
+
+def enqueue_backup_restore(
+    *, archive: str, mode: str, pdf_root_alias: str | None, actor_user_id: str
+) -> str | None:
+    """Best-effort enqueue of a backup restore (fixed id: one restore at a time)."""
+    job_id = "backup-restore"
+    try:
+        queue = get_queue()
+        existing = _live_job_id(queue.connection, job_id)
+        if existing is not None:
+            return existing
+        return queue.enqueue(
+            BACKUP_RESTORE_JOB,
+            args=(archive, mode, pdf_root_alias, actor_user_id),
+            job_id=job_id,
+            job_timeout=7200,
+        ).id
+    except Exception as exc:  # noqa: BLE001 - best effort; the endpoint falls back to inline
+        logger.warning("Could not enqueue backup restore: %s", exc)
+        return None
+
+
 def enqueue_reference_rescan() -> str | None:
     """Best-effort enqueue of a full-library reference→work rematch (batch 12). Returns id or None.
 
@@ -329,6 +371,8 @@ _FUNC_LABELS = {
     KEYWORDS_JOB: "keywords",
     SUMMARY_SCOPE_JOB: "summary-scope",
     REF_CONSOLIDATE_JOB: "reference-consolidation",
+    BACKUP_EXPORT_JOB: "backup-export",
+    BACKUP_RESTORE_JOB: "backup-restore",
     TOPIC_SCOPE_JOB: "topics-scope",
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",

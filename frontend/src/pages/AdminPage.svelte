@@ -78,6 +78,7 @@
     { id: 'agents', label: 'Agents' },
     { id: 'settings', label: 'Settings' },
     { id: 'refdupes', label: 'Reference dupes' },
+    { id: 'backup', label: 'Backup' },
   ];
   $: visibleAdminTabs = ADMIN_TABS.filter((t) => !t.ownerOnly || $isOwner);
   let activeAdminTab = 'users';
@@ -419,6 +420,136 @@
       overloadMsg = 'Saved. Restart the worker container to apply a new worker count.';
     });
     savingOverload = false;
+  }
+
+  // --- Backup / restore (S-batch item 1) ---
+  type BackupList = Awaited<ReturnType<ApiClient['listBackups']>>;
+  let backups: BackupList | null = null;
+  let backupIncludePdfs = false;
+  let backupBusy = false;
+  let backupMsg = '';
+  let uploadedArchive: string | null = null;
+  let uploadReport: Record<string, unknown> | null = null;
+  let restoreMode: 'merge' | 'replace' = 'merge';
+  let restoreConfirmText = '';
+  let restorePdfRoot = '';
+
+  async function loadBackups(): Promise<void> {
+    await run(async () => {
+      backups = await client.listBackups();
+    });
+  }
+
+  $: if (activeAdminTab === 'backup' && backups === null && !loading) void loadBackups();
+
+  async function pollBackupJob(jobId: string, doneMsg: string): Promise<void> {
+    const active = new Set(['queued', 'started', 'deferred', 'scheduled']);
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const status = await client.getJobs(100);
+        const job = status.jobs.find((j) => j.id === jobId);
+        if (job && job.status === 'failed') {
+          backupMsg = `Failed: ${job.error ?? 'see the Jobs tab'}`;
+          backupBusy = false;
+          return;
+        }
+        if (!job || !active.has(job.status)) break;
+      } catch {
+        // transient polling error — keep trying
+      }
+    }
+    backups = await client.listBackups();
+    backupMsg = doneMsg;
+    backupBusy = false;
+  }
+
+  async function createBackupNow(): Promise<void> {
+    backupBusy = true;
+    backupMsg = '';
+    await run(async () => {
+      const response = await client.createBackup(backupIncludePdfs);
+      if (response.queued && response.job_id) {
+        backupMsg = 'Creating backup in the background…';
+        void pollBackupJob(response.job_id, 'Backup created.');
+        return;
+      }
+      backups = await client.listBackups();
+      backupMsg = response.archive ? `Backup created: ${response.archive}` : 'Backup created.';
+      backupBusy = false;
+    });
+    if (!backupMsg) backupBusy = false;
+  }
+
+  async function downloadBackupFile(name: string): Promise<void> {
+    await run(async () => {
+      const blob = await client.downloadBackup(name);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  async function deleteBackupFile(name: string): Promise<void> {
+    await run(async () => {
+      await client.deleteBackup(name);
+      backups = await client.listBackups();
+    }, 'Backup deleted');
+  }
+
+  async function uploadBackupFile(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    backupMsg = '';
+    await run(async () => {
+      const report = await client.uploadBackup(file);
+      uploadedArchive = report.archive as string;
+      uploadReport = report;
+      backups = await client.listBackups();
+      backupMsg = `Uploaded ${uploadedArchive} — review the compatibility report, then restore.`;
+    });
+    input.value = '';
+  }
+
+  async function analyzeExisting(name: string): Promise<void> {
+    await run(async () => {
+      uploadReport = await client.analyzeBackup(name);
+      uploadedArchive = name;
+    });
+  }
+
+  async function restoreNow(): Promise<void> {
+    if (!uploadedArchive) return;
+    if (restoreMode === 'replace' && restoreConfirmText !== 'REPLACE') {
+      backupMsg = 'Type REPLACE to confirm a full database replacement.';
+      return;
+    }
+    const warning =
+      restoreMode === 'replace'
+        ? 'REPLACE the ENTIRE current database with this backup? Existing papers, shelves, users and settings will be overwritten. This cannot be undone.'
+        : 'Merge this backup into the current database? Existing records are kept; missing ones are added.';
+    if (!window.confirm(warning)) return;
+    backupBusy = true;
+    await run(async () => {
+      const response = await client.restoreBackup(uploadedArchive!, {
+        mode: restoreMode,
+        pdf_root_alias: restorePdfRoot.trim() || null,
+        confirm: restoreMode === 'replace' ? restoreConfirmText : undefined,
+      });
+      if (response.queued && response.job_id) {
+        backupMsg = 'Restoring in the background… the summary appears here when done.';
+        void pollBackupJob(response.job_id, 'Restore finished — see the summary below.');
+        return;
+      }
+      backups = await client.listBackups();
+      backupMsg = 'Restore finished — see the summary below.';
+      backupBusy = false;
+    });
+    if (!backupMsg) backupBusy = false;
   }
 
   // --- Reference dupes (S13/S14) ---
@@ -1493,7 +1624,109 @@
   </section>
 {/if}
 
-{#if activeAdminTab === 'refdupes'}
+{#if activeAdminTab === 'backup'}
+    <section class="surface admin-section">
+      <div class="section-head"><h2>Backup</h2></div>
+      <p class="small-help">
+        A backup is a version-tolerant archive of the library data (papers, shelves, tags,
+        references, users, settings). It is designed to restore on future versions of the app:
+        added fields are backfilled, removed fields dropped, and anything that can’t be migrated is
+        skipped — never corrupting the database. PDFs are matched by their SHA-256 content hash.
+      </p>
+      <div class="stack">
+        <label class="field checkbox-field">
+          <input type="checkbox" bind:checked={backupIncludePdfs} />
+          Include PDF files (larger archive; without them, PDFs pair back from a folder on restore)
+        </label>
+        <button type="button" on:click={createBackupNow} disabled={backupBusy || loading}
+          title="Write a backup archive on the server">{backupBusy ? 'Working…' : 'Create backup'}</button>
+        {#if backupMsg}<p class="muted" role="status">{backupMsg}</p>{/if}
+      </div>
+      {#if backups?.backups?.length}
+        <ul class="stack">
+          {#each backups.backups as b (b.archive)}
+            <li class="location-row">
+              <span><code>{b.archive}</code> · {(b.size_bytes / 1048576).toFixed(1)} MB
+                · {new Date(b.created_at).toLocaleString()}</span>
+              <span>
+                <button type="button" class="secondary small" on:click={() => downloadBackupFile(b.archive)}
+                  disabled={loading}>Download</button>
+                {#if $isOwner}
+                  <button type="button" class="secondary small" on:click={() => analyzeExisting(b.archive)}
+                    disabled={loading} title="Check this archive against the current version before restoring">Check</button>
+                {/if}
+                <button type="button" class="secondary small danger-btn" on:click={() => deleteBackupFile(b.archive)}
+                  disabled={loading}>Delete</button>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {:else if backups}
+        <p class="empty">No backups yet.</p>
+      {/if}
+      {#if backups?.last_restore}
+        <p class="muted small">Last restore: {JSON.stringify(backups.last_restore)}</p>
+      {/if}
+    </section>
+
+    {#if $isOwner}
+      <section class="surface admin-section">
+        <div class="section-head"><h2>Restore (owner only)</h2></div>
+        <p class="small-help">
+          Upload a backup archive (or “Check” one from the list above), review the compatibility
+          report, then restore. <strong>Merge</strong> adds records missing from the current
+          database and never touches existing ones. <strong>Replace</strong> wipes the current
+          database first and loads the backup — everything not in the backup is lost.
+        </p>
+        <div class="stack">
+          <input type="file" accept=".zip,application/zip" on:change={uploadBackupFile}
+            aria-label="Backup archive" />
+          {#if uploadReport}
+            <div class="entry-card">
+              <p><strong>{uploadedArchive}</strong> — compatibility with this version:</p>
+              <ul class="stack small">
+                {#each (uploadReport.tables ?? []) as t}
+                  {#if t.unknown_table || (t.dropped_columns ?? []).length}
+                    <li>
+                      <code>{t.table}</code>{#if t.unknown_table} — unknown here, its {t.rows} row(s)
+                        will be ignored{:else} — dropped fields: {t.dropped_columns.join(', ')}{/if}
+                    </li>
+                  {/if}
+                {/each}
+              </ul>
+              <p class="muted small">Tables/fields not listed restore cleanly; new fields are backfilled.</p>
+            </div>
+            <label class="field checkbox-field">
+              <input type="radio" bind:group={restoreMode} value="merge" /> Merge into the current library
+            </label>
+            <label class="field checkbox-field">
+              <input type="radio" bind:group={restoreMode} value="replace" /> Replace the current library
+            </label>
+            <label class="field">
+              PDF folder alias (optional — a configured import root scanned for PDFs to pair by hash)
+              <input bind:value={restorePdfRoot} placeholder="e.g. papers" />
+            </label>
+            {#if restoreMode === 'replace'}
+              <p class="small-help danger">
+                Replace erases every current paper, shelf, tag, user and setting before loading the
+                backup. If the backup came from another machine, you may need that system’s owner
+                credentials afterwards (the server-console password reset always works). Type
+                REPLACE to arm the button.
+              </p>
+              <input bind:value={restoreConfirmText} placeholder="Type REPLACE to confirm"
+                aria-label="Replace confirmation" />
+            {/if}
+            <button type="button" class={restoreMode === 'replace' ? 'danger-btn' : ''}
+              on:click={restoreNow}
+              disabled={backupBusy || loading || (restoreMode === 'replace' && restoreConfirmText !== 'REPLACE')}
+              title="Restore this backup">{restoreMode === 'replace' ? 'Replace database from backup' : 'Merge backup into library'}</button>
+          {/if}
+        </div>
+      </section>
+    {/if}
+  {/if}
+
+  {#if activeAdminTab === 'refdupes'}
     <section class="surface admin-section">
       <div class="section-head">
         <h2>Duplicate references</h2>

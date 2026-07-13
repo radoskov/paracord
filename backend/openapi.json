@@ -1071,6 +1071,104 @@
         "title": "AuthorStatModel",
         "type": "object"
       },
+      "BackupCreateIn": {
+        "properties": {
+          "include_pdfs": {
+            "default": false,
+            "title": "Include Pdfs",
+            "type": "boolean"
+          }
+        },
+        "title": "BackupCreateIn",
+        "type": "object"
+      },
+      "BackupCreateOut": {
+        "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "BackupCreateOut",
+        "type": "object"
+      },
+      "BackupEntry": {
+        "properties": {
+          "archive": {
+            "title": "Archive",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "archive",
+          "size_bytes",
+          "created_at"
+        ],
+        "title": "BackupEntry",
+        "type": "object"
+      },
+      "BackupsOut": {
+        "properties": {
+          "backups": {
+            "items": {
+              "$ref": "#/components/schemas/BackupEntry"
+            },
+            "title": "Backups",
+            "type": "array"
+          },
+          "last_restore": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Restore"
+          }
+        },
+        "required": [
+          "backups"
+        ],
+        "title": "BackupsOut",
+        "type": "object"
+      },
       "BatchCommitDraft": {
         "properties": {
           "abstract": {
@@ -1305,6 +1403,20 @@
           "file"
         ],
         "title": "Body_offer_teleport_api_v1_agents_files__local_file_id__offer_teleport_post",
+        "type": "object"
+      },
+      "Body_upload_backup_api_v1_admin_backups_upload_post": {
+        "properties": {
+          "upload": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Upload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload"
+        ],
+        "title": "Body_upload_backup_api_v1_admin_backups_upload_post",
         "type": "object"
       },
       "Body_upload_for_extraction_api_v1_agents_files__local_file_id__extract_post": {
@@ -5223,6 +5335,81 @@
           "graph"
         ],
         "title": "ResolvedThemeOut",
+        "type": "object"
+      },
+      "RestoreIn": {
+        "properties": {
+          "confirm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm"
+          },
+          "mode": {
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "pdf_root_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Root Alias"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "RestoreIn",
+        "type": "object"
+      },
+      "RestoreOut": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "RestoreOut",
         "type": "object"
       },
       "Role": {
@@ -10520,6 +10707,422 @@
         "summary": "List Audit Events",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/backups": {
+      "get": {
+        "description": "List the archives in the backups folder + the last restore summary (from the audit log).",
+        "operationId": "list_backups_api_v1_admin_backups_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Backups",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      },
+      "post": {
+        "description": "Create a backup archive (admin). Runs on the worker; inline when the queue is down.",
+        "operationId": "create_backup_endpoint_api_v1_admin_backups_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupCreateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Backup Endpoint",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/admin/backups/upload": {
+      "post": {
+        "description": "Upload a backup archive into the backups folder (owner) and return its analyze report.",
+        "operationId": "upload_backup_api_v1_admin_backups_upload_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_backup_api_v1_admin_backups_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Backup Api V1 Admin Backups Upload Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Backup",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/admin/backups/{name}": {
+      "delete": {
+        "description": "Delete a backup archive (admin, audited).",
+        "operationId": "delete_backup_api_v1_admin_backups__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Backup",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/admin/backups/{name}/analyze": {
+      "get": {
+        "description": "Dry-run compatibility report for an archive against the CURRENT schema (owner).\n\nShows which tables/columns of the backup would be dropped and which current columns will be\nbackfilled — the \"what is about to happen\" step before a restore.",
+        "operationId": "analyze_backup_endpoint_api_v1_admin_backups__name__analyze_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analyze Backup Endpoint Api V1 Admin Backups  Name  Analyze Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Backup Endpoint",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/admin/backups/{name}/download": {
+      "get": {
+        "description": "Download a backup archive (admin).",
+        "operationId": "download_backup_api_v1_admin_backups__name__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Backup",
+        "tags": [
+          "admin",
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/admin/backups/{name}/restore": {
+      "post": {
+        "description": "Restore an archive (OWNER ONLY). ``merge`` adds missing rows; ``replace`` rewrites the DB.\n\nReplace mode requires ``confirm == \"REPLACE\"`` (typed by the owner in the UI). The heavy work\nruns on the worker; the summary lands in the audit log / the backups list.",
+        "operationId": "restore_backup_endpoint_api_v1_admin_backups__name__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Backup Endpoint",
+        "tags": [
+          "admin",
+          "backups"
         ]
       }
     },

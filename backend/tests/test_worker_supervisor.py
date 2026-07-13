@@ -82,7 +82,8 @@ def test_resolve_worker_count_falls_back_on_db_error(monkeypatch):
 
 def test_worker_command_targets_queue_and_redis():
     cmd = supervisor._worker_command()
-    assert cmd[:3] == ["rq", "worker", "--url"]
+    assert cmd[:3] == ["rq", "worker", "--with-scheduler"]  # scheduler REQUIRED for Retry intervals
+    assert "--url" in cmd
     assert cmd[-1] == supervisor.QUEUE_NAME
 
 

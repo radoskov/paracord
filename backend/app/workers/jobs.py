@@ -491,6 +491,50 @@ def rescan_reference_matches_job() -> None:
 
 
 @_audited_job
+def export_backup_job(include_pdfs: bool = False, actor_user_id: str | None = None) -> dict:
+    """Write a logical backup archive (feature: export/backup). Returns {archive, manifest}."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.services.backup import create_backup
+
+    with SessionLocal() as db:
+        result = create_backup(
+            db,
+            include_pdfs=include_pdfs,
+            actor_user_id=uuid.UUID(actor_user_id) if actor_user_id else None,
+        )
+        db.commit()
+        return {"archive": result["archive"], "manifest": result["manifest"]}
+
+
+@_audited_job
+def restore_backup_job(
+    archive: str,
+    mode: str = "merge",
+    pdf_root_alias: str | None = None,
+    actor_user_id: str | None = None,
+) -> dict:
+    """Restore a backup archive (owner-only, enqueued by the API). Returns the restore summary."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.services.backup import backups_dir, restore_backup
+
+    path = backups_dir() / archive
+    with SessionLocal() as db:
+        summary = restore_backup(
+            db,
+            path=path,
+            mode=mode,
+            pdf_root_alias=pdf_root_alias,
+            actor_user_id=uuid.UUID(actor_user_id) if actor_user_id else None,
+        )
+        db.commit()
+        return summary
+
+
+@_audited_job
 def consolidate_references_job() -> dict:
     """Consolidate duplicate canonical references (S13/S14) — startup hook + admin button.
 

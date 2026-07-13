@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     ai,
     ai_admin,
     auth,
+    backups,
     citations,
     duplicates,
     exports,
@@ -40,6 +41,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 # Admin routes enforce {owner, admin} per-endpoint via require_admin; the privileged
 # admin-management subset is owner-only, enforced in the user-management service layer.
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(backups.router, prefix="/admin/backups", tags=["admin", "backups"])
 # AI provider config + model management (owner or admin; WORKPLAN_NEXT Stage 8).
 api_router.include_router(ai_admin.router, prefix="/admin", tags=["admin", "ai"])
 # Server import roots GUI (batch 2 #19). Owner-only, enforced per-endpoint via require_owner.

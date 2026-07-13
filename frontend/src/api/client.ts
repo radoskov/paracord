@@ -2657,6 +2657,65 @@ export class ApiClient {
     });
   }
 
+  // --- Backups (S-batch 2026-07-13 item 1): admin export, owner-only restore ---
+  async listBackups(): Promise<{
+    backups: { archive: string; size_bytes: number; created_at: string }[];
+    last_restore: Record<string, unknown> | null;
+  }> {
+    return this.request("/api/v1/admin/backups");
+  }
+
+  async createBackup(includePdfs: boolean): Promise<{ queued: boolean; job_id: string | null; archive: string | null }> {
+    return this.request("/api/v1/admin/backups", {
+      method: "POST",
+      body: { include_pdfs: includePdfs },
+    });
+  }
+
+  async downloadBackup(name: string): Promise<Blob> {
+    return this.requestBlob(`/api/v1/admin/backups/${encodeURIComponent(name)}/download`);
+  }
+
+  async deleteBackup(name: string): Promise<void> {
+    await this.request(`/api/v1/admin/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  async uploadBackup(file: globalThis.File): Promise<Record<string, unknown>> {
+    const form = new FormData();
+    form.append("upload", file);
+    const headers: Record<string, string> = {};
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const response = await fetch(`${this.baseUrl}/api/v1/admin/backups/upload`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      let detail = `Upload failed: ${response.status}`;
+      try {
+        detail = (await response.json()).detail ?? detail;
+      } catch {
+        // keep the generic message
+      }
+      throw new Error(detail);
+    }
+    return response.json();
+  }
+
+  async analyzeBackup(name: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/v1/admin/backups/${encodeURIComponent(name)}/analyze`);
+  }
+
+  async restoreBackup(
+    name: string,
+    payload: { mode: "merge" | "replace"; pdf_root_alias?: string | null; confirm?: string },
+  ): Promise<{ queued: boolean; job_id: string | null; summary: Record<string, unknown> | null }> {
+    return this.request(`/api/v1/admin/backups/${encodeURIComponent(name)}/restore`, {
+      method: "POST",
+      body: payload,
+    });
+  }
+
   async getReferenceDupes(): Promise<ReferenceDupesResponse> {
     return this.request<ReferenceDupesResponse>("/api/v1/admin/reference-dupes");
   }
