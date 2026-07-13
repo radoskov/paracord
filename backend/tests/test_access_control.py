@@ -440,80 +440,10 @@ def test_admin_group_crud_and_grant(client, db, auth_headers):
         assert r.status_code == 400
 
 
-@pytest.mark.skipif(
-    not __import__("app.core.config", fromlist=["get_settings"])
-    .get_settings()
-    .database_url.startswith("postgresql"),
-    reason="backfill assertion requires a Postgres DATABASE_URL (migrations run on PG)",
-)
-def test_backfill_gave_every_existing_user_a_personal_group():
-    """On Postgres, assert the 0029 backfill semantics: every user has a personal group.
-
-    Builds a throwaway DB seeded with users BEFORE the access-control migrations, runs the full
-    migration chain, then asserts every pre-existing user got a personal group named == username.
-    """
-    import os
-    import uuid as _uuid
-    from pathlib import Path
-
-    from alembic import command
-    from alembic.config import Config
-    from app.core.config import get_settings
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.pool import NullPool
-
-    # Resolve relative to this file so it works regardless of cwd
-    # (backend/tests/ -> parents[2] is the repo root holding backend/alembic.ini).
-    alembic_ini = str(Path(__file__).resolve().parents[2] / "backend/alembic.ini")
-
-    server_url = get_settings().database_url
-    admin = create_engine(server_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
-    conn = admin.connect()
-    db_name = f"backfill_{_uuid.uuid4().hex[:12]}"
-    conn.execute(text(f'CREATE DATABASE "{db_name}"'))
-    conn.close()
-    test_url = server_url.rsplit("/", 1)[0] + "/" + db_name
-    previous = os.environ.get("DATABASE_URL")
-    try:
-        os.environ["DATABASE_URL"] = test_url
-        get_settings.cache_clear()
-        cfg = Config(alembic_ini)
-        # Migrate up to just before the access-control schema, seed users, then finish the chain.
-        command.upgrade(cfg, "0027_web_find_settings")
-        eng = create_engine(test_url, poolclass=NullPool)
-        with eng.begin() as c:
-            for i in range(3):
-                c.execute(
-                    text(
-                        "INSERT INTO users (id, username, password_hash, role, is_bootstrap, "
-                        "created_at) VALUES (:id, :u, 'x', 'reader', false, now())"
-                    ),
-                    {"id": _uuid.uuid4(), "u": f"preexisting{i}"},
-                )
-        command.upgrade(cfg, "head")
-        with eng.connect() as c:
-            users = c.execute(text("SELECT username FROM users")).scalars().all()
-            for username in users:
-                grp = c.execute(
-                    text(
-                        "SELECT g.name FROM groups g JOIN group_memberships m "
-                        "ON m.group_id = g.id JOIN users u ON u.id = m.user_id "
-                        "WHERE u.username = :u AND g.is_personal = true"
-                    ),
-                    {"u": username},
-                ).scalar()
-                assert grp is not None, f"user {username} has no personal group after backfill"
-        eng.dispose()
-    finally:
-        if previous is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = previous
-        get_settings.cache_clear()
-        drop = admin.connect()
-        drop.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
-        drop.close()
-        admin.dispose()
+# NOTE (2026-07-13): the historical "0029 backfill gave every existing user a personal group"
+# test was removed with the migration squash — the mid-chain revisions it replayed no longer
+# exist, every supported deployment (floor: revision 0067) already ran that backfill, and the
+# runtime invariant is covered by test_create_user_makes_personal_group above.
 
 
 def test_admin_access_settings_roundtrip(client, auth_headers):
