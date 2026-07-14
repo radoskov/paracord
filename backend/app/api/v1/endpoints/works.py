@@ -390,6 +390,17 @@ _NULLS_LAST_SORTS = {
     "local_reference_count",
     "local_citation_count",
 }
+# Sorts backed by correlated scalar subqueries (not Work columns). The works query is SELECT
+# DISTINCT and Postgres requires DISTINCT ORDER BY expressions to appear in the select list, so
+# these are selected as a labelled extra column and ordered by the label. The count is
+# deterministic per work, so DISTINCT semantics are unchanged. (SQLite tolerates the bare
+# subquery ORDER BY, which is why only the Postgres deployment surfaced this.)
+_SUBQUERY_SORTS = {
+    "file_count",
+    "reference_count",
+    "local_reference_count",
+    "local_citation_count",
+}
 _DEFAULT_SORT_COLUMN = Work.updated_at
 
 
@@ -643,10 +654,16 @@ def list_works(
     # SAFE sort: look the key up in the allowlist (never interpolate the raw string); fall back to
     # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
     # order when the sort column has ties.
-    sort_column = _SORT_COLUMNS.get(sort or "", _DEFAULT_SORT_COLUMN)
+    sort_key = sort or ""
+    sort_column = _SORT_COLUMNS.get(sort_key, _DEFAULT_SORT_COLUMN)
+    if sort_key in _SUBQUERY_SORTS:
+        # Select the correlated count as a labelled column so the DISTINCT query may ORDER BY it
+        # on Postgres; ``db.scalars`` below still yields only the Work entities.
+        sort_column = sort_column.label("sort_value")
+        stmt = stmt.add_columns(sort_column)
     base_direction = sort_column.asc() if order == "asc" else sort_column.desc()
     # NULL-carrying sorts (citation_count) order NULLs last regardless of direction.
-    direction = base_direction.nullslast() if (sort or "") in _NULLS_LAST_SORTS else base_direction
+    direction = base_direction.nullslast() if sort_key in _NULLS_LAST_SORTS else base_direction
     stmt = (
         stmt.order_by(direction, Work.id)
         .offset((page - 1) * effective_per_page)
