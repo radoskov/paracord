@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch: citing polish, field search, clickable summary, batch jobs (2026-07-15)
+
+- `1601ad7` — external citing papers tinted lighter in the reference graph; paper view loads the
+  citing list eagerly so the header count shows without expanding.
+- `f97f971` — `keyword:`/`topic:` operators + exact-field search modes (Library: keywords / topic /
+  author / venue; Search tab: Keywords / Topics).
+- `73c597a` — citation summary: year bars open a papers popup; venue/author rows jump to a
+  Library `venue:`/`author:` search.
+- `7036831` — Library batch actions "Fetch citing papers" and "Summarize" as background jobs
+  (`fetch_citing_work_job`, `summarize_work_job` + 202 endpoints; titles in the Jobs tab).
+- Full battery green (backend 1173, safety 160, frontend 288 + build, e2e 33; one unrelated
+  one-off flake in test_duplicate_merge passed on rerun of the full tier).
+
 ## Legend chips, palette, count-sort 500 (2026-07-15)
 
 - **Count-column sorts 500ed on Postgres** (`4abc63b`): file/reference/local-count sorts order by
