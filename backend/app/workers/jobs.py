@@ -716,6 +716,58 @@ def topic_work_job(work_id: str) -> None:
 
 
 @_audited_job
+def fetch_citing_work_job(work_id: str) -> None:
+    """Fetch/refresh a work's citing papers from the open sources (batch action, 2026-07-15).
+
+    Same fetch + store as the inline endpoint. Skips silently when the work is gone or has no
+    DOI/arXiv id — deterministic preconditions, so retrying has no value.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+    from app.services import citing_papers as cp
+    from app.services.app_config import effective_citing_papers_fetch_cap
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None or (not work.doi and not work.arxiv_id):
+            return
+        papers, source, total = cp.fetch_citing_papers(
+            doi=work.doi, arxiv=work.arxiv_id, limit=effective_citing_papers_fetch_cap(db)
+        )
+        if source is not None:
+            cp.store_citing_papers(db, work=work, papers=papers, source=source, total=total)
+            db.commit()
+
+
+def summarize_work_job(work_id: str) -> None:
+    """Generate a per-paper summary in the background (batch action, 2026-07-15).
+
+    Mirrors the create-summary endpoint's "auto" resolution: the local-LLM provider when the AI
+    config selects it, else the deterministic extractive engine. A work with no summarizable text
+    raises ValueError — deterministic, so it is swallowed rather than retried.
+    """
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.work import Work
+    from app.services.ai_config import get_ai_config
+    from app.services.summarization import summarize_work
+
+    with SessionLocal() as db:
+        work = db.get(Work, uuid.UUID(str(work_id)))
+        if work is None:
+            return
+        ai_cfg = get_ai_config(db)
+        summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
+        try:
+            summarize_work(db, work, summary_type=summary_type)
+        except ValueError:
+            return
+        db.commit()
+
+
 def keywords_work_job(work_id: str) -> None:
     """Re-run keyword extraction for a work over abstract + latest stored TEI body (Phase K).
 

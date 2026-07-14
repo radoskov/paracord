@@ -23,6 +23,8 @@ REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
 TOPIC_JOB = "app.workers.jobs.topic_work_job"
 KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
+CITING_FETCH_JOB = "app.workers.jobs.fetch_citing_work_job"
+SUMMARIZE_WORK_JOB = "app.workers.jobs.summarize_work_job"
 SUMMARY_SCOPE_JOB = "app.workers.jobs.summarize_scope_job"
 TOPIC_SCOPE_JOB = "app.workers.jobs.topic_model_job"
 BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
@@ -200,6 +202,16 @@ def enqueue_chunking(work_id) -> str | None:
 def enqueue_topics(work_id) -> str | None:
     """Best-effort enqueue of a per-paper topic-modeling job. Returns the job id, or None."""
     return _enqueue_work_job(TOPIC_JOB, "topic", work_id)
+
+
+def enqueue_citing_fetch(work_id) -> str | None:
+    """Best-effort enqueue of a citing-papers fetch for a work (batch action). None if unavailable."""
+    return _enqueue_work_job(CITING_FETCH_JOB, "citing", work_id)
+
+
+def enqueue_work_summary(work_id) -> str | None:
+    """Best-effort enqueue of a per-paper summary (batch action). None if the queue is down."""
+    return _enqueue_work_job(SUMMARIZE_WORK_JOB, "summarize", work_id)
 
 
 def enqueue_keywords(work_id) -> str | None:
@@ -427,6 +439,8 @@ _FUNC_LABELS = {
     CHUNK_JOB: "chunk",
     TOPIC_JOB: "topic",
     KEYWORDS_JOB: "keywords",
+    CITING_FETCH_JOB: "citing-fetch",
+    SUMMARIZE_WORK_JOB: "summarize",
     SUMMARY_SCOPE_JOB: "summary-scope",
     REF_CONSOLIDATE_JOB: "reference-consolidation",
     ANALYSIS_GRAPH_JOB: "analysis-graph",
@@ -771,7 +785,15 @@ def queue_status(limit: int = 25) -> dict:
                 return "file", str(args[0])
             if job.func_name == STAGE_EXTRACT_JOB:
                 return "staging_item", str(args[0])
-            if job.func_name in (ENRICH_JOB, EMBED_JOB, CHUNK_JOB, TOPIC_JOB, KEYWORDS_JOB):
+            if job.func_name in (
+                ENRICH_JOB,
+                EMBED_JOB,
+                CHUNK_JOB,
+                TOPIC_JOB,
+                KEYWORDS_JOB,
+                CITING_FETCH_JOB,
+                SUMMARIZE_WORK_JOB,
+            ):
                 return "work", str(args[0])
             return None, None
 
