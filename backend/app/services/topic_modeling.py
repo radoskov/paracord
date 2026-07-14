@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.ai import TopicAssignment
 from app.models.work import Work
 from app.services.scope_resolution import resolve_scope_works
+from app.services.vector_math import sparse_cosine
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def model_topics(
                     scope_id=str(scope_id) if scope_id else None,
                     work_id=work.id,
                     topic_id=topic_id,
-                    score=round(_cosine(vectors[i], centroid), 4),
+                    score=round(sparse_cosine(vectors[i], centroid), 4),
                 )
             )
 
@@ -506,9 +507,9 @@ def _model_topics_embedding(
         label_centroid = _centroid([tfidf_vectors[i] for i in members])
         centroids[topic_id] = label_centroid  # hierarchy is over the label (term) space
         scored = sorted(
-            members, key=lambda i: _cosine(cluster_vectors[i], cluster_centroid), reverse=True
+            members, key=lambda i: sparse_cosine(cluster_vectors[i], cluster_centroid), reverse=True
         )
-        coherence = sum(_cosine(cluster_vectors[i], cluster_centroid) for i in members) / len(
+        coherence = sum(sparse_cosine(cluster_vectors[i], cluster_centroid) for i in members) / len(
             members
         )
         topics.append(
@@ -524,7 +525,7 @@ def _model_topics_embedding(
         )
         for i in members:
             work, _ = documents[i]
-            similarity = _cosine(cluster_vectors[i], cluster_centroid)
+            similarity = sparse_cosine(cluster_vectors[i], cluster_centroid)
             if allow_outliers and similarity < _OUTLIER_THRESHOLD:
                 outliers.append(str(work.id))
             db.add(
@@ -561,7 +562,7 @@ def _topic_hierarchy(centroids: dict[int, dict[str, float]]) -> list[dict]:
     for pos, a in enumerate(ids):
         best, best_sim = None, -1.0
         for b in ids[pos + 1 :]:
-            sim = _cosine(centroids[a], centroids[b])
+            sim = sparse_cosine(centroids[a], centroids[b])
             if sim > best_sim:
                 best, best_sim = b, sim
         if best is not None:
@@ -667,7 +668,7 @@ def _kmeans(vectors: list[dict[str, float]], k: int) -> list[int]:
             best, best_score = 0, -1.0
 
             for cluster, centroid in enumerate(centroids):
-                score = _cosine(vector, centroid)
+                score = sparse_cosine(vector, centroid)
                 if score > best_score:
                     best, best_score = cluster, score
 
@@ -696,21 +697,6 @@ def _centroid(vectors: list[dict[str, float]]) -> dict[str, float]:
 
     count = len(vectors)
     return {term: value / count for term, value in total.items()}
-
-
-def _cosine(a: dict[str, float], b: dict[str, float]) -> float:
-    if not a or not b:
-        return 0.0
-
-    smaller, larger = (a, b) if len(a) <= len(b) else (b, a)
-    dot = sum(value * larger.get(term, 0.0) for term, value in smaller.items())
-
-    if dot == 0.0:
-        return 0.0
-
-    norm_a = math.sqrt(sum(v * v for v in a.values()))
-    norm_b = math.sqrt(sum(v * v for v in b.values()))
-    return dot / (norm_a * norm_b)
 
 
 def _cluster_keywords(centroid: dict[str, float]) -> list[str]:

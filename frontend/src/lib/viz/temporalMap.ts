@@ -121,6 +121,50 @@ function escapeHtml(s: string): string {
   );
 }
 
+// C4: size/color are pure re-encodings of metrics every node already ships in `meta`, so changing
+// them is a client-side restyle — no refetch. Mirrors the server's `_size_value`/`_color_group`
+// encodings (and its legend construction) exactly; the server's params stay the source of truth
+// for the initial build.
+export function restyleTemporalMap(
+  payload: VizPayload,
+  sizeBy: string,
+  colorBy: string,
+): VizPayload {
+  const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v ? v : null;
+  const nodes = payload.nodes.map((n) => {
+    const m = n.meta ?? {};
+    let size: number | null;
+    if (sizeBy === "none") size = null;
+    else if (sizeBy === "citation_count") size = num(m.citation_count);
+    else if (sizeBy === "year") size = num(m.year);
+    else size = num(m.local_degree) ?? 0; // local_degree default
+    let colorGroup: string | null;
+    if (colorBy === "none") colorGroup = null;
+    else if (colorBy === "work_type") colorGroup = str(m.work_type) ?? "unknown";
+    else if (colorBy === "year")
+      colorGroup = m.year != null ? String(m.year) : "unknown";
+    else if (colorBy === "venue") colorGroup = str(m.venue) ?? "unknown";
+    else colorGroup = str(m.reading_status) ?? "unread"; // status default
+    return { ...n, size, color_group: colorGroup };
+  });
+  const legend =
+    colorBy === "none"
+      ? null
+      : {
+          color_by: colorBy,
+          groups: [
+            ...new Set(
+              nodes
+                .map((n) => n.color_group)
+                .filter((g): g is string => g !== null),
+            ),
+          ].sort(),
+        };
+  return { ...payload, nodes, legend };
+}
+
 export const temporalMapRenderer: VizRenderer = {
   viewType: "temporal_map",
   order: 0, // lead the view-type selector — the temporal map is the default visualization

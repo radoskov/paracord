@@ -194,6 +194,9 @@ export interface Topic {
   topic_id: number;
   keywords: string[];
   work_count: number;
+  // C4: quality signals the modeler always computes — closest-to-centroid papers + cluster tightness.
+  representative_work_ids: string[];
+  coherence_score: number | null;
 }
 
 export interface TopicModelResponse {
@@ -202,6 +205,8 @@ export interface TopicModelResponse {
   scope_id: string | null;
   work_count: number;
   topics: Topic[];
+  // Papers whose embedding fit no topic cluster (C4).
+  outlier_work_ids: string[];
   // S15: the scope was too large to run inline — poll the job; assignments land in the topic graph.
   queued?: boolean;
   job_id?: string | null;

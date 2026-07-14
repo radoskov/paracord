@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.models.work import Work
 from app.services.topic_modeling import _ordered_works, _paper_dense_vectors, _scope_works
+from app.services.vector_math import cosine_matrix
 
 # Cap the node set: the pairwise similarity is O(n^2 · dim); a personal library is small, but bound
 # it so a huge scope can't stall the request. Dropped papers are reported in the summary.
@@ -155,10 +156,7 @@ def _knn_edges(
         return []
     dim = len(vectors[0])
     matrix = np.array([[vec.get(i, 0.0) for i in range(dim)] for vec in vectors], dtype=np.float64)
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms[norms == 0.0] = 1.0  # a zero vector stays zero → cosine 0, matching _cosine's guard
-    normalized = matrix / norms
-    sims = normalized @ normalized.T
+    sims = cosine_matrix(matrix)
     np.fill_diagonal(sims, -np.inf)  # exclude self; sorts last so it never enters the top-k
 
     edge_weight: dict[tuple[str, str], float] = {}

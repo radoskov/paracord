@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from app.services.vector_math import dense_cosine
+
 if TYPE_CHECKING:
     from app.core.config import Settings
 
@@ -265,12 +267,8 @@ def get_embedding_provider(settings: Settings | None = None, *, db=None) -> Embe
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two equal-length vectors (0.0 if either is degenerate)."""
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+    """Cosine similarity between two equal-length vectors (0.0 if either is degenerate).
+
+    Thin alias for :func:`app.services.vector_math.dense_cosine`, kept for the existing call sites.
+    """
+    return dense_cosine(a, b)

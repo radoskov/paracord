@@ -55,12 +55,12 @@ def test_topic_graph_without_real_model_is_honest(client, auth_headers, db):
 
 def _reference_edges(works, vectors, *, k, min_similarity):
     """Prior O(n^2) pure-Python kNN cosine edges — the D20 numpy op must reproduce this exactly."""
-    from app.services.topic_modeling import _cosine
+    from app.services.vector_math import sparse_cosine
 
     n = len(works)
     edge_weight: dict[tuple[str, str], float] = {}
     for i in range(n):
-        sims = [(j, _cosine(vectors[i], vectors[j])) for j in range(n) if j != i]
+        sims = [(j, sparse_cosine(vectors[i], vectors[j])) for j in range(n) if j != i]
         sims.sort(key=lambda t: t[1], reverse=True)
         for j, sim in sims[:k]:
             if sim < min_similarity:

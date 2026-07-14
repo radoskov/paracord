@@ -27,7 +27,6 @@ marks where a scope-keyed cache would go for P3+.
 from __future__ import annotations
 
 import hashlib
-import math
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
@@ -54,6 +53,7 @@ from app.services.topic_modeling import (
     _tfidf,
     _tokenize,
 )
+from app.services.vector_math import cosine_matrix, sparse_cosine
 from app.utils.bounded_cache import BoundedTTLCache
 
 # Node cap (topic_graph caps at 400, citation_summary at 500; the citation graph itself is
@@ -203,19 +203,6 @@ class _AxisContext:
     embedding_model: str | None
 
 
-def _sparse_cosine(a: dict[int, float], b: dict[int, float]) -> float:
-    """Cosine similarity of two index-keyed sparse vectors (0.0 if either is empty)."""
-    if not a or not b:
-        return 0.0
-    keys = a.keys() & b.keys()
-    dot = sum(a[i] * b[i] for i in keys)
-    norm_a = math.sqrt(sum(v * v for v in a.values()))
-    norm_b = math.sqrt(sum(v * v for v in b.values()))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
 def _similarity_axis(
     db: Session, works: list[Work], ctx: _AxisContext
 ) -> tuple[dict[uuid.UUID, float | None], str | None]:
@@ -252,7 +239,7 @@ def _similarity_axis(
     values: dict[uuid.UUID, float | None] = {}
     for work in works:
         wv = vec_by_id.get(work.id)
-        values[work.id] = round(_sparse_cosine(focus_vec, wv), 4) if wv is not None else None
+        values[work.id] = round(sparse_cosine(focus_vec, wv), 4) if wv is not None else None
     return (values, None)
 
 
@@ -484,6 +471,7 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
                     "local_degree": local_degree,
                     "reading_status": work.reading_status,
                     "work_type": work.work_type,
+                    "venue": work.venue,
                     "doi": work.doi,
                 },
             )
@@ -1112,15 +1100,6 @@ def topic_river(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
 HEATMAP_CAP = 50
 
 
-def _cosine_matrix(matrix: np.ndarray) -> np.ndarray:
-    """Row-wise cosine-similarity matrix (symmetric, 1.0 diagonal for non-zero rows)."""
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    safe = np.where(norms == 0.0, 1.0, norms)
-    normed = matrix / safe
-    sim = normed @ normed.T
-    return np.clip(sim, -1.0, 1.0)
-
-
 @register_viz("similarity_heatmap")
 def similarity_heatmap(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
     """Pairwise cosine-similarity heatmap for a small SEE-filtered selection (§2d).
@@ -1165,7 +1144,7 @@ def similarity_heatmap(db: Session, actor: User, scope: VizScope, params: dict) 
             view_type="similarity_heatmap", nodes=[], matrix=None, notes=notes, reindex_hint=hint
         )
 
-    sim = _cosine_matrix(matrix)
+    sim = cosine_matrix(matrix)
     labels = [w.canonical_title or f"Untitled work ({str(w.id)[:8]})" for w in kept]
     ids = [str(w.id) for w in kept]
     values = [[round(float(sim[i][j]), 4) for j in range(len(kept))] for i in range(len(kept))]

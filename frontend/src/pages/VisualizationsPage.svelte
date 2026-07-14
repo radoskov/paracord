@@ -8,7 +8,7 @@
   } from '../api/client';
   import { getRenderer, registeredViewTypes } from '../lib/viz/registry';
   // Importing a renderer registers it in the registry (side-effect imports).
-  import '../lib/viz/temporalMap';
+  import { restyleTemporalMap } from '../lib/viz/temporalMap';
   import '../lib/viz/embeddingCluster';
   import '../lib/viz/coCitation';
   import '../lib/viz/topicRiver';
@@ -151,6 +151,18 @@
   // handler rather than a reactive block, so it can never self-trigger a fetch loop.
   function reloadIfLoaded(): void {
     if (payload) void load();
+  }
+
+  // C4: on the temporal map, size/color are re-encodings of metrics already in each node's meta —
+  // restyle the loaded payload client-side (no server round-trip). Other views still refetch
+  // (their size/color changes the server-side computation).
+  function restyleIfLoaded(): void {
+    if (!payload) return;
+    if (payload.view_type !== 'temporal_map') {
+      void load();
+      return;
+    }
+    payload = restyleTemporalMap(payload, sizeBy, colorBy);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -312,14 +324,14 @@
       {/if}
       {#if isTemporal || isCluster}
         <label>Size
-          <select bind:value={sizeBy} on:change={reloadIfLoaded} data-testid="viz-size-by" title="What point size represents — local citation degree or citation count">
+          <select bind:value={sizeBy} on:change={restyleIfLoaded} data-testid="viz-size-by" title="What point size represents — local citation degree or citation count">
             {#each SIZE_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
           </select>
         </label>
       {/if}
       {#if isTemporal || isNetwork}
         <label>Color
-          <select bind:value={colorBy} on:change={reloadIfLoaded} data-testid="viz-color-by" title="What point colour represents — e.g. reading status">
+          <select bind:value={colorBy} on:change={restyleIfLoaded} data-testid="viz-color-by" title="What point colour represents — e.g. reading status">
             {#each COLOR_OPTIONS as [value, label] (value)}<option {value}>{label}</option>{/each}
           </select>
         </label>

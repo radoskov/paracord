@@ -11,7 +11,7 @@
   import ExportDialog from '../components/ExportDialog.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
   import { resolveScopeRequest } from '../lib/scope';
-  import { pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
+  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -152,8 +152,48 @@
         return;
       }
       topics = response.topics;
+      outlierIds = response.outlier_work_ids ?? [];
+      expandedTopic = null;
+      outliersExpanded = false;
       message = `Modeled ${response.topics.length} topics over ${response.work_count} papers`;
     });
+  }
+
+  // C4: the modeler always returns per-topic representatives + coherence and scope-level outliers;
+  // they used to be fetched and dropped. Titles are looked up lazily on first expand.
+  let outlierIds: string[] = [];
+  let expandedTopic: number | null = null;
+  let outliersExpanded = false;
+  let workTitles: Record<string, string> = {};
+
+  async function ensureTitles(ids: string[]): Promise<void> {
+    const missing = ids.filter((id) => !(id in workTitles));
+    const fetched = await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const work = await client.getWork(id);
+          return [id, work.title || 'Untitled paper'] as const;
+        } catch {
+          return [id, 'Paper unavailable'] as const;
+        }
+      }),
+    );
+    if (fetched.length) workTitles = { ...workTitles, ...Object.fromEntries(fetched) };
+  }
+
+  async function toggleTopicExamples(topic: Topic): Promise<void> {
+    expandedTopic = expandedTopic === topic.topic_id ? null : topic.topic_id;
+    if (expandedTopic !== null) await ensureTitles(topic.representative_work_ids);
+  }
+
+  async function toggleOutliers(): Promise<void> {
+    outliersExpanded = !outliersExpanded;
+    if (outliersExpanded) await ensureTitles(outlierIds);
+  }
+
+  function openPaper(workId: string): void {
+    pendingLibraryOpen.set(workId);
+    if (typeof window !== 'undefined') window.location.hash = '#library';
   }
 
   async function summarise(): Promise<void> {
@@ -251,9 +291,45 @@
       {:else}
         <ul class="plain">
           {#each topics as topic (topic.topic_id)}
-            <li><strong>{topic.keywords.join(', ')}</strong><small class="muted"> · {topic.work_count} papers</small></li>
+            <li>
+              <strong>{topic.keywords.join(', ')}</strong>
+              <small class="muted"> · {topic.work_count} papers</small>
+              {#if topic.coherence_score != null}
+                <small class="muted" title="How tightly this topic’s papers cluster together (100% = near-identical)">
+                  · {Math.round(topic.coherence_score * 100)}% coherent</small>
+              {/if}
+              {#if topic.representative_work_ids.length > 0}
+                <button type="button" class="linkbtn" on:click={() => toggleTopicExamples(topic)}
+                  title="The papers closest to this topic’s center">
+                  {expandedTopic === topic.topic_id ? 'Hide examples' : 'Examples'}
+                </button>
+                {#if expandedTopic === topic.topic_id}
+                  <ul class="plain nested">
+                    {#each topic.representative_work_ids as id (id)}
+                      <li><button type="button" class="linkbtn" on:click={() => openPaper(id)}>{workTitles[id] ?? 'Loading…'}</button></li>
+                    {/each}
+                  </ul>
+                {/if}
+              {/if}
+            </li>
           {/each}
         </ul>
+        {#if outlierIds.length > 0}
+          <p class="hint-toggle">
+            <button type="button" class="linkbtn" on:click={toggleOutliers}
+              title="Papers whose content matched none of the topics">
+              {outlierIds.length} paper{outlierIds.length === 1 ? '' : 's'} fit no topic
+              {outliersExpanded ? '· hide' : '· show'}
+            </button>
+          </p>
+          {#if outliersExpanded}
+            <ul class="plain nested">
+              {#each outlierIds as id (id)}
+                <li><button type="button" class="linkbtn" on:click={() => openPaper(id)}>{workTitles[id] ?? 'Loading…'}</button></li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
       {/if}
     </div>
 
@@ -338,6 +414,30 @@
     list-style: none;
     margin: 0.5rem 0 0;
     padding: 0;
+  }
+
+  .plain.nested {
+    border-left: 2px solid var(--border-strong);
+    gap: 0.15rem;
+    margin: 0.25rem 0 0.25rem 0.4rem;
+    padding-left: 0.6rem;
+  }
+
+  .linkbtn {
+    background: none;
+    border: none;
+    color: var(--status-info);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+    min-height: 0;
+    padding: 0;
+    text-align: left;
+    text-decoration: underline;
+  }
+
+  .hint-toggle {
+    margin: 0.4rem 0 0;
   }
 
   .summary-text {

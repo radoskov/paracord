@@ -38,8 +38,11 @@
   let importing = '';
 
   // Sub-tabs (batch10 #7): Overview (the citation analytics) + Venues + Authors aggregations.
+  // The venue/author aggregation is fetched lazily on first sub-tab open (C4) — most visits stay
+  // on Overview, so the summary build no longer pays for an aggregation nobody looks at.
   let subtab: 'overview' | 'venues' | 'authors' = 'overview';
   let venueAuthor: VenueAuthorSummary | null = null;
+  let venueAuthorBusy = false;
 
   // A paper opened directly in the paper view (WorkDetail modal) — the same action the search tab
   // uses (C2). Distinct from the title click, which jumps to the Library tab.
@@ -73,20 +76,36 @@
         $selectedPaperIds,
       );
       currentScopeArgs = scopeArgs;
-      const [summaryResult, venueAuthorResult] = await Promise.all([
-        client.citationSummary(scopeArgs),
-        client.venueAuthorSummary(scopeArgs),
-      ]);
-      summary = summaryResult;
-      venueAuthor = venueAuthorResult;
+      summary = await client.citationSummary(scopeArgs);
       previews = {};
       decisions = await client.getWorklist();
+      // The venue/author aggregation belongs to the old scope now — refetch immediately only when
+      // the user is already looking at it, otherwise drop it and let the sub-tab lazy-load.
+      venueAuthor = null;
+      if (subtab !== 'overview') await loadVenueAuthor();
     } catch (error) {
       message = errorMessage(error);
       summary = null;
     } finally {
       busy = false;
     }
+  }
+
+  async function loadVenueAuthor(): Promise<void> {
+    if (!currentScopeArgs || venueAuthorBusy) return;
+    venueAuthorBusy = true;
+    try {
+      venueAuthor = await client.venueAuthorSummary(currentScopeArgs);
+    } catch (error) {
+      message = errorMessage(error);
+    } finally {
+      venueAuthorBusy = false;
+    }
+  }
+
+  function openSubtab(tab: typeof subtab): void {
+    subtab = tab;
+    if (tab !== 'overview' && !venueAuthor) void loadVenueAuthor();
   }
 
   // The resolved scope arguments used for the last summary, reused for the missing-list exports.
@@ -228,13 +247,13 @@
     <div class="card">
       <div class="subtabs" role="tablist">
         <button type="button" role="tab" aria-selected={subtab === 'overview'}
-          class:active={subtab === 'overview'} on:click={() => (subtab = 'overview')}
+          class:active={subtab === 'overview'} on:click={() => openSubtab('overview')}
           data-testid="cs-tab-overview">Overview</button>
         <button type="button" role="tab" aria-selected={subtab === 'venues'}
-          class:active={subtab === 'venues'} on:click={() => (subtab = 'venues')}
+          class:active={subtab === 'venues'} on:click={() => openSubtab('venues')}
           data-testid="cs-tab-venues">Venues{#if venueAuthor} ({venueAuthor.distinct_venue_count}){/if}</button>
         <button type="button" role="tab" aria-selected={subtab === 'authors'}
-          class:active={subtab === 'authors'} on:click={() => (subtab = 'authors')}
+          class:active={subtab === 'authors'} on:click={() => openSubtab('authors')}
           data-testid="cs-tab-authors">Authors{#if venueAuthor} ({venueAuthor.distinct_author_count}){/if}</button>
       </div>
 
@@ -519,6 +538,8 @@
             <p class="hintline">Venues are grouped case- and punctuation-insensitively; abbreviations
               and full names are not merged.</p>
           {/if}
+        {:else}
+          <p class="empty">Loading venue statistics…</p>
         {/if}
       {:else if subtab === 'authors'}
         {#if venueAuthor}
@@ -551,6 +572,8 @@
             <p class="hintline">Authors are grouped by last name + first initial (so "Vaswani, A." and
               "Ashish Vaswani" count once).</p>
           {/if}
+        {:else}
+          <p class="empty">Loading author statistics…</p>
         {/if}
       {/if}
     </div>
@@ -664,24 +687,6 @@
     flex-wrap: wrap;
     gap: 0.6rem;
     margin-top: 0.6rem;
-  }
-
-  label {
-    color: var(--ink-strong);
-    display: flex;
-    flex-direction: column;
-    font-size: 0.8rem;
-    font-weight: 700;
-    gap: 0.2rem;
-  }
-
-  select,
-  input {
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    font: inherit;
-    font-weight: 400;
-    padding: 0.3rem 0.5rem;
   }
 
   button {

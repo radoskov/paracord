@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { VizPayload } from "../../api/client";
 import { getRenderer, registeredViewTypes } from "./registry";
-import { temporalMapRenderer } from "./temporalMap";
+import { restyleTemporalMap, temporalMapRenderer } from "./temporalMap";
 import { resolveTheme } from "./theme";
 
 function makePayload(overrides: Partial<VizPayload> = {}): VizPayload {
@@ -212,5 +212,31 @@ describe("temporal_map renderer buildOption", () => {
     expect(html).toContain("2 papers here");
     expect(html).toContain('data-viz-open="a"');
     expect(html).toContain('data-viz-open="b"');
+  });
+});
+
+describe("restyleTemporalMap (C4 client-side re-encoding)", () => {
+  it("recomputes size from the requested meta metric", () => {
+    const payload = makePayload();
+    const restyled = restyleTemporalMap(payload, "citation_count", "status");
+    expect(restyled.nodes.map((n) => n.size)).toEqual([10, 3, null]);
+    // "none" clears sizes entirely (uniform symbols).
+    expect(
+      restyleTemporalMap(payload, "none", "status").nodes.every((n) => n.size === null),
+    ).toBe(true);
+    // The input payload is untouched (a new payload triggers the chart revision bump).
+    expect(payload.nodes[0].size).toBe(2);
+  });
+
+  it("recomputes color groups + legend, matching the server's encodings", () => {
+    const payload = makePayload();
+    const byYear = restyleTemporalMap(payload, "local_degree", "year");
+    expect(byYear.nodes.map((n) => n.color_group)).toEqual(["2020", "2018", "unknown"]);
+    expect(byYear.legend).toEqual({ color_by: "year", groups: ["2018", "2020", "unknown"] });
+    // Missing venue falls back to "unknown", exactly like the backend's _color_group.
+    const byVenue = restyleTemporalMap(payload, "local_degree", "venue");
+    expect(byVenue.nodes.every((n) => n.color_group === "unknown")).toBe(true);
+    // "none" drops the legend.
+    expect(restyleTemporalMap(payload, "local_degree", "none").legend).toBeNull();
   });
 });
