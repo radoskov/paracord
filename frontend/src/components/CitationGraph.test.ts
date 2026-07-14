@@ -55,5 +55,9 @@ describe('CitationGraph', () => {
     // Changing color_by after a graph exists refetches to get the server-computed groups.
     await fireEvent.change(screen.getByTestId('graph-color-by'), { target: { value: 'status' } });
     expect(load).toHaveBeenLastCalledWith('local_only', false, 'status');
+
+    // Year grouping is offered too (one discrete color per publication year).
+    await fireEvent.change(screen.getByTestId('graph-color-by'), { target: { value: 'year' } });
+    expect(load).toHaveBeenLastCalledWith('local_only', false, 'year');
   });
 });

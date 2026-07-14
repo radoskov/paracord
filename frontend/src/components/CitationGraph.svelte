@@ -154,23 +154,25 @@
     const max = Math.max(0, ...values);
     const min = Math.min(0, ...values);
     const maxWeight = Math.max(1, ...visibleEdges.map((e) => e.weight));
+    // Explicit per-category colors (not the option-level palette): with palette-assigned colors,
+    // ECharts' legend-hover highlight repaints nodes in the emphasis default instead of their own
+    // group color. An explicit itemStyle survives the emphasis state, so hover highlights correctly.
     const categories = [
-      ...colorGroups.map((g) => ({ name: g })),
-      { name: 'external' },
-      ...(colorGroups.length === 0 ? [{ name: 'in library' }] : []),
+      ...colorGroups.map((g, i) => ({
+        name: g,
+        itemStyle: { color: viz.categorical[i % viz.categorical.length] },
+      })),
+      { name: 'external', itemStyle: { color: viz.nodeDefault } },
+      ...(colorGroups.length === 0
+        ? [{ name: 'in library', itemStyle: { color: viz.categorical[0] } }]
+        : []),
     ];
     const categoryIndex = (n: RNode): number => {
       if (n.kind === 'external') return colorGroups.length;
       if (colorGroups.length === 0) return colorGroups.length + 1;
       return Math.max(0, colorGroups.indexOf(n.colorGroup ?? ''));
     };
-    const palette = [
-      ...colorGroups.map((_, i) => viz.categorical[i % viz.categorical.length]),
-      viz.nodeDefault,
-      ...(colorGroups.length === 0 ? [viz.categorical[0]] : []),
-    ];
     return {
-      color: palette,
       legend: colorGroups.length
         ? [{ data: colorGroups, textStyle: { color: viz.text }, top: 0 }]
         : undefined,
@@ -243,8 +245,17 @@
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function renderChart(chart: any): void {
+    // A full option rebuild resets the legend selection, so any solo state is gone too.
+    soloGroup = null;
     chart.setOption(buildOption(), true);
   }
+
+  // Shift-click legend solo: show only the clicked color group; shift-clicking the soloed group
+  // again re-selects all. ECharts legend events carry no modifier keys, so the shift state is
+  // captured from the DOM click (capture phase runs before ECharts' own handler).
+  let soloGroup: string | null = null;
+  let lastClickShift = false;
+  let applyingLegend = false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wireEvents(chart: any): void {
@@ -258,6 +269,33 @@
       }
       if (!node.workId && node.doi && onImportExternal) onImportExternal(node.doi);
     });
+    chart
+      .getDom()
+      ?.addEventListener('click', (e: MouseEvent) => (lastClickShift = e.shiftKey), true);
+    chart.on(
+      'legendselectchanged',
+      (params: { name: string; selected: Record<string, boolean> }) => {
+        if (applyingLegend) return; // our own dispatched actions re-fire this event
+        if (!lastClickShift) {
+          soloGroup = null; // a plain toggle breaks any solo state
+          return;
+        }
+        applyingLegend = true;
+        try {
+          const groups = Object.keys(params.selected);
+          const leavingSolo = soloGroup === params.name;
+          for (const group of groups) {
+            chart.dispatchAction({
+              type: leavingSolo || group === params.name ? 'legendSelect' : 'legendUnSelect',
+              name: group,
+            });
+          }
+          soloGroup = leavingSolo ? null : params.name;
+        } finally {
+          applyingLegend = false;
+        }
+      },
+    );
   }
 
   // Client-side option rebuilds: size/filter/layout toggles bump the revision (ChartHost repaints).
@@ -325,6 +363,7 @@
           <option value="shelf">Color: shelf</option>
           <option value="tag">Color: tag</option>
           <option value="topic">Color: topic</option>
+          <option value="year">Color: year</option>
         </select>
       {/if}
       <label class="toggle" title="Hide nodes that have no edges">
@@ -369,7 +408,8 @@
         ariaLabel={graphType === 'topic' ? 'Topic graph' : 'Citation graph'}>
         <svelte:fragment slot="fallback">Interactive view unavailable here — switch to List.</svelte:fragment>
       </ChartHost>
-      <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : 'degree'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.</p>
+      <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : 'degree'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.{#if colorGroups.length}
+          Legend: click toggles a color group; shift-click shows only that group (shift-click it again to show all).{/if}</p>
     {:else}
       <ul class="edges">
         {#each rEdges as edge (edge.source + '->' + edge.target)}

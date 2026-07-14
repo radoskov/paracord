@@ -54,7 +54,7 @@ class CitationGraphRequest(BaseModel):
     # §8.9 depth: categorical node coloring from existing library data (SEE-clamped; external nodes
     # are never colored). Node *sizing* (degree/pagerank/betweenness) is a pure client re-style — all
     # three centrality metrics ship on every node, so the frontend switches size without a refetch.
-    color_by: Literal["none", "shelf", "tag", "topic", "status"] = "none"
+    color_by: Literal["none", "shelf", "tag", "topic", "status", "year"] = "none"
     # Cap on external (cited-but-not-in-library) nodes; the most-cited ones are kept (item 1).
     max_external: int = Field(default=50, ge=0, le=500)
 

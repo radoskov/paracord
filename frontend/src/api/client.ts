@@ -223,7 +223,13 @@ export type GraphScopeType =
 export type GraphNodeMode = "local_only" | "include_external";
 // §8.9 depth (Track C P5b). Node sizing is a client re-style — all three metrics ship on every node.
 export type GraphSizeBy = "degree" | "pagerank" | "betweenness";
-export type GraphColorBy = "none" | "shelf" | "tag" | "topic" | "status";
+export type GraphColorBy =
+  | "none"
+  | "shelf"
+  | "tag"
+  | "topic"
+  | "status"
+  | "year";
 
 export interface GraphNode {
   id: string;

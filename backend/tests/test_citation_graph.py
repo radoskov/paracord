@@ -446,6 +446,25 @@ def test_color_by_status_and_topic(db_session) -> None:
     assert topic_groups[unread.id] == "untopiced"
 
 
+def test_color_by_year_defaults_unknown(db_session) -> None:
+    dated = Work(canonical_title="A", normalized_title="a", year=2021)
+    undated = Work(canonical_title="B", normalized_title="b")
+    _add_works(db_session, [dated, undated])
+    db_session.commit()
+
+    by_year = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[dated.id, undated.id],
+        compute_metrics=True,
+        color_by="year",
+    )
+    groups = {n.work_id: n.color_group for n in by_year.nodes}
+    assert groups[dated.id] == "2021"
+    assert groups[undated.id] == "unknown"
+    assert by_year.summary["color_by"] == "year"
+
+
 def test_color_by_shelf_skips_private_shelf(db_session) -> None:
     work = Work(canonical_title="P", normalized_title="p")
     db_session.add(work)

@@ -1851,7 +1851,8 @@
               "shelf",
               "tag",
               "topic",
-              "status"
+              "status",
+              "year"
             ],
             "title": "Color By",
             "type": "string"

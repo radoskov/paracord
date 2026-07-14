@@ -49,7 +49,7 @@ SizeBy = Literal["degree", "pagerank", "betweenness"]
 # Node-color grouping (§8.9). ``none`` leaves nodes uncolored; the others attach one categorical
 # ``color_group`` per local node from existing library data (SEE-clamped). External nodes are never
 # colored.
-ColorBy = Literal["none", "shelf", "tag", "topic", "status"]
+ColorBy = Literal["none", "shelf", "tag", "topic", "status", "year"]
 
 
 @dataclass
@@ -594,16 +594,19 @@ def _color_groups(
 ) -> dict[uuid.UUID, str]:
     """Map each local work id to a categorical color group for ``color_by``.
 
-    ``status``/``topic`` read directly off the work; ``shelf``/``tag`` pick the alphabetically-first
-    membership (a work may be on several — one group per node keeps the legend readable) and default
-    to ``unshelved``/``untagged``. ``shelf`` considers only non-private shelves so a private shelf's
-    name can never surface as a node color.
+    ``status``/``topic``/``year`` read directly off the work; ``shelf``/``tag`` pick the
+    alphabetically-first membership (a work may be on several — one group per node keeps the legend
+    readable) and default to ``unshelved``/``untagged``. ``shelf`` considers only non-private
+    shelves so a private shelf's name can never surface as a node color.
     """
     if not work_ids:
         return {}
     if color_by == "status":
         rows = db.execute(select(Work.id, Work.reading_status).where(Work.id.in_(work_ids))).all()
         return {work_id: (status or "unread") for work_id, status in rows}
+    if color_by == "year":
+        rows = db.execute(select(Work.id, Work.year).where(Work.id.in_(work_ids))).all()
+        return {work_id: (str(year) if year is not None else "unknown") for work_id, year in rows}
     if color_by == "topic":
         rows = db.execute(select(Work.id, Work.topics).where(Work.id.in_(work_ids))).all()
         return {work_id: (str(topics[0]) if topics else "untopiced") for work_id, topics in rows}
