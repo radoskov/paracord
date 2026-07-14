@@ -7,10 +7,12 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
   },
-  // Pre-bundle the heavy, lazily-imported libs (chart/graph libs in the viz pages; pdfjs-dist in the
+  // Pre-bundle the heavy, lazily-imported libs (ECharts in the chart surfaces; pdfjs-dist in the
   // PDF reader) so the dev server doesn't 504 with an "outdated optimize dep" on their first dynamic
   // import — which otherwise makes the reader/viz E2E journeys flaky under a parallel run.
+  // NOTE: every entry must exist in package.json — an unresolvable include breaks the whole
+  // dependency optimization pass (dead reader/charts), it doesn't just warn.
   optimizeDeps: {
-    include: ['echarts', 'cytoscape', 'cytoscape-fcose', 'pdfjs-dist'],
+    include: ['echarts', 'pdfjs-dist'],
   },
 });
