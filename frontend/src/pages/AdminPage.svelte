@@ -236,13 +236,29 @@
         ]);
         defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
       }
-      // Runtime app config (D18 page-size clamp + D1 overload protection) is owner+admin.
-      if (get(canManageUsers)) {
-        applyAppConfig(await client.getAppConfig());
-      }
       // Custom themes (owner+admin) for the Themes tab.
       if (get(canManageUsers)) customThemes = await client.listThemes();
     });
+    // Runtime app config (D18 page-size clamp + D1 overload protection) is owner+admin. Loaded
+    // OUTSIDE the chain above with its own retries: it seeds the Settings form, so a transient
+    // failure (its own or an earlier admin GET's, which would abort the chain) must not leave the
+    // form unseeded — the e2e journey-17 first-run flake.
+    if (get(canManageUsers)) void loadAppConfig();
+  }
+
+  async function loadAppConfig(): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        applyAppConfig(await client.getAppConfig());
+        return;
+      } catch (error) {
+        if (attempt === 3) {
+          appConfigMsg = `Could not load the current settings: ${errorMessage(error)}`;
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750 * attempt));
+      }
+    }
   }
 
   async function uploadThemeYaml(): Promise<void> {

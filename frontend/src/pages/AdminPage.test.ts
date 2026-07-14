@@ -150,6 +150,22 @@ describe('AdminPage groups section', () => {
     );
   });
 
+  it('retries a failed app-config load so the Settings form still seeds', async () => {
+    const client = makeClient();
+    const config = await client.getAppConfig();
+    client.getAppConfig = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('transient'))
+      .mockResolvedValue(config);
+    render(AdminPage, { client: client as never });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const input = screen.getByLabelText('Global max papers per page') as HTMLInputElement;
+    // First attempt rejects; the retry (after its backoff) seeds the field.
+    await waitFor(() => expect(input.value).toBe('500'), { timeout: 4000 });
+    expect(client.getAppConfig).toHaveBeenCalledTimes(2);
+  });
+
   it('saves the overload-protection settings from the Settings tab', async () => {
     const client = makeClient();
     render(AdminPage, { client: client as never });
