@@ -11,6 +11,7 @@
     TopicGraphResponse,
   } from '../api/client';
   import { activeVizTheme } from '../lib/theme/store';
+  import { categoricalPalette } from '../lib/viz/theme';
   import ChartHost from './ChartHost.svelte';
 
   export let label = '';
@@ -50,6 +51,9 @@
         graph = await load(nodeMode, collapseVersions, colorBy);
         topicGraph = null;
       }
+      // Fresh data means fresh groups — reset any legend-chip filtering.
+      hiddenGroups = new Set();
+      soloGroup = null;
       revision += 1;
     } finally {
       busy = false;
@@ -100,13 +104,30 @@
     return [] as REdge[];
   })();
 
-  // Distinct color groups (citation graph only), in first-seen order — ECharts categories/legend.
+  // Distinct color groups (citation graph only), sorted — years numerically (unknown last), the
+  // rest alphabetically — so the legend chips and the palette progression read in order.
   $: colorGroups = (() => {
     if (graphType !== 'citation' || colorBy === 'none') return [] as string[];
     const seen: string[] = [];
     for (const n of rNodes) if (n.colorGroup && !seen.includes(n.colorGroup)) seen.push(n.colorGroup);
-    return seen;
+    if (colorBy === 'year') {
+      return seen.sort(
+        (a, b) =>
+          (a === 'unknown' ? 1 : 0) - (b === 'unknown' ? 1 : 0) || Number(a) - Number(b),
+      );
+    }
+    return seen.sort((a, b) => a.localeCompare(b));
   })();
+
+  // Colors for the groups; grows beyond the fixed theme palette (evenly spaced hues) so ~18 years
+  // don't cycle the same 6 colors three times.
+  $: groupColors = categoricalPalette(Math.max(1, colorGroups.length), $activeVizTheme);
+
+  // Legend-chip state: groups toggled off (client-side node filter, like the other toggles).
+  let hiddenGroups = new Set<string>();
+  let soloGroup: string | null = null;
+  // The plotted node order of the last built option, per group — for hover highlight dispatch.
+  let groupDataIndices = new Map<string, number[]>();
 
   $: hasGraph = graphType === 'topic' ? topicGraph != null : graph != null;
   $: activeSummary =
@@ -133,6 +154,10 @@
     const viz = $activeVizTheme;
     const hiddenIds = new Set<string>();
     if (hideExternalLeaves) for (const n of rNodes) if (n.kind === 'external') hiddenIds.add(n.id);
+    // Legend-chip filtering: groups the user toggled off (click) or excluded via solo (shift-click).
+    if (hiddenGroups.size) {
+      for (const n of rNodes) if (n.colorGroup && hiddenGroups.has(n.colorGroup)) hiddenIds.add(n.id);
+    }
     const visibleEdges = rEdges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
     if (hideSingletons) {
       const touched = new Set<string>();
@@ -154,17 +179,17 @@
     const max = Math.max(0, ...values);
     const min = Math.min(0, ...values);
     const maxWeight = Math.max(1, ...visibleEdges.map((e) => e.weight));
-    // Explicit per-category colors (not the option-level palette): with palette-assigned colors,
-    // ECharts' legend-hover highlight repaints nodes in the emphasis default instead of their own
-    // group color. An explicit itemStyle survives the emphasis state, so hover highlights correctly.
+    // Explicit per-category colors (never the option-level palette). The legend is our own chip
+    // row above the chart — the native graph-series legend resolves its hover against the NODE
+    // list, so it highlighted whatever node sat at the legend item's index.
     const categories = [
       ...colorGroups.map((g, i) => ({
         name: g,
-        itemStyle: { color: viz.categorical[i % viz.categorical.length] },
+        itemStyle: { color: groupColors[i] },
       })),
       { name: 'external', itemStyle: { color: viz.nodeDefault } },
       ...(colorGroups.length === 0
-        ? [{ name: 'in library', itemStyle: { color: viz.categorical[0] } }]
+        ? [{ name: 'in library', itemStyle: { color: groupColors[0] } }]
         : []),
     ];
     const categoryIndex = (n: RNode): number => {
@@ -172,10 +197,15 @@
       if (colorGroups.length === 0) return colorGroups.length + 1;
       return Math.max(0, colorGroups.indexOf(n.colorGroup ?? ''));
     };
+    // Plotted-order indices per group, for the chips' hover highlight dispatch.
+    groupDataIndices = new Map();
+    nodes.forEach((n, i) => {
+      if (!n.colorGroup) return;
+      const arr = groupDataIndices.get(n.colorGroup) ?? [];
+      arr.push(i);
+      groupDataIndices.set(n.colorGroup, arr);
+    });
     return {
-      legend: colorGroups.length
-        ? [{ data: colorGroups, textStyle: { color: viz.text }, top: 0 }]
-        : undefined,
       tooltip: {
         trigger: 'item',
         confine: true,
@@ -245,17 +275,8 @@
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function renderChart(chart: any): void {
-    // A full option rebuild resets the legend selection, so any solo state is gone too.
-    soloGroup = null;
     chart.setOption(buildOption(), true);
   }
-
-  // Shift-click legend solo: show only the clicked color group; shift-clicking the soloed group
-  // again re-selects all. ECharts legend events carry no modifier keys, so the shift state is
-  // captured from the DOM click (capture phase runs before ECharts' own handler).
-  let soloGroup: string | null = null;
-  let lastClickShift = false;
-  let applyingLegend = false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wireEvents(chart: any): void {
@@ -269,33 +290,38 @@
       }
       if (!node.workId && node.doi && onImportExternal) onImportExternal(node.doi);
     });
-    chart
-      .getDom()
-      ?.addEventListener('click', (e: MouseEvent) => (lastClickShift = e.shiftKey), true);
-    chart.on(
-      'legendselectchanged',
-      (params: { name: string; selected: Record<string, boolean> }) => {
-        if (applyingLegend) return; // our own dispatched actions re-fire this event
-        if (!lastClickShift) {
-          soloGroup = null; // a plain toggle breaks any solo state
-          return;
-        }
-        applyingLegend = true;
-        try {
-          const groups = Object.keys(params.selected);
-          const leavingSolo = soloGroup === params.name;
-          for (const group of groups) {
-            chart.dispatchAction({
-              type: leavingSolo || group === params.name ? 'legendSelect' : 'legendUnSelect',
-              name: group,
-            });
-          }
-          soloGroup = leavingSolo ? null : params.name;
-        } finally {
-          applyingLegend = false;
-        }
-      },
-    );
+  }
+
+  // --- Legend chips (our own legend; see the buildOption comment on why not ECharts') ---
+
+  let chartHost: ChartHost | null = null;
+
+  // Click: toggle one group. Shift-click: show only that group; shift-click it again to show all.
+  function onChipClick(group: string, shiftKey: boolean): void {
+    if (shiftKey) {
+      if (soloGroup === group) {
+        hiddenGroups = new Set();
+        soloGroup = null;
+      } else {
+        hiddenGroups = new Set(colorGroups.filter((g) => g !== group));
+        soloGroup = group;
+      }
+    } else {
+      const next = new Set(hiddenGroups);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      hiddenGroups = next;
+      soloGroup = null;
+    }
+    revision += 1;
+  }
+
+  // Hover: emphasize the group's nodes (adjacency focus blurs the rest, so the color pops).
+  function onChipHover(group: string, entering: boolean): void {
+    const chart = chartHost?.getChart();
+    const dataIndex = groupDataIndices.get(group);
+    if (!chart || !dataIndex?.length) return;
+    chart.dispatchAction({ type: entering ? 'highlight' : 'downplay', seriesIndex: 0, dataIndex });
   }
 
   // Client-side option rebuilds: size/filter/layout toggles bump the revision (ChartHost repaints).
@@ -404,12 +430,29 @@
     {#if rNodes.length === 0 && rEdges.length === 0}
       <p class="empty">{graphType === 'topic' ? 'No similarity edges in this scope yet.' : 'No citation edges in this scope yet.'}</p>
     {:else if renderMode === 'graph'}
-      <ChartHost render={renderChart} onReady={wireEvents} {revision} {visible}
+      {#if graphType === 'citation' && colorGroups.length}
+        <div class="chips" role="group" aria-label="Color groups">
+          {#each colorGroups as group, i (group)}
+            <button
+              type="button"
+              class="chip"
+              class:off={hiddenGroups.has(group)}
+              on:click={(e) => onChipClick(group, e.shiftKey)}
+              on:mouseenter={() => onChipHover(group, true)}
+              on:mouseleave={() => onChipHover(group, false)}
+              title="Hover: highlight this group · Click: show/hide it · Shift-click: show only this group (shift-click again to show all)"
+            >
+              <span class="dot" style={`background:${groupColors[i]}`}></span>{group}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      <ChartHost bind:this={chartHost} render={renderChart} onReady={wireEvents} {revision} {visible}
         ariaLabel={graphType === 'topic' ? 'Topic graph' : 'Citation graph'}>
         <svelte:fragment slot="fallback">Interactive view unavailable here — switch to List.</svelte:fragment>
       </ChartHost>
       <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : 'degree'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.{#if colorGroups.length}
-          Legend: click toggles a color group; shift-click shows only that group (shift-click it again to show all).{/if}</p>
+          Color chips: hover highlights, click hides/shows, shift-click solos a group.{/if}</p>
     {:else}
       <ul class="edges">
         {#each rEdges as edge (edge.source + '->' + edge.target)}
@@ -488,6 +531,43 @@
     border-radius: 6px;
     font: inherit;
     padding: 0.3rem 0.5rem;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0.35rem 0;
+  }
+
+  .chip {
+    align-items: center;
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-normal);
+    border-radius: 999px;
+    color: var(--ink-strong);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 0.78rem;
+    font-weight: 600;
+    gap: 0.3rem;
+    min-height: 0;
+    padding: 0.1rem 0.55rem;
+  }
+
+  .chip.off {
+    opacity: 0.45;
+  }
+
+  .chip.off .dot {
+    background: var(--border-normal) !important;
+  }
+
+  .chip .dot {
+    border-radius: 50%;
+    display: inline-block;
+    height: 0.65rem;
+    width: 0.65rem;
   }
 
   .note {

@@ -51,3 +51,16 @@ describe('colorForGroup', () => {
     expect(colorForGroup(theme, 'missing', groups)).toBe(theme.categorical[0]);
   });
 });
+
+describe("categoricalPalette", () => {
+  it("uses the fixed theme palette while it suffices, generated hues beyond it", async () => {
+    const { categoricalPalette, resolveTheme } = await import("./theme");
+    const theme = resolveTheme("light");
+    const small = categoricalPalette(3, theme);
+    expect(small).toEqual(theme.categorical.slice(0, 3));
+    // ~18 groups (color-by-year) used to cycle the 6-color palette 3×; now every color is distinct.
+    const big = categoricalPalette(18, theme);
+    expect(big).toHaveLength(18);
+    expect(new Set(big).size).toBe(18);
+  });
+});

@@ -81,5 +81,20 @@ export function colorForGroup(
 ): string {
   if (group === null) return theme.categorical[0];
   const index = groups.indexOf(group);
-  return theme.categorical[(index < 0 ? 0 : index) % theme.categorical.length];
+  return categoricalPalette(groups.length, theme)[index < 0 ? 0 : index];
+}
+
+/**
+ * n distinct category colors. Up to the theme's validated palette size the fixed palette is used;
+ * beyond it (e.g. color-by-year over ~18 years, which used to cycle the palette 3×) colors are
+ * generated as evenly spaced hues so every group stays distinguishable — and for sorted groups
+ * (years) the hue progression follows the order.
+ */
+export function categoricalPalette(n: number, theme: VizTheme): string[] {
+  const base = theme.categorical ?? [];
+  if (n <= base.length) return base.slice(0, Math.max(1, n));
+  return Array.from(
+    { length: n },
+    (_, i) => `hsl(${Math.round((330 * i) / Math.max(1, n - 1))}, 62%, 52%)`,
+  );
 }

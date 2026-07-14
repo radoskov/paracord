@@ -61,3 +61,50 @@ describe('CitationGraph', () => {
     expect(load).toHaveBeenLastCalledWith('local_only', false, 'year');
   });
 });
+
+describe('CitationGraph legend chips', () => {
+  const COLORED: CitationGraphResponse = {
+    nodes: [
+      { id: 'a', label: 'A', type: 'local', work_id: 'a', year: 2020, doi: null, color_group: '2020' },
+      { id: 'b', label: 'B', type: 'local', work_id: 'b', year: 2018, doi: null, color_group: '2018' },
+      { id: 'c', label: 'C', type: 'local', work_id: 'c', year: null, doi: null, color_group: 'unknown' },
+    ],
+    edges: [
+      { source: 'a', target: 'b', weight: 1, resolution: 'local_match' },
+      { source: 'b', target: 'c', weight: 1, resolution: 'local_match' },
+    ],
+    summary: { node_count: 3, edge_count: 2, external_node_count: 0, unresolved_reference_count: 0 },
+  };
+
+  async function buildColored() {
+    const load = vi.fn(async () => COLORED);
+    render(CitationGraph, { label: '', load });
+    await fireEvent.change(screen.getByTestId('graph-color-by'), { target: { value: 'year' } });
+    await fireEvent.click(screen.getByRole('button', { name: /build graph/i }));
+    return load;
+  }
+
+  it('renders one chip per group, years sorted numerically with unknown last', async () => {
+    await buildColored();
+    const chips = screen.getAllByRole('button', { name: /2018|2020|unknown/ });
+    expect(chips.map((c) => c.textContent?.trim())).toEqual(['2018', '2020', 'unknown']);
+  });
+
+  it('click toggles a group off; shift-click solos; shift-click again restores', async () => {
+    await buildColored();
+    const chip = (name: string) => screen.getByRole('button', { name });
+
+    await fireEvent.click(chip('2018'));
+    expect(chip('2018').classList.contains('off')).toBe(true);
+
+    await fireEvent.click(chip('2020'), { shiftKey: true });
+    expect(chip('2020').classList.contains('off')).toBe(false);
+    expect(chip('2018').classList.contains('off')).toBe(true);
+    expect(chip('unknown').classList.contains('off')).toBe(true);
+
+    await fireEvent.click(chip('2020'), { shiftKey: true });
+    for (const name of ['2018', '2020', 'unknown']) {
+      expect(chip(name).classList.contains('off')).toBe(false);
+    }
+  });
+});

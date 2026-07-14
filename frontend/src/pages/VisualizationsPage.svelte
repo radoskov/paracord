@@ -18,6 +18,7 @@
   import ChartHost from '../components/ChartHost.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
   import { activeVizTheme } from '../lib/theme/store';
+  import { enableLegendSolo } from '../lib/viz/legendSolo';
   import { resolveScopeRequest } from '../lib/scope';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -194,6 +195,8 @@
       const id = el?.getAttribute('data-viz-open');
       if (id) openPaper(id);
     });
+    // Shift-click a legend entry to show only that group; shift-click again to show all.
+    enableLegendSolo(chart);
   }
 
   // B1 help: description of the current view + the "About this view" / "Visualization types" popups.

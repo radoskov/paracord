@@ -5,6 +5,7 @@
   import ChartHost from './ChartHost.svelte';
   import Modal from './Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
+  import { enableLegendSolo } from '../lib/viz/legendSolo';
   import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
   import {
     DEFAULT_SECTION_WEIGHTS,
@@ -127,6 +128,8 @@
     });
     // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
     chart.getDom()?.addEventListener('click', onContainerClick);
+    // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
+    enableLegendSolo(chart);
   }
 
   // Y-axis / colour changes are pure client-side restyles — bump the revision, no refetch.
