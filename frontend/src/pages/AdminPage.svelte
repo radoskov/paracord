@@ -241,7 +241,7 @@
     });
     // Runtime app config (D18 page-size clamp + D1 overload protection) is owner+admin. Loaded
     // OUTSIDE the chain above with its own retries: it seeds the Settings form, so a transient
-    // failure (its own or an earlier admin GET's, which would abort the chain) must not leave the
+    // failure (its own, or an earlier admin request aborting the chain) must not leave the
     // form unseeded — the e2e journey-17 first-run flake.
     if (get(canManageUsers)) void loadAppConfig();
   }
