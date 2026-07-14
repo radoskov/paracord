@@ -9,6 +9,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Insights audit implementation, chunk C (2026-07-14)
+
+- **C1+C2** (`7d25815`): ONE charting stack — Cytoscape removed from `package.json`;
+  `CitationGraph.svelte` rewritten as an ECharts force-directed graph (same props/controls;
+  layouts reduced to Force/Circle; filters/sizing/theme are client-side option rebuilds).
+  Shared `<ChartHost>` owns the ECharts lifecycle (lazy import, init, ResizeObserver,
+  resize-on-tab-show, theme repaint, dispose) for CitationGraph, ReferenceGraphModal,
+  CitationSummaryPage and VisualizationsPage.
+- **C3** (`f5aa83f`): shared `<ScopePicker>` + `lib/scope.ts` (readiness rule + request
+  building); Visualizations and Citation summary gain the import-batch and saved-filter scopes
+  their backends already accepted (all three tabs now offer all seven). Vocabulary unified
+  (same scope labels/hints everywhere; American "Summarize"/"Modeled" spelling).
+- **C4**: temporal-map size/color changes restyle the loaded payload client-side
+  (`restyleTemporalMap`; nodes now ship `venue` in meta) instead of refetching; the four
+  duplicated cosine implementations collapse into `services/vector_math.py`
+  (dense/sparse/matrix); Citation summary fetches the venue/author aggregation lazily on first
+  sub-tab open; Insights surfaces the topic modeler's coherence score, representative papers
+  (lazy title lookup, click-to-open) and no-topic outliers, which were previously dropped.
+
 ## Insights audit implementation, chunks A+B (2026-07-13)
 
 Owner decisions on the Insights/Viz/Summaries audit: merge graph engines on ECharts; high
