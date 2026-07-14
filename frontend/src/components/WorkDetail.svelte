@@ -1164,7 +1164,7 @@
         <button type="button" class="secondary" on:click={summarise} disabled={loading || !canModify}
           title={canModify
             ? 'Generate an AI summary of this paper (uses the configured summary model; stored and regeneratable)'
-            : INSUFFICIENT_ROLE}>{summaries.length ? 'Regenerate summary' : 'Summarise'}</button>
+            : INSUFFICIENT_ROLE}>{summaries.length ? 'Regenerate summary' : 'Summarize'}</button>
       </div>
       <div class="actions">
         <button type="button" class="secondary danger-btn" on:click={deletePaper} disabled={loading || !canModify}

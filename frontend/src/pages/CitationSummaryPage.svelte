@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-
   import {
     ApiClient,
     type CitationSummary,
@@ -13,11 +11,12 @@
     type Work,
   } from '../api/client';
   import Modal from '../components/Modal.svelte';
+  import ScopePicker from '../components/ScopePicker.svelte';
   import WorkDetail from '../components/WorkDetail.svelte';
-  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
   import ChartHost from '../components/ChartHost.svelte';
   import { activeVizTheme } from '../lib/theme/store';
+  import { resolveScopeRequest, type ScopeRequest } from '../lib/scope';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -25,9 +24,13 @@
   // Whether the tab is visible (#9): ECharts mis-sizes when built while display:none.
   export let visible = true;
 
+  // Scope state, bound into the shared ScopePicker (C3); readiness is computed there.
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let searchQuery = '';
+  let batchId = '';
+  let savedFilterId = '';
+  let scopeReady = true;
 
   let summary: CitationSummary | null = null;
   let busy = false;
@@ -59,43 +62,20 @@
 
   let chartRevision = 0;
 
-  $: scopeReady =
-    scopeType === 'library'
-      ? true
-      : scopeType === 'shelf' || scopeType === 'rack'
-        ? !!scopeId
-        : scopeType === 'search_result'
-          ? !!searchQuery.trim()
-          : scopeType === 'selected_papers'
-            ? $selectedPaperIds.length > 0
-            : false;
-
-  onMount(async () => {
-    try {
-      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
-      await Promise.all([ensureShelves(client), ensureRacks(client)]);
-    } catch (error) {
-      message = errorMessage(error);
-    }
-  });
-
   async function load(): Promise<void> {
     if (!scopeReady) return;
     busy = true;
     message = '';
     try {
-      let workIds: string[] | undefined;
-      if (scopeType === 'search_result') {
-        const works = (await client.listWorks({ q: searchQuery, perPage: 500 })).items;
-        workIds = works.map((w) => w.id);
-      } else if (scopeType === 'selected_papers') {
-        workIds = $selectedPaperIds;
-      }
-      currentWorkIds = workIds;
-      const scopeIdArg = scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null;
+      const scopeArgs = await resolveScopeRequest(
+        client,
+        { scopeType, scopeId, searchQuery, batchId, savedFilterId },
+        $selectedPaperIds,
+      );
+      currentScopeArgs = scopeArgs;
       const [summaryResult, venueAuthorResult] = await Promise.all([
-        client.citationSummary({ scopeType, scopeId: scopeIdArg, workIds }),
-        client.venueAuthorSummary({ scopeType, scopeId: scopeIdArg, workIds }),
+        client.citationSummary(scopeArgs),
+        client.venueAuthorSummary(scopeArgs),
       ]);
       summary = summaryResult;
       venueAuthor = venueAuthorResult;
@@ -109,8 +89,8 @@
     }
   }
 
-  // The resolved work ids used for the last summary (search/selection scopes), reused for exports.
-  let currentWorkIds: string[] | undefined;
+  // The resolved scope arguments used for the last summary, reused for the missing-list exports.
+  let currentScopeArgs: ScopeRequest | null = null;
 
   function openPaper(workId: string): void {
     pendingLibraryOpen.set(workId);
@@ -182,9 +162,7 @@
     exportingMissing = true;
     try {
       const result = await client.exportMissingWorks({
-        scopeType,
-        scopeId: scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null,
-        workIds: currentWorkIds,
+        ...(currentScopeArgs ?? { scopeType }),
         format,
       });
       const url = URL.createObjectURL(new Blob([result.content], { type: result.content_type }));
@@ -228,51 +206,22 @@
     </p>
 
     <div class="controls">
-      <label>
-        Scope
-        <select bind:value={scopeType} data-testid="summary-scope-type" title="What to summarize">
-          <option value="library">Whole library</option>
-          <option value="shelf">A shelf</option>
-          <option value="rack">A rack</option>
-          <option value="search_result">Search result</option>
-          <option value="selected_papers">Selected papers</option>
-        </select>
-      </label>
-
-      {#if scopeType === 'shelf'}
-        <label>Shelf
-          <select bind:value={scopeId} data-testid="summary-scope-id">
-            <option value="">Choose a shelf…</option>
-            {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
-          </select>
-        </label>
-      {:else if scopeType === 'rack'}
-        <label>Rack
-          <select bind:value={scopeId} data-testid="summary-scope-id">
-            <option value="">Choose a rack…</option>
-            {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
-          </select>
-        </label>
-      {:else if scopeType === 'search_result'}
-        <label>Query
-          <input bind:value={searchQuery} placeholder="Search papers…" data-testid="summary-scope-search" />
-        </label>
-      {:else if scopeType === 'selected_papers'}
-        <span class="selcount">{$selectedPaperIds.length} selected</span>
-      {/if}
+      <ScopePicker
+        {client}
+        bind:scopeType
+        bind:scopeId
+        bind:searchQuery
+        bind:batchId
+        bind:savedFilterId
+        bind:ready={scopeReady}
+        verb="summarize"
+        testid="summary"
+      />
 
       <button type="button" on:click={load} disabled={busy || !scopeReady} data-testid="summary-build">
         {summary ? 'Refresh' : 'Summarize'}
       </button>
     </div>
-
-    {#if !scopeReady}
-      <p class="hintline">
-        {#if scopeType === 'selected_papers'}Select papers in the Library tab first.
-        {:else if scopeType === 'search_result'}Type a search to summarize its results.
-        {:else}Pick a {scopeType} to summarize.{/if}
-      </p>
-    {/if}
   </div>
 
   {#if summary}
@@ -940,12 +889,6 @@
   .muted-strike {
     color: var(--ink-muted);
     text-decoration: line-through;
-  }
-
-  .selcount {
-    align-self: center;
-    color: var(--ink-muted);
-    font-size: 0.9rem;
   }
 
   .chart {

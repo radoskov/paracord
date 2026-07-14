@@ -151,7 +151,7 @@
     if (!status || !config) return { kind: 'baseline', label: 'Loading…', reason: null };
     const a = status.active.summary;
     if (config.summary_provider === 'extractive') {
-      return { kind: 'baseline', label: 'Built-in baseline', reason: 'Dependency-free extractive summariser — always works.' };
+      return { kind: 'baseline', label: 'Built-in baseline', reason: 'Dependency-free extractive summarizer — always works.' };
     }
     if (a.available) return { kind: 'ok', label: 'Available', reason: null };
     return { kind: 'off', label: 'Falls back to extractive', reason: a.note };
@@ -409,7 +409,7 @@
           <span class="badge badge-{sumBadge.kind}" title={sumBadge.reason ?? ''}>{sumBadge.label}</span>
         </header>
         <p class="what">Generates a short prose summary of a paper, shelf or rack.</p>
-        <p class="used">Used for: the "Summarise" action on a paper and the scope summaries in Insights.</p>
+        <p class="used">Used for: the "Summarize" action on a paper and the scope summaries in Insights.</p>
         {#if sumBadge.reason}<p class="reason">{sumBadge.reason}</p>{/if}
         <label>Summary provider
           <select bind:value={config.summary_provider} disabled={busy} title="Engine used to generate summaries">
@@ -437,7 +437,7 @@
           </label>
         {:else}
           <label>Summary model
-            <select disabled title="No model needed for the built-in extractive summariser">
+            <select disabled title="No model needed for the built-in extractive summarizer">
               <option>{config.summary_model || '—'}</option>
             </select>
             <small class="hint">No model needed for this provider.</small>

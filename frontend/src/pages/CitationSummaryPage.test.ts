@@ -46,6 +46,8 @@ function makeClient(over: Record<string, unknown> = {}) {
   return {
     listShelves: vi.fn().mockResolvedValue([]),
     listRacks: vi.fn().mockResolvedValue([]),
+    listImportBatches: vi.fn().mockResolvedValue([]),
+    listSavedFilters: vi.fn().mockResolvedValue([]),
     citationSummary: vi.fn().mockResolvedValue(baseSummary()),
     venueAuthorSummary: vi.fn().mockResolvedValue({
       scope_work_count: 0,

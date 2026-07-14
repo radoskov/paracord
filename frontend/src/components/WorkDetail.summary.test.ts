@@ -109,7 +109,7 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     const client = makeClient([], { createSummary, listSummaries });
     render(WorkDetail, { client: client as never, work: makeWork() });
 
-    const btn = await screen.findByRole("button", { name: /^summarise$/i });
+    const btn = await screen.findByRole("button", { name: /^summarize$/i });
     await fireEvent.click(btn);
 
     expect(createSummary).toHaveBeenCalledWith("w1", "auto");

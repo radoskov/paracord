@@ -67,7 +67,7 @@ describe('InsightsPage Phase B6 graph scopes', () => {
     await waitFor(() => expect(client.listImportBatches).toHaveBeenCalled());
 
     await selectScope('search_result');
-    const input = screen.getByLabelText('Graph search query') as HTMLInputElement;
+    const input = screen.getByLabelText('Scope search query') as HTMLInputElement;
     await fireEvent.input(input, { target: { value: 'attention' } });
     await build();
 

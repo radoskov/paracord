@@ -16,10 +16,11 @@
   import { VIEW_HELP, axisOptionHelp, helpForView } from '../lib/viz/vizHelp';
   import Modal from '../components/Modal.svelte';
   import ChartHost from '../components/ChartHost.svelte';
+  import ScopePicker from '../components/ScopePicker.svelte';
   import { activeVizTheme } from '../lib/theme/store';
+  import { resolveScopeRequest } from '../lib/scope';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
-  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
 
   export let client: ApiClient;
   // Whether the tab is visible (#9): ECharts mis-sizes when built while display:none, so resize
@@ -28,9 +29,13 @@
 
   let viewTypes: string[] = registeredViewTypes();
   let viewType = viewTypes[0] ?? 'temporal_map';
+  // Scope state, bound into the shared ScopePicker (C3); readiness is computed there.
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
   let searchQuery = '';
+  let batchId = '';
+  let savedFilterId = '';
+  let scopeReady = true;
 
   let xAxis = 'year';
   let yAxis = 'local_degree';
@@ -103,25 +108,9 @@
 
   $: needsFocus = isTemporal && (xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus'));
 
-  $: scopeReady =
-    scopeType === 'library'
-      ? true
-      : scopeType === 'shelf' || scopeType === 'rack'
-        ? !!scopeId
-        : scopeType === 'search_result'
-          ? !!searchQuery.trim()
-          : scopeType === 'selected_papers'
-            ? $selectedPaperIds.length > 0
-            : false;
-
   onMount(async () => {
     try {
-      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
-      [, , viewTypes] = await Promise.all([
-        ensureShelves(client),
-        ensureRacks(client),
-        client.listVizViewTypes().catch(() => registeredViewTypes()),
-      ]);
+      viewTypes = await client.listVizViewTypes().catch(() => registeredViewTypes());
     } catch (error) {
       message = errorMessage(error);
     }
@@ -132,17 +121,13 @@
     busy = true;
     message = '';
     try {
-      let workIds: string[] | undefined;
-      if (scopeType === 'search_result') {
-        const works = (await client.listWorks({ q: searchQuery, perPage: 500 })).items;
-        workIds = works.map((w) => w.id);
-      } else if (scopeType === 'selected_papers') {
-        workIds = $selectedPaperIds;
-      }
+      const scopeArgs = await resolveScopeRequest(
+        client,
+        { scopeType, scopeId, searchQuery, batchId, savedFilterId },
+        $selectedPaperIds,
+      );
       payload = await client.visualization(viewType, {
-        scopeType,
-        scopeId: scopeType === 'shelf' || scopeType === 'rack' ? scopeId : null,
-        workIds,
+        ...scopeArgs,
         xAxis,
         yAxis,
         sizeBy,
@@ -257,38 +242,17 @@
     {/if}
 
     <div class="controls">
-      <label>
-        Scope
-        <select bind:value={scopeType} data-testid="viz-scope-type" title="Which papers to include — whole library, a shelf, a rack, the search result, or selected papers">
-          <option value="library">Whole library</option>
-          <option value="shelf">A shelf</option>
-          <option value="rack">A rack</option>
-          <option value="search_result">Search result</option>
-          <option value="selected_papers">Selected papers</option>
-        </select>
-      </label>
-
-      {#if scopeType === 'shelf'}
-        <label>Shelf
-          <select bind:value={scopeId} data-testid="viz-scope-id">
-            <option value="">Choose a shelf…</option>
-            {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
-          </select>
-        </label>
-      {:else if scopeType === 'rack'}
-        <label>Rack
-          <select bind:value={scopeId} data-testid="viz-scope-id">
-            <option value="">Choose a rack…</option>
-            {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
-          </select>
-        </label>
-      {:else if scopeType === 'search_result'}
-        <label>Query
-          <input bind:value={searchQuery} placeholder="Search papers…" data-testid="viz-scope-search" />
-        </label>
-      {:else if scopeType === 'selected_papers'}
-        <span class="selcount">{$selectedPaperIds.length} selected</span>
-      {/if}
+      <ScopePicker
+        {client}
+        bind:scopeType
+        bind:scopeId
+        bind:searchQuery
+        bind:batchId
+        bind:savedFilterId
+        bind:ready={scopeReady}
+        verb="visualize"
+        testid="viz"
+      />
     </div>
 
     <div class="controls">
@@ -391,13 +355,6 @@
       </button>
     </div>
 
-    {#if !scopeReady}
-      <p class="hintline">
-        {#if scopeType === 'selected_papers'}Select papers in the Library tab first.
-        {:else if scopeType === 'search_result'}Type a search to visualize its results.
-        {:else}Pick a {scopeType} to visualize.{/if}
-      </p>
-    {/if}
   </div>
 
   {#if payload}
@@ -579,12 +536,6 @@
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .selcount {
-    align-self: center;
-    color: var(--ink-muted);
-    font-size: 0.9rem;
   }
 
   .chart {

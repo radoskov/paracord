@@ -35,8 +35,8 @@ function baseSummary(over: Partial<ScopeSummaryResponse>): ScopeSummaryResponse 
   };
 }
 
-async function summarise(): Promise<void> {
-  await fireEvent.click(screen.getByRole('button', { name: /summarise/i }));
+async function summarize(): Promise<void> {
+  await fireEvent.click(screen.getByRole('button', { name: /summarize/i }));
 }
 
 describe('InsightsPage scope summary (L4) + no search (L2)', () => {
@@ -44,7 +44,7 @@ describe('InsightsPage scope summary (L4) + no search (L2)', () => {
     const client = makeClient(baseSummary({}));
     render(InsightsPage, { client: client as never });
     await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
-    await summarise();
+    await summarize();
     await waitFor(() => expect(screen.getByText(EXTRACTIVE_HINT)).toBeTruthy());
   });
 
@@ -54,7 +54,7 @@ describe('InsightsPage scope summary (L4) + no search (L2)', () => {
     );
     render(InsightsPage, { client: client as never });
     await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
-    await summarise();
+    await summarize();
     await waitFor(() =>
       expect(screen.getByText(/the local LLM is unavailable/)).toBeTruthy(),
     );
@@ -67,7 +67,7 @@ describe('InsightsPage scope summary (L4) + no search (L2)', () => {
     );
     render(InsightsPage, { client: client as never });
     await waitFor(() => expect(client.listShelves).toHaveBeenCalled());
-    await summarise();
+    await summarize();
     await waitFor(() => expect(screen.getByText('A summary of the scope.')).toBeTruthy());
     expect(screen.queryByText(EXTRACTIVE_HINT)).toBeNull();
   });

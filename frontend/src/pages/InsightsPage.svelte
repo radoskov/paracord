@@ -1,55 +1,36 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-
   import {
     ApiClient,
     type CitationGraphResponse,
     type GraphNodeMode,
     type GraphScopeType,
-    type ImportBatch,
-    type SavedFilter,
     type ScopeSummaryResponse,
     type Topic,
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
-  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
+  import ScopePicker from '../components/ScopePicker.svelte';
+  import { resolveScopeRequest } from '../lib/scope';
   import { pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
-  // Whether the Insights tab is visible (#9). Forwarded to CitationGraph so it can resize +
-  // relayout Cytoscape after the tab is shown again (it mis-sizes while hidden).
+  // Whether the Insights tab is visible (#9). Forwarded to CitationGraph so it can resize the
+  // chart after the tab is shown again (it mis-sizes while hidden).
   export let visible = true;
 
+  // Scope state, bound into the shared ScopePicker (C3); readiness is computed there.
   let scopeType: GraphScopeType = 'library';
   let scopeId = '';
+  let searchQuery = '';
+  let batchId = '';
+  let savedFilterId = '';
+  let scopeReady = true;
+
   let topics: Topic[] = [];
   let summary: ScopeSummaryResponse | null = null;
   let loading = false;
   let message = '';
-  // Phase B6 graph scopes.
-  let graphSearchQuery = '';
-  let batches: ImportBatch[] = [];
-  let batchId = '';
-  // Phase B7 saved-filter scope.
-  let savedFilters: SavedFilter[] = [];
-  let savedFilterId = '';
-  // Live count of the library multi-selection (mirrored from LibraryPage).
-  let selectedCount = 0;
-  $: selectedCount = $selectedPaperIds.length;
-
-  onMount(async () => {
-    await run(async () => {
-      // Prime the shared catalog stores so newly created shelves/racks appear in these dropdowns live.
-      [, , batches, savedFilters] = await Promise.all([
-        ensureShelves(client),
-        ensureRacks(client),
-        client.listImportBatches().catch(() => [] as ImportBatch[]),
-        client.listSavedFilters().catch(() => [] as SavedFilter[]),
-      ]);
-    });
-  });
 
   $: scope = {
     scopeType,
@@ -103,64 +84,27 @@
     collapseVersions: boolean,
     colorBy: import('../api/client').GraphColorBy,
   ): Promise<CitationGraphResponse> {
-    if (scopeType === 'search_result') {
-      // Run the metadata search now and pass the resulting ids as the explicit work set.
-      const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
-      return awaitAnalysis(await client.citationGraph({
-        maxExternal,
-        scopeType,
-        workIds: works.map((w) => w.id),
-        nodeMode,
-        collapseVersions,
-        colorBy,
-      }));
-    }
-    if (scopeType === 'selected_papers') {
-      return awaitAnalysis(await client.citationGraph({
-        maxExternal,
-        scopeType,
-        workIds: $selectedPaperIds,
-        nodeMode,
-        collapseVersions,
-        colorBy,
-      }));
-    }
-    if (scopeType === 'import_batch') {
-      return awaitAnalysis(await client.citationGraph({ maxExternal, scopeType, scopeId: batchId || null, nodeMode, collapseVersions, colorBy }));
-    }
-    if (scopeType === 'saved_filter') {
-      // The backend loads the caller's saved filter, resolves + visibility-clamps it to work ids.
-      return awaitAnalysis(await client.citationGraph({ maxExternal, scopeType, scopeId: savedFilterId || null, nodeMode, collapseVersions, colorBy }));
-    }
+    // resolveScopeRequest runs a search_result search now and passes the ids as the explicit work
+    // set; a saved_filter id is expanded + visibility-clamped by the backend.
+    const scopeArgs = await resolveScopeRequest(
+      client,
+      { scopeType, scopeId, searchQuery, batchId, savedFilterId },
+      $selectedPaperIds,
+    );
     return awaitAnalysis(
-      await client.citationGraph({
-        maxExternal,
-        scopeType: scope.scopeType,
-        scopeId: scope.scopeId,
-        nodeMode,
-        collapseVersions,
-        colorBy,
-      }),
+      await client.citationGraph({ maxExternal, ...scopeArgs, nodeMode, collapseVersions, colorBy }),
     );
   }
 
-  // Topic (embedding-similarity) graph over the current scope (#6). Mirrors loadGraph's scope
-  // resolution so both graph types share the same scope picker.
+  // Topic (embedding-similarity) graph over the current scope (#6). Same scope resolution, so
+  // both graph types share the same scope picker.
   async function loadTopicGraph(): Promise<import('../api/client').TopicGraphResponse> {
-    if (scopeType === 'search_result') {
-      const works = (await client.listWorks({ q: graphSearchQuery, perPage: 500 })).items;
-      return awaitAnalysis(await client.topicGraph({ scopeType, workIds: works.map((w) => w.id) }));
-    }
-    if (scopeType === 'selected_papers') {
-      return awaitAnalysis(await client.topicGraph({ scopeType, workIds: $selectedPaperIds }));
-    }
-    if (scopeType === 'import_batch') {
-      return awaitAnalysis(await client.topicGraph({ scopeType, scopeId: batchId || null }));
-    }
-    if (scopeType === 'saved_filter') {
-      return awaitAnalysis(await client.topicGraph({ scopeType, scopeId: savedFilterId || null }));
-    }
-    return awaitAnalysis(await client.topicGraph({ scopeType: scope.scopeType, scopeId: scope.scopeId }));
+    const scopeArgs = await resolveScopeRequest(
+      client,
+      { scopeType, scopeId, searchQuery, batchId, savedFilterId },
+      $selectedPaperIds,
+    );
+    return awaitAnalysis(await client.topicGraph(scopeArgs));
   }
 
   // External graph node → jump to the Library search for its DOI so the user can import it (#8).
@@ -208,7 +152,7 @@
         return;
       }
       topics = response.topics;
-      message = `Modelled ${response.topics.length} topics over ${response.work_count} papers`;
+      message = `Modeled ${response.topics.length} topics over ${response.work_count} papers`;
     });
   }
 
@@ -227,20 +171,6 @@
     }, 'Summary generated');
   }
 
-  $: scopeReady =
-    scopeType === 'library'
-      ? true
-      : scopeType === 'shelf' || scopeType === 'rack'
-        ? !!scopeId
-        : scopeType === 'search_result'
-          ? !!graphSearchQuery.trim()
-          : scopeType === 'selected_papers'
-            ? selectedCount > 0
-            : scopeType === 'import_batch'
-              ? !!batchId
-              : scopeType === 'saved_filter'
-                ? !!savedFilterId
-                : false;
 </script>
 
 <section class="layout">
@@ -248,65 +178,25 @@
 
   <div class="card scope">
     <h2>Scope</h2>
-    <p class="muted">Choose what the graph, topics and summary below operate on.</p>
-    <div class="row">
-      <select bind:value={scopeType} aria-label="Scope type" title="What the analyses below operate on">
-        <option value="library">Whole library</option>
-        <option value="shelf">A shelf</option>
-        <option value="rack">A rack</option>
-        <option value="search_result">Search result</option>
-        <option value="selected_papers">Selected papers</option>
-        <option value="import_batch">From import batch</option>
-        <option value="saved_filter">Saved filter</option>
-      </select>
-      {#if scopeType === 'shelf'}
-        <select bind:value={scopeId} aria-label="Shelf" title="Choose the shelf to analyse">
-          <option value="">Choose a shelf…</option>
-          {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
-        </select>
-      {:else if scopeType === 'rack'}
-        <select bind:value={scopeId} aria-label="Rack" title="Choose the rack to analyse">
-          <option value="">Choose a rack…</option>
-          {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
-        </select>
-      {:else if scopeType === 'search_result'}
-        <input
-          bind:value={graphSearchQuery}
-          aria-label="Graph search query"
-          placeholder="Search papers to graph…"
-          title="Papers matching this search are graphed"
-        />
-      {:else if scopeType === 'selected_papers'}
-        <span class="selcount" aria-label="Selected papers count">{selectedCount} paper{selectedCount === 1 ? '' : 's'} selected</span>
-      {:else if scopeType === 'import_batch'}
-        <select bind:value={batchId} aria-label="Import batch" title="Choose the import batch to graph">
-          <option value="">Choose an import batch…</option>
-          {#each batches as batch (batch.id)}
-            <option value={batch.id}>{batch.input_type} · {batch.work_count ?? 0} paper{(batch.work_count ?? 0) === 1 ? '' : 's'} · {new Date(batch.created_at).toLocaleDateString()}</option>
-          {/each}
-        </select>
-      {:else if scopeType === 'saved_filter'}
-        <select bind:value={savedFilterId} aria-label="Saved filter" title="Choose the saved filter to analyse">
-          <option value="">Choose a saved filter…</option>
-          {#each savedFilters as filter (filter.id)}<option value={filter.id}>{filter.name}</option>{/each}
-        </select>
-      {/if}
+    <p class="muted">The set of papers the graph, topics and summary below operate on.</p>
+    <ScopePicker
+      {client}
+      bind:scopeType
+      bind:scopeId
+      bind:searchQuery
+      bind:batchId
+      bind:savedFilterId
+      bind:ready={scopeReady}
+      verb="analyze"
+      testid="insights"
+    >
       <label class="max-external-label"
         title="Keep only this many external (not-in-library) cited papers in graphs — the most-cited ones. In-library nodes are never hidden.">
         Max external
         <input type="number" min="0" max="500" bind:value={maxExternal}
           aria-label="Maximum external nodes" style="width:5rem" />
       </label>
-    </div>
-    {#if !scopeReady}
-      <p class="hintline">
-        {#if scopeType === 'search_result'}Type a search to graph its results.
-        {:else if scopeType === 'selected_papers'}Select papers in the Library tab to graph them.
-        {:else if scopeType === 'import_batch'}Pick an import batch to graph its papers.
-        {:else if scopeType === 'saved_filter'}Pick a saved filter to graph its papers.
-        {:else}Pick a {scopeType} to run analyses on it.{/if}
-      </p>
-    {/if}
+    </ScopePicker>
     {#if scopeReady && isClassicScope}
       <div style="margin-top:0.6rem">
         <ExportDialog
@@ -371,10 +261,10 @@
       <div class="head">
         <h2>Scope summary</h2>
         <button type="button" on:click={summarise} disabled={loading || !scopeReady || !isClassicScope}
-          title={isClassicScope ? (scopeReady ? 'Summarise the scope’s abstracts (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarise</button>
+          title={isClassicScope ? (scopeReady ? 'Summarize the scope’s abstracts (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarize</button>
       </div>
       {#if !summary}
-        <p class="empty">No summary yet — click “Summarise”.</p>
+        <p class="empty">No summary yet — click “Summarize”.</p>
       {:else}
         <p class="summary-text">{summary.text}</p>
         <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}</p>
@@ -432,20 +322,13 @@
     margin: 0;
   }
 
-  .row {
-    display: grid;
-    gap: 0.5rem;
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .scope .row {
-    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
-  }
-
-  .selcount {
-    align-self: center;
-    color: var(--ink-muted);
-    font-size: 0.9rem;
+  .max-external-label {
+    color: var(--ink-strong);
+    display: flex;
+    flex-direction: column;
+    font-size: 0.8rem;
+    font-weight: 700;
+    gap: 0.2rem;
   }
 
   .plain {
