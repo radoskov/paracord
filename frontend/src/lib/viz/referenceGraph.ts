@@ -89,6 +89,7 @@ function lighten(color: string, amount: number): string {
 // Group co-located nodes (identical plotted x,y) so an overlap becomes ONE count-badged marker
 // instead of indistinguishable stacked dots (ported from temporalMap.ts). Grouping is within one
 // series so a marker keeps a single colour. Fixes ~100 citing papers pixel-stacking as "a handful".
+// Never mixes click actions: nodes at one spot are also split by action kind (see actionKindOf).
 function groupByCoord(
   nodes: ReferenceGraphNode[],
   xOf: (n: ReferenceGraphNode) => number | undefined,
@@ -96,13 +97,36 @@ function groupByCoord(
 ): ReferenceGraphNode[][] {
   const by = new Map<string, ReferenceGraphNode[]>();
   for (const n of nodes) {
-    const key = `${xOf(n)}|${yOf(n)}`;
+    const key = `${xOf(n)}|${yOf(n)}|${actionKindOf(n)}`;
     const arr = by.get(key);
     if (arr) arr.push(n);
     else by.set(key, [n]);
   }
   return [...by.values()];
 }
+
+// What clicking a node does — the categories a mixed overlap must be split into. A cluster that
+// mixed an in-library citing paper with external ones acted as its first member (usually
+// "import"); splitting by action keeps every marker's click unambiguous.
+type ActionKind = "base" | "local" | "likely" | "external";
+const ACTION_ORDER: ActionKind[] = ["base", "local", "likely", "external"];
+
+export function actionKindOf(n: ReferenceGraphNode): ActionKind {
+  if (n.kind === "base") return "base";
+  if (n.kind === "likely_local") return "likely";
+  return n.resolved_work_id ? "local" : "external";
+}
+
+const ACTION_LABEL: Record<ActionKind, string> = {
+  base: "this paper",
+  local: "in library — click opens",
+  likely: "likely in library — click reviews",
+  external: "not in library — click imports",
+};
+
+// Horizontal fan-out (in year units) between the action-kind markers sharing one (x, y) spot, so
+// e.g. the in-library and external citing papers of one year sit separately but near each other.
+const OVERLAP_DX = 0.18;
 
 // How many overlapping members a cluster tooltip lists before summarizing the rest ("…and N more").
 const TOOLTIP_MEMBER_LIMIT = 10;
@@ -158,7 +182,7 @@ export const REFERENCE_GRAPH_HELP = {
     "The horizontal axis is always publication year (older to the left, newer to the right). References with no known year sit in a separate “no year” lane at the far left so they stay visible.",
   size: "Node size is always the section-weighted citation count — how heavily this paper relies on that reference. The per-section weights (abstract, methods, …) are set in your Profile.",
   color:
-    "Colour marks the node kind: this paper, an in-library reference (a work you already have), a “likely in library” reference (a tolerant title match awaiting your confirmation, shown as a lighter tint of the in-library colour), or an external reference (cited but not in your library). When several nodes land on the same spot they collapse into one marker with a count badge — hover it to list them (up to 10, with the true total) and open or import each.",
+    "Colour marks the node kind: this paper, an in-library reference (a work you already have), a “likely in library” reference (a tolerant title match awaiting your confirmation, shown as a lighter tint of the in-library colour), or an external reference (cited but not in your library). When several nodes land on the same spot they collapse into one marker with a count badge — hover it to list them (up to 10, with the true total) and open or import each. Nodes with different click actions (in library / likely / external) never share a marker: they fan out side by side, so clicking always does what that marker's colour says.",
   refEdges:
     "“Local reference-to-reference edges”: when on, also draws citation links between the in-library references that cite one another — not just from this paper out to each reference — revealing how your cited works build on each other. Off by default because it needs those references' own extracted citations.",
   naLane:
@@ -226,12 +250,36 @@ export function buildReferenceGraphOption(
   const symbolFor = (n: ReferenceGraphNode) =>
     n.kind === "base" ? BASE_SYMBOL : sizeFor(weightedById.get(n.id) ?? 0);
 
+  // When one (x, y) spot holds nodes with DIFFERENT click actions (in-library / likely / external),
+  // fan them out horizontally by OVERLAP_DX so each action gets its own nearby marker instead of
+  // one mixed cluster whose click acted as its first member. Computed over ALL nodes (the split
+  // markers can live in different series). Offsets are fractional while raw x is whole years, so a
+  // fanned marker can't land on another year's spot.
+  const kindsAt = new Map<string, ActionKind[]>();
+  for (const n of graph.nodes) {
+    const key = `${x.get(n.id)}|${yFor(n)}`;
+    const kinds = kindsAt.get(key) ?? [];
+    const kind = actionKindOf(n);
+    if (!kinds.includes(kind)) kinds.push(kind);
+    kindsAt.set(key, kinds);
+  }
+  const xPlot = (n: ReferenceGraphNode): number => {
+    const rawX = x.get(n.id) as number;
+    const kinds = kindsAt.get(`${rawX}|${yFor(n)}`) ?? [];
+    if (kinds.length < 2) return rawX;
+    const ordered = [...kinds].sort(
+      (a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b),
+    );
+    const i = ordered.indexOf(actionKindOf(n));
+    return rawX + (i - (ordered.length - 1) / 2) * OVERLAP_DX;
+  };
+
   // One plotted marker for a group of co-located nodes: a lone node renders as before; ≥2 nodes
   // collapse to a single count-badged marker whose tooltip lists every member (enterable links).
   const collapsedPoint = (members: ReferenceGraphNode[]) => {
     const rep = members[0];
     const point: Record<string, unknown> = {
-      value: [x.get(rep.id), yFor(rep)],
+      value: [xPlot(rep), yFor(rep)],
       name: rep.id,
       node: rep,
       members,
@@ -261,7 +309,7 @@ export function buildReferenceGraphOption(
   };
 
   const grouped = (nodes: ReferenceGraphNode[]) =>
-    groupByCoord(nodes, (n) => x.get(n.id), yFor).map(collapsedPoint);
+    groupByCoord(nodes, xPlot, yFor).map(collapsedPoint);
 
   const palette = theme.categorical ?? [];
   const localColor = palette[1] ?? theme.text;
@@ -328,8 +376,7 @@ export function buildReferenceGraphOption(
   }
 
   const coordById = new Map<string, [number, number]>();
-  for (const n of graph.nodes)
-    coordById.set(n.id, [x.get(n.id) as number, yFor(n)]);
+  for (const n of graph.nodes) coordById.set(n.id, [xPlot(n), yFor(n)]);
   if (graph.edges.length) {
     series.push({
       type: "lines",
@@ -390,7 +437,8 @@ export function buildReferenceGraphOption(
           const importAll = importable.length
             ? `<a data-viz-import-all="${escapeHtml(importable.join(","))}" style="${link};margin-top:6px;font-weight:bold" title="Prefill the import box with the papers here that aren't in your library">Import all ${importable.length} →</a>`
             : "";
-          return `<strong>${members.length} papers here</strong>${rows}${more}${importAll}`;
+          // Groups are split by action kind, so one label describes the whole cluster.
+          return `<strong>${members.length} papers here · ${ACTION_LABEL[actionKindOf(members[0])]}</strong>${rows}${more}${importAll}`;
         }
         const n = params.data?.node ?? members?.[0];
         if (!n) return "";

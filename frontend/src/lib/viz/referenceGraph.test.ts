@@ -335,6 +335,81 @@ describe("buildReferenceGraphOption", () => {
     expect(html).toContain("data-viz-import-all");
   });
 
+  it("never mixes click actions in one marker: co-located citing papers fan out by action", () => {
+    // Two citing papers at the same (x, y): one resolved (click opens), one not (click imports).
+    // They must NOT share a marker — the old mixed cluster acted as its first member.
+    const mixed: ReferenceGraph = {
+      base_work_id: "base",
+      nodes: [
+        graph.nodes[0],
+        {
+          id: "c1",
+          label: "Citing in lib",
+          year: 2018,
+          kind: "citing" as const,
+          resolved_work_id: "w1",
+          section_counts: {},
+          mention_count: 0,
+          weighted: 0,
+        },
+        {
+          id: "c2",
+          label: "Citing external",
+          year: 2018,
+          kind: "citing" as const,
+          resolved_work_id: null,
+          section_counts: {},
+          mention_count: 0,
+          weighted: 0,
+        },
+      ],
+      edges: [],
+    };
+    const option = buildReferenceGraphOption(mixed, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "citations",
+    });
+    const citing = (
+      option.series as Array<{
+        name: string;
+        data: Array<{ value: [number, number]; members: unknown[] }>;
+      }>
+    ).find((s) => s.name === "Cites this")!;
+    expect(citing.data).toHaveLength(2); // one marker per click action, fanned apart
+    const xs = citing.data.map((d) => d.value[0]).sort((a, b) => a - b);
+    expect(xs[0]).toBeCloseTo(2018 - 0.09, 5);
+    expect(xs[1]).toBeCloseTo(2018 + 0.09, 5);
+  });
+
+  it("labels an overlap cluster's single click action in the tooltip header", () => {
+    const stacked: ReferenceGraph = {
+      base_work_id: "base",
+      nodes: [
+        graph.nodes[0],
+        ...[1, 2].map((i) => ({
+          id: `e${i}`,
+          label: `Ext ${i}`,
+          year: 2018,
+          kind: "external" as const,
+          resolved_work_id: null,
+          section_counts: {},
+          mention_count: 0,
+          weighted: 0,
+        })),
+      ],
+      edges: [],
+    };
+    const option = buildReferenceGraphOption(stacked, DEFAULT_SECTION_WEIGHTS, theme, {
+      yAxis: "citations",
+    });
+    const external = (
+      option.series as Array<{ name: string; data: Array<{ members: unknown[] }> }>
+    ).find((s) => s.name === "External")!;
+    const html = (
+      option.tooltip as { formatter: (p: unknown) => string }
+    ).formatter({ data: external.data[0] });
+    expect(html).toContain("2 papers here · not in library — click imports");
+  });
+
   it("tooltip shows a likely-match's score + authors for a single node", () => {
     const likely: ReferenceGraph = {
       base_work_id: "base",
