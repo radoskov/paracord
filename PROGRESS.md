@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Graph legend + paper-view history follow-ups (2026-07-14)
+
+- **Graph legend/colors** (`2f1a993`): legend-hover highlight now shows each group's own color
+  (explicit per-category itemStyle — the option-level palette made ECharts repaint highlighted
+  nodes in the emphasis default); shift-click a legend entry to solo that color group
+  (shift-click again to show all); `color_by=year` added end to end.
+- **Paper-view history** (`610bd47`): the Library page records the last 100 viewed papers;
+  WorkDetail's "Previous" button walks back (refetching papers that left the filtered list) —
+  for returning after hopping through citation/reference graphs.
+- Also this session: AdminPage app-config load decoupled + retried (`8953e87`, e2e journey-17
+  first-run flake) and the stale cytoscape `optimizeDeps` entries removed (`fba76de`, broke the
+  PDF reader after a dep-cache rebuild).
+
 ## Insights audit implementation, chunk C (2026-07-14)
 
 - **C1+C2** (`7d25815`): ONE charting stack — Cytoscape removed from `package.json`;
