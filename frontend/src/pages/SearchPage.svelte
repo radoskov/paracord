@@ -28,7 +28,10 @@
   }
 
   let query = '';
-  let mode: SearchMode = 'hybrid';
+  // Beyond the ranked engines, two exact-field modes (2026-07-15): keywords / topics search the
+  // extracted keyword and modelled topic lists via the keyword:/topic: operators.
+  let mode: SearchMode | 'keywords' | 'topic' = 'hybrid';
+  $: isFieldMode = mode === 'keywords' || mode === 'topic';
   let embeddingModel = ''; // '' = default; a model_name; or 'multimode'
   let results: HybridSearchItem[] = [];
   let loading = false;
@@ -69,6 +72,23 @@
     message = '';
     activeResult = null;
     try {
+      if (mode === 'keywords' || mode === 'topic') {
+        const op = mode === 'keywords' ? 'keyword' : 'topic';
+        const found = await client.listWorks({
+          q: `${op}:"${query.trim().replace(/"/g, '')}"`,
+          perPage: 50,
+        });
+        results = found.items.map((w) => ({
+          work_id: w.id,
+          title: w.canonical_title,
+          year: w.year ?? null,
+          score: 0,
+        }));
+        degraded = false;
+        degradedReason = null;
+        searched = true;
+        return;
+      }
       const response = await client.search(
         query,
         mode,
@@ -139,7 +159,7 @@
     </p>
 
     <div class="modes" role="radiogroup" aria-label="Search mode">
-      {#each [['hybrid', 'Hybrid'], ['semantic', 'Semantic'], ['lexical', 'Lexical']] as [value, label] (value)}
+      {#each [['hybrid', 'Hybrid'], ['semantic', 'Semantic'], ['lexical', 'Lexical'], ['keywords', 'Keywords'], ['topic', 'Topics']] as [value, label] (value)}
         <label class="mode" class:active={mode === value}>
           <input type="radio" name="search-mode" value={value} bind:group={mode} />
           {label}
@@ -154,7 +174,7 @@
         placeholder="e.g. attention mechanisms for translation"
         aria-label="Search query"
       />
-      {#if modelSelectorAvailable && mode !== 'lexical'}
+      {#if modelSelectorAvailable && !isFieldMode && mode !== 'lexical'}
         <select bind:value={embeddingModel} aria-label="Embedding model" title="Which embedding model to use for meaning-based ranking">
           <option value="">Default model</option>
           {#each embeddingModels as m (m.model_name)}
@@ -189,7 +209,7 @@
                 title="Show actions for this paper">
                 <div class="result-head">
                   <strong>{hit.title ?? 'Untitled'}</strong>
-                  <span class="rel" title="Relevance">{relevancePct(hit)}%</span>
+                  {#if !isFieldMode}<span class="rel" title="Relevance">{relevancePct(hit)}%</span>{/if}
                   {#if hit.year}<small class="muted">{hit.year}</small>{/if}
                   {#if hit.lexical_rank && hit.semantic_rank}
                     <span class="badge both" title="Matched by both keyword and semantic search">both</span>

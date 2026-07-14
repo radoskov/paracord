@@ -9226,6 +9226,14 @@
             "title": "Work Count",
             "type": "integer"
           },
+          "works": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/YearWorkRef"
+            },
+            "title": "Works",
+            "type": "array"
+          },
           "year": {
             "anyOf": [
               {
@@ -9242,6 +9250,25 @@
           "work_count"
         ],
         "title": "YearCountModel",
+        "type": "object"
+      },
+      "YearWorkRef": {
+        "properties": {
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "title"
+        ],
+        "title": "YearWorkRef",
         "type": "object"
       }
     }
@@ -19754,7 +19781,7 @@
     },
     "/api/v1/works": {
       "get": {
-        "description": "List/search works by basic metadata and extraction/metadata completeness (paginated).\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``\n``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:`` ``warning:``\n``has:pdf|references|notes|annotations|summary|abstract|grobid|ocr``); the leftover free text\nmatches title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take\nprecedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE\nfilter (only see-able shelves/racks contribute; they never widen visibility).\n\nPagination (D18): ``per_page`` overrides the caller's ``papers_per_page`` preference (else the\nserver default); the effective size is clamped to the admin global maximum. ``page`` is clamped\ninto ``1..pages``. The response envelope carries ``items``/``total``/``page``/``pages``/\n``per_page``. Each item also carries its SEE-filtered ``shelves``/``racks`` (D32).\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by\nthe saved-filter/graph/export resolvers); ``list_works`` adds sort + pagination.",
+        "description": "List/search works by basic metadata and extraction/metadata completeness (paginated).\n\n``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``\n``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``\n``keyword:`` ``topic:``\n``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:`` ``warning:``\n``has:pdf|references|notes|annotations|summary|abstract|grobid|ocr``); the leftover free text\nmatches title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take\nprecedence. ``shelf:``/``rack:`` and ``cites:``/``cited_by_local:`` compose ON TOP of the SEE\nfilter (only see-able shelves/racks contribute; they never widen visibility).\n\nPagination (D18): ``per_page`` overrides the caller's ``papers_per_page`` preference (else the\nserver default); the effective size is clamped to the admin global maximum. ``page`` is clamped\ninto ``1..pages``. The response envelope carries ``items``/``total``/``page``/``pages``/\n``per_page``. Each item also carries its SEE-filtered ``shelves``/``racks`` (D32).\n\nAccess control: only papers the caller may SEE are returned (most-permissive governing shelf;\nloose papers are open; admin/owner see all). The filter body is ``build_works_query`` (reused by\nthe saved-filter/graph/export resolvers); ``list_works`` adds sort + pagination.",
         "operationId": "list_works_api_v1_works_get",
         "parameters": [
           {
@@ -21174,6 +21201,77 @@
           }
         },
         "summary": "Fetch Citing Papers Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/citing-papers/fetch-job": {
+      "post": {
+        "description": "Queue a background citing-papers fetch for a work (the Library batch action).\n\nSame permission/precondition rules as the inline fetch: modify permission and a DOI or arXiv\nid are required; the worker replaces the cached citing list when a source answers.",
+        "operationId": "fetch_citing_papers_job_endpoint_api_v1_works__work_id__citing_papers_fetch_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Fetch Citing Papers Job Endpoint Api V1 Works  Work Id  Citing Papers Fetch Job Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fetch Citing Papers Job Endpoint",
         "tags": [
           "works"
         ]
@@ -23141,6 +23239,77 @@
           }
         },
         "summary": "Create Summary",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/summaries/job": {
+      "post": {
+        "description": "Queue a background per-paper summary (the Library batch action).\n\nUses the same \"auto\" provider resolution as the inline create-summary endpoint (local LLM when\nconfigured, else extractive).",
+        "operationId": "summarize_work_job_endpoint_api_v1_works__work_id__summaries_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Summarize Work Job Endpoint Api V1 Works  Work Id  Summaries Job Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Summarize Work Job Endpoint",
         "tags": [
           "works"
         ]

@@ -75,11 +75,13 @@ from app.services.web_find import (
 from app.services.works_query import build_works_query  # noqa: F401
 from app.utils.normalization import normalize_doi, normalize_title, similarity_pct
 from app.workers.queue import (
+    enqueue_citing_fetch,
     enqueue_embedding,
     enqueue_enrichment,
     enqueue_extraction,
     enqueue_keywords,
     enqueue_topics,
+    enqueue_work_summary,
 )
 
 _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upload
@@ -614,6 +616,7 @@ def list_works(
 
     ``q`` supports structured operators (``author:`` ``year:>=2020`` ``venue:`` ``tag:`` ``type:``
     ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:`` ``cited_by_local:``
+    ``keyword:`` ``topic:``
     ``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:`` ``warning:``
     ``has:pdf|references|notes|annotations|summary|abstract|grobid|ocr``); the leftover free text
     matches title/abstract/DOI/arXiv/venue. Explicit query params (``has_pdf`` etc.) still work and take
@@ -2440,6 +2443,57 @@ def topic_work_endpoint(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Topic queue unavailable",
+        )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/{work_id}/citing-papers/fetch-job", status_code=status.HTTP_202_ACCEPTED)
+def fetch_citing_papers_job_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> dict[str, str | None]:
+    """Queue a background citing-papers fetch for a work (the Library batch action).
+
+    Same permission/precondition rules as the inline fetch: modify permission and a DOI or arXiv
+    id are required; the worker replaces the cached citing list when a source answers.
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    if not work.doi and not work.arxiv_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add a DOI or arXiv id to fetch citing papers",
+        )
+    job_id = enqueue_citing_fetch(work_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Job queue unavailable"
+        )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/{work_id}/summaries/job", status_code=status.HTTP_202_ACCEPTED)
+def summarize_work_job_endpoint(
+    work_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> dict[str, str | None]:
+    """Queue a background per-paper summary (the Library batch action).
+
+    Uses the same "auto" provider resolution as the inline create-summary endpoint (local LLM when
+    configured, else extractive).
+    """
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    job_id = enqueue_work_summary(work_id)
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Job queue unavailable"
         )
     return {"job_id": job_id, "status": "queued"}
 

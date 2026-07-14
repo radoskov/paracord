@@ -372,3 +372,24 @@ def test_list_works_review_state_operators(client, auth_headers, db):
     assert _titles(client.get("/api/v1/works?q=version:yes", headers=h)) == {"Versioned work"}
     assert _titles(client.get("/api/v1/works?q=warning:*", headers=h)) == {"Warned work"}
     assert _titles(client.get("/api/v1/works?q=warning:multiple", headers=h)) == {"Warned work"}
+
+
+def test_list_works_keyword_and_topic_operators(client, auth_headers, db):
+    h = auth_headers("editor")
+    kw = _make(client, h, canonical_title="Keyword carrier")
+    tp = _make(client, h, canonical_title="Topic carrier")
+    _make(client, h, canonical_title="Bare thing two")
+    from app.models.work import Work
+
+    db.get(Work, uuid.UUID(kw["id"])).keywords = ["graph embeddings", "retrieval"]
+    db.get(Work, uuid.UUID(tp["id"])).topics = ["Neural Ranking"]
+    db.commit()
+
+    assert _titles(client.get("/api/v1/works?q=keyword:retrieval", headers=h)) == {
+        "Keyword carrier"
+    }
+    # Case-insensitive; quoted phrases work like the other operators.
+    assert _titles(client.get('/api/v1/works?q=topic:"neural ranking"', headers=h)) == {
+        "Topic carrier"
+    }
+    assert _titles(client.get("/api/v1/works?q=keyword:nomatchxyz", headers=h)) == set()

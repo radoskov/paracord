@@ -48,7 +48,23 @@
   let selected: Work | null = null;
 
   let search = '';
-  let searchMode: 'metadata' | 'semantic' | 'hybrid' = 'metadata';
+  // metadata/semantic/both are the ranked modes; keywords/topic/author/venue are exact-field
+  // metadata searches — the free text is wrapped in the matching structured operator (2026-07-15).
+  let searchMode: 'metadata' | 'semantic' | 'hybrid' | 'keywords' | 'topic' | 'author' | 'venue' =
+    'metadata';
+  const FIELD_MODE_OPS: Record<string, string> = {
+    keywords: 'keyword',
+    topic: 'topic',
+    author: 'author',
+    venue: 'venue',
+  };
+  // The q actually sent: field modes wrap the text in their operator (quoted, quotes stripped).
+  function effectiveSearchQuery(): string {
+    const op = FIELD_MODE_OPS[searchMode];
+    const text = search.trim();
+    if (!op || !text) return search;
+    return `${op}:"${text.replace(/"/g, '')}"`;
+  }
   // Phase B2: true when the last semantic search silently fell back to the built-in baseline
   // embedder (a heavier provider was configured but unavailable).
   let semanticDegraded = false;
@@ -315,7 +331,7 @@
     await run(async () => {
       const created = await client.createSavedFilter({
         name: name.trim(),
-        search_mode: searchMode,
+        search_mode: searchMode in FIELD_MODE_OPS ? 'metadata' : searchMode,
         query_text: search,
         params: savedFilterParams(),
       });
@@ -395,7 +411,7 @@
 
   async function loadWorks(): Promise<void> {
     await run(async () => {
-      if (searchMode !== 'metadata' && search.trim()) {
+      if ((searchMode === 'semantic' || searchMode === 'hybrid') && search.trim()) {
         // Rank by semantic similarity (or lexical+semantic RRF fusion for "both"), then intersect
         // with the active structured filters. Ranked results are capped at 50, so request a full
         // page for the intersection.
@@ -424,7 +440,7 @@
       } else {
         semanticDegraded = false;
         const result = await client.listWorks({
-          q: search,
+          q: effectiveSearchQuery(),
           ...structuredQuery(),
           sort: columnPrefs.sort.key,
           order: columnPrefs.sort.order,
@@ -598,6 +614,11 @@
         return runWorkBatch((id) => client.topicWork(id), 'topic extraction');
       case 'enrich':
         return runWorkBatch((id) => client.enrichWork(id), 'enrichment');
+      case 'fetch-citing':
+        // Papers without a DOI/arXiv id 400 individually and count into the "failed" tally.
+        return runWorkBatch((id) => client.fetchCitingPapersJob(id), 'citing-papers fetch');
+      case 'summarize':
+        return runWorkBatch((id) => client.summarizeWorkJob(id), 'summarization');
       case 'apply-metadata':
         return batchApplyMetadata();
       case 'delete':
@@ -703,15 +724,21 @@
         <div class="search-row">
           <input
             bind:value={search}
-            placeholder={searchMode !== 'metadata'
+            placeholder={searchMode === 'semantic' || searchMode === 'hybrid'
               ? 'Describe the topic / keywords…'
-              : 'Search… e.g. transformer author:doe year:>=2020 has:pdf tag:ml'}
+              : searchMode in FIELD_MODE_OPS
+                ? `Search by ${searchMode}…`
+                : 'Search… e.g. transformer author:doe year:>=2020 has:pdf tag:ml'}
             aria-label="Search"
           />
           <select bind:value={searchMode} title="Search mode" aria-label="Search mode">
             <option value="metadata">metadata</option>
             <option value="semantic">semantic</option>
             <option value="hybrid">both</option>
+            <option value="keywords">keywords</option>
+            <option value="topic">topic</option>
+            <option value="author">author</option>
+            <option value="venue">venue</option>
           </select>
           <button type="submit" disabled={loading} title="Apply search and filters">Search</button>
         </div>
@@ -845,6 +872,8 @@
               <option value="keywords">Extract keywords</option>
               <option value="topics">Extract topics</option>
               <option value="enrich">Enrich (DOI/arXiv)</option>
+              <option value="fetch-citing">Fetch citing papers</option>
+              <option value="summarize">Summarize</option>
               <option value="apply-metadata">Set metadata from best source</option>
               <option value="delete">Delete</option>
             </select>

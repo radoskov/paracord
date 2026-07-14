@@ -35,6 +35,8 @@ _KNOWN = {
     "rack",
     "cites",
     "cited_by_local",
+    "keyword",
+    "topic",
     "abstract",
     "summary",
     "fulltext",
@@ -65,6 +67,8 @@ class ParsedQuery:
     rack: str | None = None
     cites: str | None = None
     cited_by_local: str | None = None
+    keyword: str | None = None  # keyword:<text> — match within the extracted keywords list
+    topic: str | None = None  # topic:<text> — match within the modelled topics list
     abstract: str | None = None  # abstract:<text> — match within the abstract column
     summary: str | None = None  # summary:<text> — match within a stored summary's text
     fulltext: str | None = None  # fulltext:<text> — match within extracted body chunks
@@ -154,6 +158,10 @@ def parse_search_query(q: str | None) -> ParsedQuery:
             parsed.work_type = value
         elif key_l == "tag":
             parsed.tag = value
+        elif key_l == "keyword":
+            parsed.keyword = value
+        elif key_l == "topic":
+            parsed.topic = value
         elif key_l == "doi":
             parsed.doi = value
         elif key_l == "arxiv":

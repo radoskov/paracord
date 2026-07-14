@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, String, and_, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.ai import Summary
@@ -115,6 +115,14 @@ def build_works_query(
         stmt = stmt.where(Work.venue.ilike(f"%{parsed.venue}%"))
     if parsed.work_type:
         stmt = stmt.where(Work.work_type == parsed.work_type)
+    if parsed.keyword:
+        # keywords/topics are JSON lists; a lowercased text cast + LIKE matches on both Postgres
+        # (JSONB) and SQLite (JSON-as-text) without a per-dialect containment operator.
+        stmt = stmt.where(
+            func.lower(cast(Work.keywords, String)).like(f"%{parsed.keyword.lower()}%")
+        )
+    if parsed.topic:
+        stmt = stmt.where(func.lower(cast(Work.topics, String)).like(f"%{parsed.topic.lower()}%"))
     if parsed.year_min is not None:
         stmt = stmt.where(Work.year >= parsed.year_min)
     if parsed.year_max is not None:
