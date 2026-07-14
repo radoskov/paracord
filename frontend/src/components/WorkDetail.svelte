@@ -47,6 +47,8 @@
   export let onImported: () => void = () => {};
   // Switch the open paper to a related one (wired by the page hosting this detail panel).
   export let onSelectWork: (workId: string) => void = () => {};
+  // Reopen the previously viewed paper (the host page keeps the history); null hides the button.
+  export let onBack: (() => void) | null = null;
 
   const STATUSES = ['unread', 'skimmed', 'reading', 'read', 'important', 'revisit'];
 
@@ -1046,6 +1048,10 @@
       {/if}
     </h2>
     <div class="bar-actions">
+      {#if onBack}
+        <button type="button" class="secondary small" on:click={onBack} data-testid="detail-back"
+          title="Reopen the previously viewed paper">‹ Previous</button>
+      {/if}
       <button type="button" class="secondary small" on:click={exportNotes} disabled={loading}
         title="Download this paper's annotations as Markdown">Export notes</button>
       <button type="button" class="secondary small" on:click={() => (showRefGraph = true)}

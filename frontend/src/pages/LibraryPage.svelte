@@ -482,9 +482,32 @@
       : [...missing, field];
   }
 
-  function selectWork(work: Work | null): void {
+  // Recently viewed papers (newest last), so "Previous" can walk back after hopping through
+  // citation/reference graphs. Ids, not Work objects — the paper is refetched if it left the list.
+  const VIEW_HISTORY_MAX = 100;
+  let viewHistory: string[] = [];
+
+  function selectWork(work: Work | null, opts: { recordHistory?: boolean } = {}): void {
+    if ((opts.recordHistory ?? true) && work && selected && work.id !== selected.id) {
+      viewHistory = [...viewHistory, selected.id].slice(-VIEW_HISTORY_MAX);
+    }
     selected = work;
     selectedWorkId.set(work?.id ?? null);
+  }
+
+  // Reopen the most recently viewed paper (the "Previous" button in the paper view).
+  async function openPreviousWork(): Promise<void> {
+    const previousId = viewHistory[viewHistory.length - 1];
+    if (!previousId) return;
+    viewHistory = viewHistory.slice(0, -1);
+    const inList = works.find((w) => w.id === previousId);
+    if (inList) {
+      selectWork(inList, { recordHistory: false });
+      return;
+    }
+    await run(async () => {
+      selectWork(await client.getWork(previousId), { recordHistory: false });
+    });
   }
 
   // Switch the open paper to a related one by id. Prefer the already-loaded list; fall back to a
@@ -662,6 +685,7 @@
     works = works.filter((w) => w.id !== workId);
     totalWorks = Math.max(0, totalWorks - 1);
     if (perPage > 0) totalPages = Math.max(1, Math.ceil(totalWorks / perPage));
+    viewHistory = viewHistory.filter((id) => id !== workId);
     selectWork(null);
     message = 'Paper deleted';
   }
@@ -956,7 +980,8 @@
   <div class="detail-col card">
     {#if selected}
       {#key selected.id}
-        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} {onImported} {onSelectWork} onClose={() => selectWork(null)} />
+        <WorkDetail {client} work={selected} {onUpdated} {onDeleted} {onImported} {onSelectWork}
+          onBack={viewHistory.length ? openPreviousWork : null} onClose={() => selectWork(null)} />
       {/key}
     {:else}
       <p class="empty">Select a paper from the list to view and edit its details, attach a PDF, review metadata, and read it.</p>
