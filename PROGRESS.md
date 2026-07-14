@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Legend chips, palette, count-sort 500 (2026-07-15)
+
+- **Count-column sorts 500ed on Postgres** (`4abc63b`): file/reference/local-count sorts order by
+  correlated subqueries, but the works query is SELECT DISTINCT — Postgres rejects DISTINCT +
+  ORDER BY-subquery (the library showed "NetworkError" until the sort column changed; SQLite
+  tests tolerated the SQL). Fixed by selecting the count as a labelled column; regression test.
+- **Citation-graph legend chips** (`9019b07`): ECharts' native graph-series legend hover
+  highlights the node at the legend item's INDEX (not the category) — replaced with our own chip
+  row (hover highlights the group, click hides/shows, shift-click solos). Groups sorted (years
+  numeric), palette extends past the fixed 6 theme colors with evenly spaced hues, and the
+  shift-click solo gesture now also works on the reference-graph and Visualizations legends via
+  shared `lib/viz/legendSolo.ts`.
+
 ## Graph legend + paper-view history follow-ups (2026-07-14)
 
 - **Graph legend/colors** (`2f1a993`): legend-hover highlight now shows each group's own color
