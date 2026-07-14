@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
 
   import {
     ApiClient,
@@ -15,6 +15,7 @@
   import '../lib/viz/similarityHeatmap';
   import { VIEW_HELP, axisOptionHelp, helpForView } from '../lib/viz/vizHelp';
   import Modal from '../components/Modal.svelte';
+  import ChartHost from '../components/ChartHost.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -53,10 +54,7 @@
   let busy = false;
   let message = '';
 
-  let chartContainer: HTMLDivElement | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let chart: any = null;
-  let chartError = false;
+  let chartRevision = 0;
 
   const SIZE_OPTIONS = [
     ['local_degree', 'Local citation degree'],
@@ -170,44 +168,35 @@
     if (payload) void load();
   }
 
-  async function render(): Promise<void> {
-    if (!payload || !chartContainer) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function renderChart(chart: any): void {
+    if (!payload) return;
     const renderer = getRenderer(payload.view_type);
-    if (!renderer) {
-      chartError = true;
-      return;
-    }
-    try {
-      const echarts = (await import('echarts')) as unknown as {
-        init: (el: HTMLElement) => typeof chart;
-      };
-      if (!chart) {
-        chart = echarts.init(chartContainer);
-        // Delegate clicks on an overlap tooltip's per-paper [open] links (B4). The tooltip is
-        // enterable, so the user can move into it; the links carry the work id.
-        chartContainer?.addEventListener('click', (e) => {
-          const el = (e.target as HTMLElement | null)?.closest?.('[data-viz-open]');
-          const id = el?.getAttribute('data-viz-open');
-          if (id) openPaper(id);
-        });
-      }
-      chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
-      // 5f: apply the manual axis view-range on top of the built option (temporal map only — the
-      // scatter view with value axes). A merge setOption keeps everything else; `null` = auto.
-      if (isTemporal) {
-        chart.setOption({
-          xAxis: { min: _num(xMin) ?? null, max: _num(xMax) ?? null },
-          yAxis: { min: _num(yMin) ?? null, max: _num(yMax) ?? null },
-        });
-      }
-      chart.off('click');
-      chart.on('click', (params: { data?: { name?: string } }) => {
-        if (params.data?.name) openPaper(params.data.name);
+    if (!renderer) throw new Error("no renderer");
+    chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
+    // 5f: apply the manual axis view-range on top of the built option (temporal map only — the
+    // scatter view with value axes). A merge setOption keeps everything else; `null` = auto.
+    if (isTemporal) {
+      chart.setOption({
+        xAxis: { min: _num(xMin) ?? null, max: _num(xMax) ?? null },
+        yAxis: { min: _num(yMin) ?? null, max: _num(yMax) ?? null },
       });
-      chartError = false;
-    } catch {
-      chartError = true;
     }
+    chart.off('click');
+    chart.on('click', (params: { data?: { name?: string } }) => {
+      if (params.data?.name) openPaper(params.data.name);
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function wireEvents(chart: any): void {
+    // Delegate clicks on an overlap tooltip's per-paper [open] links (B4). The tooltip is
+    // enterable, so the user can move into it; the links carry the work id.
+    chart.getDom()?.addEventListener('click', (e: Event) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-viz-open]');
+      const id = el?.getAttribute('data-viz-open');
+      if (id) openPaper(id);
+    });
   }
 
   // B1 help: description of the current view + the "About this view" / "Visualization types" popups.
@@ -230,35 +219,7 @@
       (payload.series?.years.length ?? 0) > 0 ||
       (payload.matrix?.labels.length ?? 0) > 0);
 
-  $: if (payload && hasData && chartContainer) void render();
-
-  // Live restyle: re-run setOption with the new VizTheme when the theme switches (no rebuild,
-  // no refetch). Reading $activeVizTheme here makes the block reactive to a theme change.
-  $: if ($activeVizTheme && chart && payload && hasData) void render();
-
-  let wasVisible = true;
-  $: {
-    if (visible && !wasVisible && chart) chart.resize();
-    wasVisible = visible;
-  }
-
-  // Resize the chart whenever its container's box changes (initial flex/tab layout, window resize,
-  // tab show/hide, theme reflow) so ECharts always fills the container width — not the tiny width
-  // it may have measured at init time.
-  let resizeObserver: ResizeObserver | null = null;
-  $: if (chartContainer && typeof ResizeObserver !== 'undefined') observeContainer(chartContainer);
-  function observeContainer(el: HTMLElement): void {
-    if (resizeObserver) resizeObserver.disconnect();
-    resizeObserver = new ResizeObserver(() => {
-      if (chart) chart.resize();
-    });
-    resizeObserver.observe(el);
-  }
-
-  onDestroy(() => {
-    if (resizeObserver) resizeObserver.disconnect();
-    if (chart) chart.dispose();
-  });
+  $: if (payload && hasData) chartRevision += 1;
 </script>
 
 <section class="layout">
@@ -480,12 +441,13 @@
       {#if !hasData}
         <p class="empty">No papers to plot in this scope.</p>
       {:else}
-        <div class="chart" bind:this={chartContainer} data-testid="viz-chart"></div>
-        {#if chartError}
-          <p class="empty">Interactive chart unavailable in this environment.</p>
-        {:else}
-          <p class="hint">Hover for details · click a point to open the paper.</p>
-        {/if}
+        <div class="chart" data-testid="viz-chart">
+          <ChartHost render={renderChart} onReady={wireEvents} revision={chartRevision} {visible}
+            height="100%" ariaLabel="Visualization chart">
+            <svelte:fragment slot="fallback">Interactive chart unavailable in this environment.</svelte:fragment>
+          </ChartHost>
+        </div>
+        <p class="hint">Hover for details · click a point to open the paper.</p>
       {/if}
     </div>
   {/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
 
   import {
     ApiClient,
@@ -16,6 +16,7 @@
   import WorkDetail from '../components/WorkDetail.svelte';
   import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
   import { buildChronologicalOption } from '../lib/viz/citationSummary';
+  import ChartHost from '../components/ChartHost.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -56,10 +57,7 @@
     'stroke-width="1.5" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/>' +
     '<path d="M2 5.5h12"/><path d="M5.5 9l2 2 3.5-4"/></svg>';
 
-  let chartContainer: HTMLDivElement | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let chart: any = null;
-  let chartError = false;
+  let chartRevision = 0;
 
   $: scopeReady =
     scopeType === 'library'
@@ -210,48 +208,13 @@
     (m) => decisions[m.key] === 'ignore',
   );
 
-  async function render(): Promise<void> {
-    if (!summary || !chartContainer || summary.chronological.length === 0) return;
-    try {
-      const echarts = (await import('echarts')) as unknown as {
-        init: (el: HTMLElement) => typeof chart;
-      };
-      if (!chart) chart = echarts.init(chartContainer);
-      chart.setOption(buildChronologicalOption(summary, $activeVizTheme), true);
-      chartError = false;
-    } catch {
-      chartError = true;
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function renderChart(chart: any): void {
+    if (!summary || summary.chronological.length === 0) return;
+    chart.setOption(buildChronologicalOption(summary, $activeVizTheme), true);
   }
 
-  $: if (summary && chartContainer) void render();
-
-  // Live restyle: re-run setOption with the new VizTheme when the theme switches (no rebuild).
-  $: if ($activeVizTheme && chart && summary) void render();
-
-  let wasVisible = true;
-  $: {
-    if (visible && !wasVisible && chart) chart.resize();
-    wasVisible = visible;
-  }
-
-  // Resize the chart whenever its container's box changes (initial layout, window resize, tab
-  // show/hide, theme reflow) so ECharts fills the container width instead of the tiny width it may
-  // have measured at init time.
-  let resizeObserver: ResizeObserver | null = null;
-  $: if (chartContainer && typeof ResizeObserver !== 'undefined') observeContainer(chartContainer);
-  function observeContainer(el: HTMLElement): void {
-    if (resizeObserver) resizeObserver.disconnect();
-    resizeObserver = new ResizeObserver(() => {
-      if (chart) chart.resize();
-    });
-    resizeObserver.observe(el);
-  }
-
-  onDestroy(() => {
-    if (resizeObserver) resizeObserver.disconnect();
-    if (chart) chart.dispose();
-  });
+  $: if (summary) chartRevision += 1;
 </script>
 
 <section class="layout">
@@ -568,10 +531,10 @@
           {#if summary.chronological.length === 0}
             <p class="empty">No dated papers in this scope.</p>
           {:else}
-            <div class="chart" bind:this={chartContainer} data-testid="summary-chart"></div>
-            {#if chartError}
-              <p class="empty">Chart unavailable in this environment.</p>
-            {/if}
+            <div class="chart" data-testid="summary-chart">
+              <ChartHost render={renderChart} revision={chartRevision} {visible} height="100%"
+                ariaLabel="Chronological citation chart" />
+            </div>
           {/if}
         </div>
       </div>

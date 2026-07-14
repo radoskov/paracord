@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
 
   import type { ApiClient, ReferenceGraph, ReferenceGraphNode } from '../api/client';
+  import ChartHost from './ChartHost.svelte';
   import Modal from './Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
@@ -33,10 +34,7 @@
     : 0;
   let loading = true;
   let message = '';
-  let container: HTMLDivElement | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let chart: any = null;
-  let chartError = false;
+  let revision = 0;
 
   // Build a free-text citation line for the batch-import box from an external reference (5g):
   // "Title (year)" — the user refines it and picks from the import search results.
@@ -104,7 +102,7 @@
     message = '';
     try {
       graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting, maxExternal });
-      await render();
+      revision += 1;
     } catch (error) {
       message = errorMessage(error);
     } finally {
@@ -112,33 +110,31 @@
     }
   }
 
-  async function render(): Promise<void> {
-    if (!graph || !container) return;
-    try {
-      const echarts = (await import('echarts')) as unknown as {
-        init: (el: HTMLElement) => typeof chart;
-      };
-      if (!chart) {
-        chart = echarts.init(container);
-        chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
-          const node = params.data?.node;
-          if (node) openOrImportNode(node);
-        });
-        // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
-        container.addEventListener('click', onContainerClick);
-      }
-      chart.setOption(
-        buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis, colorBy }),
-        true,
-      );
-      chartError = false;
-    } catch {
-      chartError = true;
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function renderChart(chart: any): void {
+    if (!graph) return;
+    chart.setOption(
+      buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis, colorBy }),
+      true,
+    );
   }
 
-  // Re-render on theme, Y-axis, or colour change (all pure client-side restyles — no refetch).
-  $: if (chart && graph && (yAxis || colorBy || $activeVizTheme)) void render();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function wireEvents(chart: any): void {
+    chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
+      const node = params.data?.node;
+      if (node) openOrImportNode(node);
+    });
+    // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
+    chart.getDom()?.addEventListener('click', onContainerClick);
+  }
+
+  // Y-axis / colour changes are pure client-side restyles — bump the revision, no refetch.
+  $: {
+    yAxis;
+    colorBy;
+    revision += 1;
+  }
 
   function toggleRefEdges(): void {
     includeRefEdges = !includeRefEdges;
@@ -153,10 +149,6 @@
   onMount(async () => {
     await loadWeights();
     await loadGraph();
-  });
-  onDestroy(() => {
-    if (container) container.removeEventListener('click', onContainerClick);
-    if (chart) chart.dispose();
   });
 </script>
 
@@ -206,8 +198,12 @@
   </div>
   {#if message}<p class="msg" role="status">{message}</p>{/if}
   {#if loading && !graph}<p class="muted">Loading…</p>{/if}
-  <div class="rg-chart" bind:this={container} data-testid="rg-chart"></div>
-  {#if chartError}<p class="muted">Interactive chart unavailable in this environment.</p>{/if}
+  <div class="rg-chart" data-testid="rg-chart">
+    <ChartHost render={renderChart} onReady={wireEvents} {revision} height="100%"
+      ariaLabel="Reference graph">
+      <svelte:fragment slot="fallback">Interactive chart unavailable in this environment.</svelte:fragment>
+    </ChartHost>
+  </div>
   {#if graph && graph.nodes.length <= 1}
     <p class="muted">This paper has no extracted references yet — run extraction to populate them.</p>
   {/if}
