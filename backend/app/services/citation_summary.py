@@ -95,10 +95,14 @@ class MissingWork:
 
 @dataclass
 class YearCount:
-    """Scope work count for one publication year (``year`` ``None`` = unknown year)."""
+    """Scope work count for one publication year (``year`` ``None`` = unknown year).
+
+    ``works`` lists the year's papers (id + title) so the UI can open them from the chart.
+    """
 
     year: int | None
     work_count: int
+    works: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -476,11 +480,17 @@ def _missing_works(
 
 def _chronological(works: list[Work]) -> list[YearCount]:
     """Scope work counts by publication year (unknown-year works bucketed under ``year=None``)."""
-    counts: Counter[int | None] = Counter(work.year for work in works)
-    known = sorted(y for y in counts if y is not None)
-    result = [YearCount(year=y, work_count=counts[y]) for y in known]
-    if None in counts:
-        result.append(YearCount(year=None, work_count=counts[None]))
+    by_year: dict[int | None, list[dict]] = {}
+    for work in works:
+        by_year.setdefault(work.year, []).append(
+            {"work_id": str(work.id), "title": work.canonical_title or "Untitled paper"}
+        )
+    for members in by_year.values():
+        members.sort(key=lambda m: m["title"].lower())
+    known = sorted(y for y in by_year if y is not None)
+    result = [YearCount(year=y, work_count=len(by_year[y]), works=by_year[y]) for y in known]
+    if None in by_year:
+        result.append(YearCount(year=None, work_count=len(by_year[None]), works=by_year[None]))
     return result
 
 

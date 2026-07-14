@@ -412,6 +412,8 @@ export type MissingDecision = "import" | "ignore";
 export interface YearCount {
   year: number | null;
   work_count: number;
+  // The year's papers (id + title) so the chart can list/open them on click.
+  works: { work_id: string; title: string }[];
 }
 
 export interface CitationSummary {
@@ -1707,6 +1709,24 @@ export class ApiClient {
     workId: string,
   ): Promise<{ job_id: string | null; status: string }> {
     return this.request(`/api/v1/works/${workId}/topics`, { method: "POST" });
+  }
+
+  /** Queue a background citing-papers fetch (the Library batch action). */
+  async fetchCitingPapersJob(
+    workId: string,
+  ): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/citing-papers/fetch-job`, {
+      method: "POST",
+    });
+  }
+
+  /** Queue a background per-paper summary (the Library batch action). */
+  async summarizeWorkJob(
+    workId: string,
+  ): Promise<{ job_id: string | null; status: string }> {
+    return this.request(`/api/v1/works/${workId}/summaries/job`, {
+      method: "POST",
+    });
   }
 
   async keywordsWork(

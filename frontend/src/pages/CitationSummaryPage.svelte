@@ -9,6 +9,7 @@
     type RankedWork,
     type VenueAuthorSummary,
     type Work,
+    type YearCount,
   } from '../api/client';
   import Modal from '../components/Modal.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
@@ -17,7 +18,7 @@
   import ChartHost from '../components/ChartHost.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { resolveScopeRequest, type ScopeRequest } from '../lib/scope';
-  import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
+  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -116,6 +117,23 @@
     if (typeof window !== 'undefined') window.location.hash = '#library';
   }
 
+  // Venue/author rows jump to a Library metadata search via the venue:/author: operators. Authors
+  // search by family name (the grouped display name is "Family, I." — the initial-only form would
+  // miss "First Family" spellings; the family-name substring matches both).
+  function searchLibrary(query: string): void {
+    pendingLibrarySearch.set({ query, mode: 'metadata' });
+    if (typeof window !== 'undefined') window.location.hash = '#library';
+  }
+
+  function searchVenue(name: string): void {
+    searchLibrary(`venue:"${name.replace(/"/g, '')}"`);
+  }
+
+  function searchAuthor(name: string): void {
+    const family = (name.includes(',') ? name.split(',')[0] : name).trim();
+    searchLibrary(`author:"${family.replace(/"/g, '')}"`);
+  }
+
   // Open the paper directly in the in-app paper view (WorkDetail modal), reusing the search-tab flow.
   async function openInPaperView(workId: string): Promise<void> {
     try {
@@ -209,6 +227,20 @@
   function renderChart(chart: any): void {
     if (!summary || summary.chronological.length === 0) return;
     chart.setOption(buildChronologicalOption(summary, $activeVizTheme), true);
+  }
+
+  // Clicking a year bar opens a popup listing that year's papers (clickable titles).
+  let yearPopup: YearCount | null = null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function wireChartEvents(chart: any): void {
+    chart.on('click', (params: { name?: string }) => {
+      if (!params.name || !summary) return;
+      yearPopup =
+        summary.chronological.find(
+          (entry) => (entry.year === null ? 'Unknown' : String(entry.year)) === params.name,
+        ) ?? null;
+    });
   }
 
   $: if (summary) chartRevision += 1;
@@ -500,8 +532,8 @@
             <p class="empty">No dated papers in this scope.</p>
           {:else}
             <div class="chart" data-testid="summary-chart">
-              <ChartHost render={renderChart} revision={chartRevision} {visible} height="100%"
-                ariaLabel="Chronological citation chart" />
+              <ChartHost render={renderChart} onReady={wireChartEvents} revision={chartRevision}
+                {visible} height="100%" ariaLabel="Chronological citation chart" />
             </div>
           {/if}
         </div>
@@ -522,7 +554,8 @@
                 {#each venueAuthor.venues as v (v.name)}
                   <tr>
                     <td>
-                      <strong>{v.name}</strong>
+                      <button class="link" type="button" on:click={() => searchVenue(v.name)}
+                        title="Show this venue's papers in the Library">{v.name}</button>
                       {#if v.variants.length > 1}
                         <span class="variants" title={`Merged spellings: ${v.variants.join(', ')}`}
                           >+{v.variants.length - 1} spelling(s)</span>
@@ -557,7 +590,8 @@
                 {#each venueAuthor.authors as a (a.name)}
                   <tr>
                     <td>
-                      <strong>{a.name}</strong>
+                      <button class="link" type="button" on:click={() => searchAuthor(a.name)}
+                        title="Show this author's papers in the Library">{a.name}</button>
                       {#if a.variants.length > 1}
                         <span class="variants" title={`Merged name forms: ${a.variants.join(', ')}`}
                           >+{a.variants.length - 1} form(s)</span>
@@ -579,6 +613,28 @@
     </div>
   {/if}
 </section>
+
+{#if yearPopup}
+  <Modal
+    title={`Papers ${yearPopup.year === null ? 'with unknown year' : `from ${yearPopup.year}`} (${yearPopup.work_count})`}
+    onClose={() => (yearPopup = null)}
+  >
+    <ol class="year-popup-list" data-testid="year-popup">
+      {#each yearPopup.works as w (w.work_id)}
+        <li>
+          <button class="link" type="button" title="Open in the Library tab"
+            on:click={() => { yearPopup = null; openPaper(w.work_id); }}>{w.title}</button>
+          <button
+            class="iconbtn"
+            type="button"
+            title="Open in paper view"
+            aria-label="Open in paper view"
+            on:click={() => { yearPopup = null; void openInPaperView(w.work_id); }}>{@html openIcon}</button>
+        </li>
+      {/each}
+    </ol>
+  </Modal>
+{/if}
 
 {#if detailWork}
   <Modal title={detailWork.title ?? 'Paper'} wide onClose={() => (detailWork = null)}>
@@ -899,6 +955,14 @@
   .chart {
     height: 16rem;
     width: 100%;
+  }
+
+  .year-popup-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0;
+    padding-left: 1.2rem;
   }
 
   .notes {

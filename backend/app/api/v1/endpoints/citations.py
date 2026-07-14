@@ -71,9 +71,16 @@ class MissingWorkModel(BaseModel):
     arxiv_id: str | None = None
 
 
+class YearWorkRef(BaseModel):
+    work_id: uuid.UUID
+    title: str
+
+
 class YearCountModel(BaseModel):
     year: int | None = None
     work_count: int
+    # The year's papers (id + title), so the chart can list/open them on click.
+    works: list[YearWorkRef] = []
 
 
 class CitationSummaryResponse(BaseModel):
