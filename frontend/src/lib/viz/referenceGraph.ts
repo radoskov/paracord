@@ -247,6 +247,8 @@ export function buildReferenceGraphOption(
   const yFor = (n: ReferenceGraphNode) =>
     n.kind === "base" ? baseY : (yById.get(n.id) ?? naY);
 
+  const citingColor = (theme.categorical ?? [])[4] ?? theme.text;
+
   const symbolFor = (n: ReferenceGraphNode) =>
     n.kind === "base" ? BASE_SYMBOL : sizeFor(weightedById.get(n.id) ?? 0);
 
@@ -278,6 +280,10 @@ export function buildReferenceGraphOption(
   // collapse to a single count-badged marker whose tooltip lists every member (enterable links).
   const collapsedPoint = (members: ReferenceGraphNode[]) => {
     const rep = members[0];
+    // Citing papers NOT in the library render as a lighter tint of the citing colour (one legend
+    // entry — they're all citing papers — but in-library vs external stays distinguishable, the
+    // same related-but-different scheme as "likely in library" vs "in library").
+    const externalCiting = rep.kind === "citing" && !rep.resolved_work_id;
     const point: Record<string, unknown> = {
       value: [xPlot(rep), yFor(rep)],
       name: rep.id,
@@ -285,13 +291,18 @@ export function buildReferenceGraphOption(
       members,
       symbolSize: Math.max(...members.map(symbolFor)),
       // A node with no value for this axis gets a dashed outline so it reads as "n/a", not zero.
-      ...(isNa(rep)
+      ...(isNa(rep) || externalCiting
         ? {
             itemStyle: {
-              borderType: "dashed",
-              borderColor: theme.text,
-              borderWidth: 1.5,
-              opacity: 0.65,
+              ...(externalCiting ? { color: lighten(citingColor, 0.45) } : {}),
+              ...(isNa(rep)
+                ? {
+                    borderType: "dashed",
+                    borderColor: theme.text,
+                    borderWidth: 1.5,
+                    opacity: 0.65,
+                  }
+                : {}),
             },
           }
         : {}),
@@ -342,7 +353,7 @@ export function buildReferenceGraphOption(
       { key: "local", name: "In library", color: localColor, z: 2 },
       { key: "likely_local", name: "Likely in library", color: lighten(localColor, 0.45), z: 2 },
       { key: "external", name: "External", color: palette[3] ?? theme.splitLine, z: 2 },
-      { key: "citing", name: "Cites this", color: palette[4] ?? theme.text, z: 2 },
+      { key: "citing", name: "Cites this", color: citingColor, z: 2 },
     ];
     series = kinds.map((k) => ({
       type: "scatter",

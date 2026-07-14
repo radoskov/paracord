@@ -267,7 +267,9 @@
     };
     await run(async () => {
       // Trailing ensureTags() primes the shared tag store in parallel; its result isn't destructured.
-      [fields, files, contexts, references, annotations, summaries, appliedTags] =
+      // Citing papers load eagerly too (a cheap stored-links read), so the section header shows its
+      // count without having to expand it first — same as the References section.
+      [fields, files, contexts, references, annotations, summaries, appliedTags, citing] =
         await Promise.all([
           client.listWorkMetadata(w.id),
           client.listWorkFiles(w.id),
@@ -276,8 +278,14 @@
           client.listAnnotations(w.id),
           client.listSummaries(w.id),
           client.listWorkTags(w.id),
+          // Best-effort (never blocks the detail load); Promise.resolve() also absorbs a partial
+          // test client without the method.
+          Promise.resolve()
+            .then(() => client.getCitingPapers(w.id))
+            .catch(() => null),
           ensureTags(client),
         ]);
+      citingLoaded = citing != null;
     });
     // Seed the editable Authors field from the loaded 'authors' assertion (no Work column exists).
     form = { ...form, authors: authorsFromFields(fields) };
