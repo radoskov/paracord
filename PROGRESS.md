@@ -9,6 +9,40 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch: import sub-tabs, resilient citation import, jobs history, matching (2026-07-15)
+
+- `9744046` — Import page split into sub-tabs (PDF import / Citations / Identifier / Folder
+  import / External data); last selection remembered per browser session; a reference-graph
+  "import citation" push auto-opens the Citations sub-tab.
+- `65901b7` + `a60c457` — batch-citation preview reworked to two rows per entry (title gets the
+  full first row); the review table + commit extracted into shared `DraftReview.svelte`.
+- `838e4e2` — batch citation lookup is now chunked (4 lines/request): progress bar, "Cancel
+  search", a failed/timed-out chunk degrades to editable title-only rows, and "Commit selected
+  now" imports found entries while the search keeps running. `web_find.total_budget` default
+  raised 25 → 120 s (now a backstop, not the pacing mechanism).
+- `a60c457` — BibTeX import gained "Preview & choose" (`POST /imports/bibtex/preview` → shared
+  review table → `batch/commit` with `engine="bibtex"`; arXiv id / work_type / abstract ride
+  along; already-in-library entries flagged and default-unchecked).
+- `b615420` — jobs: every run gets a unique id (`{key}-{token}`); live-run coalescing moved to a
+  Redis `latest-job:{key}` pointer. Re-running a finished job now ADDS a Jobs-tab entry instead of
+  overwriting the old one (which made history vanish and counts disagree); "all" count = sum of
+  the per-state registry counts.
+- `eae2239` — the restart-looping chunk-job failure (SQLAlchemy DataError 9h9h): chunk text/labels
+  now sanitized (NUL/control chars stripped; section labels clamped to the column's 255 chars) and
+  a chunk failure now sets the paper's processing-error badge. NOTE: the original failing work was
+  deleted from the library before diagnosis, so the fix covers the two known DataError vectors of
+  that insert rather than a reproduced case.
+- `0bcd4ef` — reference matching: new `reference_matching.auto_accept_threshold` (yaml, default
+  100 = exact normalized title) auto-CONFIRMS a fuzzy match even without a DOI/arXiv id — fixes
+  "stays likely at 100%"; the runtime fuzzy-as-confirmed toggle is unchanged. Confirm/reject in
+  the references list now shows inline per-row pending/error feedback (an error used to render
+  only at the top of the modal, reading as "nothing happened").
+- `0875075` — citation summary: a likely-local fuzzy suggestion counts as held, not "frequently
+  cited but missing" (rejected suggestions stay missing).
+- `897da47` — Admin Settings / Find-on-web / Backup tabs use a packed two-column (masonry) layout.
+- Fast backend tier green (889 passed), frontend 293 + build green. Worker restarted; frontend
+  `.vite` cache cleared + dev server restarted after the in-container build.
+
 ## UX batch: citing polish, field search, clickable summary, batch jobs (2026-07-15)
 
 - `1601ad7` — external citing papers tinted lighter in the reference graph; paper view loads the
