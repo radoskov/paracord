@@ -197,6 +197,9 @@ export interface Topic {
   // C4: quality signals the modeler always computes — closest-to-centroid papers + cluster tightness.
   representative_work_ids: string[];
   coherence_score: number | null;
+  // UX batch 4: the papers behind this topic (best-fit first), with titles for direct display.
+  work_ids?: string[];
+  works?: { id: string; title: string | null }[];
 }
 
 export interface TopicModelResponse {
@@ -272,6 +275,8 @@ export interface TopicGraphNode {
   year: number | null;
   venue?: string | null;
   doi?: string | null;
+  // UX batch 4: enables citation-count sizing / year coloring in the topic graph.
+  citation_count?: number | null;
 }
 
 export interface TopicGraphEdge {
@@ -1160,6 +1165,9 @@ export interface ScopeSummaryResponse {
   provider_used?: string | null;
   fallback?: boolean;
   fallback_reason?: string | null;
+  // UX batch 4: which scope this summarizes + how (v2 map-reduce).
+  scope_label?: string | null;
+  method?: string | null;
 }
 
 export interface AiConfig {
@@ -2501,6 +2509,16 @@ export class ApiClient {
     const params = new URLSearchParams({ scope_type: scopeType });
     if (scopeId) params.set("scope_id", scopeId);
     return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/latest?${params}`);
+  }
+
+  /** Reconstructed topics for a scope (the async-completion read path; UX batch 4). */
+  async getLatestTopics(
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+  ): Promise<TopicModelResponse> {
+    const params = new URLSearchParams({ scope_type: scopeType });
+    if (scopeId) params.set("scope_id", scopeId);
+    return this.request<TopicModelResponse>(`/api/v1/ai/topics/latest?${params}`);
   }
 
   async listAdminUsers(): Promise<AdminUser[]> {

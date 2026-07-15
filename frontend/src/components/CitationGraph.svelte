@@ -13,6 +13,7 @@
   import { activeVizTheme } from '../lib/theme/store';
   import { categoricalPalette } from '../lib/viz/theme';
   import ChartHost from './ChartHost.svelte';
+  import Modal from './Modal.svelte';
 
   export let label = '';
   export let disabled = false;
@@ -76,9 +77,15 @@
     degree: number;
     pagerank: number;
     betweenness: number;
+    citationCount: number | null;
     colorGroup: string | null;
     warning: boolean;
   };
+
+  // Topic-graph encodings (UX batch 4): its own selects — the citation metrics (pagerank etc.)
+  // don't exist on similarity nodes, but citation count and year do.
+  let topicSizeBy: 'degree' | 'citations' = 'degree';
+  let topicColorBy: 'none' | 'year' = 'none';
   type REdge = { source: string; target: string; weight: number; resolution?: string };
 
   $: rNodes = (() => {
@@ -86,14 +93,17 @@
       return topicGraph.nodes.map<RNode>((n) => ({
         id: n.id, label: n.label, kind: 'local', workId: n.work_id, year: n.year,
         venue: n.venue ?? null, doi: n.doi ?? null, degree: 0, pagerank: 0, betweenness: 0,
-        colorGroup: null, warning: false,
+        citationCount: n.citation_count ?? null,
+        colorGroup: topicColorBy === 'year' ? String(n.year ?? 'unknown') : null,
+        warning: false,
       }));
     }
     if (graph) {
       return graph.nodes.map<RNode>((n) => ({
         id: n.id, label: n.label, kind: n.type, workId: n.work_id, year: n.year,
         venue: n.venue ?? null, doi: n.doi, degree: n.degree ?? 0, pagerank: n.pagerank ?? 0,
-        betweenness: n.betweenness ?? 0, colorGroup: n.color_group ?? null,
+        betweenness: n.betweenness ?? 0, citationCount: null,
+        colorGroup: n.color_group ?? null,
         warning: n.warning ?? false,
       }));
     }
@@ -111,10 +121,11 @@
   // Distinct color groups (citation graph only), sorted — years numerically (unknown last), the
   // rest alphabetically — so the legend chips and the palette progression read in order.
   $: colorGroups = (() => {
-    if (graphType !== 'citation' || colorBy === 'none') return [] as string[];
+    const activeColorBy = graphType === 'topic' ? topicColorBy : colorBy;
+    if (activeColorBy === 'none') return [] as string[];
     const seen: string[] = [];
     for (const n of rNodes) if (n.colorGroup && !seen.includes(n.colorGroup)) seen.push(n.colorGroup);
-    if (colorBy === 'year') {
+    if (activeColorBy === 'year') {
       return seen.sort(
         (a, b) =>
           (a === 'unknown' ? 1 : 0) - (b === 'unknown' ? 1 : 0) || Number(a) - Number(b),
@@ -183,7 +194,9 @@
         ? n.pagerank
         : graphType === 'citation' && sizeBy === 'betweenness'
           ? n.betweenness
-          : n.degree || deg[n.id] || 0;
+          : graphType === 'topic' && topicSizeBy === 'citations'
+            ? (n.citationCount ?? 0)
+            : n.degree || deg[n.id] || 0;
     const values = nodes.map(metric);
     const max = Math.max(0, ...values);
     const min = Math.min(0, ...values);
@@ -229,16 +242,22 @@
           const m = d.meta;
           if (!m) return String(d.name ?? '');
           // Encoded channels (UX batch 3): spell out what size/color mean for THIS node.
-          const sizeMetric = graphType === 'citation' ? sizeBy : 'degree';
+          const sizeMetric =
+            graphType === 'citation'
+              ? sizeBy
+              : topicSizeBy === 'citations'
+                ? 'citation count'
+                : 'degree (similarity links)';
           const sizeVal =
             d.sizeValue != null && Number.isFinite(d.sizeValue)
               ? Number(d.sizeValue) >= 1
                 ? String(Math.round(Number(d.sizeValue)))
                 : Number(d.sizeValue).toFixed(4)
               : '—';
+          const activeColorBy = graphType === 'topic' ? topicColorBy : colorBy;
           const colorDesc =
-            m.colorGroup && colorBy !== 'none'
-              ? `color = ${colorBy}: ${m.colorGroup}`
+            m.colorGroup && activeColorBy !== 'none'
+              ? `color = ${activeColorBy}: ${m.colorGroup}`
               : `color = ${m.kind === 'external' ? 'external (not in library)' : 'in library'}`;
           const bits = [
             `<strong>${m.label}</strong>`,
@@ -449,11 +468,16 @@
   // Client-side option rebuilds: size/filter/layout toggles bump the revision (ChartHost repaints).
   $: {
     sizeBy;
+    topicSizeBy;
+    topicColorBy;
     hideSingletons;
     hideExternalLeaves;
     layout;
     revision += 1;
   }
+
+  // Help popup (UX batch 4): what the metrics mean + how the edges are computed, per graph type.
+  let showHelp = false;
 </script>
 
 <section>
@@ -514,6 +538,18 @@
           <option value="year">Color: year</option>
         </select>
       {/if}
+      {#if graphType === 'topic' && renderMode === 'graph'}
+        <select bind:value={topicSizeBy} disabled={disabled || busy} data-testid="topic-size-by"
+          title="What node size represents">
+          <option value="degree">Size: similarity links</option>
+          <option value="citations">Size: citation count</option>
+        </select>
+        <select bind:value={topicColorBy} disabled={disabled || busy} data-testid="topic-color-by"
+          title="Group node colors by an attribute">
+          <option value="none">Color: none</option>
+          <option value="year">Color: year</option>
+        </select>
+      {/if}
       <label class="toggle" title="Hide nodes that have no edges">
         <input type="checkbox" bind:checked={hideSingletons} aria-label="Hide nodes with no edges" />
         Hide singletons
@@ -534,6 +570,8 @@
         <button type="button" class="secondary" on:click={refresh} disabled={disabled || busy}
           title="Recompute the graph from the server, then reset the view and filters">Refresh</button>
       {/if}
+      <button type="button" class="secondary" on:click={() => (showHelp = true)}
+        data-testid="graph-help" title="What the metrics mean and how the edges are computed">ⓘ Help</button>
     </div>
   </div>
 
@@ -560,7 +598,7 @@
     {#if rNodes.length === 0 && rEdges.length === 0}
       <p class="empty">{graphType === 'topic' ? 'No similarity edges in this scope yet.' : 'No citation edges in this scope yet.'}</p>
     {:else if renderMode === 'graph'}
-      {#if graphType === 'citation' && colorGroups.length}
+      {#if colorGroups.length}
         <div class="chips" role="group" aria-label="Color groups">
           {#each colorGroups as group, i (group)}
             <button
@@ -587,8 +625,8 @@
         ariaLabel={graphType === 'topic' ? 'Topic graph' : 'Citation graph'}>
         <svelte:fragment slot="fallback">Interactive view unavailable here — switch to List.</svelte:fragment>
       </ChartHost>
-      <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : 'degree'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''}.{#if colorGroups.length}
-          Color chips: hover highlights, click hides/shows, shift-click solos a group.{/if}</p>
+      <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : topicSizeBy === 'citations' ? 'citation count' : 'similarity links'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''} · ctrl-click a node to show only it + neighbors.{#if colorGroups.length}
+          Color chips: hover highlights, click hides/shows, shift-click solos, ctrl-click focuses a group + neighbors.{/if}</p>
     {:else}
       <ul class="edges">
         {#each rEdges as edge (edge.source + '->' + edge.target)}
@@ -604,7 +642,66 @@
   {/if}
 </section>
 
+{#if showHelp}
+  <Modal title={graphType === 'topic' ? 'About the topic graph' : 'About the citation graph'}
+    onClose={() => (showHelp = false)}>
+    {#if graphType === 'topic'}
+      <dl class="graph-help">
+        <dt>What it shows</dt>
+        <dd>Each node is a paper in the scope; an edge means the two papers are semantically
+          similar. There are no citation relations here — it maps what the papers are
+          <em>about</em>.</dd>
+        <dt>How edges are computed</dt>
+        <dd>Every paper's title + abstract is embedded with the active embedding model; edges are
+          the cosine similarity between those vectors. Each paper keeps only its top-6 most
+          similar neighbours, and pairs below 0.30 similarity are dropped — so the graph stays
+          sparse and readable. Edge width ∝ similarity. Without a real embedding model there are
+          no edges (the note above the graph says so).</dd>
+        <dt>Node size</dt>
+        <dd><strong>Similarity links</strong>: how many similarity edges the paper has (a hub of
+          its semantic neighbourhood). <strong>Citation count</strong>: the paper's global
+          citation count from stored metadata.</dd>
+        <dt>Color</dt>
+        <dd>Uniform by default; <em>Color: year</em> groups papers by publication year (chips
+          above the graph filter them).</dd>
+      </dl>
+    {:else}
+      <dl class="graph-help">
+        <dt>What it shows</dt>
+        <dd>Each node is a paper; a directed edge A → B means A cites B (resolved from extracted
+          references). External (not-in-library) cited papers appear as diamonds when included.</dd>
+        <dt>Node size metrics</dt>
+        <dd><strong>Degree</strong>: how many citation edges touch the paper — raw connectedness.
+          <strong>PageRank</strong>: influence — a paper cited by other influential papers scores
+          higher than one cited the same number of times by isolated papers.
+          <strong>Betweenness</strong>: bridge-ness — how often the paper sits on the shortest
+          path between two other papers; high values are papers connecting otherwise separate
+          areas.</dd>
+        <dt>Color</dt>
+        <dd><em>Color: status/shelf/tag/topic/year</em> groups papers by that attribute (computed
+          server-side; the chips above the graph filter the groups).</dd>
+      </dl>
+    {/if}
+    <dl class="graph-help">
+      <dt>Interactions</dt>
+      <dd>Click an in-library node to open it{onImportExternal ? '; click an external node to import it' : ''}.
+        Ctrl-click a node or a color chip → show only it + direct neighbours (ctrl-click again or
+        Reset view to clear). Shift-click a chip solos its group. Show all fits the view; Refresh
+        recomputes from the server.</dd>
+    </dl>
+  </Modal>
+{/if}
+
 <style>
+  .graph-help dt {
+    font-weight: 600;
+    margin-top: 0.6rem;
+  }
+
+  .graph-help dd {
+    margin: 0.15rem 0 0;
+  }
+
   .head {
     align-items: center;
     display: flex;

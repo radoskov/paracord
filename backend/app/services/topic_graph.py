@@ -37,6 +37,8 @@ class TopicGraphNode:
     label: str
     work_id: uuid.UUID
     year: int | None = None
+    # UX batch 4: lets the UI offer citation-count node sizing / year coloring.
+    citation_count: int | None = None
 
 
 @dataclass
@@ -101,7 +103,11 @@ def build_topic_graph(
         return TopicGraph(
             nodes=[
                 TopicGraphNode(
-                    id=str(w.id), label=w.canonical_title or "(untitled)", work_id=w.id, year=w.year
+                    id=str(w.id),
+                    label=w.canonical_title or "(untitled)",
+                    work_id=w.id,
+                    year=w.year,
+                    citation_count=w.citation_count,
                 )
                 for w in all_works
             ],
@@ -116,7 +122,11 @@ def build_topic_graph(
 
     nodes = [
         TopicGraphNode(
-            id=str(w.id), label=w.canonical_title or "(untitled)", work_id=w.id, year=w.year
+            id=str(w.id),
+            label=w.canonical_title or "(untitled)",
+            work_id=w.id,
+            year=w.year,
+            citation_count=w.citation_count,
         )
         for w in works
     ]

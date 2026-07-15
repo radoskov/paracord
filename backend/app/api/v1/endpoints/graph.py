@@ -170,6 +170,7 @@ class TopicGraphNodeRead(BaseModel):
     label: str
     work_id: uuid.UUID
     year: int | None = None
+    citation_count: int | None = None
 
 
 class TopicGraphEdgeRead(BaseModel):

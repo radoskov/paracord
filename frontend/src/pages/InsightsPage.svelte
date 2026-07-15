@@ -137,18 +137,35 @@
     message = 'Still running in the background — check the Jobs tab.';
   }
 
+  // Busy flags (UX batch 4): the buttons show a running state (and can't be re-clicked) for the
+  // whole run, INCLUDING the background-job wait — previously a queued job looked like nothing
+  // had happened.
+  let topicsBusy = false;
+  let summaryBusy = false;
+  let maxTopics = 8;
+
   async function modelTopics(): Promise<void> {
+    topicsBusy = true;
+    let backgrounded = false;
     await run(async () => {
       const response = await client.modelTopics({
         scopeType: scope.scopeType,
         scopeId: scope.scopeId,
-        maxTopics: 6,
+        maxTopics,
       });
       if (response.queued && response.job_id) {
-        message = `Modeling ${response.work_count} papers in the background — the topic graph will refresh when done.`;
+        backgrounded = true;
+        message = `Modeling ${response.work_count} papers in the background…`;
         void pollJob(response.job_id, async () => {
-          message = 'Topic model finished — refresh the topic graph to see the new topics.';
-        });
+          // UX batch 4: fetch the stored result — a whole-library run used to end with a
+          // "refresh the graph" note and NO topics.
+          const latest = await client.getLatestTopics(scope.scopeType, scope.scopeId);
+          topics = latest.topics;
+          outlierIds = latest.outlier_work_ids ?? [];
+          expandedTopic = null;
+          outliersExpanded = false;
+          message = `Modeled ${latest.topics.length} topics over ${latest.work_count} papers`;
+        }).finally(() => (topicsBusy = false));
         return;
       }
       topics = response.topics;
@@ -157,6 +174,7 @@
       outliersExpanded = false;
       message = `Modeled ${response.topics.length} topics over ${response.work_count} papers`;
     });
+    if (!backgrounded) topicsBusy = false;
   }
 
   // C4: the modeler always returns per-topic representatives + coherence and scope-level outliers;
@@ -197,18 +215,22 @@
   }
 
   async function summarise(): Promise<void> {
+    summaryBusy = true;
+    let backgrounded = false;
     await run(async () => {
       const response = await client.createScopeScope(scope.scopeType, scope.scopeId);
       if (response.queued && response.job_id) {
+        backgrounded = true;
         message = `Summarizing ${response.work_count} papers in the background…`;
         void pollJob(response.job_id, async () => {
           summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId);
           message = 'Summary ready.';
-        });
+        }).finally(() => (summaryBusy = false));
         return;
       }
       summary = response;
     }, 'Summary generated');
+    if (!backgrounded) summaryBusy = false;
   }
 
 </script>
@@ -245,6 +267,7 @@
       disabled={loading || !scopeReady}
       load={loadGraph}
       loadTopic={loadTopicGraph}
+      onOpenWork={openPaper}
       onImportExternal={importExternal}
       {visible}
     />
@@ -254,8 +277,14 @@
     <div class="card">
       <div class="head">
         <h2>Topics</h2>
-        <button type="button" on:click={modelTopics} disabled={loading || !scopeReady || !isClassicScope}
-          title={isClassicScope ? (scopeReady ? 'Cluster the scope’s papers into keyword topics' : `Pick a ${scopeType} first`) : 'Topics work on a library, shelf or rack scope'}>Model topics</button>
+        <label class="max-topics" title="How many topics to cluster the papers into (1-20)">
+          Max
+          <input type="number" min="1" max="20" bind:value={maxTopics} style="width:3.5rem" />
+        </label>
+        <button type="button" class:busy={topicsBusy} on:click={modelTopics}
+          disabled={loading || topicsBusy || !scopeReady || !isClassicScope}
+          title={isClassicScope ? (scopeReady ? 'Cluster the scope’s papers into keyword topics' : `Pick a ${scopeType} first`) : 'Topics work on a library, shelf or rack scope'}
+          >{topicsBusy ? 'Modeling…' : 'Model topics'}</button>
       </div>
       {#if topics.length === 0}
         <p class="empty">No topics yet — click “Model topics”.</p>
@@ -269,7 +298,19 @@
                 <small class="muted" title="How tightly this topic’s papers cluster together (100% = near-identical)">
                   · {Math.round(topic.coherence_score * 100)}% coherent</small>
               {/if}
-              {#if topic.representative_work_ids.length > 0}
+              {#if topic.works?.length}
+                <button type="button" class="linkbtn" on:click={() => toggleTopicExamples(topic)}
+                  title="List this topic’s papers (best fit first) — click one to open it">
+                  {expandedTopic === topic.topic_id ? 'Hide papers' : 'Show papers'}
+                </button>
+                {#if expandedTopic === topic.topic_id}
+                  <ul class="plain nested">
+                    {#each topic.works as w (w.id)}
+                      <li><button type="button" class="linkbtn" on:click={() => openPaper(w.id)}>{w.title ?? 'Untitled paper'}</button></li>
+                    {/each}
+                  </ul>
+                {/if}
+              {:else if topic.representative_work_ids.length > 0}
                 <button type="button" class="linkbtn" on:click={() => toggleTopicExamples(topic)}
                   title="The papers closest to this topic’s center">
                   {expandedTopic === topic.topic_id ? 'Hide examples' : 'Examples'}
@@ -307,14 +348,21 @@
     <div class="card">
       <div class="head">
         <h2>Scope summary</h2>
-        <button type="button" on:click={summarise} disabled={loading || !scopeReady || !isClassicScope}
-          title={isClassicScope ? (scopeReady ? 'Summarize the scope’s abstracts (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}>Summarize</button>
+        <button type="button" class:busy={summaryBusy} on:click={summarise}
+          disabled={loading || summaryBusy || !scopeReady || !isClassicScope}
+          title={isClassicScope ? (scopeReady ? 'Summarize the scope (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}
+          >{summaryBusy ? 'Summarizing…' : 'Summarize'}</button>
       </div>
       {#if !summary}
         <p class="empty">No summary yet — click “Summarize”.</p>
       {:else}
+        {#if summary.scope_label}
+          <p class="summary-scope" data-testid="summary-scope-label">
+            Summary of <strong>{summary.scope_label}</strong>
+          </p>
+        {/if}
         <p class="summary-text">{summary.text}</p>
-        <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}</p>
+        <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}{summary.method === 'map_reduce' ? ' · per-paper digests synthesized' : ''}</p>
         {#if summary.provider_used !== 'local_llm'}
           <p class="extractive-hint" role="status">
             {#if summary.fallback && summary.fallback_reason}
@@ -366,6 +414,24 @@
   .layout {
     display: grid;
     gap: 1rem;
+  }
+
+  /* Running-state buttons (UX batch 4): visibly "working" while the job runs. */
+  button.busy {
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+    cursor: progress;
+  }
+
+  .max-topics {
+    align-items: center;
+    display: flex;
+    font-size: 0.85rem;
+    gap: 0.3rem;
+  }
+
+  .summary-scope {
+    margin: 0 0 0.4rem;
   }
 
   .export-block summary {
