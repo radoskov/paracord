@@ -356,9 +356,15 @@ def chunk_work_job(work_id: str) -> None:
     from app.db.session import SessionLocal
     from app.services.chunking import chunk_work_by_id
 
-    with SessionLocal() as db:
-        chunk_work_by_id(db, uuid.UUID(str(work_id)))
-        db.commit()
+    try:
+        with SessionLocal() as db:
+            chunk_work_by_id(db, uuid.UUID(str(work_id)))
+            db.commit()
+    except Exception as exc:
+        # Flag the paper (loud, per-paper) like enrich does — without this the only trace is a
+        # failed job that the startup recovery sweep silently re-enqueues on every restart.
+        _set_work_processing_error(work_id, "chunk", str(exc))
+        raise
 
 
 @_audited_job

@@ -142,3 +142,33 @@ def test_work_with_no_tei_chunks_title_and_abstract(db_session) -> None:
     labels = [label for label, _ in iter_work_sections(db_session, work)]
     assert labels == ["title", "abstract"]
     assert rechunk_work(db_session, work) == 2
+
+
+def test_build_chunks_sanitizes_nul_bytes_and_overlong_section_labels(db_session) -> None:
+    """Postgres rejects NUL bytes (DataError, sqlalche.me/e/20/9h9h) and ``section`` is capped at
+    255 chars — a mis-parsed TEI must not be able to sink the chunk job with either."""
+    monster_head = "A ridiculously long section head " * 20  # ≫ 255 chars once parsed
+    tei = f"""<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text><body>
+    <div><head>{monster_head}</head><p>Ordinary body text under the mis-parsed head.</p></div>
+  </body></text>
+</TEI>"""
+    work = Work(
+        canonical_title="Sanitize me\x00please",
+        normalized_title="sanitize",
+        abstract="Abstract with a NUL\x00byte inside.",
+    )
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db_session.commit()
+
+    records = build_chunks_for_work(db_session, work)
+    assert records
+    for r in records:
+        assert "\x00" not in r["text"]
+        assert r["section"] is None or (len(r["section"]) <= 255 and "\x00" not in r["section"])
+    # The over-long head was clamped, not dropped.
+    clamped = [r["section"] for r in records if r["section"] and r["section"].startswith("A ridiculously")]
+    assert clamped and all(len(s) == 255 for s in clamped)

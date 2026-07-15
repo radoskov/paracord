@@ -31,6 +31,24 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # Section labels that add noise rather than signal to semantic retrieval.
 _SKIP_SECTION = re.compile(r"reference|bibliograph|acknowledg", re.IGNORECASE)
 
+# Postgres rejects NUL (0x00) in text values with a DataError, and the ``section`` column is capped
+# at 255 chars while GROBID ``<head>`` labels are unbounded — a mis-parsed PDF can yield a whole
+# paragraph as the "label" and control characters in the body. Sanitize both before they reach the
+# INSERT (the sqlalche.me/e/20/9h9h chunk-job failure).
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_SECTION_MAX_CHARS = 255
+
+
+def _sanitize_text(text: str) -> str:
+    return _CONTROL_CHARS.sub(" ", text or "")
+
+
+def _sanitize_label(label: str | None) -> str | None:
+    if not label:
+        return None
+    cleaned = " ".join(_CONTROL_CHARS.sub(" ", label).split())
+    return cleaned[:_SECTION_MAX_CHARS] or None
+
 
 def _count_tokens(text: str) -> int:
     return len(text.split())
@@ -130,10 +148,11 @@ def build_chunks_for_work(db: Session, work: Work) -> list[dict]:
     chunks: list[dict] = []
     position = 0
     for label, text in iter_work_sections(db, work):
-        for piece in chunk_text(text):
+        clean_label = _sanitize_label(label)
+        for piece in chunk_text(_sanitize_text(text)):
             chunks.append(
                 {
-                    "section": label,
+                    "section": clean_label,
                     "position": position,
                     "text": piece,
                     "token_count": _count_tokens(piece),
