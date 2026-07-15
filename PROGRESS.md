@@ -11,6 +11,18 @@
 
 ## UX batch 3 follow-ups: smarter downloads, Elsevier API, graph zoom/sliders (2026-07-15)
 
+- `6780d1d` — fix round: **zen mode portals to `<body>`** (the paper-view modal's containing
+  block was clipping `position:fixed` — the app showed around the backdrop); force-layout
+  **Show all fits without re-springing** (zoom/center merge, not a repaint; one-shot auto-fit
+  ~1.6 s after rebuilds); **ctrl-click focus on the reference graph** (nodes AND legend entries,
+  venue coloring included; the legend toggle the click causes is undone automatically); help
+  popups document the new interactions.
+- `c1e5baf` — ctrl-click neighborhood focus extended to the Visualizations **co-citation network
+  and temporal map** (payload-level node/edge filtering before the pure renderers; legend
+  ctrl-click included; focus note + hint line; About texts updated).
+- reference docs updated in the same batch: 02 (app_config/users columns, migrations 0070–0073),
+  03 (`pdf_link_finder` row + web_find fallback chain incl. the Elsevier gates), 07 (zen mode +
+  standard graph interactions); handoff note `2026-07-15-ux-batch3-downloads-graphs.md`.
 - `0e139c3` — embedded-JSON PDF sniffing (layer 4 of `pdf_link_finder`): script-blob URL scan +
   ScienceDirect `pdfft?md5&pid` reconstruction from `urlMetadata`; **Elsevier Article Retrieval
   API fetcher** for 10.1016 DOIs (write-only key in Admin → Find-on-web; yaml/env fallback

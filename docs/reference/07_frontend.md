@@ -108,6 +108,9 @@ custom themes (uploaded YAML) merge into everyone's picker. Full operator guide:
   annotation highlights (`lib/reader/overlayBoxes.ts`) tracked across zoom; whole-document search with
   a scanned-PDF fallback (fetch server OCR text when the native layer is sparse); selection →
   annotation mapping to GROBID-style scaled coords; bidirectional citation↔reference navigation.
+  **Zen mode** (UX batch 3): the reader portals itself to `<body>` (a modal ancestor's containing
+  block would otherwise clip `position:fixed`) and fills the viewport over a dark backdrop; only
+  paging/zoom/view-mode/reading-mode + Exit zen remain; Esc exits.
   ⚠️ the PDF is fully buffered (`.arrayBuffer()`) — large scans load entirely into RAM.
 - **CitationGraph (~740 lines)** — Cytoscape + fcose. Citation (directed) vs Topic (similarity)
   graph; Graph vs List modes. Controls: node mode, collapse-versions, size-by
@@ -124,6 +127,18 @@ custom themes (uploaded YAML) merge into everyone's picker. Full operator guide:
 - **Visualizations registry (`lib/viz/registry.ts`)** — `view_type → VizRenderer` with pure
   `buildOption(payload, theme)` (never imports echarts, so jsdom-unit-testable). Five renderers:
   temporalMap (default), embeddingCluster, coCitation, topicRiver, similarityHeatmap.
+- **Standard graph interactions (UX batch 3)** — shared conventions across the Insights
+  citation/topic graph, the per-paper reference graph and the Visualizations graph views:
+  **Show all** (fit the view — on force layouts a zoom/center merge, never a repaint, so the
+  simulation doesn't re-spring; a one-shot auto-fit also fires ~1.6 s after any rebuild),
+  **Reset view** (fit + clear every filter incl. legend solo and ctrl-click focus), **Refresh**
+  (recompute + reset). **Ctrl-click** a node or a legend/category chip → show only it + direct
+  neighbors (payload/edge-list filtering, cleared by ctrl-click again / Reset view / rebuild).
+  Shift-click legend/chip = solo. Tooltips append the encoded channels (`size = …`, `color = …`).
+  Reference graph extras: edge-snapped wheel zoom (cursor near a plot edge pins the window to
+  that data edge), Max-external base 500 persisted per user (`reference_graph_max_external`
+  preference). Temporal map / embedding cluster: two-handle slider dataZoom bars replaced the
+  manual min/max inputs (end stops = auto).
 
 ## 7. "Paper" (UI) vs "Work" (code)
 

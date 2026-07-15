@@ -78,6 +78,11 @@ erDiagram
 
 **Singletons** (fixed-id single-row overlays over static `Settings`, no relationships):
 `ai_config`, `app_config`, `web_find_settings`, `access_settings`.
+`app_config` grew in the 2026-07-15 UX batches (migrations 0070–0073): matching acceptance
+(`fuzzy_accept_threshold`, `use_high_confidence_auto_accept`), `citation_summary_item_cap`,
+and the Elsevier API pair (`elsevier_api_key` — write-only through the admin API — and the
+`elsevier_api_enabled` master switch); `users.elsevier_api_allowed` (0073, NULL→False) is the
+per-user gate for that key.
 **Standalone**: `web_find_allowed_hosts`, `import_roots`, `audit_events` (soft actor links),
 `duplicate_candidates` (soft polymorphic pair), `embedding_model_registry`, `missing_work_decisions`,
 `custom_themes`, `default_grants`.
