@@ -1871,7 +1871,7 @@
                     <span class="cand-status ok">✓ Already attached (deduplicated)</span>
                   {:else if r.status === 'manual_upload_needed'}
                     <span class="cand-status warn">
-                      Could not download automatically (login/paywall).
+                      Could not download automatically{r.reason ? ` — ${r.reason}` : ' (login/paywall)'}.
                       <button type="button" class="link" on:click={startManualUpload}>Upload the PDF manually</button>.
                     </span>
                   {:else if r.status === 'blocked'}
