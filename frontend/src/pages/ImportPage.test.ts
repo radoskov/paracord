@@ -130,3 +130,39 @@ describe('ImportPage multi-PDF import (batch10 #1)', () => {
     expect(screen.getByText(/same DOI as an existing paper/)).toBeTruthy();
   });
 });
+
+describe('ImportPage sub-tabs', () => {
+  beforeEach(() => {
+    currentUser.set({ id: 'u', username: 'ed', role: 'editor' } as never);
+    sessionStorage.clear();
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it('defaults to PDF import and switches panels per sub-tab', async () => {
+    render(ImportPage, { client: makeClient() as never });
+
+    // Default tab shows the PDF upload card only.
+    expect(screen.getByLabelText('PDF files')).toBeTruthy();
+    expect(screen.queryByLabelText('BibTeX')).toBeNull();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Citations' }));
+    expect(screen.queryByLabelText('PDF files')).toBeNull();
+    expect(screen.getByLabelText('BibTeX')).toBeTruthy();
+    expect(screen.getByLabelText('Citations, one per line')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'External data' }));
+    expect(screen.getByLabelText('RIS')).toBeTruthy();
+    expect(screen.getByLabelText('CSL JSON')).toBeTruthy();
+  });
+
+  it('remembers the last selected sub-tab across remounts (session)', async () => {
+    const first = render(ImportPage, { client: makeClient() as never });
+    await fireEvent.click(screen.getByRole('button', { name: 'Identifier' }));
+    expect(screen.getByLabelText('arXiv id or DOI')).toBeTruthy();
+    first.unmount();
+
+    render(ImportPage, { client: makeClient() as never });
+    expect(screen.getByLabelText('arXiv id or DOI')).toBeTruthy();
+    expect(screen.queryByLabelText('PDF files')).toBeNull();
+  });
+});

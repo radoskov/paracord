@@ -11,10 +11,42 @@
   } from '../api/client';
   import BatchImport from '../components/BatchImport.svelte';
   import ShelfPicker from '../components/ShelfPicker.svelte';
+  import { pendingImportText } from '../lib/selection';
   import { isOwner } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
+
+  // Import sub-tabs: the page outgrew a single scroll of panels, so group them under a local
+  // tab strip (same pattern as Admin #24). The last selected sub-tab survives page switches
+  // within the browser session.
+  type ImportTab = { id: string; label: string };
+  const IMPORT_TABS: ImportTab[] = [
+    { id: 'pdf', label: 'PDF import' },
+    { id: 'citations', label: 'Citations' },
+    { id: 'identifier', label: 'Identifier' },
+    { id: 'folder', label: 'Folder import' },
+    { id: 'external', label: 'External data' },
+  ];
+  const TAB_STORE_KEY = 'paracord_import_subtab';
+  function initialTab(): string {
+    try {
+      const stored = sessionStorage.getItem(TAB_STORE_KEY);
+      if (stored && IMPORT_TABS.some((t) => t.id === stored)) return stored;
+    } catch {
+      /* storage unavailable (private mode) — fall through to the default */
+    }
+    return 'pdf';
+  }
+  let activeTab = initialTab();
+  function selectTab(id: string): void {
+    activeTab = id;
+    try {
+      sessionStorage.setItem(TAB_STORE_KEY, id);
+    } catch {
+      /* storage unavailable — selection just won't survive a page switch */
+    }
+  }
 
   // Optional import-to-shelf targets per card (Phase J item 6); '' means no shelf.
   let uploadShelfId = '';
@@ -43,7 +75,14 @@
   const EXTRACTION_QUEUE_WARNING =
     "Imported, but extraction couldn't be queued — the processing queue looks offline. It'll retry automatically.";
 
-  onMount(load);
+  onMount(() => {
+    void load();
+    // A reference-graph "import citation" push prefills the citations box (BatchImport consumes
+    // the store when it mounts) — jump to that sub-tab so the pushed text is actually visible.
+    return pendingImportText.subscribe((val) => {
+      if (val) activeTab = 'citations';
+    });
+  });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -274,10 +313,19 @@
   }
 </script>
 
-<section class="grid">
+<section>
+  <nav class="import-tabs" aria-label="Import methods">
+    {#each IMPORT_TABS as tab (tab.id)}
+      <button type="button" class="import-tab" class:active={activeTab === tab.id}
+        on:click={() => selectTab(tab.id)}>{tab.label}</button>
+    {/each}
+  </nav>
+
+  <div class="grid">
   {#if message}<p class="muted msg">{message}</p>{/if}
   {#if warning}<p class="msg warn-msg" role="alert">⚠ {warning}</p>{/if}
 
+  {#if activeTab === 'pdf'}
   <div class="card wide-card">
     <h2>Upload PDFs</h2>
     <p class="muted">
@@ -370,8 +418,10 @@
       </div>
     {/if}
   </div>
+  {/if}
 
-  <div class="card">
+  {#if activeTab === 'identifier'}
+  <div class="card narrow-card">
     <h2>Import by identifier</h2>
     <p class="muted">Fetch metadata for an arXiv id or DOI and create a paper (idempotent).</p>
     <form on:submit|preventDefault={importIdentifier} class="stack">
@@ -383,8 +433,10 @@
       <ShelfPicker {client} bind:value={identifierShelfId} label="Add to shelf (optional)" />
     </form>
   </div>
+  {/if}
 
-  <div class="card">
+  {#if activeTab === 'folder'}
+  <div class="card narrow-card">
     <h2>Server folder</h2>
     <p class="muted">
       Scans a folder <strong>on the server machine</strong> for PDFs. For security the server
@@ -429,7 +481,9 @@
     </div>
     {#if sources.length === 0}<p class="hintline">No sources yet — add one above. Aliases come from the server config.</p>{/if}
   </div>
+  {/if}
 
+  {#if activeTab === 'citations'}
   <div class="card wide">
     <BatchImport {client} />
   </div>
@@ -444,7 +498,9 @@
         title={bibtexContent.trim() ? 'Import the pasted BibTeX entries' : 'Paste BibTeX first'}>Import BibTeX</button>
     </form>
   </div>
+  {/if}
 
+  {#if activeTab === 'external'}
   <div class="card">
     <h2>Paste RIS</h2>
     <p class="muted">Reference Manager / EndNote format (tagged lines, one record per <code>ER</code>).</p>
@@ -466,6 +522,8 @@
         title={cslContent.trim() ? 'Import the pasted CSL JSON items' : 'Paste CSL JSON first'}>Import CSL JSON</button>
     </form>
   </div>
+  {/if}
+  </div>
 </section>
 
 <style>
@@ -473,6 +531,33 @@
     display: grid;
     gap: 1rem;
     grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  }
+
+  .import-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+  }
+
+  .import-tab {
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    color: var(--accent-secondary);
+    font-weight: 600;
+  }
+
+  .import-tab.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--ink-inverse);
+  }
+
+  /* Single-form tabs (identifier, folder): cap the card so a lone form doesn't stretch
+     across the whole viewport. */
+  .narrow-card {
+    max-width: 44rem;
   }
 
   .warn {
