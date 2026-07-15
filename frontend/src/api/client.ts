@@ -1448,6 +1448,10 @@ export interface JobRecord {
   // F2: RQ retries remaining (null = no retry policy). A "scheduled" job with this set is a pending
   // automatic retry — the Jobs tab surfaces it so a retry looks like progress, not a stuck job.
   retries_left?: number | null;
+  // UX batch 4: long jobs (scope summary) report progress; a stop-requested job shows "stopping".
+  progress_done?: number | null;
+  progress_total?: number | null;
+  stopping?: boolean;
 }
 
 export interface QueueStatus {
@@ -2970,6 +2974,11 @@ export class ApiClient {
 
   async cancelJob(jobId: string): Promise<{ cancelled: boolean; job_id: string }> {
     return this.request(`/api/v1/jobs/${jobId}/cancel`, { method: "POST" });
+  }
+
+  /** Cooperatively stop a running long job (or cancel it if still queued). UX batch 4. */
+  async stopJob(jobId: string): Promise<{ stopping: boolean; job_id: string }> {
+    return this.request(`/api/v1/jobs/${jobId}/stop`, { method: "POST" });
   }
 
   async getJobs(limit = 25): Promise<QueueStatus> {

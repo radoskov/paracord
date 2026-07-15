@@ -17856,6 +17856,67 @@
         ]
       }
     },
+    "/api/v1/jobs/{job_id}/stop": {
+      "post": {
+        "description": "Cooperatively stop a RUNNING long job (UX batch 4), or cancel it if still queued.\n\nLong jobs (scope summary) check the flag between papers and stop cleanly; work already done\n(per-paper summaries) is kept. A queued job is cancelled outright.",
+        "operationId": "stop_job_endpoint_api_v1_jobs__job_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Stop Job Endpoint Api V1 Jobs  Job Id  Stop Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Job Endpoint",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
     "/api/v1/preferences": {
       "get": {
         "description": "Return the caller's stored preferences (empty defaults if none saved yet).",

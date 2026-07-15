@@ -112,6 +112,23 @@ def cancel_job_endpoint(job_id: str, _: User = EDITOR_DEP) -> dict:
     return {"cancelled": True, "job_id": job_id}
 
 
+@router.post("/{job_id}/stop")
+def stop_job_endpoint(job_id: str, _: User = EDITOR_DEP) -> dict:
+    """Cooperatively stop a RUNNING long job (UX batch 4), or cancel it if still queued.
+
+    Long jobs (scope summary) check the flag between papers and stop cleanly; work already done
+    (per-paper summaries) is kept. A queued job is cancelled outright.
+    """
+    from app.workers.queue import request_job_stop
+
+    if not request_job_stop(job_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Job not found, already finished, or not stoppable",
+        )
+    return {"stopping": True, "job_id": job_id}
+
+
 @router.get("/{job_id}/result")
 def get_job_result(job_id: str, actor: User = EDITOR_DEP) -> dict:
     """Status + stored result of a background analysis job (requester-gated; L-a).

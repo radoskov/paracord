@@ -548,6 +548,8 @@ def summarize_scope(
     settings: Settings | None = None,
     paper_detail: str = "short",
     regenerate_papers: bool = False,
+    progress_cb=None,
+    cancel_cb=None,
 ) -> tuple[Summary, int]:
     """Generate (replacing prior) a scope summary over the scope's papers.
 
@@ -589,7 +591,13 @@ def summarize_scope(
         llm_ok = ai_cfg.summary_provider == "local_llm"
         if not llm_ok:
             fallback_reason = "the local LLM is not enabled"
-        for work in works:
+        for idx, work in enumerate(works):
+            if cancel_cb is not None and cancel_cb():
+                from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+
+                raise JobCancelled(f"cancelled after {idx} of {len(works)} papers")
+            if progress_cb is not None:
+                progress_cb(idx, len(works))
             digest = _work_digest(
                 db,
                 work,

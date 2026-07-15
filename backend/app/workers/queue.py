@@ -539,6 +539,72 @@ def cancel_job(job_id: str) -> bool:
         return False
 
 
+def request_job_stop(job_id: str) -> bool:
+    """Cooperatively ask a RUNNING job to stop (UX batch 4). Returns whether the flag was set.
+
+    Sets ``job.meta['cancel_requested']``; long jobs (scope summary) check it between papers via
+    :func:`job_cancel_requested` and stop cleanly. A queued/not-yet-started job is cancelled
+    outright instead. Never raises."""
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        queue = get_queue()
+        try:
+            job = Job.fetch(job_id, connection=queue.connection)
+        except NoSuchJobError:
+            return False
+        status = job.get_status(refresh=True)
+        if status in {"queued", "scheduled", "deferred"}:
+            return cancel_job(job_id)
+        if status != "started":
+            return False
+        meta = job.get_meta(refresh=True) or {}
+        meta["cancel_requested"] = True
+        job.meta = meta
+        job.save_meta()
+        return True
+    except Exception as exc:  # noqa: BLE001 - best effort
+        logger.warning("Could not request stop for job %s: %s", job_id, exc)
+        return False
+
+
+def _current_job():
+    """The RQ job this code is running inside, or None (inline/tests). Never raises."""
+    try:
+        from rq import get_current_job
+
+        return get_current_job()
+    except Exception:  # noqa: BLE001 - no worker context
+        return None
+
+
+def job_report_progress(done: int, total: int) -> None:
+    """From inside a job: publish {done,total} to its meta so the Jobs tab shows progress."""
+    job = _current_job()
+    if job is None:
+        return
+    with contextlib.suppress(Exception):
+        meta = job.get_meta(refresh=True) or {}
+        meta["progress"] = {"done": done, "total": total}
+        job.meta = meta
+        job.save_meta()
+
+
+def job_cancel_requested() -> bool:
+    """From inside a job: whether a cooperative stop was requested (see request_job_stop)."""
+    job = _current_job()
+    if job is None:
+        return False
+    with contextlib.suppress(Exception):
+        return bool((job.get_meta(refresh=True) or {}).get("cancel_requested"))
+    return False
+
+
+class JobCancelled(Exception):
+    """Raised inside a job when a cooperative stop was requested."""
+
+
 def clear_jobs(which: str = "finished_failed") -> dict:
     """Clear job history from the registries. Returns counts removed (never raises).
 
@@ -872,6 +938,8 @@ def queue_status(limit: int = 25) -> dict:
                 except Exception:  # noqa: BLE001 - job may expire between listing and fetch
                     continue
                 kind, target_id = _target(job)
+                meta = job.get_meta(refresh=False) or {}
+                progress = meta.get("progress")
                 rows.append(
                     {
                         "id": job.id,
@@ -888,6 +956,11 @@ def queue_status(limit: int = 25) -> dict:
                         # policy). A "scheduled" job with retries_left set is a pending retry — the
                         # Jobs tab labels it so users see the app is retrying, not stuck.
                         "retries_left": getattr(job, "retries_left", None),
+                        # UX batch 4: long jobs (scope summary) report {done,total}; a job that set
+                        # a cancel flag is shown as stopping.
+                        "progress_done": progress.get("done") if progress else None,
+                        "progress_total": progress.get("total") if progress else None,
+                        "stopping": bool(meta.get("cancel_requested")),
                     }
                 )
             return rows

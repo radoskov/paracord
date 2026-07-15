@@ -841,23 +841,36 @@ def summarize_scope_job(
     from app.models.user import User
     from app.services import access
     from app.services.summarization import summarize_scope
+    from app.workers.queue import (
+        JobCancelled,
+        job_cancel_requested,
+        job_report_progress,
+    )
 
     with SessionLocal() as db:
         actor = db.get(User, uuid.UUID(actor_user_id)) if actor_user_id else None
         if actor is None:
             return None
-        summary, work_count = summarize_scope(
-            db,
-            scope_type=scope_type,
-            scope_id=uuid.UUID(scope_id) if scope_id else None,
-            summary_type=summary_type or "extractive",
-            max_sentences=max_sentences,
-            model_name=model_name,
-            created_by_user_id=actor.id,
-            visible_ids=access.visible_work_condition(db, actor),  # E3: SQL predicate
-            paper_detail=paper_detail,
-            regenerate_papers=regenerate_papers,
-        )
+        try:
+            summary, work_count = summarize_scope(
+                db,
+                scope_type=scope_type,
+                scope_id=uuid.UUID(scope_id) if scope_id else None,
+                summary_type=summary_type or "extractive",
+                max_sentences=max_sentences,
+                model_name=model_name,
+                created_by_user_id=actor.id,
+                visible_ids=access.visible_work_condition(db, actor),  # E3: SQL predicate
+                paper_detail=paper_detail,
+                regenerate_papers=regenerate_papers,
+                progress_cb=job_report_progress,
+                cancel_cb=job_cancel_requested,
+            )
+        except JobCancelled:
+            # Per-paper summaries created before the stop are already persisted (useful);
+            # just record that the scope synthesis was cancelled.
+            db.commit()
+            return {"cancelled": True}
         db.commit()
         return {"summary_id": str(summary.id), "work_count": work_count}
 

@@ -82,6 +82,15 @@
     filter = filter === key ? 'all' : key;
   }
 
+  async function stopJob(jobId: string): Promise<void> {
+    try {
+      await client.stopJob(jobId);
+    } catch (error) {
+      message = errorMessage(error);
+    }
+    await refresh();
+  }
+
   async function cancelJob(jobId: string): Promise<void> {
     try {
       await client.cancelJob(jobId);
@@ -252,9 +261,17 @@
                   {/if}
                   <strong>{job.task}</strong>
                   <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
-                  {#if ['queued', 'scheduled', 'deferred'].includes(job.status)}
+                  {#if job.progress_total}
+                    <small class="muted" title="Papers processed so far">{job.progress_done ?? 0}/{job.progress_total}</small>
+                  {/if}
+                  {#if job.stopping}
+                    <small class="muted">stopping…</small>
+                  {:else if ['queued', 'scheduled', 'deferred'].includes(job.status)}
                     <button type="button" class="linkish cancel-btn" on:click={() => cancelJob(job.id)}
-                      title="Cancel this pending job (a running job keeps going)">Cancel</button>
+                      title="Cancel this pending job">Cancel</button>
+                  {:else if job.status === 'started'}
+                    <button type="button" class="linkish cancel-btn" on:click={() => stopJob(job.id)}
+                      title="Stop this running job (work already done is kept)">Stop</button>
                   {/if}
                 </div>
                 {#if job.paper_title || job.paper_sha256}
