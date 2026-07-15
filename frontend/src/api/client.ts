@@ -2495,10 +2495,16 @@ export class ApiClient {
   async createScopeScope(
     scopeType: "library" | "shelf" | "rack",
     scopeId: string | null,
+    opts: { paperDetail?: "short" | "detailed"; regeneratePapers?: boolean } = {},
   ): Promise<ScopeSummaryResponse> {
     return this.request<ScopeSummaryResponse>("/api/v1/ai/summaries", {
       method: "POST",
-      body: { scope_type: scopeType, scope_id: scopeId ?? null },
+      body: {
+        scope_type: scopeType,
+        scope_id: scopeId ?? null,
+        paper_detail: opts.paperDetail ?? "short",
+        regenerate_papers: opts.regeneratePapers ?? false,
+      },
     });
   }
 
@@ -3107,10 +3113,11 @@ export class ApiClient {
   async createSummary(
     workId: string,
     summaryType: SummaryType,
+    detail: "short" | "detailed" = "short",
   ): Promise<Summary> {
     return this.request<Summary>(`/api/v1/works/${workId}/summaries`, {
       method: "POST",
-      body: { summary_type: summaryType },
+      body: { summary_type: summaryType, detail },
     });
   }
 

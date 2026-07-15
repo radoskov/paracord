@@ -214,11 +214,59 @@
     if (typeof window !== 'undefined') window.location.hash = '#library';
   }
 
+  // Prettify the scope summary (UX batch 4): the LLM emits numbered sections often with
+  // "Heading: - bullet" runs on one line. Parse that into heading paragraphs + bullet lists so it
+  // renders as structured sections instead of one run-on block. Falls back to plain paragraphs.
+  type SummarySection = { heading?: string; body?: string; bullets?: string[] };
+  function formatSummary(text: string): SummarySection[] {
+    const out: SummarySection[] = [];
+    // Break before a leading number ("2. Key problems…") or a known section label mid-run.
+    const normalized = text
+      .replace(/\s+(\d\.\s)/g, '\n$1')
+      .replace(/\s+-\s+/g, '\n- ');
+    for (const rawLine of normalized.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (line.startsWith('- ')) {
+        const item = line.slice(2).trim();
+        const last = out[out.length - 1];
+        if (last?.bullets) last.bullets.push(item);
+        else out.push({ bullets: [item] });
+        continue;
+      }
+      // "1. Heading: rest" or "Heading:" — split a leading heading from any inline body.
+      const num = line.match(/^(\d\.\s*)?(.*)$/);
+      const rest = num ? num[2] : line;
+      const colon = rest.indexOf(':');
+      if (colon > 0 && colon < 40) {
+        out.push({ heading: rest.slice(0, colon + 1) });
+        const body = rest.slice(colon + 1).trim();
+        if (body) out.push({ body });
+      } else {
+        out.push({ body: rest });
+      }
+    }
+    return out.length ? out : [{ body: text }];
+  }
+
+  // UX batch 4: which per-paper summary feeds the scope synthesis, and whether to reuse or
+  // regenerate them — maps 1:1 to the backend paper_detail/regenerate_papers.
+  let summarySource:
+    | 'use_short'
+    | 'use_detailed'
+    | 'regen_short'
+    | 'regen_detailed' = 'use_short';
+
   async function summarise(): Promise<void> {
     summaryBusy = true;
     let backgrounded = false;
+    const paperDetail = summarySource.endsWith('detailed') ? 'detailed' : 'short';
+    const regeneratePapers = summarySource.startsWith('regen');
     await run(async () => {
-      const response = await client.createScopeScope(scope.scopeType, scope.scopeId);
+      const response = await client.createScopeScope(scope.scopeType, scope.scopeId, {
+        paperDetail,
+        regeneratePapers,
+      });
       if (response.queued && response.job_id) {
         backgrounded = true;
         message = `Summarizing ${response.work_count} papers in the background…`;
@@ -348,10 +396,18 @@
     <div class="card">
       <div class="head">
         <h2>Scope summary</h2>
+        <label class="summary-source" title="Which per-paper summary feeds the collection synthesis, and whether to reuse or regenerate them">
+          <select bind:value={summarySource} disabled={summaryBusy}>
+            <option value="use_short">Use/create short</option>
+            <option value="use_detailed">Use/create detailed</option>
+            <option value="regen_short">Regenerate short</option>
+            <option value="regen_detailed">Regenerate detailed</option>
+          </select>
+        </label>
         <button type="button" class:busy={summaryBusy} on:click={summarise}
           disabled={loading || summaryBusy || !scopeReady || !isClassicScope}
           title={isClassicScope ? (scopeReady ? 'Summarize the scope (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}
-          >{summaryBusy ? 'Summarizing…' : 'Summarize'}</button>
+          >{summaryBusy ? 'Summarizing…' : summary ? 'Regenerate' : 'Summarize'}</button>
       </div>
       {#if !summary}
         <p class="empty">No summary yet — click “Summarize”.</p>
@@ -361,7 +417,16 @@
             Summary of <strong>{summary.scope_label}</strong>
           </p>
         {/if}
-        <p class="summary-text">{summary.text}</p>
+        <div class="summary-body">
+          {#each formatSummary(summary.text) as sec}
+            {#if sec.heading}<p class="summary-heading">{sec.heading}</p>{/if}
+            {#if sec.bullets}
+              <ul class="summary-bullets">{#each sec.bullets as b}<li>{b}</li>{/each}</ul>
+            {:else}
+              <p class="summary-text">{sec.body}</p>
+            {/if}
+          {/each}
+        </div>
         <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}{summary.method === 'map_reduce' ? ' · per-paper digests synthesized' : ''}</p>
         {#if summary.provider_used !== 'local_llm'}
           <p class="extractive-hint" role="status">
@@ -432,6 +497,24 @@
 
   .summary-scope {
     margin: 0 0 0.4rem;
+  }
+
+  .summary-source select {
+    font-size: 0.85rem;
+  }
+
+  .summary-heading {
+    font-weight: 600;
+    margin: 0.6rem 0 0.2rem;
+  }
+
+  .summary-bullets {
+    margin: 0.1rem 0 0.3rem;
+    padding-left: 1.2rem;
+  }
+
+  .summary-body .summary-text {
+    margin: 0.2rem 0;
   }
 
   .export-block summary {

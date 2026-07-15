@@ -99,7 +99,7 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     expect(await screen.findByText("not extracted")).toBeTruthy();
   });
 
-  it("generates a summary from the paper view and shows it (B8)", async () => {
+  it("generates a short summary from the paper view and shows it (B8)", async () => {
     const createSummary = vi.fn().mockResolvedValue(makeSummary());
     // No summary at first; after generating, the reload returns one.
     const listSummaries = vi
@@ -109,14 +109,32 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     const client = makeClient([], { createSummary, listSummaries });
     render(WorkDetail, { client: client as never, work: makeWork() });
 
+    // The Short summary sub-panel's action is "Summarize" until one exists.
     const btn = await screen.findByRole("button", { name: /^summarize$/i });
     await fireEvent.click(btn);
 
-    expect(createSummary).toHaveBeenCalledWith("w1", "auto");
+    expect(createSummary).toHaveBeenCalledWith("w1", "auto", "short");
     await waitFor(() =>
       expect(screen.getByText("A short summary.")).toBeTruthy(),
     );
-    // Now that a summary exists, the action becomes "Regenerate summary".
-    await screen.findByRole("button", { name: /regenerate summary/i });
+    // Now that a short summary exists, its button becomes "Regenerate".
+    await screen.findByRole("button", { name: /^regenerate$/i });
+  });
+
+  it("generates a detailed summary separately from the short one", async () => {
+    const detailed = makeSummary({
+      id: "s2",
+      summary_type: "local_llm_detailed",
+      text: "Intro paragraph.\n\nSection one.\n\nSection two.",
+    });
+    const createSummary = vi.fn().mockResolvedValue(detailed);
+    const listSummaries = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([detailed]);
+    const client = makeClient([], { createSummary, listSummaries });
+    render(WorkDetail, { client: client as never, work: makeWork() });
+
+    await fireEvent.click(await screen.findByRole("button", { name: /generate detailed/i }));
+    expect(createSummary).toHaveBeenCalledWith("w1", "auto", "detailed");
+    await waitFor(() => expect(screen.getByText("Intro paragraph.")).toBeTruthy());
+    expect(screen.getByText("Section two.")).toBeTruthy();
   });
 });
