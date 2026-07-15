@@ -1085,8 +1085,9 @@ export interface IdentifierImportResponse {
   extraction_queued?: boolean;
 }
 
-// Batch citation import (Phase J item 5).
-export type EngineKind = "lookup" | "grobid";
+// Batch citation import (Phase J item 5). "bibtex" drafts come from the BibTeX preview endpoint
+// and commit through the same batch commit.
+export type EngineKind = "lookup" | "grobid" | "bibtex";
 export type BatchMatchStatus = "matched" | "title_only" | "no_match";
 
 export interface DraftCandidate {
@@ -1112,6 +1113,10 @@ export interface ParsedDraft {
   suggested_abstract: string | null;
   match_status: BatchMatchStatus;
   candidates: DraftCandidate[];
+  // BibTeX-engine extras (absent/null for lookup/grobid drafts).
+  suggested_arxiv_id?: string | null;
+  suggested_work_type?: string | null;
+  existing_work_id?: string | null;
 }
 
 export interface BatchPreviewResponse {
@@ -1128,6 +1133,9 @@ export interface BatchCommitDraft {
   venue: string | null;
   abstract: string | null;
   include: boolean;
+  // BibTeX-engine passthrough (not editable in the review UI).
+  arxiv_id?: string | null;
+  work_type?: string | null;
 }
 
 export interface ScopeSummaryResponse {
@@ -2299,6 +2307,13 @@ export class ApiClient {
     return this.request<ImportBatch>("/api/v1/imports/bibtex", {
       method: "POST",
       body: { content, target_shelf_id: targetShelfId ?? null },
+    });
+  }
+
+  async bibtexImportPreview(content: string): Promise<BatchPreviewResponse> {
+    return this.request<BatchPreviewResponse>("/api/v1/imports/bibtex/preview", {
+      method: "POST",
+      body: { content },
     });
   }
 

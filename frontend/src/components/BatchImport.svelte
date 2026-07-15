@@ -1,30 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  import {
-    ApiClient,
-    type BatchCommitDraft,
-    type EngineKind,
-    type ImportBatch,
-    type ParsedDraft,
-  } from '../api/client';
+  import { ApiClient, type EngineKind, type ParsedDraft } from '../api/client';
   import { pendingImportText } from '../lib/selection';
-  import { errorMessage } from '../lib/ui';
-  import ShelfPicker from './ShelfPicker.svelte';
+  import DraftReview from './DraftReview.svelte';
 
   export let client: ApiClient;
-
-  type Row = {
-    draft: ParsedDraft;
-    include: boolean;
-    title: string;
-    authors: string;
-    year: string;
-    doi: string;
-    venue: string;
-    // Index into draft.candidates for the chosen candidate, or -1 for "edited by hand".
-    candidateIndex: number;
-  };
 
   let text = '';
   let engine: EngineKind = 'lookup';
@@ -38,19 +19,16 @@
       pendingImportText.set(null);
     }),
   );
-  let rows: Row[] = [];
+
+  let review: DraftReview;
+  let message = '';
   let degraded = false;
   let grobidUnavailable = false;
-  let targetShelfId = '';
-  let enrich = true;
-  let loading = false;
-  let message = '';
-  let lastBatch: ImportBatch | null = null;
 
   // Chunked lookup (UX batch): lines are looked up a few at a time so the preview fills in
   // progressively, a failed/timed-out chunk degrades to title-only rows instead of sinking the
   // whole batch, and the search can be cancelled between chunks. Already-found rows can be
-  // committed while the search keeps running (gradual import).
+  // committed while the search keeps running (gradual import — see DraftReview).
   const LOOKUP_CHUNK = 4;
   let searching = false;
   let cancelRequested = false;
@@ -65,31 +43,6 @@
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
-
-  function rowFromDraft(draft: ParsedDraft): Row {
-    return {
-      draft,
-      // Default-checked for confident matches; reviewers opt in to the rest.
-      include: draft.match_status === 'matched',
-      title: draft.suggested_title ?? draft.raw_line,
-      authors: draft.suggested_authors.join('; '),
-      year: draft.suggested_year != null ? String(draft.suggested_year) : '',
-      doi: draft.suggested_doi ?? '',
-      venue: draft.suggested_venue ?? '',
-      candidateIndex: -1,
-    };
-  }
-
-  function applyCandidate(row: Row): void {
-    const c = row.draft.candidates[row.candidateIndex];
-    if (!c) return;
-    row.title = c.title ?? row.title;
-    row.authors = c.authors.join('; ');
-    row.year = c.year != null ? String(c.year) : '';
-    row.doi = c.doi ?? '';
-    row.venue = c.venue ?? '';
-    rows = rows; // trigger reactivity
-  }
 
   function fallbackDraft(line: string, index: number): ParsedDraft {
     return {
@@ -108,13 +61,12 @@
   }
 
   async function preview(): Promise<void> {
-    if (!lines.length || searching || loading) return;
+    if (!lines.length || searching) return;
     const all = lines;
     searching = true;
     cancelRequested = false;
     message = '';
-    lastBatch = null;
-    rows = [];
+    review.reset();
     degraded = false;
     grobidUnavailable = false;
     failedLines = 0;
@@ -130,16 +82,15 @@
         try {
           const result = await client.batchImportPreview(chunk, engine);
           // Remap the per-request indices to global ones so row keys stay unique across chunks.
-          rows = [
-            ...rows,
-            ...result.drafts.map((d) => rowFromDraft({ ...d, line_index: offset + d.line_index })),
-          ];
+          review.addDrafts(
+            result.drafts.map((d) => ({ ...d, line_index: offset + d.line_index })),
+          );
           degraded = degraded || result.degraded;
           grobidUnavailable = grobidUnavailable || result.grobid_unavailable;
         } catch {
           // One failed chunk must not sink the batch — keep its lines editable as title-only.
           failedLines += chunk.length;
-          rows = [...rows, ...chunk.map((line, i) => rowFromDraft(fallbackDraft(line, offset + i)))];
+          review.addDrafts(chunk.map((line, i) => fallbackDraft(line, offset + i)));
         }
         progressDone = Math.min(offset + chunk.length, all.length);
       }
@@ -148,55 +99,9 @@
     }
   }
 
-  async function commit(): Promise<void> {
-    const selected = rows.filter((r) => r.include);
-    if (!selected.length) {
-      message = 'Select at least one paper to commit.';
-      return;
-    }
-    const drafts: BatchCommitDraft[] = selected.map((r) => ({
-      title: r.title.trim() || null,
-      authors: r.authors
-        .split(';')
-        .map((a) => a.trim())
-        .filter(Boolean),
-      year: r.year.trim() ? Number(r.year.trim()) : null,
-      doi: r.doi.trim() || null,
-      venue: r.venue.trim() || null,
-      abstract: null,
-      include: true,
-    }));
-    loading = true;
-    message = '';
-    try {
-      lastBatch = await client.batchImportCommit(drafts, {
-        engine,
-        targetShelfId: targetShelfId || null,
-        enrich,
-      });
-      const s = lastBatch.stats ?? {};
-      message = `Committed: ${s.created ?? 0} created, ${s.matched ?? 0} matched, ${s.skipped ?? 0} skipped${
-        s.added_to_shelf ? `, ${s.added_to_shelf} added to shelf` : ''
-      }.`;
-      if (searching) {
-        // Gradual import: drop only the committed rows; the ongoing search keeps appending.
-        const committed = new Set(selected.map((r) => r.draft.line_index));
-        rows = rows.filter((r) => !committed.has(r.draft.line_index));
-      } else {
-        rows = [];
-        text = '';
-      }
-    } catch (error) {
-      message = errorMessage(error);
-    } finally {
-      loading = false;
-    }
-  }
-
-  function badge(status: string): string {
-    if (status === 'matched') return 'matched';
-    if (status === 'title_only') return 'title only';
-    return 'no match';
+  function onCommitted(event: CustomEvent<{ remaining: number }>): void {
+    // Once everything the user wanted is committed and the search is idle, clear the input.
+    if (!searching && event.detail.remaining === 0) text = '';
   }
 </script>
 
@@ -205,7 +110,8 @@
   <p class="muted">
     Paste raw citations or titles, one per line. <strong>Lookup</strong> searches Crossref /
     OpenAlex / Semantic Scholar; <strong>GROBID</strong> parses the reference strings. Review the
-    suggestions, then commit the papers you want.
+    suggestions, then commit the papers you want — you can already commit while the search keeps
+    running.
   </p>
 
   <textarea
@@ -221,7 +127,7 @@
       <label><input type="radio" bind:group={engine} value="lookup" /> Lookup</label>
       <label><input type="radio" bind:group={engine} value="grobid" /> GROBID</label>
     </fieldset>
-    <button type="button" on:click={preview} disabled={loading || searching || !lines.length}>
+    <button type="button" on:click={preview} disabled={searching || !lines.length}>
       Preview
     </button>
   </div>
@@ -253,68 +159,7 @@
     </p>
   {/if}
 
-  {#if rows.length}
-    <!-- Two rows per draft (UX batch): the title gets the full first row so it stays readable;
-         the shorter fields share the second row. -->
-    <div class="drafts">
-      {#each rows as row (row.draft.line_index)}
-        <div class="draft">
-          <div class="draft-title-row">
-            <input type="checkbox" bind:checked={row.include} aria-label="Include this paper" />
-            <span class="pill {row.draft.match_status}">{badge(row.draft.match_status)}</span>
-            <input class="title-input" bind:value={row.title} aria-label="Title" placeholder="Title" />
-          </div>
-          <div class="draft-fields">
-            <label class="field">
-              <span class="field-label">Authors</span>
-              <input bind:value={row.authors} aria-label="Authors (semicolon-separated)" />
-            </label>
-            <label class="field yr-field">
-              <span class="field-label">Year</span>
-              <input class="yr" bind:value={row.year} aria-label="Year" />
-            </label>
-            <label class="field">
-              <span class="field-label">DOI</span>
-              <input bind:value={row.doi} aria-label="DOI" />
-            </label>
-            <label class="field">
-              <span class="field-label">Venue</span>
-              <input bind:value={row.venue} aria-label="Venue" />
-            </label>
-            {#if row.draft.candidates.length > 1}
-              <label class="field">
-                <span class="field-label">Candidate</span>
-                <select
-                  bind:value={row.candidateIndex}
-                  on:change={() => applyCandidate(row)}
-                  aria-label="Choose a candidate"
-                >
-                  <option value={-1}>Custom</option>
-                  {#each row.draft.candidates as cand, i (i)}
-                    <option value={i}>
-                      {cand.title ?? '—'} ({Math.round(cand.confidence * 100)}%)
-                    </option>
-                  {/each}
-                </select>
-              </label>
-            {/if}
-          </div>
-        </div>
-      {/each}
-    </div>
-
-    <div class="commit-row">
-      <ShelfPicker {client} bind:value={targetShelfId} label="Add committed papers to shelf" />
-      <label class="enrich">
-        <input type="checkbox" bind:checked={enrich} /> Enrich new papers (DOI metadata)
-      </label>
-      <button type="button" on:click={commit} disabled={loading}
-        title={searching
-          ? 'Import the checked entries found so far; the search keeps running'
-          : 'Import the checked entries'}
-        >{searching ? 'Commit selected now' : 'Commit selected'}</button>
-    </div>
-  {/if}
+  <DraftReview bind:this={review} {client} gradual={searching} on:committed={onCommitted} />
 </div>
 
 <style>
@@ -353,102 +198,6 @@
     height: 1px;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
-  }
-
-  .drafts {
-    border: 1px solid var(--border-normal);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-
-  .draft {
-    padding: 0.45rem 0.6rem 0.55rem;
-  }
-
-  .draft + .draft {
-    border-top: 1px solid var(--border-normal);
-  }
-
-  .draft-title-row {
-    align-items: center;
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .title-input {
-    flex: 1;
-    font-weight: 600;
-    min-width: 0;
-  }
-
-  .draft-fields {
-    display: grid;
-    gap: 0.5rem;
-    grid-template-columns: minmax(10rem, 2fr) 4.5rem minmax(8rem, 1.5fr) minmax(8rem, 1.5fr) minmax(10rem, 1.5fr);
-    margin-top: 0.35rem;
-  }
-
-  @media (max-width: 900px) {
-    .draft-fields {
-      grid-template-columns: 1fr 1fr;
-    }
-  }
-
-  .field {
-    display: grid;
-    gap: 0.1rem;
-    min-width: 0;
-  }
-
-  .field input,
-  .field select {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .field-label {
-    color: var(--ink-muted);
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .pill {
-    border-radius: 999px;
-    padding: 0.1rem 0.5rem;
-    font-size: 0.75rem;
-    white-space: nowrap;
-    background: var(--surface-sunken);
-  }
-
-  .pill.matched {
-    background: var(--status-success-bg);
-    color: var(--status-success);
-  }
-
-  .pill.title_only {
-    background: var(--status-warning-bg);
-    color: var(--status-warning);
-  }
-
-  .pill.no_match {
-    background: var(--status-danger-bg);
-    color: var(--status-danger);
-  }
-
-  .commit-row {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-end;
-    flex-wrap: wrap;
-  }
-
-  .enrich {
-    display: flex;
-    gap: 0.3rem;
-    align-items: center;
-    font-size: 0.85rem;
   }
 
   .progress-row {

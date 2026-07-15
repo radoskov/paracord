@@ -10,7 +10,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.source import ImportBatch
 from app.models.user import User
 from app.models.work import Work
-from app.services.bibtex import import_bibtex, parse_bibtex, parse_bibtex_authors
+from app.services.bibtex import import_bibtex, parse_bibtex, parse_bibtex_authors, preview_bibtex
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
@@ -139,6 +139,34 @@ def test_import_bibtex_skips_entries_without_title(db_session, editor: User) -> 
     db_session.commit()
     assert batch.stats["created"] == 0
     assert batch.stats["skipped"] == 1
+
+
+def test_preview_bibtex_maps_entries_to_drafts_without_writing(db_session) -> None:
+    drafts = preview_bibtex(db_session, SAMPLE)
+
+    assert [d.suggested_title for d in drafts] == [
+        "Attention Is All You Need",
+        "Deep Residual Learning for Image Recognition",
+    ]
+    first, second = drafts
+    assert first.engine == "bibtex"
+    assert first.match_status == "matched"
+    assert first.suggested_doi == "10.5555/3295222.3295349"
+    assert first.suggested_authors == ["Ashish Vaswani", "Noam Shazeer"]
+    assert first.existing_work_id is None
+    assert second.suggested_arxiv_id == "1512.03385"
+    assert second.suggested_work_type == "inproceedings"
+    assert second.suggested_venue == "CVPR"
+    # Preview never writes.
+    assert db_session.scalar(select(func.count()).select_from(Work)) == 0
+
+
+def test_preview_bibtex_flags_entries_already_in_library(db_session, editor: User) -> None:
+    import_bibtex(db_session, SAMPLE, actor=editor)
+    db_session.commit()
+
+    drafts = preview_bibtex(db_session, SAMPLE)
+    assert all(d.existing_work_id is not None for d in drafts)
 
 
 # --- API --------------------------------------------------------------------

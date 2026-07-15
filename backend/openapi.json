@@ -1252,6 +1252,17 @@
             ],
             "title": "Abstract"
           },
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
           "authors": {
             "default": [],
             "items": {
@@ -1298,6 +1309,17 @@
             ],
             "title": "Venue"
           },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          },
           "year": {
             "anyOf": [
               {
@@ -1326,7 +1348,8 @@
             "default": "lookup",
             "enum": [
               "lookup",
-              "grobid"
+              "grobid",
+              "bibtex"
             ],
             "title": "Engine",
             "type": "string"
@@ -1459,6 +1482,19 @@
           "content"
         ],
         "title": "BibtexImportCreate",
+        "type": "object"
+      },
+      "BibtexPreviewRequest": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "BibtexPreviewRequest",
         "type": "object"
       },
       "Body_offer_teleport_api_v1_agents_files__local_file_id__offer_teleport_post": {
@@ -4489,10 +4525,23 @@
           "engine": {
             "enum": [
               "lookup",
-              "grobid"
+              "grobid",
+              "bibtex"
             ],
             "title": "Engine",
             "type": "string"
+          },
+          "existing_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing Work Id"
           },
           "line_index": {
             "title": "Line Index",
@@ -4521,6 +4570,17 @@
               }
             ],
             "title": "Suggested Abstract"
+          },
+          "suggested_arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Arxiv Id"
           },
           "suggested_authors": {
             "default": [],
@@ -4562,6 +4622,17 @@
               }
             ],
             "title": "Suggested Venue"
+          },
+          "suggested_work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Work Type"
           },
           "suggested_year": {
             "anyOf": [
@@ -16315,6 +16386,66 @@
           }
         },
         "summary": "Import Bibtex Entries",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/bibtex/preview": {
+      "post": {
+        "description": "Parse BibTeX into reviewable drafts (NO writes) for the preview-&-choose flow.\n\nCommits go through ``POST /batch/commit`` with ``engine=\"bibtex\"``, so the review UI is shared\nwith the batch citation import. Entries already in the library carry ``existing_work_id``.",
+        "operationId": "bibtex_preview_api_v1_imports_bibtex_preview_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BibtexPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bibtex Preview",
         "tags": [
           "imports"
         ]

@@ -22,7 +22,7 @@ from app.models.user import User
 from app.schemas.agent import TeleportRequest
 from app.services import agent_files, batch_import, import_staging
 from app.services.bibliography_import import import_csl, import_ris
-from app.services.bibtex import import_bibtex
+from app.services.bibtex import import_bibtex, preview_bibtex
 from app.services.identifiers import arxiv_base_id as _arxiv_base_id
 from app.services.metadata_enrichment import enrich_work
 from app.services.queue_capacity import assert_queue_has_capacity
@@ -636,7 +636,7 @@ class DraftCandidateRead(BaseModel):
 class ParsedDraftRead(BaseModel):
     line_index: int
     raw_line: str
-    engine: Literal["lookup", "grobid"]
+    engine: Literal["lookup", "grobid", "bibtex"]
     suggested_title: str | None = None
     suggested_authors: list[str] = []
     suggested_year: int | None = None
@@ -645,6 +645,10 @@ class ParsedDraftRead(BaseModel):
     suggested_abstract: str | None = None
     match_status: Literal["matched", "title_only", "no_match"]
     candidates: list[DraftCandidateRead] = []
+    # BibTeX-engine extras (None for lookup/grobid drafts).
+    suggested_arxiv_id: str | None = None
+    suggested_work_type: str | None = None
+    existing_work_id: uuid.UUID | None = None
 
 
 class BatchPreviewResponse(BaseModel):
@@ -661,11 +665,14 @@ class BatchCommitDraft(BaseModel):
     venue: str | None = None
     abstract: str | None = None
     include: bool = True
+    # BibTeX-engine passthrough (kept out of the editable review fields).
+    arxiv_id: str | None = None
+    work_type: str | None = None
 
 
 class BatchCommitRequest(BaseModel):
     drafts: list[BatchCommitDraft]
-    engine: Literal["lookup", "grobid"] = "lookup"
+    engine: Literal["lookup", "grobid", "bibtex"] = "lookup"
     target_shelf_id: uuid.UUID | None = None
     enrich: bool = True
 
@@ -682,6 +689,9 @@ def _draft_to_read(draft: batch_import.ParsedDraft) -> ParsedDraftRead:
         suggested_venue=draft.suggested_venue,
         suggested_abstract=draft.suggested_abstract,
         match_status=draft.match_status,
+        suggested_arxiv_id=draft.suggested_arxiv_id,
+        suggested_work_type=draft.suggested_work_type,
+        existing_work_id=draft.existing_work_id,
         candidates=[
             DraftCandidateRead(
                 title=c.title,
@@ -721,6 +731,28 @@ def batch_preview(
     )
 
 
+class BibtexPreviewRequest(BaseModel):
+    content: str
+
+
+@router.post("/bibtex/preview", response_model=BatchPreviewResponse)
+def bibtex_preview(
+    payload: BibtexPreviewRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> BatchPreviewResponse:
+    """Parse BibTeX into reviewable drafts (NO writes) for the preview-&-choose flow.
+
+    Commits go through ``POST /batch/commit`` with ``engine="bibtex"``, so the review UI is shared
+    with the batch citation import. Entries already in the library carry ``existing_work_id``.
+    """
+    _ = actor  # contributor floor matches the /batch/commit path this preview feeds
+    if not payload.content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty BibTeX content")
+    drafts = preview_bibtex(db, payload.content)
+    return BatchPreviewResponse(drafts=[_draft_to_read(d) for d in drafts])
+
+
 @router.post("/batch/commit", response_model=ImportBatchRead, status_code=status.HTTP_201_CREATED)
 def batch_commit(
     payload: BatchCommitRequest,
@@ -741,6 +773,8 @@ def batch_commit(
             venue=d.venue,
             abstract=d.abstract,
             include=d.include,
+            arxiv_id=d.arxiv_id,
+            work_type=d.work_type,
         )
         for d in payload.drafts
     ]

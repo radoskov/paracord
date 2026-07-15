@@ -40,6 +40,7 @@ from app.services.audit import record_event
 from app.services.bibliography_import import _find_existing
 from app.services.default_shelf import place_on_default_if_loose
 from app.services.grobid_client import GrobidClient, GrobidUnavailableError
+from app.services.identifiers import arxiv_base_id
 from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.tei_parser import parse_citation_list
 from app.utils.normalization import normalize_doi, normalize_title
@@ -47,7 +48,7 @@ from app.workers.queue import enqueue_embedding, enqueue_enrichment
 
 logger = logging.getLogger(__name__)
 
-EngineKind = Literal["lookup", "grobid"]
+EngineKind = Literal["lookup", "grobid", "bibtex"]
 MatchStatus = Literal["matched", "title_only", "no_match"]
 
 
@@ -80,6 +81,11 @@ class ParsedDraft:
     suggested_abstract: str | None
     match_status: MatchStatus
     candidates: list[DraftCandidate] = field(default_factory=list)
+    # BibTeX-engine extras: identifiers/type parsed from the entry ride along so the preview→commit
+    # round-trip doesn't lose them, and an already-in-library hit is flagged for the reviewer.
+    suggested_arxiv_id: str | None = None
+    suggested_work_type: str | None = None
+    existing_work_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -100,6 +106,9 @@ class ConfirmedDraft:
     venue: str | None = None
     abstract: str | None = None
     include: bool = True
+    # BibTeX-engine passthrough (not user-editable in the review UI).
+    arxiv_id: str | None = None
+    work_type: str | None = None
 
 
 def clean_lines(lines: list[str], *, settings: Settings) -> list[str]:
@@ -379,6 +388,11 @@ def commit_drafts(
             created_by_user_id=actor.id,
             import_batch_id=batch.id,
         )
+        if draft.arxiv_id:
+            work.arxiv_id = draft.arxiv_id
+            work.arxiv_base_id = arxiv_base_id(draft.arxiv_id)
+        if draft.work_type:
+            work.work_type = draft.work_type
         db.add(work)
         db.flush()
         if draft.authors:

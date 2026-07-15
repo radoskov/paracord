@@ -70,6 +70,44 @@ def parse_bibtex_authors(value: str | None) -> list[str]:
     return authors
 
 
+def preview_bibtex(db: Session, content: str) -> list:
+    """Parse BibTeX into reviewable batch drafts (NO writes) for the preview-&-choose flow.
+
+    Each entry maps onto the batch-import draft shape so the same review table / commit endpoint
+    serves both flows; entries already in the library (by DOI / normalized title) carry
+    ``existing_work_id`` so the reviewer can see they'd only be matched, not created.
+    """
+    # Local import: batch_import must stay importable without the bibtex module (one-way dep).
+    from app.services.batch_import import ParsedDraft
+
+    drafts: list[ParsedDraft] = []
+    for index, entry in enumerate(parse_bibtex(content)):
+        title = entry.fields.get("title")
+        raw_doi = entry.fields.get("doi")
+        doi = normalize_doi(raw_doi) if raw_doi else None
+        existing = _find_existing(
+            db, doi=doi, normalized_title=normalize_title(title) if title else None
+        )
+        drafts.append(
+            ParsedDraft(
+                line_index=index,
+                raw_line=f"@{entry.entry_type}{{{entry.key}}}",
+                engine="bibtex",
+                suggested_title=title,
+                suggested_authors=parse_bibtex_authors(entry.fields.get("author")),
+                suggested_year=_parse_year(entry.fields.get("year")),
+                suggested_doi=doi,
+                suggested_venue=_first_field(entry.fields, _VENUE_FIELDS),
+                suggested_abstract=entry.fields.get("abstract"),
+                match_status="matched" if title else "title_only",
+                suggested_arxiv_id=_arxiv_id(entry.fields),
+                suggested_work_type=entry.entry_type,
+                existing_work_id=existing.id if existing else None,
+            )
+        )
+    return drafts
+
+
 def import_bibtex(db: Session, content: str, *, actor: User, target_shelf_id=None) -> ImportBatch:
     """Create works from BibTeX content and record an import batch + audit event.
 

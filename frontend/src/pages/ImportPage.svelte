@@ -10,6 +10,7 @@
     type StagingItem,
   } from '../api/client';
   import BatchImport from '../components/BatchImport.svelte';
+  import DraftReview from '../components/DraftReview.svelte';
   import ShelfPicker from '../components/ShelfPicker.svelte';
   import { pendingImportText } from '../lib/selection';
   import { isOwner } from '../lib/session';
@@ -290,8 +291,26 @@
     await run(async () => {
       const batch = await client.importBibtex(bibtexContent, bibtexShelfId || null);
       bibtexContent = '';
+      bibtexReview?.reset();
       message = `BibTeX import: ${batch.stats?.created ?? 0} created, ${batch.stats?.matched ?? 0} matched`;
     });
+  }
+
+  // BibTeX preview-&-choose (UX batch): parse without writing, review/uncheck/edit the parsed
+  // entries in the shared draft table, then commit through the batch commit endpoint.
+  let bibtexReview: DraftReview;
+  async function previewBibtexEntries(): Promise<void> {
+    if (!bibtexContent.trim()) return;
+    await run(async () => {
+      const result = await client.bibtexImportPreview(bibtexContent);
+      bibtexReview.reset();
+      bibtexReview.addDrafts(result.drafts);
+      if (!result.drafts.length) message = 'No BibTeX entries found in the pasted text.';
+    });
+  }
+
+  function onBibtexCommitted(event: CustomEvent<{ remaining: number }>): void {
+    if (event.detail.remaining === 0) bibtexContent = '';
   }
 
   async function importRis(): Promise<void> {
@@ -490,13 +509,26 @@
 
   <div class="card wide">
     <h2>Paste BibTeX</h2>
-    <p class="muted">Paste one or more BibTeX entries; duplicates (by DOI/title) are skipped.</p>
-    <form on:submit|preventDefault={importBibtex} class="stack">
+    <p class="muted">
+      Paste one or more BibTeX entries. <strong>Preview &amp; choose</strong> parses them first and
+      lets you review, edit and pick the entries to create (existing papers are flagged).
+      <strong>Import directly</strong> creates them straight away — duplicates (by DOI/title) are
+      matched instead of duplicated.
+    </p>
+    <form on:submit|preventDefault={previewBibtexEntries} class="stack">
       <textarea bind:value={bibtexContent} rows="5" placeholder="@article&#123;...&#125;" aria-label="BibTeX"></textarea>
-      <ShelfPicker {client} bind:value={bibtexShelfId} label="Add to shelf (optional)" />
-      <button type="submit" disabled={!bibtexContent.trim() || loading}
-        title={bibtexContent.trim() ? 'Import the pasted BibTeX entries' : 'Paste BibTeX first'}>Import BibTeX</button>
+      <ShelfPicker {client} bind:value={bibtexShelfId} label="Add to shelf on direct import (optional)" />
+      <div class="row">
+        <button type="submit" disabled={!bibtexContent.trim() || loading}
+          title={bibtexContent.trim() ? 'Parse and review the entries before creating papers' : 'Paste BibTeX first'}
+          >Preview &amp; choose</button>
+        <button type="button" class="secondary" on:click={importBibtex}
+          disabled={!bibtexContent.trim() || loading}
+          title={bibtexContent.trim() ? 'Import the pasted BibTeX entries straight away' : 'Paste BibTeX first'}
+          >Import directly</button>
+      </div>
     </form>
+    <DraftReview bind:this={bibtexReview} {client} on:committed={onBibtexCommitted} />
   </div>
   {/if}
 

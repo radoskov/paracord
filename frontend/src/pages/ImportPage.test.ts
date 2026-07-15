@@ -155,6 +155,65 @@ describe('ImportPage sub-tabs', () => {
     expect(screen.getByLabelText('CSL JSON')).toBeTruthy();
   });
 
+  it('BibTeX preview & choose feeds the shared draft review and commits via batch commit', async () => {
+    const client = makeClient({
+      bibtexImportPreview: vi.fn().mockResolvedValue({
+        drafts: [
+          {
+            line_index: 0,
+            raw_line: '@article{vaswani2017}',
+            engine: 'bibtex',
+            suggested_title: 'Attention Is All You Need',
+            suggested_authors: ['Ashish Vaswani'],
+            suggested_year: 2017,
+            suggested_doi: '10.5555/ATTN',
+            suggested_venue: 'NeurIPS',
+            suggested_abstract: null,
+            match_status: 'matched',
+            candidates: [],
+            suggested_arxiv_id: '1706.03762',
+            suggested_work_type: 'article',
+            existing_work_id: null,
+          },
+        ],
+        degraded: false,
+        grobid_unavailable: false,
+      }),
+      batchImportCommit: vi.fn().mockResolvedValue({
+        id: 'b1',
+        source_id: null,
+        input_type: 'batch_bibtex',
+        status: 'completed',
+        stats: { created: 1, matched: 0, skipped: 0 },
+        created_at: '',
+        started_at: null,
+        finished_at: null,
+      }),
+    });
+    render(ImportPage, { client: client as never });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Citations' }));
+    await fireEvent.input(screen.getByLabelText('BibTeX'), {
+      target: { value: '@article{vaswani2017, title={Attention Is All You Need}}' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
+
+    const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
+    expect(title.value).toBe('Attention Is All You Need');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Commit selected' }));
+    await waitFor(() => expect(client.batchImportCommit).toHaveBeenCalled());
+    const [drafts, options] = (client.batchImportCommit as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(options).toMatchObject({ engine: 'bibtex' });
+    expect(drafts[0]).toMatchObject({
+      title: 'Attention Is All You Need',
+      arxiv_id: '1706.03762',
+      work_type: 'article',
+    });
+    // Fully committed → the paste box is cleared.
+    expect((screen.getByLabelText('BibTeX') as HTMLTextAreaElement).value).toBe('');
+  });
+
   it('remembers the last selected sub-tab across remounts (session)', async () => {
     const first = render(ImportPage, { client: makeClient() as never });
     await fireEvent.click(screen.getByRole('button', { name: 'Identifier' }));
