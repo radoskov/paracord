@@ -9,6 +9,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 3: zen reader, graph UX, ref metadata, badges (2026-07-15)
+
+- `112d862` + workplan updates — `docs/WORKPLAN_2026-07-15_ux-batch3.md`, incl. the **automatic
+  PDF retrieval proposal + 6 discussion points awaiting the owner** (item 4 not implemented by
+  request).
+- `e36dce6` — Insights export widgets folded into a `<details>` card at the bottom; reference
+  graph "Max external" base = 500 (frontend default + backend Query/service defaults) and the
+  user's chosen value persists in the preferences blob (`reference_graph_max_external`).
+- `62f5c04` — resolved references display the WORK's canonical title/year (reference-graph nodes
+  + the references panel overlay) — importing a cited paper now updates what other papers show.
+- `b5ba0ed` — Library badges column gains `likely_refs` ("refs to review") and
+  `citers_in_library` ("cited locally") tokens (two grouped queries per page).
+- `754985e` — reader zen mode: viewport takeover on a dark backdrop; only paging/zoom/view-mode/
+  reading-mode + Exit zen remain; Esc exits; combinable with original/dim/dark.
+- `3fdf38d` — graphs: **Show all / Reset view / Refresh** on the citation/topic graph and the
+  reference graph; tooltips spell out the encoded channels (size/color/Y); **ctrl-click** a node
+  or a category chip on the citation/topic graph shows it + direct neighbors only (focus note +
+  cleared by Reset view/rebuild). Deferred to discussion: edge-snap zoom, ctrl-click on the
+  reference-graph scatter / Visualizations.
+- Fast tier 905 passed (after adding the external-citation tables to the m1 trimmed fixture),
+  frontend 294 + build green. Frontend dev server restarted (vite cache cleared); API hot-reloads;
+  no migrations this batch.
+
 ## UX batch 2: acceptance policy, unified imports, previews, summary columns (2026-07-15)
 
 - `0911bb0` — two-level fuzzy-match acceptance (migration 0070): admin checkbox "Use fuzzy

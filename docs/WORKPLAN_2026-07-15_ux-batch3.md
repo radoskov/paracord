@@ -38,6 +38,52 @@ badges in the Library badges column; move Insights "Export this library" out of 
 7 → 2 → 3 → 6 → 1 → 5 (buttons → tooltips → ctrl-click → snap-zoom last/optional) → 4 (proposal
 text only). Each lands as its own commit with tests where the repo has precedent.
 
-## Status
+## Proposal: automatic PDF retrieval (item 4 — awaiting owner decision)
 
-Filled in as items land — see PROGRESS.md for the commit log.
+Current state (verified): PDF download is strictly user-initiated (WorkDetail → Find on web →
+pick → download). Enrichment *sees* open-access PDF URLs (OpenAlex `best_oa_location.pdf_url`,
+Unpaywall `url_for_pdf`, S2 `openAccessPdf`) but **discards them** — `ExternalMetadata` has no
+OA-URL field. `web_find.download_and_attach` already validates hosts (denylist + policy modes),
+streams with `%PDF` magic + size checks, attaches, dedups and enqueues extraction — it is fully
+reusable from a background job.
+
+Staged plan:
+
+1. **Capture OA links during enrichment** (cheap, no downloads): add `oa_pdf_url` to
+   `ExternalMetadata` + the OpenAlex/Unpaywall/S2 parsers; persist on the Work (nullable column).
+   UI affordance: "open-access PDF available".
+2. **Auto-fetch job**: new `fetch_pdf_job(work_id)` (RQ, coalescing key `pdffetch-{work_id}`):
+   runs when a work has NO file; tries the stored OA URL first, else `find_candidates` and takes
+   the top candidate only when its score clears a threshold (e.g. 0.9); downloads via
+   `download_and_attach` under the configured download policy with a system actor.
+   `needs_confirmation` (unknown host in unrestricted mode) is **never auto-confirmed** — skipped
+   with a per-paper note. Failure marks the paper (like extraction) and respects an attempt cap.
+3. **Triggers (opt-in)**: admin toggle "auto-fetch PDFs after import" wired into
+   enrichment-completed (identifier/BibTeX/batch/citation imports all funnel through enrichment),
+   plus a Library batch action "Fetch PDFs" for existing papers.
+
+Guardrails: OA/allowlisted hosts only under `restricted`/`careful`; existing size caps; per-sweep
+download cap; jobs visible in the Jobs tab.
+
+### Discussion points (owner input needed)
+
+1. Default for "auto-fetch after import": ON (recommended for identifier/DOI imports under the
+   `careful` policy — it only ever touches OA/known-publisher hosts) or OFF?
+2. Store the OA URL as a `Work` column (simple, recommended) or a MetadataAssertion (provenance)?
+3. One-time backfill sweep over the existing library, or new imports only?
+4. Auto mode never auto-confirms unknown hosts — acceptable, or do you want a "pending downloads"
+   review queue for those?
+5. Graph edge-snapped zoom (item 5d): requires replacing ECharts' built-in roam with a custom
+   wheel handler that clamps the view center to the content bounding box. Feasible but adds
+   bespoke zoom code per chart family — implement for the reference graph only, all graphs, or
+   drop it?
+6. Visualizations page: the same Show all / Reset view / Refresh trio can be added, but the
+   temporal map's manual X/Y range inputs overlap with "Show all" (blank = auto is today's
+   reset). Unify or leave as is?
+
+## Status (2026-07-15, end of session)
+
+Landed: items 1, 2, 3, 6, 7 fully; item 5 partially — standard buttons + tooltip encodings on the
+citation/topic graph and the reference graph, ctrl-click neighborhood focus (nodes + chips) on
+the citation/topic graph. Deferred: edge-snap zoom, ctrl-click on the reference-graph scatter and
+Visualizations (see discussion points), item 4 (proposal above).
