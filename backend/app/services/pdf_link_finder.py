@@ -77,8 +77,10 @@ def publisher_pdf_urls(url: str) -> list[str]:
             _add(f"https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber={m.group(1)}")
     if host.endswith("nature.com") and "/articles/" in path and not path.endswith(".pdf"):
         _add(url.split("?")[0].rstrip("/") + ".pdf")
-    if host.endswith("mdpi.com") and re.search(r"/\d{4}-\d{3,4}/", path) and not path.endswith(
-        ("/pdf", ".pdf")
+    if (
+        host.endswith("mdpi.com")
+        and re.search(r"/\d{4}-\d{3,4}/", path)
+        and not path.endswith(("/pdf", ".pdf"))
     ):
         _add(url.split("?")[0].rstrip("/") + "/pdf")
     if host.endswith("aclanthology.org") and not path.endswith(".pdf"):
@@ -199,9 +201,7 @@ def _sciencedirect_pdfft_urls(value, out: list[str]) -> None:
             if md5 and pid:
                 path = str(value.get("path") or "science/article/pii").strip("/")
                 ext = str(value.get("pdfExtension") or "/pdfft")
-                out.append(
-                    f"https://www.sciencedirect.com/{path}/{pii}{ext}?md5={md5}&pid={pid}"
-                )
+                out.append(f"https://www.sciencedirect.com/{path}/{pii}{ext}?md5={md5}&pid={pid}")
         for child in value.values():
             _sciencedirect_pdfft_urls(child, out)
     elif isinstance(value, list):

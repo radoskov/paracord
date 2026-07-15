@@ -188,8 +188,7 @@ def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
     """Per-PAPER abstractive summary (single document prompt). Raises on any failure."""
     prompt = (
         "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
-        "method, and key result. Respond with the summary only.\n\n"
-        + text[:LLM_INPUT_CHAR_BUDGET]
+        "method, and key result. Respond with the summary only.\n\n" + text[:LLM_INPUT_CHAR_BUDGET]
     )
     return _ollama_generate(prompt, model=model, base_url=base_url)
 

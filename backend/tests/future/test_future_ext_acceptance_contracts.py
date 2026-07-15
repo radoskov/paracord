@@ -79,6 +79,8 @@ def test_topic_models_are_scope_namespaced_stable_and_comparable(db) -> None:
     rerun = model_topics(db, scope_type="shelf", scope_id=shelf.id, max_topics=2)
     db.commit()
     assert _signature(rerun) == _signature(shelf_result)  # stable across re-runs
-    assert len(_assignments(f"keyword-kmeans:shelf:{shelf.id}")) == len(WORKS)  # replaced, not duped
+    assert len(_assignments(f"keyword-kmeans:shelf:{shelf.id}")) == len(
+        WORKS
+    )  # replaced, not duped
     library_after = {(a.work_id, a.topic_id) for a in _assignments("keyword-kmeans:library:all")}
     assert library_after == library_before

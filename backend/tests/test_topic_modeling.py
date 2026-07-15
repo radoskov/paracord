@@ -461,9 +461,7 @@ def test_topics_api_runs_for_editor(client, auth_headers, db) -> None:
     assert latest.status_code == 200
     lbody = latest.json()
     assert lbody["work_count"] == 3
-    assert {t["work_count"] for t in lbody["topics"]} == {
-        t["work_count"] for t in body["topics"]
-    }
+    assert {t["work_count"] for t in lbody["topics"]} == {t["work_count"] for t in body["topics"]}
     assert all(t["keywords"] for t in lbody["topics"])
     assert all(w["title"] for t in lbody["topics"] for w in t["works"])
 

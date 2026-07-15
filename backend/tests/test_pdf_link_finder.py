@@ -51,7 +51,10 @@ def test_non_http_and_duplicate_links_are_dropped() -> None:
 
 
 def test_mangled_html_does_not_raise() -> None:
-    assert find_pdf_links("<a href='/x.pdf' <broken", BASE) in ([], ["https://publisher.example/x.pdf"])
+    assert find_pdf_links("<a href='/x.pdf' <broken", BASE) in (
+        [],
+        ["https://publisher.example/x.pdf"],
+    )
 
 
 def test_json_sniff_finds_pdf_urls_in_script_blobs() -> None:
@@ -69,7 +72,9 @@ def test_json_sniff_reconstructs_sciencedirect_pdfft_url() -> None:
       "pdfExtension":"/pdfft","queryParams":{"md5":"abc123","pid":"1-s2.0-main.pdf"}}}}}
     </script>
     """
-    links = find_pdf_links(html, "https://www.sciencedirect.com/science/article/pii/S0004370224001234")
+    links = find_pdf_links(
+        html, "https://www.sciencedirect.com/science/article/pii/S0004370224001234"
+    )
     assert (
         "https://www.sciencedirect.com/science/article/pii/S0004370224001234/pdfft"
         "?md5=abc123&pid=1-s2.0-main.pdf" in links

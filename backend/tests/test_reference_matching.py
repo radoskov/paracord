@@ -510,9 +510,7 @@ def test_reference_list_overlays_resolved_work_metadata(
     _work(db, LOCAL_TITLE, year=2010, doi="10.7/target")
     make_reference(db, citing_work_id=citing.id, title="Truncated Titl", doi="10.7/target")
     db.commit()
-    r = client.post(
-        f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor")
-    )
+    r = client.post(f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor"))
     assert r.status_code == 200
 
     refs = client.get(

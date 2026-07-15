@@ -1153,8 +1153,9 @@ def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_pat
     actor.elsevier_api_allowed = True  # per-user gate (off by default)
     seen: list[tuple[str, dict | None]] = []
 
-    def fake_stream(url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None,
-                    headers=None):
+    def fake_stream(
+        url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None, headers=None
+    ):
         seen.append((url, headers))
         return _PDF_BYTES if "api.elsevier.com" in url else None
 

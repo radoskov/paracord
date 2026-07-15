@@ -329,7 +329,13 @@ def read_latest_topics(
     labels recomputed deterministically over each topic's member documents.
     """
     from app.services.ai_config import get_ai_config
-    from app.services.topic_modeling import _centroid, _cluster_keywords, _doc_text, _tfidf, _tokenize
+    from app.services.topic_modeling import (
+        _centroid,
+        _cluster_keywords,
+        _doc_text,
+        _tfidf,
+        _tokenize,
+    )
 
     if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")

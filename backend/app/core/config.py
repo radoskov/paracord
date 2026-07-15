@@ -243,9 +243,7 @@ class Settings(BaseSettings):
     # Elsevier Article Retrieval API key (free from dev.elsevier.com; entitlement follows the
     # institution's IP range). The runtime AppConfig value (Admin → Find-on-web) overrides this
     # yaml/env default. Used to fetch ScienceDirect PDFs for 10.1016 DOIs.
-    web_find_elsevier_api_key: str | None = Field(
-        default=None, alias="PARACORD_ELSEVIER_API_KEY"
-    )
+    web_find_elsevier_api_key: str | None = Field(default=None, alias="PARACORD_ELSEVIER_API_KEY")
     web_find_max_candidates: int = 10
     web_find_per_source_timeout: float = 8.0
     # Wall-clock cap for one lookup request (find-on-web fan-out / batch preview). Generous on
