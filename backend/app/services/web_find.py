@@ -1038,6 +1038,20 @@ def _classify_download_host(
     )
 
 
+# Zotero-style honest-but-compatible headers (UX batch 4): publisher CDNs routinely answer a bare
+# bot User-Agent with a 403/challenge page even for entitled campus IPs — the same "Download PDF"
+# link then works in a browser. We keep the PaRacORD identification in the UA, wrapped in the
+# Mozilla-compatible form naive UA sniffers expect, and send browser-typical Accept headers.
+_BROWSERLIKE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 "
+        "PaRacORD/0.0 (find-on-web; legit sources only)"
+    ),
+    "Accept": "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.8",
+}
+
+
 def _stream_pdf(
     url: str,
     *,
@@ -1065,7 +1079,7 @@ def _stream_pdf(
             raise DownloadRefused(reason)
     elif _is_denied_host(url) or _host_resolves_internal(url, resolver=resolver):
         raise DownloadRefused(f"Refusing download from host {_host(url)!r}")
-    request_headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
+    request_headers = dict(_BROWSERLIKE_HEADERS)
     if headers:
         request_headers.update(headers)
     with (
@@ -1125,10 +1139,12 @@ def _fetch_landing_html(
         )
         if outcome != "allow":
             raise DownloadRefused(reason)
-    headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
     with (
         httpx.Client(
-            timeout=timeout, headers=headers, follow_redirects=True, max_redirects=_REDIRECT_CAP
+            timeout=timeout,
+            headers=_BROWSERLIKE_HEADERS,
+            follow_redirects=True,
+            max_redirects=_REDIRECT_CAP,
         ) as client,
         client.stream("GET", url) as response,
     ):
@@ -1277,6 +1293,7 @@ def download_and_attach(
         # confirmed. Only active on the real network path (or when a test injects html_fetcher),
         # so existing injected-streamer tests keep single-attempt semantics.
         fetched_url = candidate_url
+        tried_urls: list[str] = [candidate_url]
         use_fallbacks = streamer is None or html_fetcher is not None
         if pdf_bytes is None and use_fallbacks:
             from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
@@ -1295,6 +1312,7 @@ def download_and_attach(
                         "https://api.elsevier.com/content/article/doi/"
                         f"{quote(normalize_doi(doi), safe='')}?httpAccept=application%2Fpdf"
                     )
+                    tried_urls.append(api_url)
                     try:
                         pdf_bytes = _attempt(api_url, headers={"X-ELS-APIKey": api_key})
                     except Exception:  # noqa: BLE001 - API miss → continue with page discovery
@@ -1318,14 +1336,19 @@ def download_and_attach(
                 )
             except Exception:  # noqa: BLE001 - a refused/failed page read just ends discovery
                 page = None
+            page_url = candidate_url
             if page is not None:
                 html, final_url = page
+                page_url = final_url
                 fallback_urls += [
                     u for u in find_pdf_links(html, final_url) if u not in fallback_urls
                 ]
             for url_try in fallback_urls[:5]:
+                tried_urls.append(url_try)
                 try:
-                    pdf_bytes = _attempt(url_try)
+                    # Browsers send the landing page as Referer for its links; some publishers
+                    # require it before serving the PDF.
+                    pdf_bytes = _attempt(url_try, headers={"Referer": page_url})
                 except ValueError:
                     return {"status": "error", "reason": "file exceeds the download size cap"}
                 except Exception:  # noqa: BLE001 - refused/failed fallback → try the next one
@@ -1335,7 +1358,14 @@ def download_and_attach(
                     break
 
         if pdf_bytes is None:
-            return {"status": "manual_upload_needed", "reason": "no downloadable PDF (login/HTML)"}
+            # Name what was actually tried (UX batch 4) — "no downloadable PDF" alone made
+            # failures undiagnosable (e.g. a publisher 403ing the fetch despite a visible button).
+            shown = ", ".join(tried_urls[:4])
+            more = f" (+{len(tried_urls) - 4} more)" if len(tried_urls) > 4 else ""
+            return {
+                "status": "manual_upload_needed",
+                "reason": f"no downloadable PDF (login/HTML/blocked). Tried: {shown}{more}",
+            }
 
         filename = fetched_url.rstrip("/").rsplit("/", 1)[-1] or "download.pdf"
         if not filename.lower().endswith(".pdf"):

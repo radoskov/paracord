@@ -57,6 +57,19 @@ def test_mangled_html_does_not_raise() -> None:
     )
 
 
+def test_springer_download_button_exact_markup() -> None:
+    """The owner's real-world Springer button (relative href + tracking attrs) must be found."""
+    html = """
+    <div class="c-pdf-container"><div class="c-pdf-download u-clear-both u-mb-16">
+      <a href="/content/pdf/10.1007/s12206-026-0351-5.pdf" class="c-pdf-download__link"
+         data-article-pdf="true" data-test="pdf-link" data-track-action="download pdf" download="">
+        <span class="c-pdf-download__text">Download PDF</span>
+      </a></div></div>
+    """
+    links = find_pdf_links(html, "https://link.springer.com/article/10.1007/s12206-026-0351-5")
+    assert links == ["https://link.springer.com/content/pdf/10.1007/s12206-026-0351-5.pdf"]
+
+
 def test_json_sniff_finds_pdf_urls_in_script_blobs() -> None:
     """Layer 4: SPA pages embed the PDF URL in JSON state — no JS execution needed."""
     html = """
