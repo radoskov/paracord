@@ -144,15 +144,24 @@ def build_reference_graph(
     topics_by_work: dict[uuid.UUID, list] = {}
     degree_by_work: dict[uuid.UUID, int] = {}
     venue_by_work: dict[uuid.UUID, str | None] = {}
+    title_by_work: dict[uuid.UUID, str | None] = {}
+    year_by_work: dict[uuid.UUID, int | None] = {}
     if local_work_ids:
-        for wid, cc, topics, venue in db.execute(
-            select(Work.id, Work.citation_count, Work.topics, Work.venue).where(
-                Work.id.in_(local_work_ids)
-            )
+        for wid, cc, topics, venue, w_title, w_year in db.execute(
+            select(
+                Work.id,
+                Work.citation_count,
+                Work.topics,
+                Work.venue,
+                Work.canonical_title,
+                Work.year,
+            ).where(Work.id.in_(local_work_ids))
         ).all():
             citation_by_work[wid] = cc
             topics_by_work[wid] = list(topics or [])
             venue_by_work[wid] = venue
+            title_by_work[wid] = w_title
+            year_by_work[wid] = w_year
         degree_stmt = (
             select(
                 Reference.resolved_work_id,
@@ -185,8 +194,14 @@ def build_reference_graph(
         wid = ref.resolved_work_id if is_local else None
         node = {
             "id": str(ref.id),
-            "label": ref.title or ref.raw_citation or "Untitled reference",
-            "year": ref.year,
+            # A resolved reference displays the WORK's canonical metadata (UX batch 3): once the
+            # paper is imported, the graph must show its real title/year — the extraction-time
+            # reference values (often truncated, year frequently missing) are only the fallback.
+            "label": (title_by_work.get(wid) if wid else None)
+            or ref.title
+            or ref.raw_citation
+            or "Untitled reference",
+            "year": (year_by_work.get(wid) if wid else None) or ref.year,
             "kind": "local" if is_local else "likely_local" if is_likely else "external",
             "resolved_work_id": str(wid) if wid else None,
             # A soft candidate (batch 12): carried for the tooltip + jump-to, but NOT resolved.

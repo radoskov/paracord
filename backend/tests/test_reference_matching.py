@@ -501,6 +501,28 @@ def test_action_on_reference_not_cited_by_work_is_404(
     assert r.status_code == 404
 
 
+def test_reference_list_overlays_resolved_work_metadata(
+    client, auth_headers, db, make_reference
+) -> None:
+    """UX batch 3: once a reference resolves to a library work, the references panel shows the
+    WORK's canonical title/year — extraction-time values (year often missing) are the fallback."""
+    citing = _work(db, "Citing Paper", year=2021)
+    _work(db, LOCAL_TITLE, year=2010, doi="10.7/target")
+    make_reference(db, citing_work_id=citing.id, title="Truncated Titl", doi="10.7/target")
+    db.commit()
+    r = client.post(
+        f"/api/v1/works/{citing.id}/references/rescan", headers=auth_headers("editor")
+    )
+    assert r.status_code == 200
+
+    refs = client.get(
+        f"/api/v1/works/{citing.id}/references", headers=auth_headers("editor")
+    ).json()
+    assert refs[0]["resolved_work_id"] is not None
+    assert refs[0]["title"] == LOCAL_TITLE  # work's canonical title, not "Truncated Titl"
+    assert refs[0]["year"] == 2010  # backfilled from the work (the reference had none)
+
+
 def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monkeypatch) -> None:
     from app.workers import queue as queue_mod
 

@@ -1514,10 +1514,29 @@ def list_work_references(
     _guard_see_work(db, actor, work)
     references = references_for_work(db, work_id)
     shorthands = _reference_shorthands(db, [ref.id for ref in references])
-    return [
-        ReferenceRead.model_validate(ref).model_copy(update={"shorthand": shorthands.get(ref.id)})
-        for ref in references
-    ]
+    # A resolved reference displays the WORK's canonical title/year (UX batch 3): once the cited
+    # paper is imported, its real metadata must show — the extraction-time values (year often
+    # missing) are only the fallback. Display-side overlay; the Reference row keeps its provenance.
+    resolved_ids = {ref.resolved_work_id for ref in references if ref.resolved_work_id}
+    work_meta: dict[uuid.UUID, tuple[str | None, int | None]] = {}
+    if resolved_ids:
+        work_meta = {
+            wid: (w_title, w_year)
+            for wid, w_title, w_year in db.execute(
+                select(Work.id, Work.canonical_title, Work.year).where(Work.id.in_(resolved_ids))
+            ).all()
+        }
+    out: list[ReferenceRead] = []
+    for ref in references:
+        overlay: dict = {"shorthand": shorthands.get(ref.id)}
+        if ref.resolved_work_id in work_meta:
+            w_title, w_year = work_meta[ref.resolved_work_id]
+            if w_title:
+                overlay["title"] = w_title
+            if w_year is not None:
+                overlay["year"] = w_year
+        out.append(ReferenceRead.model_validate(ref).model_copy(update=overlay))
+    return out
 
 
 class ReferenceActionRequest(BaseModel):
