@@ -5945,6 +5945,20 @@
             ],
             "title": "Model Name"
           },
+          "paper_detail": {
+            "default": "short",
+            "enum": [
+              "short",
+              "detailed"
+            ],
+            "title": "Paper Detail",
+            "type": "string"
+          },
+          "regenerate_papers": {
+            "default": false,
+            "title": "Regenerate Papers",
+            "type": "boolean"
+          },
           "scope_id": {
             "anyOf": [
               {
@@ -6886,6 +6900,15 @@
       },
       "SummaryCreate": {
         "properties": {
+          "detail": {
+            "default": "short",
+            "enum": [
+              "short",
+              "detailed"
+            ],
+            "title": "Detail",
+            "type": "string"
+          },
           "max_sentences": {
             "default": 5,
             "title": "Max Sentences",

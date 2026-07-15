@@ -41,6 +41,12 @@ class ScopeSummaryRequest(BaseModel):
     summary_type: Literal["extractive", "local_llm"] | None = None
     max_sentences: int = 8
     model_name: str | None = None
+    # UX batch 4: which per-paper summary feeds the collection synthesis, and whether to force
+    # those per-paper summaries to be (re)generated. Maps the Insights dropdown:
+    #   use/create short → short + reuse ; use/create detailed → detailed + reuse
+    #   regen short → short + regenerate ; regen detailed → detailed + regenerate
+    paper_detail: Literal["short", "detailed"] = "short"
+    regenerate_papers: bool = False
 
 
 class ScopeSummaryResponse(BaseModel):
@@ -112,6 +118,8 @@ def create_scope_summary(
             max_sentences=max(3, min(payload.max_sentences, 20)),
             model_name=payload.model_name,
             actor_user_id=str(actor.id),
+            paper_detail=payload.paper_detail,
+            regenerate_papers=payload.regenerate_papers,
         )
         if job_id is not None:
             response.status_code = status.HTTP_202_ACCEPTED
@@ -127,6 +135,8 @@ def create_scope_summary(
             model_name=payload.model_name,
             created_by_user_id=actor.id,
             visible_ids=visible,
+            paper_detail=payload.paper_detail,
+            regenerate_papers=payload.regenerate_papers,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

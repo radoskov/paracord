@@ -826,6 +826,8 @@ def summarize_scope_job(
     max_sentences: int = 8,
     model_name: str | None = None,
     actor_user_id: str | None = None,
+    paper_detail: str = "short",
+    regenerate_papers: bool = False,
 ) -> dict | None:
     """Run the scope-summary pipeline off the request path (S15).
 
@@ -853,6 +855,8 @@ def summarize_scope_job(
             model_name=model_name,
             created_by_user_id=actor.id,
             visible_ids=access.visible_work_condition(db, actor),  # E3: SQL predicate
+            paper_detail=paper_detail,
+            regenerate_papers=regenerate_papers,
         )
         db.commit()
         return {"summary_id": str(summary.id), "work_count": work_count}

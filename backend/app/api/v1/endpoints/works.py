@@ -1449,6 +1449,9 @@ class AnnotationRead(BaseModel):
 
 class SummaryCreate(BaseModel):
     summary_type: str = "extractive"
+    # UX batch 4: 'short' (one paragraph) or 'detailed' (section-by-section + intro); stored
+    # separately so a paper can carry both.
+    detail: Literal["short", "detailed"] = "short"
     max_sentences: int = 5
     model_name: str | None = None  # for summary_type=local_llm (Ollama model id)
 
@@ -2357,6 +2360,7 @@ def create_summary(
             db,
             work,
             summary_type=summary_type,
+            detail=payload.detail,
             max_sentences=payload.max_sentences,
             model_name=payload.model_name,
             created_by_user_id=actor.id,

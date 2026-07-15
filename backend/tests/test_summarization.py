@@ -163,6 +163,64 @@ def test_summarize_work_extractive_is_not_marked_degraded(db_session) -> None:
     assert summary.provider_used == summary.provider_requested == "extractive"
 
 
+def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch) -> None:
+    """UX batch 4: short + detailed are stored as separate rows; detailed chunks the WHOLE body
+    (no 12k clip) into section paragraphs + a synthesized intro."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+
+    db_session = db
+    update_ai_config(db_session, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db_session.commit()
+    seen: list[str] = []
+
+    def fake_generate(prompt, *, model, base_url):
+        seen.append(prompt)
+        if prompt.startswith(summ._DETAIL_INTRO_PROMPT[:30]):
+            return "HIGH-LEVEL INTRO."
+        if prompt.startswith(summ._DETAIL_CHUNK_PROMPT[:30]):
+            return f"SECTION SUMMARY {len([p for p in seen if 'section of an academic' in p])}."
+        return "SHORT SUMMARY."
+
+    monkeypatch.setattr(summ, "_ollama_generate", fake_generate)
+    monkeypatch.setattr(summ, "LLM_INPUT_CHAR_BUDGET", 400)  # force multi-chunk detailed
+
+    divs = "".join(
+        f"<div><head>Section {i}</head><p>{('Sentence number ' + str(i) + ' with several words. ') * 6}</p></div>"
+        for i in range(6)
+    )
+    tei = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
+    )
+    work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence.")
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(
+        RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei)
+    )
+    db_session.commit()
+
+    short = summarize_work(db_session, work, summary_type="local_llm", detail="short")
+    detailed = summarize_work(db_session, work, summary_type="local_llm", detail="detailed")
+    db_session.commit()
+
+    assert short.summary_type == "local_llm"
+    assert detailed.summary_type == "local_llm_detailed"
+    assert short.provider_used == "local_llm" and detailed.provider_used == "local_llm"
+    # Both rows persist (coexist) — the paper view shows both.
+    rows = {
+        s.summary_type
+        for s in db_session.scalars(
+            select(Summary).where(Summary.entity_type == "work", Summary.entity_id == work.id)
+        ).all()
+    }
+    assert rows == {"local_llm", "local_llm_detailed"}
+    # Detailed = intro + several section paragraphs.
+    assert detailed.text.startswith("HIGH-LEVEL INTRO.")
+    assert detailed.text.count("SECTION SUMMARY") >= 2
+    assert detailed.params["detail"] == "detailed"
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)

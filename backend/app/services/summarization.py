@@ -185,12 +185,76 @@ def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
 
 
 def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
-    """Per-PAPER abstractive summary (single document prompt). Raises on any failure."""
+    """Per-PAPER SHORT abstractive summary (single-paragraph prompt). Raises on any failure."""
     prompt = (
         "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
         "method, and key result. Respond with the summary only.\n\n" + text[:LLM_INPUT_CHAR_BUDGET]
     )
     return _ollama_generate(prompt, model=model, base_url=base_url)
+
+
+_DETAIL_CHUNK_PROMPT = (
+    "This is one section of an academic paper. Summarize it into a single focused paragraph "
+    "covering what it establishes (problem, method, data, or result). Respond with the paragraph "
+    "only.\n\n"
+)
+_DETAIL_INTRO_PROMPT = (
+    "The paragraphs below are section-by-section summaries of ONE academic paper. Write a 2-3 "
+    "sentence high-level overview of the whole paper (problem, approach, key result). Respond "
+    "with the overview only.\n\n"
+)
+
+
+def _split_to_budget(block: str, budget: int) -> list[str]:
+    """Split a block longer than ``budget`` on sentence boundaries into ≤budget pieces."""
+    if len(block) <= budget:
+        return [block]
+    pieces: list[str] = []
+    current = ""
+    for sentence in _SENTENCE_SPLIT.split(block):
+        if current and len(current) + len(sentence) > budget:
+            pieces.append(current.strip())
+            current = ""
+        current += sentence + " "
+    if current.strip():
+        pieces.append(current.strip())
+    return pieces or [block[:budget]]
+
+
+def _paragraphs(text: str, budget: int) -> list[str]:
+    """Split body text into map blocks: paragraph breaks first, then sentence-split any block
+    still over ``budget`` (GROBID body extraction often drops paragraph breaks, leaving one blob).
+    """
+    raw = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    raw = raw or ([text.strip()] if text.strip() else [])
+    out: list[str] = []
+    for block in raw:
+        out.extend(_split_to_budget(block, budget))
+    return out
+
+
+def _detailed_llm_summary(text: str, *, model: str, base_url: str) -> str:
+    """Per-PAPER DETAILED summary (UX batch 4): the WHOLE body — no 12k clip — packed into
+    context-window chunks, each condensed into its own paragraph, with a high-level intro
+    synthesized from those paragraphs when there is more than one chunk. Raises on any failure.
+    """
+    chunks = _pack_blocks(_paragraphs(text, LLM_INPUT_CHAR_BUDGET), LLM_INPUT_CHAR_BUDGET)
+    if not chunks:
+        return ""
+    section_summaries = [
+        _ollama_generate(_DETAIL_CHUNK_PROMPT + chunk, model=model, base_url=base_url)
+        for chunk in chunks
+    ]
+    section_summaries = [s for s in section_summaries if s.strip()]
+    if not section_summaries:
+        return ""
+    body = "\n\n".join(section_summaries)
+    if len(section_summaries) == 1:
+        return body
+    intro = _ollama_generate(
+        _DETAIL_INTRO_PROMPT + body[:LLM_INPUT_CHAR_BUDGET], model=model, base_url=base_url
+    )
+    return f"{intro}\n\n{body}" if intro.strip() else body
 
 
 # --- Scope (collection) prompts — UX batch 4 -------------------------------------------------
@@ -261,12 +325,18 @@ def summarize_work(
     work: Work,
     *,
     summary_type: str = "extractive",
+    detail: str = "short",
     max_sentences: int = 5,
     model_name: str | None = None,
     created_by_user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
 ) -> Summary:
-    """Create (replacing any prior summary of the same type) a provenance-tagged summary.
+    """Create (replacing any prior summary of the same type+detail) a provenance-tagged summary.
+
+    ``detail`` (UX batch 4): ``"short"`` = one paragraph (the historical behavior); ``"detailed"``
+    = the whole body chunked section-by-section with a synthesized intro (LLM), or a longer
+    extractive summary as the fallback. Short and detailed are stored as SEPARATE rows (the
+    detailed one under ``{summary_type}_detailed``) so both coexist in the paper view.
 
     For ``local_llm`` the returned Summary carries a transient ``source_sections`` attribute (the
     sources that fed it); the API surfaces it. When the LLM is disabled/unreachable the text is the
@@ -275,6 +345,13 @@ def summarize_work(
     """
     if summary_type not in SUPPORTED_SUMMARY_TYPES:
         raise ValueError(f"Unsupported summary type: {summary_type}")
+    if detail not in ("short", "detailed"):
+        raise ValueError(f"Unsupported detail level: {detail}")
+    # Detailed summaries are stored under a distinct type so they never clobber the short one.
+    stored_type = summary_type if detail == "short" else f"{summary_type}_detailed"
+    detailed = detail == "detailed"
+    # A longer extractive stands in for a detailed summary when the LLM isn't producing it.
+    eff_sentences = max_sentences * 3 if detailed else max_sentences
 
     settings = settings or get_settings()
     from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
@@ -300,8 +377,14 @@ def summarize_work(
         # straight to the deterministic fallback, so disabled/CI installs never hit the network.
         if ai_cfg.summary_provider == "local_llm" and source_text:
             try:
-                text = _ollama_summarize(
-                    source_text, model=stored_model, base_url=ai_cfg.ollama_url
+                text = (
+                    _detailed_llm_summary(
+                        source_text, model=stored_model, base_url=ai_cfg.ollama_url
+                    )
+                    if detailed
+                    else _ollama_summarize(
+                        source_text, model=stored_model, base_url=ai_cfg.ollama_url
+                    )
                 )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
@@ -309,30 +392,30 @@ def summarize_work(
         else:
             fallback_reason = "the local LLM is not enabled"
         if not text:
-            text = summarize_extractive(source_text, max_sentences=max_sentences)
+            text = summarize_extractive(source_text, max_sentences=eff_sentences)
             provider_used = "extractive"
             if text:
                 source_sections.append("extractive-fallback")
     else:
-        text = summarize_extractive(work_source_text(db, work), max_sentences=max_sentences)
+        text = summarize_extractive(work_source_text(db, work), max_sentences=eff_sentences)
         stored_model = "tier1-extractive-frequency"
 
     if not text:
         raise ValueError("No text available to summarize")
 
-    # One stored summary per (work, type): replace the previous one so re-runs stay idempotent.
+    # One stored summary per (work, type+detail): replace the previous one so re-runs stay idempotent.
     db.execute(
         delete(Summary).where(
             Summary.entity_type == "work",
             Summary.entity_id == work.id,
-            Summary.summary_type == summary_type,
+            Summary.summary_type == stored_type,
         )
     )
     fallback = provider_used != provider_requested
     summary = Summary(
         entity_type="work",
         entity_id=work.id,
-        summary_type=summary_type,
+        summary_type=stored_type,
         text=text,
         model_name=stored_model,
         prompt_version=prompt_version,
@@ -344,6 +427,7 @@ def summarize_work(
         created_by_user_id=created_by_user_id,
         params={
             "summary_type": summary_type,
+            "detail": detail,
             "max_sentences": max_sentences,
             "model_name": model_name,
         },
@@ -380,32 +464,37 @@ def _work_digest(
     model_name: str,
     created_by_user_id: uuid.UUID | None,
     settings: Settings | None,
+    detail: str = "short",
+    regenerate: bool = False,
 ) -> tuple[str, str | None] | None:
     """One paper's digest for the scope map step. Returns ``(text, degraded_reason)`` or None.
 
-    Reuses a previously stored genuine local_llm summary for the paper; otherwise generates one
-    through :func:`summarize_work` (persisting it, so it also appears in the paper's own view).
-    ``degraded_reason`` is non-None when the LLM attempt fell back — the scope loop uses it to
-    stop hammering an unavailable daemon. Without LLM use, the digest is the abstract, else a
-    short extractive digest of the body.
+    UX batch 4: ``detail`` picks which per-paper summary feeds the scope synthesis ("short" or
+    "detailed"); ``regenerate`` forces a fresh one. When not regenerating, an existing genuine
+    local_llm summary of that detail level is reused (so a scope run doesn't re-summarize papers
+    already summarized in their own view, and vice versa). ``degraded_reason`` is non-None when the
+    LLM attempt fell back — the scope loop uses it to stop hammering an unavailable daemon.
     """
+    stored_type = "local_llm" if detail == "short" else "local_llm_detailed"
     if use_llm:
-        existing = db.scalars(
-            select(Summary)
-            .where(
-                Summary.entity_type == "work",
-                Summary.entity_id == work.id,
-                Summary.summary_type == "local_llm",
-            )
-            .order_by(Summary.created_at.desc())
-        ).first()
-        if existing is not None and existing.provider_used == "local_llm" and existing.text:
-            return existing.text, None
+        if not regenerate:
+            existing = db.scalars(
+                select(Summary)
+                .where(
+                    Summary.entity_type == "work",
+                    Summary.entity_id == work.id,
+                    Summary.summary_type == stored_type,
+                )
+                .order_by(Summary.created_at.desc())
+            ).first()
+            if existing is not None and existing.provider_used == "local_llm" and existing.text:
+                return existing.text, None
         try:
             s = summarize_work(
                 db,
                 work,
                 summary_type="local_llm",
+                detail=detail,
                 model_name=model_name,
                 created_by_user_id=created_by_user_id,
                 settings=settings,
@@ -457,13 +546,16 @@ def summarize_scope(
     created_by_user_id: uuid.UUID | None = None,
     visible_ids: set[uuid.UUID] | None = None,
     settings: Settings | None = None,
+    paper_detail: str = "short",
+    regenerate_papers: bool = False,
 ) -> tuple[Summary, int]:
-    """Generate (replacing prior) a scope summary over all works' abstracts.
+    """Generate (replacing prior) a scope summary over the scope's papers.
 
-    Mirrors ``summarize_work``: ``local_llm`` calls the configured Ollama model (when enabled) over
-    the combined abstracts and degrades to the extractive engine on any failure, recording the
-    requested model + a fallback reason. Returns ``(summary, work_count)``; ``visible_ids`` (Phase H)
-    restricts the scope to works the caller may see.
+    ``local_llm`` builds per-paper digests (map) then synthesizes the collection (reduce); UX
+    batch 4 adds ``paper_detail`` ("short"/"detailed") to choose which per-paper summary feeds the
+    map, and ``regenerate_papers`` to force those per-paper summaries to be regenerated rather than
+    reused. Degrades to the extractive engine on any LLM failure. Returns ``(summary, work_count)``;
+    ``visible_ids`` (Phase H) restricts the scope to works the caller may see.
     """
     if summary_type not in SUPPORTED_SUMMARY_TYPES:
         raise ValueError(f"Unsupported summary type: {summary_type}")
@@ -505,6 +597,8 @@ def summarize_scope(
                 model_name=stored_model,
                 created_by_user_id=created_by_user_id,
                 settings=settings,
+                detail=paper_detail,
+                regenerate=regenerate_papers,
             )
             if digest is None:
                 continue
@@ -591,6 +685,7 @@ def summarize_scope(
             "scope_label": _scope_label(db, scope_type, scope_id),
             "method": method,
             "chunks": chunk_count,
+            "paper_detail": paper_detail,
         },
     )
     db.add(summary)
