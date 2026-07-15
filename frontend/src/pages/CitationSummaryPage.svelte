@@ -66,6 +66,28 @@
 
   let chartRevision = 0;
 
+  // Per-column scroll windows (UX batch): each column shows ALL returned entries but folds into a
+  // ~15-item scroll box; a "to top" reset appears once the column is scrolled.
+  let columnScrolled: Record<string, boolean> = {};
+  const columnEls: Record<string, HTMLElement> = {};
+  function columnScroll(node: HTMLElement, key: string) {
+    columnEls[key] = node;
+    const onScroll = () => {
+      const is = node.scrollTop > 0;
+      if (columnScrolled[key] !== is) columnScrolled = { ...columnScrolled, [key]: is };
+    };
+    node.addEventListener('scroll', onScroll, { passive: true });
+    return {
+      destroy() {
+        node.removeEventListener('scroll', onScroll);
+        delete columnEls[key];
+      },
+    };
+  }
+  function columnToTop(key: string): void {
+    columnEls[key]?.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   async function load(): Promise<void> {
     if (!scopeReady) return;
     busy = true;
@@ -318,6 +340,7 @@
           {#if summary.most_cited_local.length === 0}
             <p class="empty">No local citations in this scope.</p>
           {:else}
+            <div class="col-scroll" use:columnScroll={'local'}>
             <ol>
               {#each summary.most_cited_local as w (w.work_id)}
                 <li>
@@ -333,6 +356,9 @@
                 </li>
               {/each}
             </ol>
+            </div>
+            {#if columnScrolled['local']}<button type="button" class="ghost to-top"
+              on:click={() => columnToTop('local')} title="Scroll this column back to the top">↑ To top</button>{/if}
           {/if}
         </div>
 
@@ -341,6 +367,7 @@
           {#if summary.most_cited_external.length === 0}
             <p class="empty">No citation counts fetched for this scope yet.</p>
           {:else}
+            <div class="col-scroll" use:columnScroll={'external'}>
             <ol>
               {#each summary.most_cited_external as w (w.work_id)}
                 <li>
@@ -356,6 +383,9 @@
                 </li>
               {/each}
             </ol>
+            </div>
+            {#if columnScrolled['external']}<button type="button" class="ghost to-top"
+              on:click={() => columnToTop('external')} title="Scroll this column back to the top">↑ To top</button>{/if}
           {/if}
         </div>
 
@@ -384,6 +414,7 @@
           {#if summary.frequently_cited_missing.length === 0}
             <p class="empty">Every frequently-cited work is already in your library.</p>
           {:else}
+            <div class="col-scroll" use:columnScroll={'missing'}>
             <ol data-testid="summary-missing-active">
               {#each activeMissing as m (m.key)}
                 <li>
@@ -461,6 +492,9 @@
                 </li>
               {/each}
             </ol>
+            </div>
+            {#if columnScrolled['missing']}<button type="button" class="ghost to-top"
+              on:click={() => columnToTop('missing')} title="Scroll this column back to the top">↑ To top</button>{/if}
             {#if ignoredMissing.length > 0}
               <details class="ignored" bind:open={showIgnored} data-testid="summary-ignored">
                 <summary>Ignored ({ignoredMissing.length})</summary>
@@ -486,6 +520,7 @@
           {#if summary.bridge_papers.length === 0}
             <p class="empty">No bridge papers detected.</p>
           {:else}
+            <div class="col-scroll" use:columnScroll={'bridge'}>
             <ol>
               {#each summary.bridge_papers as w (w.work_id)}
                 <li>
@@ -501,6 +536,9 @@
                 </li>
               {/each}
             </ol>
+            </div>
+            {#if columnScrolled['bridge']}<button type="button" class="ghost to-top"
+              on:click={() => columnToTop('bridge')} title="Scroll this column back to the top">↑ To top</button>{/if}
           {/if}
         </div>
 
@@ -509,6 +547,7 @@
           {#if summary.isolated_papers.length === 0}
             <p class="empty">Every paper connects to the rest of the scope.</p>
           {:else}
+            <div class="col-scroll" use:columnScroll={'isolated'}>
             <ol>
               {#each summary.isolated_papers as w (w.work_id)}
                 <li>
@@ -523,6 +562,9 @@
                 </li>
               {/each}
             </ol>
+            </div>
+            {#if columnScrolled['isolated']}<button type="button" class="ghost to-top"
+              on:click={() => columnToTop('isolated')} title="Scroll this column back to the top">↑ To top</button>{/if}
           {/if}
         </div>
 
@@ -771,6 +813,18 @@
   .block ol {
     margin: 0;
     padding-left: 1.2rem;
+  }
+
+  /* Fold each column into a ~15-item window (UX batch): every significant entry is returned and
+     reachable by scrolling, without one long column stretching the whole grid row. */
+  .col-scroll {
+    max-height: 26rem;
+    overflow-y: auto;
+    padding-right: 0.25rem;
+  }
+
+  .to-top {
+    margin-top: 0.3rem;
   }
 
   .block li {

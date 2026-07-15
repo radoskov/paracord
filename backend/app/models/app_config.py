@@ -46,6 +46,11 @@ _DEFAULT_CITING_PAPERS_FETCH_CAP = 1000
 # instead of inline in the request (S15/S16).
 _DEFAULT_AI_SCOPE_JOB_THRESHOLD = 100
 
+# Out-of-the-box cap on items per citation-summary column (UX batch). Generous by default — the
+# UI folds each column into a scrollable window, so a large cap surfaces every significant entry
+# without hiding the tail (the old fixed 15 hid important items).
+_DEFAULT_CITATION_SUMMARY_ITEM_CAP = 100
+
 # Out-of-the-box per-surface node caps for the analysis graphs (Insights audit L-a). High and
 # admin-editable; a capped graph keeps its highest-degree nodes and reports the hidden count.
 _DEFAULT_CITATION_GRAPH_NODE_CAP = 1500
@@ -97,6 +102,10 @@ class AppConfig(Base):
     # AI scope-job threshold (S15/S16): scopes larger than this run topics/summaries on the worker.
     ai_scope_job_threshold: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_AI_SCOPE_JOB_THRESHOLD)
+    )
+    # Items per citation-summary column (UX batch): how many entries each ranked block returns.
+    citation_summary_item_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=str(_DEFAULT_CITATION_SUMMARY_ITEM_CAP)
     )
     # Per-surface analysis node caps (L-a).
     citation_graph_node_cap: Mapped[int] = mapped_column(

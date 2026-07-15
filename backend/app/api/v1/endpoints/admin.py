@@ -49,6 +49,8 @@ class AppConfigOut(BaseModel):
     max_queue_len: int
     # Citing-papers fetch cap (S20): max external citers fetched+cached per paper.
     citing_papers_fetch_cap: int
+    # Citation summary (UX batch): items per ranked column (the UI shows them in a scroll window).
+    citation_summary_item_cap: int
     # AI scope-job threshold (S15/S16): scopes above this run topics/summaries/graphs on the worker.
     ai_scope_job_threshold: int
     # Per-surface analysis node caps (L-a): highest-degree nodes are kept, hidden counts reported.
@@ -79,6 +81,7 @@ class AppConfigUpdate(BaseModel):
     rq_worker_count: int | None = Field(default=None, ge=1)
     max_queue_len: int | None = Field(default=None, ge=1)
     citing_papers_fetch_cap: int | None = Field(default=None, ge=1)
+    citation_summary_item_cap: int | None = Field(default=None, ge=1, le=500)
     ai_scope_job_threshold: int | None = Field(default=None, ge=1)
     citation_graph_node_cap: int | None = Field(default=None, ge=1)
     topic_graph_node_cap: int | None = Field(default=None, ge=1)
@@ -314,6 +317,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         rq_worker_count=app_config_service.effective_rq_worker_count(db),
         max_queue_len=app_config_service.effective_max_queue_len(db),
         citing_papers_fetch_cap=app_config_service.effective_citing_papers_fetch_cap(db),
+        citation_summary_item_cap=app_config_service.effective_citation_summary_item_cap(db),
         ai_scope_job_threshold=app_config_service.effective_ai_scope_job_threshold(db),
         citation_graph_node_cap=app_config_service.effective_citation_graph_node_cap(db),
         topic_graph_node_cap=app_config_service.effective_topic_graph_node_cap(db),
@@ -384,6 +388,12 @@ def update_app_config(
         if payload.citing_papers_fetch_cap is not None:
             changed["citing_papers_fetch_cap"] = app_config_service.update_citing_papers_fetch_cap(
                 db, value=payload.citing_papers_fetch_cap, actor_user_id=actor.id
+            )
+        if payload.citation_summary_item_cap is not None:
+            changed["citation_summary_item_cap"] = (
+                app_config_service.update_citation_summary_item_cap(
+                    db, value=payload.citation_summary_item_cap, actor_user_id=actor.id
+                )
             )
         if payload.ai_scope_job_threshold is not None:
             changed["ai_scope_job_threshold"] = app_config_service.update_ai_scope_job_threshold(

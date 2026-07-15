@@ -1311,6 +1311,8 @@ export interface AppConfig {
   max_queue_len: number;
   // Citing-papers fetch cap (S20): max external citers fetched+cached per paper.
   citing_papers_fetch_cap: number;
+  // Citation summary (UX batch): items per ranked column (shown in a scrollable window).
+  citation_summary_item_cap: number;
   // Per-surface analysis node caps (L-a).
   citation_graph_node_cap: number;
   topic_graph_node_cap: number;

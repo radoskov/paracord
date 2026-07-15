@@ -26,7 +26,6 @@ from app.models.citation import Reference, ReferenceCitation
 from app.models.user import User
 from app.services import access, citation_worklist
 from app.services.citation_summary import (
-    DEFAULT_LIMIT,
     SummaryScope,
     citation_summary,
 )
@@ -105,16 +104,22 @@ def get_citation_summary(
     scope_type: _ScopeType = Query("library"),
     scope_id: uuid.UUID | None = Query(None),
     work_ids: list[uuid.UUID] | None = Query(None),
-    limit: int = Query(DEFAULT_LIMIT, ge=1, le=100),
+    limit: int | None = Query(None, ge=1, le=500),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> CitationSummaryResponse:
     """Compute the scoped citation summary (§8.11) for the given scope.
 
+    ``limit`` caps each ranked column; when omitted it comes from the admin-configured
+    ``citation_summary_item_cap`` (UX batch — the old fixed 15 hid significant entries).
     Access control: a shelf/rack scope requires SEE on that container (404 otherwise); the summary's
     works/references are clamped to the caller's visible works. Cached + versioned by a scope
     signature (see :func:`app.services.citation_summary.citation_summary`).
     """
+    if limit is None:
+        from app.services.app_config import effective_citation_summary_item_cap
+
+        limit = effective_citation_summary_item_cap(db)
     resolved_work_ids = resolve_scope_or_404(
         db, actor, scope_type=scope_type, scope_id=scope_id, work_ids=work_ids
     )

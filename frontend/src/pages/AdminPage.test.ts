@@ -30,6 +30,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     resolveReferenceDupe: vi.fn().mockResolvedValue({ last_scan: null, conflicts: [] }),
     getAppConfig: vi.fn().mockResolvedValue({
       max_papers_per_page: 500,
+      citation_summary_item_cap: 100,
       rate_limit_per_client_per_min: 60,
       rate_limit_global_per_min: 300,
       max_batch_items: 100,
@@ -49,6 +50,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     }),
     updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
       max_papers_per_page: 250,
+      citation_summary_item_cap: 100,
       rate_limit_per_client_per_min: 60,
       rate_limit_global_per_min: 300,
       max_batch_items: 100,
@@ -154,7 +156,7 @@ describe('AdminPage groups section', () => {
     await fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
     await waitFor(() =>
-      expect(client.updateAppConfig).toHaveBeenCalledWith({ max_papers_per_page: 250 }),
+      expect(client.updateAppConfig).toHaveBeenCalledWith({ max_papers_per_page: 250, citation_summary_item_cap: 100 }),
     );
   });
 

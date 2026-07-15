@@ -324,6 +324,7 @@
 
   // --- App settings (D18: page-size clamp; D1: overload protection) ---
   let maxPapersPerPage = '';
+  let citationSummaryCap = '';
   let rateLimitPerClient = '';
   let rateLimitGlobal = '';
   let maxBatchItems = '';
@@ -351,6 +352,7 @@
 
   function applyAppConfig(cfg: AppConfig): void {
     maxPapersPerPage = String(cfg.max_papers_per_page);
+    citationSummaryCap = String(cfg.citation_summary_item_cap);
     rateLimitPerClient = String(cfg.rate_limit_per_client_per_min);
     rateLimitGlobal = String(cfg.rate_limit_global_per_min);
     maxBatchItems = String(cfg.max_batch_items);
@@ -405,10 +407,20 @@
       message = 'Max papers per page must be a whole number of at least 1';
       return;
     }
+    const summaryCap = Math.trunc(Number(citationSummaryCap));
+    if (!Number.isFinite(summaryCap) || summaryCap < 1 || summaryCap > 500) {
+      message = 'Citation summary items per column must be between 1 and 500';
+      return;
+    }
     savingAppConfig = true;
     appConfigMsg = '';
     await run(async () => {
-      applyAppConfig(await client.updateAppConfig({ max_papers_per_page: value }));
+      applyAppConfig(
+        await client.updateAppConfig({
+          max_papers_per_page: value,
+          citation_summary_item_cap: summaryCap,
+        }),
+      );
       appConfigMsg = 'Saved.';
     });
     savingAppConfig = false;
@@ -1841,6 +1853,15 @@
         <p class="small-help">
           The ceiling applied to every user’s Library page size. A user’s own “papers per page”
           preference is clamped to this value.
+        </p>
+        <label class="field">
+          Citation summary items per column
+          <input type="number" min="1" max="500" bind:value={citationSummaryCap} />
+        </label>
+        <p class="small-help">
+          How many entries each Citation-summary column returns (most-cited, missing, bridge, …).
+          Columns fold into a scrollable window, so a generous cap surfaces every significant
+          entry without cluttering the page.
         </p>
         <button type="submit" disabled={savingAppConfig || loading || !maxPapersPerPage}
           title="Save the global maximum papers per page">Save</button>

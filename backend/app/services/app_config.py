@@ -17,6 +17,7 @@ from app.core.config import Settings, get_settings
 from app.models.app_config import (
     _DEFAULT_AI_SCOPE_JOB_THRESHOLD,
     _DEFAULT_CITATION_GRAPH_NODE_CAP,
+    _DEFAULT_CITATION_SUMMARY_ITEM_CAP,
     _DEFAULT_CITING_PAPERS_FETCH_CAP,
     _DEFAULT_MAX_BATCH_ITEMS,
     _DEFAULT_MAX_QUEUE_LEN,
@@ -115,6 +116,23 @@ def effective_max_queue_len(db: Session, *, settings: Settings | None = None) ->
     if row is None or row.max_queue_len is None:
         return _DEFAULT_MAX_QUEUE_LEN
     return row.max_queue_len
+
+
+def effective_citation_summary_item_cap(db: Session, *, settings: Settings | None = None) -> int:
+    """Return the effective per-column item cap for the citation summary (UX batch)."""
+    if not _app_config_table_present(db):
+        return _DEFAULT_CITATION_SUMMARY_ITEM_CAP
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.citation_summary_item_cap is None:
+        return _DEFAULT_CITATION_SUMMARY_ITEM_CAP
+    return row.citation_summary_item_cap
+
+
+def update_citation_summary_item_cap(
+    db: Session, *, value: int, actor_user_id: uuid.UUID | None = None
+) -> int:
+    """Persist a new citation-summary per-column item cap (UX batch)."""
+    return _update_int(db, "citation_summary_item_cap", value, actor_user_id)
 
 
 def effective_citing_papers_fetch_cap(db: Session, *, settings: Settings | None = None) -> int:

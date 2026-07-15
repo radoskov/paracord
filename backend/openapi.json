@@ -887,6 +887,10 @@
             "title": "Citation Graph Node Cap",
             "type": "integer"
           },
+          "citation_summary_item_cap": {
+            "title": "Citation Summary Item Cap",
+            "type": "integer"
+          },
           "citing_papers_fetch_cap": {
             "title": "Citing Papers Fetch Cap",
             "type": "integer"
@@ -956,6 +960,7 @@
           "rq_worker_count",
           "max_queue_len",
           "citing_papers_fetch_cap",
+          "citation_summary_item_cap",
           "ai_scope_job_threshold",
           "citation_graph_node_cap",
           "topic_graph_node_cap",
@@ -995,6 +1000,19 @@
               }
             ],
             "title": "Citation Graph Node Cap"
+          },
+          "citation_summary_item_cap": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Summary Item Cap"
           },
           "citing_papers_fetch_cap": {
             "anyOf": [
@@ -14916,7 +14934,7 @@
     },
     "/api/v1/citations/summary": {
       "get": {
-        "description": "Compute the scoped citation summary (§8.11) for the given scope.\n\nAccess control: a shelf/rack scope requires SEE on that container (404 otherwise); the summary's\nworks/references are clamped to the caller's visible works. Cached + versioned by a scope\nsignature (see :func:`app.services.citation_summary.citation_summary`).",
+        "description": "Compute the scoped citation summary (§8.11) for the given scope.\n\n``limit`` caps each ranked column; when omitted it comes from the admin-configured\n``citation_summary_item_cap`` (UX batch — the old fixed 15 hid significant entries).\nAccess control: a shelf/rack scope requires SEE on that container (404 otherwise); the summary's\nworks/references are clamped to the caller's visible works. Cached + versioned by a scope\nsignature (see :func:`app.services.citation_summary.citation_summary`).",
         "operationId": "get_citation_summary_api_v1_citations_summary_get",
         "parameters": [
           {
@@ -14980,11 +14998,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 15,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           },
           {
