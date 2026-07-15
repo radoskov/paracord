@@ -357,6 +357,16 @@
     }, 'Citing paper imported into the library');
   }
 
+  // Panel-header badges (UX batch): show at a glance that some references/citers need review
+  // ("likely match"), are already held ("in library"), or are external — without expanding.
+  $: refLikelyCount = references.filter(
+    (r) => r.resolution_status === 'likely_match' && r.suggested_work_id,
+  ).length;
+  $: refInLibraryCount = references.filter((r) => r.resolved_work_id).length;
+  $: refExternalCount = references.length - refInLibraryCount - refLikelyCount;
+  $: citingInLibraryCount = citing?.items.filter((c) => c.resolved_work_id).length ?? 0;
+  $: citingExternalCount = (citing?.items.length ?? 0) - citingInLibraryCount;
+
   // "Find & Import" (UX batch): prefill the batch-citation search with this entry (incl. the DOI
   // when present) and jump to the Import tab's Citations sub-tab, so the user reviews candidates
   // instead of importing blind. Same mechanism as the reference graph's import push.
@@ -1473,7 +1483,15 @@
   </details>
 
   <details class="references-block" open={refsPanelOpen} on:toggle={rememberRefsPanel}>
-    <summary>References ({references.length})</summary>
+    <summary>References ({references.length})
+      {#if refLikelyCount}<span class="sum-badge sum-badge-warn"
+          title="Fuzzy candidates awaiting your confirm/reject — expand to review them"
+          >{refLikelyCount} likely match{refLikelyCount === 1 ? '' : 'es'}</span>{/if}
+      {#if refInLibraryCount}<span class="sum-badge sum-badge-ok"
+          title="References already linked to papers in your library">{refInLibraryCount} in library</span>{/if}
+      {#if refExternalCount}<span class="sum-badge"
+          title="References not (yet) in your library">{refExternalCount} external</span>{/if}
+    </summary>
     {#if references.length === 0}
       <p class="empty">
         No references extracted yet. They appear after GROBID extraction runs on an attached PDF
@@ -1554,7 +1572,12 @@
   </details>
 
   <details class="citing-block" on:toggle={(e) => e.currentTarget.open && loadCiting()}>
-    <summary>Citing papers{#if citing}{' '}({citing.items.length}{#if citing.citation_count && citing.citation_count > citing.items.length} of {citing.citation_count}{/if}){/if}</summary>
+    <summary>Citing papers{#if citing}{' '}({citing.items.length}{#if citing.citation_count && citing.citation_count > citing.items.length} of {citing.citation_count}{/if}){/if}
+      {#if citingInLibraryCount}<span class="sum-badge sum-badge-ok"
+          title="Citing papers already in your library">{citingInLibraryCount} in library</span>{/if}
+      {#if citingExternalCount}<span class="sum-badge"
+          title="External citing papers not (yet) in your library">{citingExternalCount} external</span>{/if}
+    </summary>
     <p class="muted small citing-lead">
       External papers that cite this one, fetched from OpenAlex (falling back to Semantic Scholar).
       {#if citing?.fetched_at}
@@ -2493,6 +2516,27 @@
 
   .ref-badge-link:hover {
     text-decoration: underline;
+  }
+
+  /* Panel-header badges (UX batch) — same shape as the metadata "conflicts" badge. */
+  .sum-badge {
+    background: var(--surface-sunken);
+    border-radius: 0.25rem;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.35rem;
+    white-space: nowrap;
+  }
+
+  .sum-badge-warn {
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
+  }
+
+  .sum-badge-ok {
+    background: var(--status-success-bg);
+    color: var(--status-success);
   }
 
   /* Inline confirm/reject failure — shown on the row itself, not the far-away top message line. */
