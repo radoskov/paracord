@@ -122,6 +122,9 @@
     message = '';
     try {
       graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting, maxExternal });
+      // Fresh data → stale focus ids would hide everything.
+      focusIds = null;
+      focusLabel = '';
       revision += 1;
     } catch (error) {
       message = errorMessage(error);
@@ -130,13 +133,76 @@
     }
   }
 
+  // --- Ctrl-click neighborhood focus (UX batch 3, parity with the Insights graph) -------------
+  let focusIds: Set<string> | null = null;
+  let focusLabel = '';
+
+  function neighborhoodOf(seed: Set<string>): Set<string> {
+    const keep = new Set(seed);
+    for (const e of graph?.edges ?? []) {
+      if (seed.has(e.source)) keep.add(e.target);
+      if (seed.has(e.target)) keep.add(e.source);
+    }
+    return keep;
+  }
+
+  function clearFocus(): void {
+    focusIds = null;
+    focusLabel = '';
+    revision += 1;
+  }
+
+  function focusOnNode(node: ReferenceGraphNode): void {
+    if (focusIds && focusLabel === node.id) {
+      clearFocus();
+      return;
+    }
+    focusIds = neighborhoodOf(new Set([node.id]));
+    focusLabel = node.id;
+    revision += 1;
+  }
+
+  // Ctrl-click a legend entry: focus that whole category + the direct neighbors of its nodes
+  // (e.g. "external" shows every external reference plus this paper). Node ids are read from the
+  // clicked series' plotted data, so it works for kind AND venue coloring alike.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function focusOnLegendSeries(chart: any, name: string): void {
+    if (focusIds && focusLabel === name) {
+      clearFocus();
+      return;
+    }
+    const series = ((chart.getOption()?.series ?? []) as {
+      name?: string;
+      type?: string;
+      data?: { node?: ReferenceGraphNode; members?: ReferenceGraphNode[] }[];
+    }[]).find((s) => s.name === name && s.type === 'scatter');
+    const seeds = new Set<string>();
+    for (const d of series?.data ?? []) {
+      if (d?.members) for (const m of d.members) seeds.add(m.id);
+      else if (d?.node) seeds.add(d.node.id);
+    }
+    if (!seeds.size) return;
+    focusIds = neighborhoodOf(seeds);
+    focusLabel = name;
+    revision += 1;
+  }
+
+  $: focusLabelText =
+    focusIds && graph
+      ? (graph.nodes.find((n) => n.id === focusLabel)?.label ?? focusLabel)
+      : '';
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function renderChart(chart: any): void {
     if (!graph) return;
-    chart.setOption(
-      buildReferenceGraphOption(graph, weights, $activeVizTheme, { yAxis, colorBy }),
-      true,
-    );
+    const g = focusIds
+      ? {
+          ...graph,
+          nodes: graph.nodes.filter((n) => focusIds?.has(n.id)),
+          edges: graph.edges.filter((e) => focusIds?.has(e.source) && focusIds?.has(e.target)),
+        }
+      : graph;
+    chart.setOption(buildReferenceGraphOption(g, weights, $activeVizTheme, { yAxis, colorBy }), true);
   }
 
   // Edge-snapped cursor zoom (UX batch 3): when a wheel-zoom happens with the cursor in the
@@ -181,9 +247,34 @@
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wireEvents(chart: any): void {
-    chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
-      const node = params.data?.node;
-      if (node) openOrImportNode(node);
+    chart.on(
+      'click',
+      (params: { data?: { node?: ReferenceGraphNode }; event?: { event?: MouseEvent } }) => {
+        const node = params.data?.node;
+        if (!node) return;
+        const raw = params.event?.event;
+        if (raw && (raw.ctrlKey || raw.metaKey)) {
+          focusOnNode(node); // ctrl-click = neighborhood focus, NOT open/import (UX batch 3)
+          return;
+        }
+        openOrImportNode(node);
+      },
+    );
+    // Track modifier state at the DOM level (legendselectchanged carries no modifiers), so a
+    // ctrl-click on a legend entry becomes a neighborhood focus instead of a hide/show toggle.
+    let legendCtrl = false;
+    chart.getDom()?.addEventListener(
+      'click',
+      (ev: MouseEvent) => {
+        legendCtrl = ev.ctrlKey || ev.metaKey;
+      },
+      true,
+    );
+    chart.on('legendselectchanged', (params: { name?: string }) => {
+      if (!legendCtrl || !params.name) return;
+      legendCtrl = false;
+      chart.dispatchAction({ type: 'legendAllSelect' }); // undo the toggle the click caused
+      focusOnLegendSeries(chart, params.name);
     });
     // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
     chart.getDom()?.addEventListener('click', onContainerClick);
@@ -211,6 +302,7 @@
   function rgResetView(): void {
     rgShowAll();
     chartHost?.getChart()?.dispatchAction({ type: 'legendAllSelect' });
+    if (focusIds) clearFocus();
   }
 
   function toggleRefEdges(): void {
@@ -263,6 +355,10 @@
       title="Show all + restore every legend kind (clears click/shift-click filtering)">Reset view</button>
     <button type="button" class="secondary" on:click={() => loadGraph()} disabled={loading}
       title="Refetch and recompute the graph">Refresh</button>
+    {#if focusIds}
+      <span class="muted" data-testid="rg-focus-note"
+        >Focused: {focusLabelText} + neighbors — ctrl-click again or Reset view</span>
+    {/if}
     <span class="muted"
       >X = year · node size = section-weighted citations (weights in Profile) · the highlighted node
       is this paper.{#if naCount > 0}

@@ -55,7 +55,7 @@ export const VIEW_HELP: Record<string, VizViewHelp> = {
     short:
       "Plots each paper as a point — publication year on one axis and a metric you choose on the other. Citation edges link papers that cite each other, so clusters of related work stand out over time.",
     about:
-      "A Litmaps-style scatter of your papers. Both axes are configurable; point size and colour encode extra dimensions, and an optional overlay draws the citation links among the papers in scope. Papers that land on the same spot merge into one marker showing the count — hover it to list them and open any one.",
+      "A Litmaps-style scatter of your papers. Both axes are configurable; point size and colour encode extra dimensions, and an optional overlay draws the citation links among the papers in scope. Papers that land on the same spot merge into one marker showing the count — hover it to list them and open any one. Use the two-handle range sliders below/beside the plot to clamp each axis (handles at the end stops = auto); scroll to zoom; shift-click a legend entry to solo it; Show all resets the zoom windows and Reset view repaints everything.",
     requirements:
       'Year and citation axes work from stored metadata. The "similarity to focus" and "topic similarity to focus" axes need a focus paper plus, respectively, embeddings or extracted topics.',
     params: [
@@ -92,7 +92,7 @@ export const VIEW_HELP: Record<string, VizViewHelp> = {
     short:
       "Places papers by semantic similarity (a 2-D projection of their embeddings) and colours them by cluster, so papers about the same thing sit together.",
     about:
-      "Each paper is embedded, the vectors are projected to two dimensions (PCA by default, UMAP optionally), and papers are grouped into clusters. Nearby points are semantically similar; the cluster colour is a rough topic grouping.",
+      "Each paper is embedded, the vectors are projected to two dimensions (PCA by default, UMAP optionally), and papers are grouped into clusters. Nearby points are semantically similar; the cluster colour is a rough topic grouping. The two-handle range sliders clamp each axis (end stops = auto); Show all resets the zoom windows, Reset view repaints everything.",
     requirements:
       "Meaningful clusters need a real embedding model (set one in AI & Models and reindex). With only the built-in baseline it still renders, but the layout is coarse.",
     params: [

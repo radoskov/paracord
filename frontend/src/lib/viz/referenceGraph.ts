@@ -177,7 +177,9 @@ export const REFERENCE_Y_AXES: YAxisOption[] = [
 /** Help for the reference graph's settings beyond the Y-axis options (shown in the Help popup). */
 export const REFERENCE_GRAPH_HELP = {
   overview:
-    "Each node is a work this paper cites. It plots where those references sit in time and how heavily this paper leans on each, so you can see which references are load-bearing and how they cluster by year.",
+    "Each node is a work this paper cites. It plots where those references sit in time and how heavily this paper leans on each, so you can see which references are load-bearing and how they cluster by year. " +
+    "Interactions: click a node to open it (in library) or prefill the Import tab (external); ctrl-click a node OR a legend entry to show only it plus its direct neighbors (ctrl-click again or Reset view to undo); shift-click a legend entry to show only that kind/venue; scroll to zoom (near a chart edge the zoom pins itself to that data edge, handy for the bottom lanes). " +
+    "Buttons: Show all re-fits the view, Reset view also clears legend filtering and the ctrl-click focus, Refresh refetches the data. The Max external limit is remembered per user.",
   xAxis:
     "The horizontal axis is always publication year (older to the left, newer to the right). References with no known year sit in a separate “no year” lane at the far left so they stay visible.",
   size: "Node size is always the section-weighted citation count — how heavily this paper relies on that reference. The per-section weights (abstract, methods, …) are set in your Profile.",

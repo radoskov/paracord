@@ -111,14 +111,40 @@
   // zoom, view-mode and reading-mode controls remain (plus Exit zen / Esc). Combinable with any
   // reading mode — it changes layout, not the page filter.
   let zen = false;
+  let readerEl: HTMLElement | undefined;
+  let zenAnchor: Comment | null = null;
   function toggleZen(): void {
-    zen = !zen;
-    if (zen) tab = 'pdf'; // the tab nav is hidden in zen — make sure the pages are what shows
+    if (zen) {
+      exitZen();
+      return;
+    }
+    zen = true;
+    tab = 'pdf'; // the tab nav is hidden in zen — make sure the pages are what shows
+    // Portal to <body> (UX batch 3 fix): the reader usually lives inside the paper-view modal,
+    // whose panel creates a containing block — position:fixed alone left the app visible around
+    // the backdrop. Moving the element out for the duration of zen makes inset:0 truly viewport-
+    // sized; the comment anchor restores the original spot on exit.
+    if (readerEl?.parentNode && typeof document !== 'undefined') {
+      zenAnchor = document.createComment('zen-anchor');
+      readerEl.parentNode.insertBefore(zenAnchor, readerEl);
+      document.body.appendChild(readerEl);
+    }
+  }
+  function exitZen(): void {
+    zen = false;
+    if (readerEl && zenAnchor?.parentNode) {
+      zenAnchor.parentNode.insertBefore(readerEl, zenAnchor);
+    }
+    zenAnchor?.remove();
+    zenAnchor = null;
   }
   function onZenKeydown(ev: KeyboardEvent): void {
     if (zen && ev.key === 'Escape') {
       ev.preventDefault();
-      zen = false;
+      // The paper-view modal also closes on window Escape — swallow the event so leaving zen
+      // doesn't take the whole modal down with it (best-effort: listener order dependent).
+      ev.stopImmediatePropagation();
+      exitZen();
     }
   }
 
@@ -738,7 +764,7 @@
 
 <svelte:window on:keydown={onPanKeyDown} on:keydown={onZenKeydown} on:keyup={onPanKeyUp} />
 
-<section class="reader" class:zen>
+<section class="reader" class:zen bind:this={readerEl}>
   <header>
     <div>
       <h3>{fileName}</h3>
@@ -1096,7 +1122,7 @@
     overflow: auto;
     padding: 0.7rem 1rem 1rem;
     position: fixed;
-    z-index: 300;
+    z-index: 1000; /* above the paper-view modal backdrop */
   }
 
   .reader.zen header,

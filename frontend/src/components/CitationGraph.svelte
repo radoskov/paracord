@@ -58,6 +58,7 @@
       focusIds = null;
       focusLabel = '';
       revision += 1;
+      scheduleForceFit();
     } finally {
       busy = false;
     }
@@ -343,11 +344,28 @@
     revision += 1;
   }
 
-  // Standard graph buttons (UX batch 3). "Show all": repaint (notMerge) so roam zoom/pan reset
-  // and the whole graph fits again. "Reset view": that + clear every filter (chips, solo,
-  // ctrl-click focus). "Refresh": recompute the data from the server, then reset.
+  // Standard graph buttons (UX batch 3). "Show all" resets only the roam view (zoom 1,
+  // auto-center) — a full repaint would restart the force simulation and the nodes would spring
+  // back out of view. "Reset view" clears every filter (chips, solo, ctrl-click focus) and
+  // repaints; "Refresh" recomputes the data from the server, then resets. After any repaint of a
+  // force layout, a one-shot fit re-centers the view once the springing has settled.
+  function fitView(): void {
+    // Merge-setOption of the official zoom/center view props — the layout keeps its positions.
+    chartHost?.getChart()?.setOption({ series: [{ zoom: 1, center: null }] });
+  }
+
+  let fitTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleForceFit(): void {
+    if (layout !== 'force') return;
+    if (fitTimer) clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      fitTimer = null;
+      fitView();
+    }, 1600);
+  }
+
   function showAll(): void {
-    revision += 1;
+    fitView();
   }
 
   function resetView(): void {
@@ -356,11 +374,13 @@
     focusIds = null;
     focusLabel = '';
     revision += 1;
+    scheduleForceFit();
   }
 
   async function refresh(): Promise<void> {
     resetView();
     await build();
+    scheduleForceFit();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
