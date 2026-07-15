@@ -23,6 +23,7 @@ from app.core.security import hash_password
 from app.db.base import Base
 from app.models.audit import AuditEvent
 from app.models.citation import Reference, ReferenceCitation
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
@@ -63,6 +64,9 @@ def db_session(tmp_path: Path):
             ReferenceCitation.__table__,
             # list_works reads metadata_assertions for the conflict badge (batch10 issue 5).
             MetadataAssertion.__table__,
+            # list_works reads external citations for the "cited locally" badge (UX batch 3).
+            ExternalPaper.__table__,
+            ExternalCitationLink.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
