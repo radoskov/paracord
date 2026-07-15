@@ -51,9 +51,12 @@
         graph = await load(nodeMode, collapseVersions, colorBy);
         topicGraph = null;
       }
-      // Fresh data means fresh groups — reset any legend-chip filtering.
+      // Fresh data means fresh groups — reset any legend-chip filtering + ctrl-click focus
+      // (stale node ids from the previous dataset would otherwise hide everything).
       hiddenGroups = new Set();
       soloGroup = null;
+      focusIds = null;
+      focusLabel = '';
       revision += 1;
     } finally {
       busy = false;
@@ -158,6 +161,11 @@
     if (hiddenGroups.size) {
       for (const n of rNodes) if (n.colorGroup && hiddenGroups.has(n.colorGroup)) hiddenIds.add(n.id);
     }
+    // Ctrl-click neighborhood focus (UX batch 3): only the focused node/category + direct
+    // neighbors stay visible.
+    if (focusIds) {
+      for (const n of rNodes) if (!focusIds.has(n.id)) hiddenIds.add(n.id);
+    }
     const visibleEdges = rEdges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
     if (hideSingletons) {
       const touched = new Set<string>();
@@ -216,14 +224,27 @@
               d.resolution ? ` · ${d.resolution}` : ` · sim ${Number(d.weight).toFixed(2)}`
             }`;
           }
-          const d = params.data as { name?: string; meta?: RNode };
+          const d = params.data as { name?: string; meta?: RNode; sizeValue?: number };
           const m = d.meta;
           if (!m) return String(d.name ?? '');
+          // Encoded channels (UX batch 3): spell out what size/color mean for THIS node.
+          const sizeMetric = graphType === 'citation' ? sizeBy : 'degree';
+          const sizeVal =
+            d.sizeValue != null && Number.isFinite(d.sizeValue)
+              ? Number(d.sizeValue) >= 1
+                ? String(Math.round(Number(d.sizeValue)))
+                : Number(d.sizeValue).toFixed(4)
+              : '—';
+          const colorDesc =
+            m.colorGroup && colorBy !== 'none'
+              ? `color = ${colorBy}: ${m.colorGroup}`
+              : `color = ${m.kind === 'external' ? 'external (not in library)' : 'in library'}`;
           const bits = [
             `<strong>${m.label}</strong>`,
             [m.year, m.venue].filter(Boolean).join(' · '),
             m.doi ? `doi:${m.doi}` : '',
             m.kind === 'external' ? 'not in library' : '',
+            `<span style="opacity:.75">size = ${sizeMetric}: ${sizeVal} · ${colorDesc}</span>`,
           ].filter(Boolean);
           return bits.join('<br>');
         },
@@ -259,6 +280,7 @@
             itemStyle: n.warning
               ? { borderColor: viz.warningRing, borderWidth: 3 }
               : undefined,
+            sizeValue: metric(n),
             meta: n,
           })),
           links: visibleEdges.map((e) => ({
@@ -278,18 +300,93 @@
     chart.setOption(buildOption(), true);
   }
 
+  // --- Ctrl-click neighborhood focus (UX batch 3) ---------------------------------------------
+  // Focus = the clicked node (or every node of a clicked category chip) plus its direct
+  // neighbors; everything else is hidden. Ctrl-click the same target again, or Reset view,
+  // to show everything.
+  let focusIds: Set<string> | null = null;
+  let focusLabel = '';
+
+  function neighborhoodOf(seedIds: Set<string>): Set<string> {
+    const keep = new Set(seedIds);
+    for (const e of rEdges) {
+      if (seedIds.has(e.source)) keep.add(e.target);
+      if (seedIds.has(e.target)) keep.add(e.source);
+    }
+    return keep;
+  }
+
+  function focusOnNode(node: RNode): void {
+    if (focusIds && focusLabel === node.label) {
+      clearFocus();
+      return;
+    }
+    focusIds = neighborhoodOf(new Set([node.id]));
+    focusLabel = node.label;
+    revision += 1;
+  }
+
+  function focusOnGroup(group: string): void {
+    if (focusIds && focusLabel === group) {
+      clearFocus();
+      return;
+    }
+    const seeds = new Set(rNodes.filter((n) => n.colorGroup === group).map((n) => n.id));
+    focusIds = neighborhoodOf(seeds);
+    focusLabel = group;
+    revision += 1;
+  }
+
+  function clearFocus(): void {
+    focusIds = null;
+    focusLabel = '';
+    revision += 1;
+  }
+
+  // Standard graph buttons (UX batch 3). "Show all": repaint (notMerge) so roam zoom/pan reset
+  // and the whole graph fits again. "Reset view": that + clear every filter (chips, solo,
+  // ctrl-click focus). "Refresh": recompute the data from the server, then reset.
+  function showAll(): void {
+    revision += 1;
+  }
+
+  function resetView(): void {
+    hiddenGroups = new Set();
+    soloGroup = null;
+    focusIds = null;
+    focusLabel = '';
+    revision += 1;
+  }
+
+  async function refresh(): Promise<void> {
+    resetView();
+    await build();
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wireEvents(chart: any): void {
-    chart.on('click', (params: { dataType?: string; data?: { meta?: RNode } }) => {
-      if (params.dataType !== 'node') return;
-      const node = params.data?.meta;
-      if (!node) return;
-      if (node.workId && onOpenWork) {
-        onOpenWork(node.workId);
-        return;
-      }
-      if (!node.workId && node.doi && onImportExternal) onImportExternal(node.doi);
-    });
+    chart.on(
+      'click',
+      (params: {
+        dataType?: string;
+        data?: { meta?: RNode };
+        event?: { event?: MouseEvent };
+      }) => {
+        if (params.dataType !== 'node') return;
+        const node = params.data?.meta;
+        if (!node) return;
+        const raw = params.event?.event;
+        if (raw && (raw.ctrlKey || raw.metaKey)) {
+          focusOnNode(node);
+          return;
+        }
+        if (node.workId && onOpenWork) {
+          onOpenWork(node.workId);
+          return;
+        }
+        if (!node.workId && node.doi && onImportExternal) onImportExternal(node.doi);
+      },
+    );
   }
 
   // --- Legend chips (our own legend; see the buildOption comment on why not ECharts') ---
@@ -297,7 +394,12 @@
   let chartHost: ChartHost | null = null;
 
   // Click: toggle one group. Shift-click: show only that group; shift-click it again to show all.
-  function onChipClick(group: string, shiftKey: boolean): void {
+  // Ctrl-click: focus the group + its direct neighbors (UX batch 3).
+  function onChipClick(group: string, shiftKey: boolean, ctrlKey = false): void {
+    if (ctrlKey) {
+      focusOnGroup(group);
+      return;
+    }
     if (shiftKey) {
       if (soloGroup === group) {
         hiddenGroups = new Set();
@@ -404,6 +506,14 @@
       {/if}
       <button type="button" on:click={build} disabled={disabled || busy}
         title={graphType === 'topic' ? 'Build the topic graph for the chosen scope' : 'Build the citation graph for the chosen scope'}>Build graph</button>
+      {#if hasGraph}
+        <button type="button" class="secondary" on:click={showAll} disabled={busy}
+          title="Fit the view so the whole graph is visible again (keeps filters)">Show all</button>
+        <button type="button" class="secondary" on:click={resetView} disabled={busy}
+          title="Fit the view AND clear every filter (chips, solo, ctrl-click focus)">Reset view</button>
+        <button type="button" class="secondary" on:click={refresh} disabled={disabled || busy}
+          title="Recompute the graph from the server, then reset the view and filters">Refresh</button>
+      {/if}
     </div>
   </div>
 
@@ -437,15 +547,21 @@
               type="button"
               class="chip"
               class:off={hiddenGroups.has(group)}
-              on:click={(e) => onChipClick(group, e.shiftKey)}
+              on:click={(e) => onChipClick(group, e.shiftKey, e.ctrlKey || e.metaKey)}
               on:mouseenter={() => onChipHover(group, true)}
               on:mouseleave={() => onChipHover(group, false)}
-              title="Hover: highlight this group · Click: show/hide it · Shift-click: show only this group (shift-click again to show all)"
+              title="Hover: highlight this group · Click: show/hide it · Shift-click: show only this group (shift-click again to show all) · Ctrl-click: show this group + its direct neighbors"
             >
               <span class="dot" style={`background:${groupColors[i]}`}></span>{group}
             </button>
           {/each}
         </div>
+      {/if}
+      {#if focusIds}
+        <p class="note" data-testid="graph-focus-note">
+          Focused on “{focusLabel}” + direct neighbors — ctrl-click it again or use Reset view to
+          show everything.
+        </p>
       {/if}
       <ChartHost bind:this={chartHost} render={renderChart} onReady={wireEvents} {revision} {visible}
         ariaLabel={graphType === 'topic' ? 'Topic graph' : 'Citation graph'}>

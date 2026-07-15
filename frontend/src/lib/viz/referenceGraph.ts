@@ -474,6 +474,12 @@ export function buildReferenceGraphOption(
           n.kind === "citing"
             ? ""
             : `Cited ${n.mention_count}× ${breakdown ? `(${escapeHtml(breakdown)})` : ""}`,
+          // Encoded channels (UX batch 3): what this node's position/size/colour mean.
+          `<span style="opacity:.75">Y = ${escapeHtml(axisName)}: ${
+            yById.get(n.id) != null ? String(yById.get(n.id)) : "n/a"
+          } · size = weighted citations: ${weightedById.get(n.id) ?? "n/a"} · color = ${
+            colorBy === "venue" ? `venue: ${escapeHtml(n.venue ?? "n/a")}` : `kind: ${n.kind}`
+          }</span>`,
         ]
           .filter(Boolean)
           .join("<br>");

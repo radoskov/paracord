@@ -158,6 +158,20 @@
     revision += 1;
   }
 
+  // Standard graph buttons (UX batch 3). Scatter charts zoom via inside dataZoom, so "Show all"
+  // resets both axes to their full extent; "Reset view" also restores every legend kind
+  // (deselected via click / shift-click solo); "Refresh" refetches and recomputes.
+  let chartHost: ChartHost | null = null;
+  function rgShowAll(): void {
+    const chart = chartHost?.getChart();
+    chart?.dispatchAction({ type: 'dataZoom', start: 0, end: 100, dataZoomIndex: 0 });
+    chart?.dispatchAction({ type: 'dataZoom', start: 0, end: 100, dataZoomIndex: 1 });
+  }
+  function rgResetView(): void {
+    rgShowAll();
+    chartHost?.getChart()?.dispatchAction({ type: 'legendAllSelect' });
+  }
+
   function toggleRefEdges(): void {
     includeRefEdges = !includeRefEdges;
     void loadGraph();
@@ -202,6 +216,12 @@
       <input type="number" min="0" max="500" bind:value={maxExternal} on:change={onMaxExternalChange}
         class="max-external" data-testid="rg-max-external" />
     </label>
+    <button type="button" class="secondary" on:click={rgShowAll}
+      title="Zoom out so every node is visible again">Show all</button>
+    <button type="button" class="secondary" on:click={rgResetView}
+      title="Show all + restore every legend kind (clears click/shift-click filtering)">Reset view</button>
+    <button type="button" class="secondary" on:click={() => loadGraph()} disabled={loading}
+      title="Refetch and recompute the graph">Refresh</button>
     <span class="muted"
       >X = year · node size = section-weighted citations (weights in Profile) · the highlighted node
       is this paper.{#if naCount > 0}
@@ -221,7 +241,7 @@
   {#if message}<p class="msg" role="status">{message}</p>{/if}
   {#if loading && !graph}<p class="muted">Loading…</p>{/if}
   <div class="rg-chart" data-testid="rg-chart">
-    <ChartHost render={renderChart} onReady={wireEvents} {revision} height="100%"
+    <ChartHost bind:this={chartHost} render={renderChart} onReady={wireEvents} {revision} height="100%"
       ariaLabel="Reference graph">
       <svelte:fragment slot="fallback">Interactive chart unavailable in this environment.</svelte:fragment>
     </ChartHost>
