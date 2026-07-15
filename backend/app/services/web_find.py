@@ -1285,9 +1285,11 @@ def download_and_attach(
             # key, the Article Retrieval API returns the PDF where the institution is entitled —
             # far more reliable than scraping ScienceDirect's JS-only pages.
             if doi and normalize_doi(doi) and normalize_doi(doi).startswith("10.1016/"):
-                from app.services.app_config import effective_elsevier_api_key
+                from app.services.app_config import usable_elsevier_api_key
 
-                api_key = effective_elsevier_api_key(db, settings=settings)
+                # Gated three ways: key present, master switch on, AND this actor individually
+                # allowed (off by default; Admin → Users).
+                api_key = usable_elsevier_api_key(db, actor, settings=settings)
                 if api_key:
                     api_url = (
                         "https://api.elsevier.com/content/article/doi/"

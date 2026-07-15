@@ -121,6 +121,9 @@ class AppConfig(Base):
     # fall back to the yaml/env default. Write-only through the admin API (reads report only
     # whether a key is configured).
     elsevier_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Master switch for using the stored Elsevier key at all (NULL → True). The key can stay
+    # stored while its use is disabled; per-user allowance (Users tab) additionally gates it.
+    elsevier_api_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Reference→library matching (batch 12, owner item #1). When ON, a fuzzy "likely local" candidate
     # that clears the title threshold + gates becomes a HARD link (``resolved_work_id`` set, counted in
     # every graph/metric calculation) instead of a soft one-click suggestion. OFF (default; an absent

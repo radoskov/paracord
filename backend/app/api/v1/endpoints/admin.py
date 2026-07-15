@@ -54,6 +54,9 @@ class AppConfigOut(BaseModel):
     # Elsevier Article Retrieval API key (UX batch 3): WRITE-ONLY — reads report only whether a
     # key is configured (admin-set row or the yaml/env fallback), never the key itself.
     elsevier_api_key_set: bool
+    # Master switch: the key can stay stored while its USE is disabled (per-user allowance in the
+    # Users tab additionally gates it).
+    elsevier_api_enabled: bool
     # AI scope-job threshold (S15/S16): scopes above this run topics/summaries/graphs on the worker.
     ai_scope_job_threshold: int
     # Per-surface analysis node caps (L-a): highest-degree nodes are kept, hidden counts reported.
@@ -88,6 +91,7 @@ class AppConfigUpdate(BaseModel):
     # Write-only: a non-None value sets the key; an empty string clears the admin-set value
     # (falling back to the yaml/env default).
     elsevier_api_key: str | None = Field(default=None, max_length=128)
+    elsevier_api_enabled: bool | None = Field(default=None)
     ai_scope_job_threshold: int | None = Field(default=None, ge=1)
     citation_graph_node_cap: int | None = Field(default=None, ge=1)
     topic_graph_node_cap: int | None = Field(default=None, ge=1)
@@ -195,6 +199,38 @@ def update_user_role(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+class UserElsevierApiUpdate(BaseModel):
+    allowed: bool
+
+
+@router.post("/users/{user_id}/elsevier-api", response_model=UserOut)
+def set_user_elsevier_api(
+    user_id: uuid.UUID,
+    payload: UserElsevierApiUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> User:
+    """Allow/deny this user's find-on-web downloads to use the server's Elsevier API key.
+
+    OFF by default for every user (UX batch 3); the app-config master switch gates it globally.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.elsevier_api_allowed = payload.allowed
+    record_event(
+        db,
+        "user.elsevier_api",
+        actor_user_id=actor.id,
+        entity_type="user",
+        entity_id=str(user.id),
+        details={"allowed": payload.allowed},
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -325,6 +361,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         citing_papers_fetch_cap=app_config_service.effective_citing_papers_fetch_cap(db),
         citation_summary_item_cap=app_config_service.effective_citation_summary_item_cap(db),
         elsevier_api_key_set=app_config_service.effective_elsevier_api_key(db) is not None,
+        elsevier_api_enabled=app_config_service.effective_elsevier_api_enabled(db),
         ai_scope_job_threshold=app_config_service.effective_ai_scope_job_threshold(db),
         citation_graph_node_cap=app_config_service.effective_citation_graph_node_cap(db),
         topic_graph_node_cap=app_config_service.effective_topic_graph_node_cap(db),
@@ -406,6 +443,10 @@ def update_app_config(
             # Audit records only whether a key is set — never the key itself.
             changed["elsevier_api_key_set"] = app_config_service.update_elsevier_api_key(
                 db, value=payload.elsevier_api_key, actor_user_id=actor.id
+            )
+        if payload.elsevier_api_enabled is not None:
+            changed["elsevier_api_enabled"] = app_config_service.update_elsevier_api_enabled(
+                db, value=payload.elsevier_api_enabled, actor_user_id=actor.id
             )
         if payload.ai_scope_job_threshold is not None:
             changed["ai_scope_job_threshold"] = app_config_service.update_ai_scope_job_threshold(

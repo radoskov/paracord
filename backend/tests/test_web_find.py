@@ -1149,6 +1149,8 @@ def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_pat
     # This fixture's schema has no app_config table — configure via the settings fallback.
     settings_obj = _attach_settings(tmp_path)
     monkeypatch.setattr(settings_obj, "web_find_elsevier_api_key", "sekret-key", raising=False)
+    actor = _Actor()
+    actor.elsevier_api_allowed = True  # per-user gate (off by default)
     seen: list[tuple[str, dict | None]] = []
 
     def fake_stream(url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None,
@@ -1161,7 +1163,7 @@ def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_pat
         work=_seed_work(db_session),
         candidate_url="https://www.sciencedirect.com/science/article/pii/S123",
         source="crossref",
-        actor=_Actor(),
+        actor=actor,
         settings=settings_obj,
         doi="10.1016/j.artint.2024.104123",
         streamer=fake_stream,
@@ -1173,6 +1175,22 @@ def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_pat
     url, headers = api_calls[0]
     assert "10.1016%2Fj.artint.2024.104123" in url and "httpAccept=application%2Fpdf" in url
     assert headers == {"X-ELS-APIKey": "sekret-key"}
+
+    # The per-user gate (off by default) blocks the API path for a not-allowed actor.
+    seen.clear()
+    out2 = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url="https://www.sciencedirect.com/science/article/pii/S124",
+        source="crossref",
+        actor=_Actor(),  # elsevier_api_allowed not set → False
+        settings=settings_obj,
+        doi="10.1016/j.artint.2024.104124",
+        streamer=fake_stream,
+        html_fetcher=lambda url, **_kw: ("<html></html>", url),
+    )
+    assert out2["status"] == "manual_upload_needed"
+    assert not [u for u, _h in seen if "api.elsevier.com" in u]
 
 
 def test_landing_page_fallback_never_escapes_the_policy(db_session, tmp_path):

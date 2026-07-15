@@ -39,3 +39,6 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Whether this user's find-on-web downloads may use the server's Elsevier API key (UX batch 3).
+    # OFF by default (NULL → False); toggled per user in Admin → Users.
+    elsevier_api_allowed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

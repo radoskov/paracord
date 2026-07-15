@@ -158,6 +158,40 @@ def update_elsevier_api_key(
     return row.elsevier_api_key is not None
 
 
+def effective_elsevier_api_enabled(db: Session, *, settings: Settings | None = None) -> bool:
+    """Master switch for using the stored Elsevier key (UX batch 3). ON by default (NULL → True)."""
+    if not _app_config_table_present(db):
+        return True
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.elsevier_api_enabled is None:
+        return True
+    return bool(row.elsevier_api_enabled)
+
+
+def update_elsevier_api_enabled(
+    db: Session, *, value: bool, actor_user_id: uuid.UUID | None = None
+) -> bool:
+    """Persist the Elsevier-API master switch. Returns the stored value."""
+    row = _ensure_row(db)
+    row.elsevier_api_enabled = bool(value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return bool(row.elsevier_api_enabled)
+
+
+def usable_elsevier_api_key(db: Session, actor, *, settings: Settings | None = None) -> str | None:
+    """The Elsevier key THIS actor's download may use, or None.
+
+    Three gates: a key exists (admin-set or yaml/env), the master switch is on, and the actor is
+    individually allowed (OFF by default; toggled per user in Admin → Users).
+    """
+    if not effective_elsevier_api_enabled(db):
+        return None
+    if not bool(getattr(actor, "elsevier_api_allowed", False)):
+        return None
+    return effective_elsevier_api_key(db, settings=settings)
+
+
 def effective_citing_papers_fetch_cap(db: Session, *, settings: Settings | None = None) -> int:
     """Return the effective cap on citing papers fetched+cached per paper (S20)."""
     if not _app_config_table_present(db):

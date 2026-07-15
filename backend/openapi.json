@@ -895,6 +895,10 @@
             "title": "Citing Papers Fetch Cap",
             "type": "integer"
           },
+          "elsevier_api_enabled": {
+            "title": "Elsevier Api Enabled",
+            "type": "boolean"
+          },
           "elsevier_api_key_set": {
             "title": "Elsevier Api Key Set",
             "type": "boolean"
@@ -966,6 +970,7 @@
           "citing_papers_fetch_cap",
           "citation_summary_item_cap",
           "elsevier_api_key_set",
+          "elsevier_api_enabled",
           "ai_scope_job_threshold",
           "citation_graph_node_cap",
           "topic_graph_node_cap",
@@ -1030,6 +1035,17 @@
               }
             ],
             "title": "Citing Papers Fetch Cap"
+          },
+          "elsevier_api_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elsevier Api Enabled"
           },
           "elsevier_api_key": {
             "anyOf": [
@@ -7730,6 +7746,19 @@
         "title": "UserCreate",
         "type": "object"
       },
+      "UserElsevierApiUpdate": {
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "UserElsevierApiUpdate",
+        "type": "object"
+      },
       "UserOut": {
         "properties": {
           "created_at": {
@@ -7748,6 +7777,18 @@
               }
             ],
             "title": "Disabled At"
+          },
+          "elsevier_api_allowed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Elsevier Api Allowed"
           },
           "id": {
             "format": "uuid",
@@ -12884,6 +12925,76 @@
           }
         },
         "summary": "Disable User",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/elsevier-api": {
+      "post": {
+        "description": "Allow/deny this user's find-on-web downloads to use the server's Elsevier API key.\n\nOFF by default for every user (UX batch 3); the app-config master switch gates it globally.",
+        "operationId": "set_user_elsevier_api_api_v1_admin_users__user_id__elsevier_api_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserElsevierApiUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set User Elsevier Api",
         "tags": [
           "admin"
         ]

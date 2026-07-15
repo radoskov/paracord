@@ -1287,6 +1287,8 @@ export interface AdminUser {
   // The single immutable owner account (provisioned by `make bootstrap-admin`). Never disablable,
   // deletable or role-changeable; only the owner can manage admins.
   is_bootstrap: boolean;
+  // Whether this user's downloads may use the server's Elsevier API key (UX batch 3; off default).
+  elsevier_api_allowed?: boolean | null;
 }
 
 export interface CurrentUser {
@@ -1319,6 +1321,8 @@ export interface AppConfig {
   // `elsevier_api_key` is write-only ("" clears the admin-set value).
   elsevier_api_key_set: boolean;
   elsevier_api_key?: string | null;
+  // Master switch: the key can stay stored while its use is disabled.
+  elsevier_api_enabled: boolean;
   // Per-surface analysis node caps (L-a).
   citation_graph_node_cap: number;
   topic_graph_node_cap: number;
@@ -2524,6 +2528,13 @@ export class ApiClient {
   async disableUser(userId: string): Promise<AdminUser> {
     return this.request<AdminUser>(`/api/v1/admin/users/${userId}/disable`, {
       method: "POST",
+    });
+  }
+
+  async setUserElsevierApi(userId: string, allowed: boolean): Promise<AdminUser> {
+    return this.request<AdminUser>(`/api/v1/admin/users/${userId}/elsevier-api`, {
+      method: "POST",
+      body: { allowed },
     });
   }
 

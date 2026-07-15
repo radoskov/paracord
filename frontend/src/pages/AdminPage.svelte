@@ -338,6 +338,7 @@
   let elsevierKeySet = false;
   let elsevierKeyInput = '';
   let elsevierKeyMsg = '';
+  let elsevierApiEnabled = true;
   let useFuzzyAsConfirmed = false;
   let fuzzyAcceptThreshold = '';
   let fuzzyThresholdMin = 90;
@@ -367,6 +368,7 @@
     topicGraphCap = String(cfg.topic_graph_node_cap);
     vizCap = String(cfg.viz_node_cap);
     elsevierKeySet = cfg.elsevier_api_key_set;
+    elsevierApiEnabled = cfg.elsevier_api_enabled;
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
     fuzzyAcceptThreshold = String(cfg.fuzzy_accept_threshold);
     fuzzyThresholdMin = cfg.fuzzy_accept_threshold_min;
@@ -393,6 +395,19 @@
           : 'Saved.';
     });
     savingMatching = false;
+  }
+
+  async function toggleUserElsevierApi(user: AdminUser): Promise<void> {
+    await run(async () => {
+      const updated = await client.setUserElsevierApi(user.id, !user.elsevier_api_allowed);
+      users = users.map((u) => (u.id === user.id ? { ...u, ...updated } : u));
+    });
+  }
+
+  async function toggleElsevierEnabled(): Promise<void> {
+    await run(async () => {
+      applyAppConfig(await client.updateAppConfig({ elsevier_api_enabled: elsevierApiEnabled }));
+    });
   }
 
   async function saveElsevierKey(): Promise<void> {
@@ -1091,6 +1106,17 @@
                   >
                     Reset password
                   </button>
+                  <button
+                    type="button"
+                    class:secondary={!user.elsevier_api_allowed}
+                    on:click={() => toggleUserElsevierApi(user)}
+                    disabled={loading}
+                    title={user.elsevier_api_allowed
+                      ? 'This user’s downloads may use the Elsevier API key — click to revoke'
+                      : 'Allow this user’s downloads to use the Elsevier API key (off by default)'}
+                  >
+                    Elsevier API: {user.elsevier_api_allowed ? 'on' : 'off'}
+                  </button>
                   {#if user.disabled_at}
                     <button
                       type="button"
@@ -1397,6 +1423,14 @@
         hosts are always blocked, whatever the policy.
       </p>
       <form class="stack elsevier-key" on:submit|preventDefault={saveElsevierKey}>
+        <label class="field checkbox-field">
+          <input type="checkbox" bind:checked={elsevierApiEnabled} on:change={toggleElsevierEnabled} />
+          Enable Elsevier API downloads
+        </label>
+        <p class="small-help">
+          Master switch: the key below stays stored even while disabled. Each user additionally
+          needs the per-user “Elsevier API” allowance in the Users tab (off by default).
+        </p>
         <label class="field">
           Elsevier API key {elsevierKeySet ? '(configured ✓)' : '(not set)'}
           <input type="password" bind:value={elsevierKeyInput} autocomplete="off"

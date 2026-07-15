@@ -27,3 +27,5 @@ class UserOut(BaseModel):
     created_at: datetime
     disabled_at: datetime | None = None
     is_bootstrap: bool = False
+    # Whether this user's downloads may use the server's Elsevier API key (UX batch 3; NULL→False).
+    elsevier_api_allowed: bool | None = False
