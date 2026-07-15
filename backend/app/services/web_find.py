@@ -1269,7 +1269,10 @@ def download_and_attach(
         if outcome == "error":
             # A host refused by the mode gate (not a hard block): keep the status, but append the
             # actionable hint so the user knows it's a policy choice they can change (UX batch 4).
-            return {"status": "error", "reason": reason + _policy_refusal_hint(candidate_url, policy)}
+            return {
+                "status": "error",
+                "reason": reason + _policy_refusal_hint(candidate_url, policy),
+            }
         # In unrestricted mode an unknown public host needs an explicit confirmation; a confirmed
         # item falls through to allow.
         if outcome == "needs_confirmation" and not confirmed:

@@ -189,9 +189,7 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
         f"<div><head>Section {i}</head><p>{('Sentence number ' + str(i) + ' with several words. ') * 6}</p></div>"
         for i in range(6)
     )
-    tei = (
-        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
-    )
+    tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
     work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence.")
     db_session.add(work)
     db_session.flush()
