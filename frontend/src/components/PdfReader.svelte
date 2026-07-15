@@ -107,6 +107,21 @@
   }
   $: pageFilter = readingModeFilter(readingMode);
 
+  // Zen mode (UX batch 3): the reader takes over the viewport on a dark backdrop; only paging,
+  // zoom, view-mode and reading-mode controls remain (plus Exit zen / Esc). Combinable with any
+  // reading mode — it changes layout, not the page filter.
+  let zen = false;
+  function toggleZen(): void {
+    zen = !zen;
+    if (zen) tab = 'pdf'; // the tab nav is hidden in zen — make sure the pages are what shows
+  }
+  function onZenKeydown(ev: KeyboardEvent): void {
+    if (zen && ev.key === 'Escape') {
+      ev.preventDefault();
+      zen = false;
+    }
+  }
+
   // --- search -------------------------------------------------------------
   // Separator joining adjacent text items when building a page's full-text string. A single
   // space lets phrases that span item boundaries (the common case) match, while keeping the
@@ -721,9 +736,9 @@
   });
 </script>
 
-<svelte:window on:keydown={onPanKeyDown} on:keyup={onPanKeyUp} />
+<svelte:window on:keydown={onPanKeyDown} on:keydown={onZenKeydown} on:keyup={onPanKeyUp} />
 
-<section class="reader">
+<section class="reader" class:zen>
   <header>
     <div>
       <h3>{fileName}</h3>
@@ -845,6 +860,18 @@
             : INSUFFICIENT_ROLE}
         >
           Highlight selection
+        </button>
+        <button
+          type="button"
+          class="zen-btn"
+          class:active={zen}
+          on:click={toggleZen}
+          data-testid="reader-zen"
+          title={zen
+            ? 'Leave zen mode (Esc)'
+            : 'Zen mode: the reader fills the screen over a dark backdrop; only paging, zoom and page-mode controls stay'}
+        >
+          {zen ? 'Exit zen' : 'Zen'}
         </button>
       </div>
       <p class="search-hint">
@@ -1058,6 +1085,46 @@
   .reader {
     display: grid;
     gap: 0.7rem;
+  }
+
+  /* Zen mode (UX batch 3): fill the viewport over a dark backdrop — the app never shows through.
+     Only the paging/zoom/view-mode/reading-mode controls (and Exit zen) remain visible. */
+  .reader.zen {
+    align-content: start;
+    background: #101216;
+    inset: 0;
+    overflow: auto;
+    padding: 0.7rem 1rem 1rem;
+    position: fixed;
+    z-index: 300;
+  }
+
+  .reader.zen header,
+  .reader.zen .search,
+  .reader.zen .copy-text-btn,
+  .reader.zen .select-btn,
+  .reader.zen .search-hint {
+    display: none;
+  }
+
+  .reader.zen .pdf-toolbar {
+    color: #cdd3dc;
+  }
+
+  .reader.zen .zen-btn {
+    margin-left: auto;
+  }
+
+  .reader.zen .page-wrap,
+  .reader.zen .thumbs {
+    background: #14161a;
+    border-color: #262a31;
+    max-height: calc(100vh - 5.8rem);
+  }
+
+  .zen-btn.active {
+    background: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   header {
