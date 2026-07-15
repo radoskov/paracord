@@ -1100,6 +1100,52 @@ def _stream_pdf(
     return data
 
 
+def _fetch_landing_html(
+    url: str,
+    *,
+    timeout: float,
+    policy: str,
+    merged_allowed: set[str],
+    resolver: Callable[[str], list[str]] | None = None,
+) -> tuple[str, str] | None:
+    """Fetch a landing page's HTML for PDF-link discovery. Returns ``(html, final_url)`` or None.
+
+    Every hop passes the same classification as a download (denylist / SSRF / policy mode) — a page
+    we may not download from is also a page we may not read. Body capped at 2 MB; non-HTML → None.
+    """
+    if policy is not None and merged_allowed is not None:
+        outcome, reason = _classify_download_host(
+            url, policy=policy, merged_allowed=merged_allowed, resolver=resolver
+        )
+        if outcome != "allow":
+            raise DownloadRefused(reason)
+    headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
+    with (
+        httpx.Client(
+            timeout=timeout, headers=headers, follow_redirects=True, max_redirects=_REDIRECT_CAP
+        ) as client,
+        client.stream("GET", url) as response,
+    ):
+        for hop in [*response.history, response]:
+            outcome, reason = _classify_download_host(
+                str(hop.url), policy=policy, merged_allowed=merged_allowed, resolver=resolver
+            )
+            if outcome != "allow":
+                raise DownloadRefused(reason)
+        if response.status_code >= 400:
+            return None
+        content_type = (response.headers.get("content-type") or "").lower()
+        if "html" not in content_type:
+            return None
+        chunks = bytearray()
+        for chunk in response.iter_bytes():
+            chunks.extend(chunk)
+            if len(chunks) > 2 * 1024 * 1024:
+                break
+        final_url = str(response.url)
+    return bytes(chunks).decode("utf-8", errors="replace"), final_url
+
+
 def download_and_attach(
     db: Session,
     *,
@@ -1114,6 +1160,7 @@ def download_and_attach(
     file_read=None,
     streamer=None,
     resolver: Callable[[str], list[str]] | None = None,
+    html_fetcher=None,
 ) -> dict:
     """Download a candidate PDF and attach it to ``work`` under the global download-policy.
 
@@ -1184,20 +1231,22 @@ def download_and_attach(
                 "url": candidate_url,
                 "reason": reason,
             }
-        try:
-            # The real streamer re-classifies every redirect hop under the same policy; an injected
-            # test streamer keeps the original (url, timeout, max_bytes) signature.
+        def _attempt(url_try: str) -> bytes | None:
             if stream_accepts_policy:
-                pdf_bytes = stream(
-                    candidate_url,
+                return stream(
+                    url_try,
                     timeout=timeout,
                     max_bytes=max_bytes,
                     policy=policy,
                     merged_allowed=merged_allowed,
                     resolver=resolver,
                 )
-            else:
-                pdf_bytes = stream(candidate_url, timeout=timeout, max_bytes=max_bytes)
+            return stream(url_try, timeout=timeout, max_bytes=max_bytes)
+
+        try:
+            # The real streamer re-classifies every redirect hop under the same policy; an injected
+            # test streamer keeps the original (url, timeout, max_bytes) signature.
+            pdf_bytes = _attempt(candidate_url)
         except DownloadRefused as exc:
             # A redirect that escaped the policy / hit a hard block mid-stream.
             return {"status": "blocked", "reason": str(exc)}
@@ -1205,11 +1254,53 @@ def download_and_attach(
             return {"status": "error", "reason": "file exceeds the download size cap"}
         except Exception as exc:  # noqa: BLE001 - network/parse failure → manual fallback
             logger.warning("find-on-web download failed for %s: %s", candidate_url, exc)
-            return {"status": "manual_upload_needed", "reason": str(exc)}
+            pdf_bytes = None
+
+        # "Less weak" attempt (UX batch 3): when the direct fetch didn't yield a PDF, do what the
+        # user would do on the landing page — try known publisher PDF-URL rewrites, then read the
+        # page once and follow its "Download PDF" affordances (citation_pdf_url meta, scored
+        # anchors). Bounded (≤ a handful of URLs, one page fetch, no recursion), and every URL
+        # still passes the full deny/SSRF/policy gates; a refused fallback is skipped, never
+        # confirmed. Only active on the real network path (or when a test injects html_fetcher),
+        # so existing injected-streamer tests keep single-attempt semantics.
+        fetched_url = candidate_url
+        use_fallbacks = streamer is None or html_fetcher is not None
+        if pdf_bytes is None and use_fallbacks:
+            from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
+
+            fallback_urls = publisher_pdf_urls(candidate_url)
+            page: tuple[str, str] | None = None
+            fetch_html = html_fetcher or _fetch_landing_html
+            try:
+                page = fetch_html(
+                    candidate_url,
+                    timeout=timeout,
+                    policy=policy,
+                    merged_allowed=merged_allowed,
+                    resolver=resolver,
+                )
+            except Exception:  # noqa: BLE001 - a refused/failed page read just ends discovery
+                page = None
+            if page is not None:
+                html, final_url = page
+                fallback_urls += [
+                    u for u in find_pdf_links(html, final_url) if u not in fallback_urls
+                ]
+            for url_try in fallback_urls[:5]:
+                try:
+                    pdf_bytes = _attempt(url_try)
+                except ValueError:
+                    return {"status": "error", "reason": "file exceeds the download size cap"}
+                except Exception:  # noqa: BLE001 - refused/failed fallback → try the next one
+                    continue
+                if pdf_bytes is not None:
+                    fetched_url = url_try
+                    break
+
         if pdf_bytes is None:
             return {"status": "manual_upload_needed", "reason": "no downloadable PDF (login/HTML)"}
 
-        filename = candidate_url.rstrip("/").rsplit("/", 1)[-1] or "download.pdf"
+        filename = fetched_url.rstrip("/").rsplit("/", 1)[-1] or "download.pdf"
         if not filename.lower().endswith(".pdf"):
             filename += ".pdf"
         file_obj, _created, newly_linked = attach_uploaded_pdf_to_work(
@@ -1231,7 +1322,8 @@ def download_and_attach(
             details={
                 "source": source,
                 "file_id": str(file_obj.id),
-                "url": candidate_url,
+                "url": fetched_url,
+                "requested_url": candidate_url,
                 "identifiers_filled": filled,
             },
         )

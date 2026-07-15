@@ -1104,6 +1104,74 @@ def test_mode_unrestricted_unknown_host_needs_confirmation_then_attaches(db_sess
     assert out2["status"] == "attached"
 
 
+def test_landing_page_fallback_follows_download_pdf_button(db_session, tmp_path):
+    """UX batch 3: an HTML landing page no longer dead-ends — publisher URL rewrites and the
+    page's citation_pdf_url / "Download PDF" affordances are tried (still under the policy)."""
+    set_download_policy(db_session, policy="careful")
+    db_session.commit()
+    landing = "https://link.springer.com/article/10.1007/xyz"
+    pdf_url = "https://link.springer.com/real/download.pdf"
+    tried: list[str] = []
+
+    def fake_stream(url, *, timeout, max_bytes, **_kw):
+        tried.append(url)
+        return _PDF_BYTES if url == pdf_url else None  # landing + rewrites are HTML → None
+
+    def fake_html_fetcher(url, **_kw):
+        return (
+            f'<html><a class="c-pdf-download__link" href="{pdf_url}">Download PDF</a></html>',
+            url,
+        )
+
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url=landing,
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=fake_stream,
+        html_fetcher=fake_html_fetcher,
+    )
+    assert out["status"] == "attached"
+    # The publisher rewrite ran before the page-extracted link; the button link finally hit.
+    assert tried[0] == landing
+    assert "https://link.springer.com/content/pdf/10.1007/xyz.pdf" in tried
+    assert tried[-1] == pdf_url
+
+
+def test_landing_page_fallback_never_escapes_the_policy(db_session, tmp_path):
+    """A page-extracted link on a denied/refused host is skipped, never fetched."""
+    set_download_policy(db_session, policy="careful")
+    db_session.commit()
+    landing = "https://link.springer.com/article/10.1007/xyz"
+
+    def fake_stream(url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None):
+        # Mirror the real streamer's per-URL gate: refuse anything not policy-allowed.
+        outcome, reason = web_find._classify_download_host(
+            url, policy=policy or "careful", merged_allowed=merged_allowed or set()
+        )
+        if outcome != "allow":
+            raise DownloadRefused(reason)
+        return None  # allowed hosts return HTML (no PDF) in this scenario
+
+    def fake_html_fetcher(url, **_kw):
+        return ('<a href="https://sci-hub.se/x.pdf">Download PDF</a>', url)
+
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url=landing,
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=fake_stream,
+        html_fetcher=fake_html_fetcher,
+    )
+    assert out["status"] == "manual_upload_needed"
+    assert db_session.scalar(select(File)) is None
+
+
 def test_denied_host_blocked_in_every_mode_incl_unrestricted_confirmed(db_session, tmp_path):
     for policy in ("restricted", "careful", "unrestricted"):
         set_download_policy(db_session, policy=policy)
