@@ -121,6 +121,16 @@
     if (status === 'title_only') return 'title only';
     return 'no match';
   }
+
+  function badgeTitle(status: string): string {
+    if (status === 'matched') {
+      return 'A confident candidate was found and prefilled these fields. Committing creates a new paper — unless one with the same DOI/title is already in the library, in which case it is matched instead of duplicated (and just added to the chosen shelf).';
+    }
+    if (status === 'title_only') {
+      return 'No confident candidate was found — the pasted line was kept as the title. Edit the fields or commit as-is to create a minimal paper.';
+    }
+    return 'The lookup found no candidate. You can still fill in the fields by hand and commit to create the paper.';
+  }
 </script>
 
 {#if message}<p class="msg">{message}</p>{/if}
@@ -133,7 +143,8 @@
       <div class="draft">
         <div class="draft-title-row">
           <input type="checkbox" bind:checked={row.include} aria-label="Include this paper" />
-          <span class="pill {row.draft.match_status}">{badge(row.draft.match_status)}</span>
+          <span class="pill {row.draft.match_status}" title={badgeTitle(row.draft.match_status)}
+            >{badge(row.draft.match_status)}</span>
           {#if row.draft.existing_work_id}
             <span class="pill in-library"
               title="Already in your library — committing it only adds the existing paper to the chosen shelf"
