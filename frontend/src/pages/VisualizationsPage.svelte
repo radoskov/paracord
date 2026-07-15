@@ -106,8 +106,51 @@
     }
   }
   function vizResetView(): void {
+    vizFocus = null;
     chartRevision += 1;
   }
+
+  // Ctrl-click neighborhood focus (UX batch 3 parity): on the co-citation network and the
+  // temporal map, ctrl-click a node (or a legend entry) to show only it + direct neighbors —
+  // neighbors come from the payload's edge list (the citation overlay on the temporal map).
+  let vizFocus: { ids: Set<string>; label: string } | null = null;
+  $: focusSupported =
+    payload?.view_type === 'co_citation' || payload?.view_type === 'temporal_map';
+
+  function vizNeighborhood(seed: Set<string>): Set<string> {
+    const keep = new Set(seed);
+    for (const e of payload?.edges ?? []) {
+      if (seed.has(e.source)) keep.add(e.target);
+      if (seed.has(e.target)) keep.add(e.source);
+    }
+    return keep;
+  }
+
+  function vizFocusOnNode(id: string): void {
+    if (vizFocus?.label === id) vizFocus = null;
+    else vizFocus = { ids: vizNeighborhood(new Set([id])), label: id };
+    chartRevision += 1;
+  }
+
+  function vizFocusOnGroup(name: string): void {
+    const seeds = new Set(
+      (payload?.nodes ?? [])
+        .filter((n) => (n.color_group ?? 'Papers') === name)
+        .map((n) => n.id),
+    );
+    if (!seeds.size) return; // e.g. the "Citations" edge-overlay legend entry
+    if (vizFocus?.label === name) {
+      vizFocus = null;
+      chartRevision += 1;
+      return;
+    }
+    vizFocus = { ids: vizNeighborhood(seeds), label: name };
+    chartRevision += 1;
+  }
+
+  $: vizFocusLabelText = vizFocus
+    ? (payload?.nodes.find((n) => n.id === vizFocus?.label)?.label ?? vizFocus.label)
+    : '';
 
   // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
   // the axis / color / edge controls do not apply — only the size encoding and node cap do.
@@ -151,6 +194,7 @@
         edgeMaxNodes,
         layout: isCluster ? clusterLayout : undefined,
       });
+      vizFocus = null; // fresh payload → stale focus ids would hide everything
     } catch (error) {
       message = errorMessage(error);
       payload = null;
@@ -183,11 +227,34 @@
     if (!payload) return;
     const renderer = getRenderer(payload.view_type);
     if (!renderer) throw new Error("no renderer");
-    chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
+    // Ctrl-click focus filters the PAYLOAD (nodes + edges) before the pure renderer builds the
+    // option, so it works identically for the network and the scatter overlay.
+    const focus = vizFocus;
+    const p =
+      focus && focusSupported
+        ? {
+            ...payload,
+            nodes: payload.nodes.filter((n) => focus.ids.has(n.id)),
+            edges: (payload.edges ?? []).filter(
+              (e) => focus.ids.has(e.source) && focus.ids.has(e.target),
+            ),
+          }
+        : payload;
+    chart.setOption(renderer.buildOption(p, $activeVizTheme), true);
     chart.off('click');
-    chart.on('click', (params: { data?: { name?: string } }) => {
-      if (params.data?.name) openPaper(params.data.name);
-    });
+    chart.on(
+      'click',
+      (params: { data?: { name?: string }; event?: { event?: MouseEvent } }) => {
+        const name = params.data?.name;
+        if (!name) return;
+        const raw = params.event?.event;
+        if (raw && (raw.ctrlKey || raw.metaKey) && focusSupported) {
+          vizFocusOnNode(name);
+          return;
+        }
+        openPaper(name);
+      },
+    );
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,6 +268,22 @@
     });
     // Shift-click a legend entry to show only that group; shift-click again to show all.
     enableLegendSolo(chart);
+    // Ctrl-click a legend entry → neighborhood focus on that group (legendselectchanged carries
+    // no modifiers, so capture them at the DOM level and undo the toggle the click caused).
+    let legendCtrl = false;
+    chart.getDom()?.addEventListener(
+      'click',
+      (ev: MouseEvent) => {
+        legendCtrl = ev.ctrlKey || ev.metaKey;
+      },
+      true,
+    );
+    chart.on('legendselectchanged', (params: { name?: string }) => {
+      if (!legendCtrl || !params.name || !focusSupported) return;
+      legendCtrl = false;
+      chart.dispatchAction({ type: 'legendAllSelect' });
+      vizFocusOnGroup(params.name);
+    });
   }
 
   // B1 help: description of the current view + the "About this view" / "Visualization types" popups.
@@ -422,7 +505,17 @@
             <svelte:fragment slot="fallback">Interactive chart unavailable in this environment.</svelte:fragment>
           </ChartHost>
         </div>
-        <p class="hint">Hover for details · click a point to open the paper.</p>
+        {#if vizFocus && focusSupported}
+          <p class="hint" data-testid="viz-focus-note">
+            Focused on “{vizFocusLabelText}” + direct neighbors — ctrl-click it again or use Reset
+            view to show everything.
+          </p>
+        {/if}
+        <p class="hint">
+          Hover for details · click a point to open the paper{focusSupported
+            ? ' · ctrl-click a point or legend entry to show only it + its neighbors'
+            : ''}.
+        </p>
       {/if}
     </div>
   {/if}

@@ -55,7 +55,7 @@ export const VIEW_HELP: Record<string, VizViewHelp> = {
     short:
       "Plots each paper as a point — publication year on one axis and a metric you choose on the other. Citation edges link papers that cite each other, so clusters of related work stand out over time.",
     about:
-      "A Litmaps-style scatter of your papers. Both axes are configurable; point size and colour encode extra dimensions, and an optional overlay draws the citation links among the papers in scope. Papers that land on the same spot merge into one marker showing the count — hover it to list them and open any one. Use the two-handle range sliders below/beside the plot to clamp each axis (handles at the end stops = auto); scroll to zoom; shift-click a legend entry to solo it; Show all resets the zoom windows and Reset view repaints everything.",
+      "A Litmaps-style scatter of your papers. Both axes are configurable; point size and colour encode extra dimensions, and an optional overlay draws the citation links among the papers in scope. Papers that land on the same spot merge into one marker showing the count — hover it to list them and open any one. Use the two-handle range sliders below/beside the plot to clamp each axis (handles at the end stops = auto); scroll to zoom; shift-click a legend entry to solo it; ctrl-click a point or a legend entry to show only it + its direct citation neighbors; Show all resets the zoom windows and Reset view repaints everything (and clears the focus).",
     requirements:
       'Year and citation axes work from stored metadata. The "similarity to focus" and "topic similarity to focus" axes need a focus paper plus, respectively, embeddings or extracted topics.',
     params: [
@@ -113,7 +113,7 @@ export const VIEW_HELP: Record<string, VizViewHelp> = {
     short:
       "A network of papers linked by how they cite (or are co-cited by) each other, revealing tightly-connected groups of related work.",
     about:
-      "Nodes are papers; edges connect papers that share a citation relationship (bibliographic coupling or co-citation, selectable). Densely-linked clusters point to sub-topics or research lineages in your library.",
+      "Nodes are papers; edges connect papers that share a citation relationship (bibliographic coupling or co-citation, selectable). Densely-linked clusters point to sub-topics or research lineages in your library. Ctrl-click a node or a legend entry to show only it + its direct neighbors (ctrl-click again or Reset view to clear); shift-click a legend entry to solo that group.",
     requirements:
       "Needs extracted references — run extraction on the papers first.",
     params: [
