@@ -237,35 +237,6 @@
           aria-label="Maximum external nodes" style="width:5rem" />
       </label>
     </ScopePicker>
-    {#if scopeReady && isClassicScope}
-      <div style="margin-top:0.6rem">
-        <ExportDialog
-          label={`this ${scopeType}`}
-          fetchExport={(format, style) =>
-            client.exportCitations({
-              scope_type: scopeType,
-              scope_id: scopeId || undefined,
-              format,
-              style,
-            })}
-          fetchStyles={() => client.listCitationStyles()}
-        />
-      </div>
-    {:else if scopeReady && scopeType === 'saved_filter'}
-      <div style="margin-top:0.6rem">
-        <ExportDialog
-          label="this saved filter"
-          fetchExport={(format, style) =>
-            client.exportCitations({
-              scope_type: 'saved_filter',
-              scope_id: savedFilterId || undefined,
-              format,
-              style,
-            })}
-          fetchStyles={() => client.listCitationStyles()}
-        />
-      </div>
-    {/if}
   </div>
 
   <div class="card">
@@ -356,12 +327,50 @@
       {/if}
     </div>
   </div>
+
+  <!-- Export lives at the bottom, folded (UX batch 3): occasionally useful, shouldn't sit between
+       the scope picker and the graph. -->
+  {#if scopeReady && (isClassicScope || scopeType === 'saved_filter')}
+    <details class="card export-block">
+      <summary>Export this {scopeType === 'saved_filter' ? 'saved filter' : scopeType}</summary>
+      {#if isClassicScope}
+        <ExportDialog
+          label={`this ${scopeType}`}
+          fetchExport={(format, style) =>
+            client.exportCitations({
+              scope_type: scopeType,
+              scope_id: scopeId || undefined,
+              format,
+              style,
+            })}
+          fetchStyles={() => client.listCitationStyles()}
+        />
+      {:else}
+        <ExportDialog
+          label="this saved filter"
+          fetchExport={(format, style) =>
+            client.exportCitations({
+              scope_type: 'saved_filter',
+              scope_id: savedFilterId || undefined,
+              format,
+              style,
+            })}
+          fetchStyles={() => client.listCitationStyles()}
+        />
+      {/if}
+    </details>
+  {/if}
 </section>
 
 <style>
   .layout {
     display: grid;
     gap: 1rem;
+  }
+
+  .export-block summary {
+    cursor: pointer;
+    font-weight: 600;
   }
 
   .msg {

@@ -71,7 +71,7 @@ def _weighted(counts: dict[str, int], weights: dict[str, float]) -> float:
     return sum(weights.get(bucket, 1.0) * n for bucket, n in counts.items())
 
 
-DEFAULT_MAX_EXTERNAL = 50
+DEFAULT_MAX_EXTERNAL = 500
 
 
 def build_reference_graph(

@@ -1659,7 +1659,7 @@ def get_reference_graph(
     work_id: uuid.UUID,
     include_ref_edges: bool = False,
     include_citing: bool = False,
-    max_external: int = Query(default=50, ge=0, le=500),
+    max_external: int = Query(default=500, ge=0, le=500),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> dict:

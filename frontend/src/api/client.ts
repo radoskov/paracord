@@ -1025,6 +1025,8 @@ export interface UserPreferences {
   library_columns?: LibraryColumnPrefs;
   // B7: per-user section weights for the reference graph's node sizing (bucket → weight).
   citation_section_weights?: Record<string, number>;
+  // UX batch 3: the reference graph's "Max external" limit, persisted per user (default 500).
+  reference_graph_max_external?: number;
 }
 
 export interface ReferenceGraphNode {

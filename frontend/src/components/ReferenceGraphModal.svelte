@@ -24,7 +24,8 @@
   let weights: Record<string, number> = { ...DEFAULT_SECTION_WEIGHTS };
   let includeRefEdges = false;
   let includeCiting = true;
-  let maxExternal = 50;
+  // Base limit 500 (UX batch 3); the user's chosen value persists in their preferences blob.
+  let maxExternal = 500;
   let yAxis = 'weighted';
   let colorBy = 'kind';
   let showHelp = false;
@@ -93,9 +94,27 @@
       if (prefs.citation_section_weights) {
         weights = { ...DEFAULT_SECTION_WEIGHTS, ...prefs.citation_section_weights };
       }
+      if (typeof prefs.reference_graph_max_external === 'number') {
+        maxExternal = Math.min(500, Math.max(0, prefs.reference_graph_max_external));
+      }
     } catch {
       // keep defaults if preferences can't be read
     }
+  }
+
+  // Persist the chosen max-external limit (merge-put so other preference keys survive).
+  async function persistMaxExternal(): Promise<void> {
+    try {
+      const prefs = await client.getPreferences();
+      await client.putPreferences({ ...prefs, reference_graph_max_external: maxExternal });
+    } catch {
+      // best-effort — the value still applies for this session
+    }
+  }
+
+  function onMaxExternalChange(): void {
+    void loadGraph();
+    void persistMaxExternal();
   }
 
   async function loadGraph(): Promise<void> {
@@ -180,7 +199,7 @@
     </label>
     <label title="Keep only this many external references / citing papers (the most-cited and newest); in-library nodes are never hidden">
       Max external
-      <input type="number" min="0" max="500" bind:value={maxExternal} on:change={() => loadGraph()}
+      <input type="number" min="0" max="500" bind:value={maxExternal} on:change={onMaxExternalChange}
         class="max-external" data-testid="rg-max-external" />
     </label>
     <span class="muted"

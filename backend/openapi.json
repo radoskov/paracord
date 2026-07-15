@@ -22922,7 +22922,7 @@
             "name": "max_external",
             "required": false,
             "schema": {
-              "default": 50,
+              "default": 500,
               "maximum": 500,
               "minimum": 0,
               "title": "Max External",
