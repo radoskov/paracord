@@ -335,6 +335,10 @@
   let topicGraphCap = '';
   let vizCap = '';
   let useFuzzyAsConfirmed = false;
+  let fuzzyAcceptThreshold = '';
+  let fuzzyThresholdMin = 90;
+  let useHighConfidenceAutoAccept = true;
+  let highConfidenceThreshold = 100;
   let referenceRescanOnStartup = false;
   let rescanningLibrary = false;
   let rescanLibraryMsg = '';
@@ -358,6 +362,10 @@
     topicGraphCap = String(cfg.topic_graph_node_cap);
     vizCap = String(cfg.viz_node_cap);
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
+    fuzzyAcceptThreshold = String(cfg.fuzzy_accept_threshold);
+    fuzzyThresholdMin = cfg.fuzzy_accept_threshold_min;
+    useHighConfidenceAutoAccept = cfg.use_high_confidence_auto_accept;
+    highConfidenceThreshold = cfg.high_confidence_threshold;
     referenceRescanOnStartup = cfg.reference_rescan_on_startup;
   }
 
@@ -368,12 +376,15 @@
       applyAppConfig(
         await client.updateAppConfig({
           use_fuzzy_match_as_confirmed: useFuzzyAsConfirmed,
+          fuzzy_accept_threshold: Number(fuzzyAcceptThreshold) || undefined,
+          use_high_confidence_auto_accept: useHighConfidenceAutoAccept,
           reference_rescan_on_startup: referenceRescanOnStartup,
         }),
       );
-      matchingMsg = useFuzzyAsConfirmed
-        ? 'Saved. A library-wide rescan was started to promote existing likely matches.'
-        : 'Saved.';
+      matchingMsg =
+        useFuzzyAsConfirmed || useHighConfidenceAutoAccept
+          ? 'Saved. A library-wide rescan was started to apply the acceptance settings.'
+          : 'Saved.';
     });
     savingMatching = false;
   }
@@ -1926,17 +1937,36 @@
       <form on:submit|preventDefault={saveMatchingConfig} class="stack">
         <label class="field checkbox-field">
           <input type="checkbox" bind:checked={useFuzzyAsConfirmed} />
-          Treat a fuzzy “likely local” match as confirmed
+          Use fuzzy auto-accept
+        </label>
+        <label class="field threshold-field">
+          Fuzzy auto-accept threshold (%)
+          <input type="number" min={fuzzyThresholdMin} max="100" step="0.5"
+            bind:value={fuzzyAcceptThreshold} disabled={!useFuzzyAsConfirmed}
+            title={`Similarity score at/above which a fuzzy match is auto-confirmed (minimum ${fuzzyThresholdMin}%, set in server.yaml)`} />
         </label>
         <p class="small-help">
-          Off (default): a tolerant title match to a library paper is a soft <em>likely match</em>
-          you confirm with one click, and it isn’t counted in graphs/metrics until you do. On: a
-          match above the configured threshold is linked automatically (a hard link, counted
-          everywhere). Turning this on starts a one-time library-wide rescan so existing likely
-          matches are promoted. Exact DOI/arXiv matches are always treated as confirmed regardless,
-          and independently of this toggle a fuzzy score at/above
-          <code>reference_matching.auto_accept_threshold</code> in <code>server.yaml</code>
-          (default 100 = exact normalized title) is auto-confirmed even without a DOI/arXiv id.
+          When on, a fuzzy “likely local” match scoring at least the threshold is linked
+          automatically (a hard link, counted in graphs/metrics) instead of waiting for your
+          one-click confirmation. The minimum is {fuzzyThresholdMin}% — fixed in
+          <code>server.yaml</code> (<code>reference_matching.min_auto_accept_threshold</code>), so
+          it can’t be opened wider here. Exact DOI/arXiv matches are always confirmed regardless.
+        </p>
+        <label class="field checkbox-field">
+          <input type="checkbox" bind:checked={useHighConfidenceAutoAccept}
+            disabled={useFuzzyAsConfirmed}
+            title={useFuzzyAsConfirmed
+              ? `Implied by fuzzy auto-accept: anything ≥ ${fuzzyAcceptThreshold || fuzzyThresholdMin}% is already accepted, so ${highConfidenceThreshold}% matches are too`
+              : `Auto-confirm a ${highConfidenceThreshold}% title match even without a DOI/arXiv id`} />
+          Use high-confidence auto-accept (≥ {highConfidenceThreshold}%)
+        </label>
+        <p class="small-help">
+          Auto-confirms a fuzzy match at/above <strong>{highConfidenceThreshold}%</strong> (an
+          exact normalized-title match at the default) even without a DOI/arXiv id. This threshold
+          is deliberately not editable here — it comes from
+          <code>reference_matching.high_confidence_threshold</code> in <code>server.yaml</code>.
+          {#if useFuzzyAsConfirmed}Currently implied by fuzzy auto-accept (its lower threshold
+          already accepts these matches).{/if}
         </p>
         <label class="field checkbox-field">
           <input type="checkbox" bind:checked={referenceRescanOnStartup} />
@@ -1983,6 +2013,11 @@
 
   .checkbox-field input {
     width: auto;
+  }
+
+  /* Numeric threshold input under its checkbox (UX batch) — keep it compact. */
+  .threshold-field input {
+    max-width: 8rem;
   }
 
   .admin-tabs {

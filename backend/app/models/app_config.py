@@ -9,7 +9,7 @@ static ``Settings`` defaults apply.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Uuid
+from sqlalchemy import Boolean, DateTime, Float, Integer, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -114,6 +114,14 @@ class AppConfig(Base):
     # row or NULL → False) keeps fuzzy candidates as suggestions. The numeric matcher params live in
     # the static ``Settings``/YAML; only this toggle needs runtime edits, hence its home here.
     use_fuzzy_match_as_confirmed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Fuzzy auto-accept threshold (UX batch): the score at/above which the toggle above hard-links
+    # a fuzzy match. NULL → the yaml default (``reference_matching.auto_accept_threshold``); always
+    # clamped to at least ``reference_matching.min_auto_accept_threshold`` (yaml-only floor).
+    fuzzy_accept_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # High-confidence auto-accept (UX batch): when ON (default; NULL → True), a fuzzy match at/above
+    # the yaml-only ``reference_matching.high_confidence_threshold`` (default 100 = exact normalized
+    # title) is hard-linked even without a DOI/arXiv id — independent of the fuzzy toggle above.
+    use_high_confidence_auto_accept: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Reference→library matching (F3a): when ON, the API enqueues a full library-wide reference
     # rematch on startup (best-effort, like the D7 sweep) so the stored reference→work resolution
     # stays fresh across deploys. OFF by default (an absent row or a NULL value → False).

@@ -495,7 +495,7 @@ def enrich_work(
         # citing papers elsewhere in the library link up now, not at the next full rescan.
         # Local imports: citing_papers imports this module (cycle guard).
         from app.services.app_config import (  # noqa: PLC0415
-            effective_use_fuzzy_match_as_confirmed,
+            effective_accept_policy,
         )
         from app.services.citing_papers import (  # noqa: PLC0415
             rescan_external_papers_for_new_work,
@@ -505,7 +505,7 @@ def enrich_work(
         )
 
         rescan_references_for_new_work(
-            db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+            db, work, accept_policy=effective_accept_policy(db)
         )
         rescan_external_papers_for_new_work(db, work)
     if sources:

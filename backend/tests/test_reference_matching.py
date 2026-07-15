@@ -7,6 +7,7 @@ from app.models.citation import Reference
 from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services.reference_matching import (
+    AcceptPolicy,
     find_reference_match,
     rescan_references_for_new_work,
     resolve_and_persist,
@@ -87,10 +88,10 @@ def test_arxiv_identifier_match_is_local(db) -> None:
 
 
 def test_fuzzy_dash_colon_title_is_likely_match_below_auto_accept(db, monkeypatch) -> None:
-    # Pin the auto-accept threshold out of reach — this test exercises the SOFT likely-match path
-    # (at the default threshold of 100 this exact-normalized-title pair would be auto-confirmed).
+    # Pin the high-confidence threshold out of reach — this test exercises the SOFT likely-match
+    # path (at the default threshold of 100 this exact-normalized-title pair auto-confirms).
     monkeypatch.setattr(
-        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+        get_settings(), "reference_matching_high_confidence_threshold", 101.0, raising=False
     )
     work = _work(db, LOCAL_TITLE, year=2010)
     ref = _ref(db, title=CITED_TITLE, year=2010)
@@ -121,16 +122,80 @@ def test_perfect_title_match_is_auto_confirmed_without_identifier(db) -> None:
     assert ref.resolved_work_id == work.id
 
 
-def test_auto_accept_threshold_is_configurable(db, monkeypatch) -> None:
-    """Lowering reference_matching.auto_accept_threshold promotes near-perfect matches too."""
-    monkeypatch.setattr(
-        get_settings(), "reference_matching_auto_accept_threshold", 90.0, raising=False
+def test_fuzzy_auto_accept_policy_promotes_matches_at_threshold(db) -> None:
+    """The admin's fuzzy auto-accept level: score ≥ its threshold hard-links even when the
+    high-confidence level is off."""
+    policy = AcceptPolicy(
+        use_fuzzy=True,
+        fuzzy_threshold=90.0,
+        use_high_confidence=False,
+        high_confidence_threshold=100.0,
     )
     work = _work(db, LOCAL_TITLE, year=2010)
-    ref = _ref(db, title=CITED_TITLE, year=2010)  # the ~98-scoring dash/colon variant
-    resolve_and_persist(db, ref)
+    ref = _ref(db, title=CITED_TITLE, year=2010)
+    resolve_and_persist(db, ref, accept_policy=policy)
     assert ref.resolution_status == "local_match"
     assert ref.resolved_work_id == work.id
+
+
+def test_high_confidence_toggle_off_keeps_perfect_match_likely(db) -> None:
+    """Both acceptance levels off → even a 100% title match stays a soft suggestion."""
+    policy = AcceptPolicy(
+        use_fuzzy=False,
+        fuzzy_threshold=90.0,
+        use_high_confidence=False,
+        high_confidence_threshold=100.0,
+    )
+    work = _work(db, LOCAL_TITLE, year=2010)
+    ref = _ref(db, title=LOCAL_TITLE, year=2010)
+    resolve_and_persist(db, ref, accept_policy=policy)
+    assert ref.resolution_status == "likely_match"
+    assert ref.suggested_work_id == work.id
+
+
+def test_accept_policy_levels() -> None:
+    p = AcceptPolicy(
+        use_fuzzy=True,
+        fuzzy_threshold=92.0,
+        use_high_confidence=True,
+        high_confidence_threshold=100.0,
+    )
+    assert p.accepts(92.0) and p.accepts(100.0)
+    assert not p.accepts(91.9)
+    only_high = AcceptPolicy(
+        use_fuzzy=False,
+        fuzzy_threshold=92.0,
+        use_high_confidence=True,
+        high_confidence_threshold=100.0,
+    )
+    assert only_high.accepts(100.0)
+    assert not only_high.accepts(99.9)
+
+
+def test_effective_fuzzy_threshold_clamps_to_yaml_floor(db, monkeypatch) -> None:
+    """The admin-stored threshold can never take effect below the yaml-only floor."""
+    from app.services.app_config import (
+        _ensure_row,
+        effective_fuzzy_accept_threshold,
+        update_fuzzy_accept_threshold,
+    )
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "reference_matching_min_auto_accept_threshold", 90.0, raising=False)
+    # A sneaky sub-floor value written directly to the row is clamped on read.
+    row = _ensure_row(db)
+    row.fuzzy_accept_threshold = 10.0
+    db.flush()
+    assert effective_fuzzy_accept_threshold(db) == 90.0
+    # The update helper refuses sub-floor / >100 values outright.
+    import pytest
+
+    with pytest.raises(ValueError, match="between 90"):
+        update_fuzzy_accept_threshold(db, value=50.0)
+    with pytest.raises(ValueError):
+        update_fuzzy_accept_threshold(db, value=101.0)
+    assert update_fuzzy_accept_threshold(db, value=95.0) == 95.0
+    assert effective_fuzzy_accept_threshold(db) == 95.0
 
 
 def test_title_below_threshold_is_external(db) -> None:
@@ -211,7 +276,7 @@ def test_rejected_candidate_is_not_re_proposed(db) -> None:
 
 def test_rejected_still_surfaces_a_different_better_candidate(db, monkeypatch) -> None:
     monkeypatch.setattr(  # soft-path test: keep the better candidate below auto-accept
-        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+        get_settings(), "reference_matching_high_confidence_threshold", 101.0, raising=False
     )
     rejected = _work(db, "KnowRob knowledge base tools", year=2010)
     better = _work(db, LOCAL_TITLE, year=2010)
@@ -270,7 +335,7 @@ def test_per_paper_rescan_endpoint_links_reference(
     client, auth_headers, db, make_reference, monkeypatch
 ) -> None:
     monkeypatch.setattr(  # soft-path test: keep the match below the auto-accept threshold
-        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+        get_settings(), "reference_matching_high_confidence_threshold", 101.0, raising=False
     )
     citing = _work(db, "Citing Paper", year=2021)
     target = _work(db, LOCAL_TITLE, year=2010)
@@ -450,6 +515,40 @@ def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monk
     assert r.status_code == 200
     assert r.json()["use_fuzzy_match_as_confirmed"] is True
     assert calls == [1]  # flipping ON kicks off a library-wide rescan
+
+
+def test_admin_acceptance_settings_round_trip_and_validate(client, auth_headers, monkeypatch) -> None:
+    """UX batch: the fuzzy threshold + high-confidence toggle are admin-editable; the yaml floor
+    and the high-confidence threshold are surfaced read-only and enforced."""
+    from app.workers import queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "enqueue_reference_rescan", lambda: "job-1")
+    admin = auth_headers("owner")
+    cfg = client.get("/api/v1/admin/app-config", headers=admin).json()
+    assert cfg["fuzzy_accept_threshold"] == 90.0  # yaml default
+    assert cfg["fuzzy_accept_threshold_min"] == 90.0
+    assert cfg["use_high_confidence_auto_accept"] is True
+    assert cfg["high_confidence_threshold"] == 100.0
+
+    r = client.patch(
+        "/api/v1/admin/app-config",
+        headers=admin,
+        json={"fuzzy_accept_threshold": 95.5, "use_high_confidence_auto_accept": False},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fuzzy_accept_threshold"] == 95.5
+    assert body["use_high_confidence_auto_accept"] is False
+
+    # Below the yaml floor → 400 (never persisted).
+    r = client.patch(
+        "/api/v1/admin/app-config", headers=admin, json={"fuzzy_accept_threshold": 10.0}
+    )
+    assert r.status_code == 400
+    assert (
+        client.get("/api/v1/admin/app-config", headers=admin).json()["fuzzy_accept_threshold"]
+        == 95.5
+    )
 
 
 # --- arXiv-DOI bridging ---------------------------------------------------------------------------

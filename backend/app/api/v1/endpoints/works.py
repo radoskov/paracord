@@ -32,7 +32,7 @@ from app.services import access
 from app.services.app_config import (
     effective_citing_papers_fetch_cap,
     effective_max_papers_per_page,
-    effective_use_fuzzy_match_as_confirmed,
+    effective_accept_policy,
 )
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
@@ -768,7 +768,7 @@ def import_reference_as_work(
     # references cite — link them now (fuzzy stays soft; toggle read from AppConfig) so importing one
     # citation doesn't leave its siblings pointing "external".
     rescan_references_for_new_work(
-        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        db, work, accept_policy=effective_accept_policy(db)
     )
     rescan_external_papers_for_new_work(db, work)
     db.commit()
@@ -832,7 +832,7 @@ def import_citing_paper_as_work(
     # external references/citers point at.
     place_on_default_if_loose(db, work.id, actor_id=actor.id)
     rescan_references_for_new_work(
-        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        db, work, accept_policy=effective_accept_policy(db)
     )
     rescan_external_papers_for_new_work(db, work)
     db.commit()
@@ -873,7 +873,7 @@ def create_work(
     place_on_default_if_loose(db, work.id, actor_id=actor.id)
     # Reverse-rescan (batch 12): link any still-external references that cite this new paper.
     rescan_references_for_new_work(
-        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        db, work, accept_policy=effective_accept_policy(db)
     )
     rescan_external_papers_for_new_work(db, work)
     db.commit()
@@ -1316,7 +1316,7 @@ def delete_work(
     if orphaned_refs:
         db.flush()
         run_matching_for_references(
-            db, orphaned_refs, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+            db, orphaned_refs, accept_policy=effective_accept_policy(db)
         )
     record_event(
         db,
@@ -1633,7 +1633,7 @@ def rescan_work_references(
     _guard_modify_work(db, actor, work)
     references = references_for_work(db, work_id)
     changed = run_matching_for_references(
-        db, references, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+        db, references, accept_policy=effective_accept_policy(db)
     )
     db.commit()
     return ReferenceRescanResult(scanned=len(references), changed=changed)

@@ -124,6 +124,14 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["reference_matching_auto_accept_threshold"] = reference_matching[
             "auto_accept_threshold"
         ]
+    if "min_auto_accept_threshold" in reference_matching:
+        values["reference_matching_min_auto_accept_threshold"] = reference_matching[
+            "min_auto_accept_threshold"
+        ]
+    if "high_confidence_threshold" in reference_matching:
+        values["reference_matching_high_confidence_threshold"] = reference_matching[
+            "high_confidence_threshold"
+        ]
     if "author_overlap_threshold" in reference_matching:
         values["reference_matching_author_threshold"] = reference_matching[
             "author_overlap_threshold"
@@ -257,10 +265,17 @@ class Settings(BaseSettings):
     # similarity_pct (0-100) at/above which a candidate work is a title match. The KnowRob dash/colon
     # pair scores 98.0, so 90 comfortably links it while excluding unrelated same-first-word titles.
     reference_matching_title_threshold: float = 90.0
-    # similarity_pct at/above which a fuzzy match is AUTO-CONFIRMED (hard link) even without a
-    # DOI/arXiv id. Default 100 = only an exact normalized-title match; lower it (e.g. 90) to
-    # auto-accept every likely match, or use the runtime "fuzzy as confirmed" toggle instead.
-    reference_matching_auto_accept_threshold: float = 100.0
+    # Default for the ADMIN-EDITABLE "fuzzy auto-accept" threshold (similarity_pct): when the
+    # admin enables fuzzy auto-accept, matches at/above this score are auto-CONFIRMED (hard link).
+    # The runtime value lives on the AppConfig singleton; this is its out-of-the-box default.
+    reference_matching_auto_accept_threshold: float = 90.0
+    # Floor for the admin-editable fuzzy auto-accept threshold — admins can never set it below
+    # this (protects against a 0% "accept everything" misconfiguration). YAML-only.
+    reference_matching_min_auto_accept_threshold: float = 90.0
+    # "High-confidence auto-accept" threshold: score at/above which a fuzzy match is auto-CONFIRMED
+    # even without a DOI/arXiv id when the (admin-toggleable) high-confidence acceptance is on.
+    # YAML-only and deliberately NOT admin-editable; 100 = exact normalized title.
+    reference_matching_high_confidence_threshold: float = 100.0
     # Author-overlap ratio (0-1) a candidate must clear when both sides list authors (Phase 4). The
     # gate is skipped when either side has no authors — a signal you can't compute can't disqualify.
     reference_matching_author_threshold: float = 0.5

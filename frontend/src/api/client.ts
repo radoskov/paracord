@@ -1317,8 +1317,15 @@ export interface AppConfig {
   viz_node_cap: number;
   // AI scope-job threshold (S15/S16): scopes above this run topics/summaries as a background job.
   ai_scope_job_threshold: number;
-  // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
+  // Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link
+  // ("use fuzzy auto-accept"), at/above the editable threshold below.
   use_fuzzy_match_as_confirmed: boolean;
+  // Fuzzy auto-accept threshold (UX batch): effective similarity_pct; min is the yaml-only floor.
+  fuzzy_accept_threshold: number;
+  fuzzy_accept_threshold_min: number;
+  // High-confidence auto-accept (UX batch): toggle runtime-editable; threshold yaml-only.
+  use_high_confidence_auto_accept: boolean;
+  high_confidence_threshold: number;
   // Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.
   reference_rescan_on_startup: boolean;
 }

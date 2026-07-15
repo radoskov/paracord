@@ -242,6 +242,80 @@ def update_use_fuzzy_match_as_confirmed(
     return bool(row.use_fuzzy_match_as_confirmed)
 
 
+def effective_fuzzy_accept_threshold(db: Session, *, settings: Settings | None = None) -> float:
+    """The similarity_pct at/above which fuzzy auto-accept hard-links a match (UX batch).
+
+    NULL / absent row → the yaml default (``reference_matching.auto_accept_threshold``). Always
+    clamped into [``min_auto_accept_threshold``, 100] — the floor is yaml-only, so admins can
+    never open the gate below it (e.g. an accidental 0%).
+    """
+    settings = settings or get_settings()
+    floor = float(settings.reference_matching_min_auto_accept_threshold)
+    value = float(settings.reference_matching_auto_accept_threshold)
+    if _app_config_table_present(db):
+        row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+        if row is not None and row.fuzzy_accept_threshold is not None:
+            value = float(row.fuzzy_accept_threshold)
+    return min(100.0, max(floor, value))
+
+
+def update_fuzzy_accept_threshold(
+    db: Session, *, value: float, actor_user_id: uuid.UUID | None = None,
+    settings: Settings | None = None,
+) -> float:
+    """Persist the admin-set fuzzy auto-accept threshold. Rejects values below the yaml floor."""
+    settings = settings or get_settings()
+    floor = float(settings.reference_matching_min_auto_accept_threshold)
+    if not floor <= float(value) <= 100.0:
+        raise ValueError(
+            f"Fuzzy auto-accept threshold must be between {floor:g} and 100 "
+            f"(the minimum is set in server.yaml)"
+        )
+    row = _ensure_row(db)
+    row.fuzzy_accept_threshold = float(value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return float(row.fuzzy_accept_threshold)
+
+
+def effective_use_high_confidence_auto_accept(
+    db: Session, *, settings: Settings | None = None
+) -> bool:
+    """Whether a fuzzy match at/above the yaml-only high-confidence threshold (default 100 = exact
+    normalized title) is hard-linked even without a DOI/arXiv id. ON by default (NULL → True)."""
+    if not _app_config_table_present(db):
+        return True
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or row.use_high_confidence_auto_accept is None:
+        return True
+    return bool(row.use_high_confidence_auto_accept)
+
+
+def update_use_high_confidence_auto_accept(
+    db: Session, *, value: bool, actor_user_id: uuid.UUID | None = None
+) -> bool:
+    """Persist the high-confidence auto-accept toggle (UX batch). Returns the stored value."""
+    row = _ensure_row(db)
+    row.use_high_confidence_auto_accept = bool(value)
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return bool(row.use_high_confidence_auto_accept)
+
+
+def effective_accept_policy(db: Session, *, settings: Settings | None = None):
+    """The full fuzzy-match acceptance policy (UX batch): runtime toggles + clamped threshold
+    overlaid on the yaml bounds. Returns a :class:`app.services.reference_matching.AcceptPolicy`."""
+    from app.services.reference_matching import AcceptPolicy
+
+    settings = settings or get_settings()
+    return AcceptPolicy(
+        use_fuzzy=effective_use_fuzzy_match_as_confirmed(db),
+        fuzzy_threshold=effective_fuzzy_accept_threshold(db, settings=settings),
+        use_high_confidence=effective_use_high_confidence_auto_accept(db),
+        high_confidence_threshold=float(settings.reference_matching_high_confidence_threshold),
+    )
+
+
 def effective_reference_rescan_on_startup(db: Session, *, settings: Settings | None = None) -> bool:
     """Whether the API enqueues a full reference rematch on startup (F3a). Default OFF.
 

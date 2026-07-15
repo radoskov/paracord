@@ -21,7 +21,7 @@ from app.models.metadata import MetadataAssertion
 from app.models.work import Work
 from app.services import ocr as ocr_service
 from app.services.ai_config import get_ai_config
-from app.services.app_config import effective_use_fuzzy_match_as_confirmed
+from app.services.app_config import effective_accept_policy
 from app.services.audit import record_event
 from app.services.file_paths import resolve_backend_readable_pdf_path, save_derived_ocr_pdf
 from app.services.keyword_extraction import extract_keywords
@@ -245,12 +245,12 @@ def store_parsed_extraction(
     # Reference→library matching (batch 12): resolve each canonical reference this extraction touched
     # against the local library, before building mentions (so a mention inherits the resolution). The
     # fuzzy-as-confirmed runtime toggle is read from the AppConfig singleton (Phase 3).
-    fuzzy_as_confirmed = effective_use_fuzzy_match_as_confirmed(db)
+    accept_policy = effective_accept_policy(db)
     run_matching_for_references(
         db,
         set(reference_by_key.values()),
         settings=get_settings(),
-        fuzzy_as_confirmed=fuzzy_as_confirmed,
+        accept_policy=accept_policy,
     )
 
     # Reverse direction: this work's title/DOI may have just been promoted above, making it the
@@ -261,7 +261,7 @@ def store_parsed_extraction(
         rescan_external_papers_for_new_work,  # noqa: PLC0415 - cycle guard
     )
 
-    rescan_references_for_new_work(db, work, fuzzy_as_confirmed=fuzzy_as_confirmed)
+    rescan_references_for_new_work(db, work, accept_policy=accept_policy)
     rescan_external_papers_for_new_work(db, work)
 
     mention_count = 0

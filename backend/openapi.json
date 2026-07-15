@@ -891,6 +891,18 @@
             "title": "Citing Papers Fetch Cap",
             "type": "integer"
           },
+          "fuzzy_accept_threshold": {
+            "title": "Fuzzy Accept Threshold",
+            "type": "number"
+          },
+          "fuzzy_accept_threshold_min": {
+            "title": "Fuzzy Accept Threshold Min",
+            "type": "number"
+          },
+          "high_confidence_threshold": {
+            "title": "High Confidence Threshold",
+            "type": "number"
+          },
           "max_batch_items": {
             "title": "Max Batch Items",
             "type": "integer"
@@ -927,6 +939,10 @@
             "title": "Use Fuzzy Match As Confirmed",
             "type": "boolean"
           },
+          "use_high_confidence_auto_accept": {
+            "title": "Use High Confidence Auto Accept",
+            "type": "boolean"
+          },
           "viz_node_cap": {
             "title": "Viz Node Cap",
             "type": "integer"
@@ -945,6 +961,10 @@
           "topic_graph_node_cap",
           "viz_node_cap",
           "use_fuzzy_match_as_confirmed",
+          "fuzzy_accept_threshold",
+          "fuzzy_accept_threshold_min",
+          "use_high_confidence_auto_accept",
+          "high_confidence_threshold",
           "reference_rescan_on_startup"
         ],
         "title": "AppConfigOut",
@@ -987,6 +1007,19 @@
               }
             ],
             "title": "Citing Papers Fetch Cap"
+          },
+          "fuzzy_accept_threshold": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fuzzy Accept Threshold"
           },
           "max_batch_items": {
             "anyOf": [
@@ -1093,6 +1126,17 @@
               }
             ],
             "title": "Use Fuzzy Match As Confirmed"
+          },
+          "use_high_confidence_auto_accept": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use High Confidence Auto Accept"
           },
           "viz_node_cap": {
             "anyOf": [

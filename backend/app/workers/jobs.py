@@ -426,7 +426,7 @@ def rescan_reference_matches_job() -> None:
     from app.db.session import SessionLocal
     from app.models.citation import Reference
     from app.models.external_citation import ExternalPaper
-    from app.services.app_config import effective_use_fuzzy_match_as_confirmed
+    from app.services.app_config import effective_accept_policy
     from app.services.citing_papers import resolve_external_paper
     from app.services.reference_matching import (
         build_match_indexes,
@@ -442,7 +442,7 @@ def rescan_reference_matches_job() -> None:
         # The in-memory indexes hold ORM Work rows across many commits; default expire-on-commit
         # would turn every post-commit attribute read into a refresh query (defeating S8).
         db.expire_on_commit = False
-        fuzzy = effective_use_fuzzy_match_as_confirmed(db)
+        accept_policy = effective_accept_policy(db)
         indexes = build_match_indexes(db)
 
         # Ids first, rows per batch: a mid-iteration commit would kill a streaming cursor, and a
@@ -461,7 +461,7 @@ def rescan_reference_matches_job() -> None:
                     resolve_and_persist(
                         db,
                         reference,
-                        fuzzy_as_confirmed=fuzzy,
+                        accept_policy=accept_policy,
                         candidate_works=candidates,
                         author_names=indexes.author_names,
                     )

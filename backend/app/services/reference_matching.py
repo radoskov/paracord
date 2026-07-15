@@ -303,6 +303,41 @@ def find_reference_match(
 # --------------------------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class AcceptPolicy:
+    """When a FUZZY match becomes a hard link without user confirmation (UX batch).
+
+    Two independent levels: the admin's runtime "fuzzy auto-accept" (checkbox + editable threshold,
+    floored by yaml ``min_auto_accept_threshold``) and the "high-confidence auto-accept" (checkbox
+    only; its threshold is yaml-only, default 100 = exact normalized title). Identifier matches are
+    always hard links regardless. Build via ``app_config.effective_accept_policy(db)``.
+    """
+
+    use_fuzzy: bool
+    fuzzy_threshold: float
+    use_high_confidence: bool
+    high_confidence_threshold: float
+
+    def accepts(self, score: float) -> bool:
+        if self.use_fuzzy and score >= self.fuzzy_threshold:
+            return True
+        return self.use_high_confidence and score >= self.high_confidence_threshold
+
+
+def _fallback_policy(settings: Settings, *, fuzzy_as_confirmed: bool) -> AcceptPolicy:
+    """Policy for callers that still pass the bare ``fuzzy_as_confirmed`` bool (tests, older call
+    sites): the legacy toggle + the out-of-the-box high-confidence acceptance."""
+    floor = float(settings.reference_matching_min_auto_accept_threshold)
+    return AcceptPolicy(
+        use_fuzzy=fuzzy_as_confirmed,
+        fuzzy_threshold=min(
+            100.0, max(floor, float(settings.reference_matching_auto_accept_threshold))
+        ),
+        use_high_confidence=True,
+        high_confidence_threshold=float(settings.reference_matching_high_confidence_threshold),
+    )
+
+
 def _set_local(reference: Reference, match: ReferenceMatch) -> bool:
     changed = (
         reference.resolved_work_id != match.work_id or reference.resolution_status != "local_match"
@@ -346,6 +381,7 @@ def resolve_and_persist(
     *,
     settings: Settings | None = None,
     fuzzy_as_confirmed: bool = False,
+    accept_policy: AcceptPolicy | None = None,
     candidate_works: Sequence[Work] | None = None,
     author_names: Mapping[uuid.UUID, list[str]] | None = None,
 ) -> bool:
@@ -353,9 +389,12 @@ def resolve_and_persist(
 
     Never touches a ``confirmed_match`` (locked by the user) and never re-proposes the *same*
     candidate the user already rejected (a different, better candidate may still surface). A soft
-    fuzzy guess stays in ``suggested_work_id`` unless ``fuzzy_as_confirmed`` is on.
+    fuzzy guess stays in ``suggested_work_id`` unless the ``accept_policy`` (or the legacy
+    ``fuzzy_as_confirmed`` bool) accepts its score.
     """
     settings = settings or get_settings()
+    if accept_policy is None:
+        accept_policy = _fallback_policy(settings, fuzzy_as_confirmed=fuzzy_as_confirmed)
     status = reference.resolution_status
     if status == _LOCKED_STATUS:
         return False
@@ -374,11 +413,11 @@ def resolve_and_persist(
                 reference.match_score = match.score
                 return True
             return False
-        # Two acceptance levels (UX batch): the runtime toggle accepts EVERY likely match, and the
-        # yaml auto-accept threshold hard-links near-perfect title matches (default 100 = exact
-        # normalized title) even without a DOI/arXiv id. The identifier gate above already
+        # Two acceptance levels (UX batch): the admin's fuzzy auto-accept (editable threshold) and
+        # the high-confidence auto-accept (yaml-fixed threshold, default 100 = exact normalized
+        # title) — both hard-link even without a DOI/arXiv id. The identifier gate above already
         # disqualified candidates whose identifiers contradict the reference's.
-        if fuzzy_as_confirmed or match.score >= settings.reference_matching_auto_accept_threshold:
+        if accept_policy.accepts(match.score):
             return _set_local(reference, match)
         return _set_likely(reference, match)
 
@@ -395,6 +434,7 @@ def run_matching_for_references(
     *,
     settings: Settings | None = None,
     fuzzy_as_confirmed: bool = False,
+    accept_policy: AcceptPolicy | None = None,
 ) -> int:
     """Match+persist a batch of references (e.g. every reference an extraction touched). Returns the
     number whose resolution changed."""
@@ -402,7 +442,11 @@ def run_matching_for_references(
     changed = 0
     for reference in references:
         if resolve_and_persist(
-            db, reference, settings=settings, fuzzy_as_confirmed=fuzzy_as_confirmed
+            db,
+            reference,
+            settings=settings,
+            fuzzy_as_confirmed=fuzzy_as_confirmed,
+            accept_policy=accept_policy,
         ):
             changed += 1
     return changed
@@ -486,6 +530,7 @@ def rescan_references_for_new_work(
     *,
     settings: Settings | None = None,
     fuzzy_as_confirmed: bool = False,
+    accept_policy: AcceptPolicy | None = None,
 ) -> int:
     """Reverse-rescan: check the library's not-yet-resolved references against *one* new work.
 
@@ -526,6 +571,7 @@ def rescan_references_for_new_work(
             reference,
             settings=settings,
             fuzzy_as_confirmed=fuzzy_as_confirmed,
+            accept_policy=accept_policy,
             candidate_works=[work],
         ):
             changed += 1

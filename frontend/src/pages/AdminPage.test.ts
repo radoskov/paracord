@@ -41,6 +41,10 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       topic_graph_node_cap: 400,
       viz_node_cap: 500,
       use_fuzzy_match_as_confirmed: false,
+      fuzzy_accept_threshold: 90,
+      fuzzy_accept_threshold_min: 90,
+      use_high_confidence_auto_accept: true,
+      high_confidence_threshold: 100,
       reference_rescan_on_startup: false,
     }),
     updateAppConfig: vi.fn().mockImplementation(async (changes) => ({
@@ -56,6 +60,10 @@ function makeClient(overrides: Record<string, unknown> = {}) {
       topic_graph_node_cap: 400,
       viz_node_cap: 500,
       use_fuzzy_match_as_confirmed: false,
+      fuzzy_accept_threshold: 90,
+      fuzzy_accept_threshold_min: 90,
+      use_high_confidence_auto_accept: true,
+      high_confidence_threshold: 100,
       reference_rescan_on_startup: false,
       ...changes,
     })),
@@ -200,17 +208,24 @@ describe('AdminPage groups section', () => {
     await waitFor(() => expect(client.getAppConfig).toHaveBeenCalled());
 
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    const toggle = screen.getByLabelText(
-      'Treat a fuzzy “likely local” match as confirmed',
-    ) as HTMLInputElement;
+    const toggle = screen.getByLabelText('Use fuzzy auto-accept') as HTMLInputElement;
     await waitFor(() => expect(toggle.checked).toBe(false));
+    // The high-confidence toggle defaults ON; while fuzzy auto-accept is off it is editable.
+    const highConf = screen.getByLabelText(/Use high-confidence auto-accept/) as HTMLInputElement;
+    expect(highConf.checked).toBe(true);
+    expect(highConf.disabled).toBe(false);
 
     await fireEvent.click(toggle);
+    // Enabling fuzzy auto-accept implies (and disables) the high-confidence level.
+    expect((screen.getByLabelText(/Use high-confidence auto-accept/) as HTMLInputElement).disabled)
+      .toBe(true);
     await fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[2]);
 
     await waitFor(() =>
       expect(client.updateAppConfig).toHaveBeenCalledWith({
         use_fuzzy_match_as_confirmed: true,
+        fuzzy_accept_threshold: 90,
+        use_high_confidence_auto_accept: true,
         reference_rescan_on_startup: false,
       }),
     );

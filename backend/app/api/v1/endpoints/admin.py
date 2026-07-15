@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.agent import Agent, AgentFile
 from app.models.audit import AuditEvent
@@ -54,8 +55,17 @@ class AppConfigOut(BaseModel):
     citation_graph_node_cap: int
     topic_graph_node_cap: int
     viz_node_cap: int
-    # Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link.
+    # Reference→library matching (batch 12): treat a fuzzy "likely local" match as a hard link
+    # ("use fuzzy auto-accept"), at/above the editable threshold below.
     use_fuzzy_match_as_confirmed: bool
+    # Fuzzy auto-accept threshold (UX batch): effective (clamped) similarity_pct.
+    fuzzy_accept_threshold: float
+    # Yaml-only floor for the threshold above — surfaced so the UI can show/enforce it.
+    fuzzy_accept_threshold_min: float
+    # High-confidence auto-accept (UX batch): accept a ≥high_confidence_threshold match even
+    # without a DOI/arXiv id. The threshold itself is yaml-only (surfaced read-only).
+    use_high_confidence_auto_accept: bool
+    high_confidence_threshold: float
     # Reference→library matching (F3a): re-run a full library-wide reference rematch on startup.
     reference_rescan_on_startup: bool
 
@@ -74,6 +84,9 @@ class AppConfigUpdate(BaseModel):
     topic_graph_node_cap: int | None = Field(default=None, ge=1)
     viz_node_cap: int | None = Field(default=None, ge=1)
     use_fuzzy_match_as_confirmed: bool | None = Field(default=None)
+    # Validated against the yaml floor in the service (400 below it); ge=0 is just a sanity bound.
+    fuzzy_accept_threshold: float | None = Field(default=None, ge=0, le=100)
+    use_high_confidence_auto_accept: bool | None = Field(default=None)
     reference_rescan_on_startup: bool | None = Field(default=None)
 
 
@@ -306,6 +319,16 @@ def _app_config_out(db: Session) -> AppConfigOut:
         topic_graph_node_cap=app_config_service.effective_topic_graph_node_cap(db),
         viz_node_cap=app_config_service.effective_viz_node_cap(db),
         use_fuzzy_match_as_confirmed=app_config_service.effective_use_fuzzy_match_as_confirmed(db),
+        fuzzy_accept_threshold=app_config_service.effective_fuzzy_accept_threshold(db),
+        fuzzy_accept_threshold_min=float(
+            get_settings().reference_matching_min_auto_accept_threshold
+        ),
+        use_high_confidence_auto_accept=(
+            app_config_service.effective_use_high_confidence_auto_accept(db)
+        ),
+        high_confidence_threshold=float(
+            get_settings().reference_matching_high_confidence_threshold
+        ),
         reference_rescan_on_startup=app_config_service.effective_reference_rescan_on_startup(db),
     )
 
@@ -384,6 +407,16 @@ def update_app_config(
                     db, value=payload.use_fuzzy_match_as_confirmed, actor_user_id=actor.id
                 )
             )
+        if payload.fuzzy_accept_threshold is not None:
+            changed["fuzzy_accept_threshold"] = app_config_service.update_fuzzy_accept_threshold(
+                db, value=payload.fuzzy_accept_threshold, actor_user_id=actor.id
+            )
+        if payload.use_high_confidence_auto_accept is not None:
+            changed["use_high_confidence_auto_accept"] = (
+                app_config_service.update_use_high_confidence_auto_accept(
+                    db, value=payload.use_high_confidence_auto_accept, actor_user_id=actor.id
+                )
+            )
         if payload.reference_rescan_on_startup is not None:
             changed["reference_rescan_on_startup"] = (
                 app_config_service.update_reference_rescan_on_startup(
@@ -402,9 +435,14 @@ def update_app_config(
     db.commit()
     # Newly-persisted rate limits take effect after the short config cache expires.
     rate_limit.reset_cache()
-    # Turning "fuzzy as confirmed" ON promotes existing soft likely_matches to hard links — kick off a
-    # background library-wide rematch so that happens without waiting for the next extraction (batch 12).
-    if payload.use_fuzzy_match_as_confirmed:
+    # A more permissive acceptance (either auto-accept toggled ON, or a changed threshold) can
+    # promote existing soft likely_matches to hard links — kick off a background library-wide
+    # rematch so that happens without waiting for the next extraction (batch 12 / UX batch).
+    if (
+        payload.use_fuzzy_match_as_confirmed
+        or payload.use_high_confidence_auto_accept
+        or payload.fuzzy_accept_threshold is not None
+    ):
         from app.workers.queue import enqueue_reference_rescan
 
         enqueue_reference_rescan()
