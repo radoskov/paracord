@@ -214,6 +214,59 @@ describe('ImportPage sub-tabs', () => {
     expect((screen.getByLabelText('BibTeX') as HTMLTextAreaElement).value).toBe('');
   });
 
+  it('Identifier preview & choose fetches metadata into the review table and commits', async () => {
+    const client = makeClient({
+      externalPreview: vi.fn().mockResolvedValue({
+        available: true,
+        title: 'Attention Is All You Need',
+        authors: ['Ashish Vaswani'],
+        year: 2017,
+        venue: 'NeurIPS',
+        abstract: null,
+        doi: null,
+        arxiv_id: '1706.03762',
+        sources: ['arxiv'],
+        message: null,
+      }),
+      batchImportCommit: vi.fn().mockResolvedValue({
+        id: 'b1',
+        source_id: null,
+        input_type: 'batch_identifier',
+        status: 'completed',
+        stats: { created: 1, matched: 0, skipped: 0 },
+        created_at: '',
+        started_at: null,
+        finished_at: null,
+      }),
+      importByIdentifier: vi.fn(),
+    });
+    render(ImportPage, { client: client as never });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Identifier' }));
+    await fireEvent.input(screen.getByLabelText('arXiv id or DOI'), {
+      target: { value: '1706.03762' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
+
+    await waitFor(() =>
+      expect(client.externalPreview).toHaveBeenCalledWith({ arxiv: '1706.03762' }),
+    );
+    const title = (await screen.findByLabelText('Title')) as HTMLInputElement;
+    expect(title.value).toBe('Attention Is All You Need');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Commit selected' }));
+    await waitFor(() => expect(client.batchImportCommit).toHaveBeenCalled());
+    const [drafts, options] = (client.batchImportCommit as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(options).toMatchObject({ engine: 'identifier' });
+    expect(drafts[0]).toMatchObject({
+      title: 'Attention Is All You Need',
+      arxiv_id: '1706.03762',
+    });
+    expect(client.importByIdentifier).not.toHaveBeenCalled();
+    // Fully committed → the identifier box is cleared.
+    expect((screen.getByLabelText('arXiv id or DOI') as HTMLInputElement).value).toBe('');
+  });
+
   it('remembers the last selected sub-tab across remounts (session)', async () => {
     const first = render(ImportPage, { client: makeClient() as never });
     await fireEvent.click(screen.getByRole('button', { name: 'Identifier' }));

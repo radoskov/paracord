@@ -269,21 +269,64 @@
     });
   }
 
+  const ARXIV_ID_RE = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/i;
+
   async function importIdentifier(): Promise<void> {
     const value = identifierValue.trim();
     if (!value) return;
     await run(async () => {
-      const isArxiv = /^\d{4}\.\d{4,5}(v\d+)?$|^[a-z-]+\/\d{7}(v\d+)?$/i.test(value);
+      const isArxiv = ARXIV_ID_RE.test(value);
       const result = await client.importByIdentifier(
         isArxiv ? 'arxiv' : 'doi',
         value,
         identifierShelfId || null,
       );
       identifierValue = '';
+      identifierReview?.reset();
       message = result.created
         ? `Imported as ${isArxiv ? 'arXiv' : 'DOI'} (${result.enriched_sources.join(', ') || 'no enrichment'})`
         : 'Already in the library — re-enriched';
     });
+  }
+
+  // Identifier preview-&-choose (UX batch): fetch the metadata WITHOUT creating anything, let the
+  // user revise it in the shared draft table, then commit through the batch commit endpoint.
+  let identifierReview: DraftReview;
+  async function previewIdentifier(): Promise<void> {
+    const value = identifierValue.trim();
+    if (!value) return;
+    await run(async () => {
+      const isArxiv = ARXIV_ID_RE.test(value);
+      const preview = await client.externalPreview(isArxiv ? { arxiv: value } : { doi: value });
+      if (!preview.available) {
+        message = preview.message || 'No metadata found for this identifier.';
+        return;
+      }
+      identifierReview.reset();
+      identifierReview.addDrafts([
+        {
+          line_index: 0,
+          raw_line: value,
+          engine: 'identifier',
+          suggested_title: preview.title,
+          suggested_authors: preview.authors ?? [],
+          suggested_year: preview.year,
+          suggested_doi: preview.doi ?? (isArxiv ? null : value),
+          suggested_venue: preview.venue,
+          suggested_abstract: preview.abstract,
+          match_status: preview.title ? 'matched' : 'title_only',
+          candidates: [],
+          suggested_arxiv_id: preview.arxiv_id ?? (isArxiv ? value : null),
+          suggested_work_type: null,
+          existing_work_id: null,
+        },
+      ]);
+      if (preview.sources.length) message = `Fetched from ${preview.sources.join(', ')}.`;
+    });
+  }
+
+  function onIdentifierCommitted(event: CustomEvent<{ remaining: number }>): void {
+    if (event.detail.remaining === 0) identifierValue = '';
   }
 
   async function importBibtex(): Promise<void> {
@@ -442,15 +485,25 @@
   {#if activeTab === 'identifier'}
   <div class="card narrow-card">
     <h2>Import by identifier</h2>
-    <p class="muted">Fetch metadata for an arXiv id or DOI and create a paper (idempotent).</p>
-    <form on:submit|preventDefault={importIdentifier} class="stack">
+    <p class="muted">
+      Fetch metadata for an arXiv id or DOI. <strong>Preview &amp; choose</strong> shows what was
+      found and lets you revise the record before creating the paper; <strong>Import
+      directly</strong> creates it straight away (idempotent).
+    </p>
+    <form on:submit|preventDefault={previewIdentifier} class="stack">
+      <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
+      <ShelfPicker {client} bind:value={identifierShelfId} label="Add to shelf on direct import (optional)" />
       <div class="row">
-        <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
         <button type="submit" disabled={!identifierValue.trim() || loading}
-          title={identifierValue.trim() ? 'Fetch metadata and create the paper' : 'Enter an arXiv id or DOI first'}>Import</button>
+          title={identifierValue.trim() ? 'Fetch the metadata and review it before creating the paper' : 'Enter an arXiv id or DOI first'}
+          >Preview &amp; choose</button>
+        <button type="button" class="secondary" on:click={importIdentifier}
+          disabled={!identifierValue.trim() || loading}
+          title={identifierValue.trim() ? 'Fetch metadata and create the paper straight away' : 'Enter an arXiv id or DOI first'}
+          >Import directly</button>
       </div>
-      <ShelfPicker {client} bind:value={identifierShelfId} label="Add to shelf (optional)" />
     </form>
+    <DraftReview bind:this={identifierReview} {client} on:committed={onIdentifierCommitted} />
   </div>
   {/if}
 

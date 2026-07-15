@@ -1086,9 +1086,9 @@ export interface IdentifierImportResponse {
   extraction_queued?: boolean;
 }
 
-// Batch citation import (Phase J item 5). "bibtex" drafts come from the BibTeX preview endpoint
-// and commit through the same batch commit.
-export type EngineKind = "lookup" | "grobid" | "bibtex";
+// Batch citation import (Phase J item 5). "bibtex" drafts come from the BibTeX preview endpoint,
+// "identifier" drafts from the external-preview fetch; both commit through the same batch commit.
+export type EngineKind = "lookup" | "grobid" | "bibtex" | "identifier";
 export type BatchMatchStatus = "matched" | "title_only" | "no_match";
 
 export interface DraftCandidate {

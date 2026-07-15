@@ -1349,7 +1349,8 @@
             "enum": [
               "lookup",
               "grobid",
-              "bibtex"
+              "bibtex",
+              "identifier"
             ],
             "title": "Engine",
             "type": "string"
@@ -4537,7 +4538,8 @@
             "enum": [
               "lookup",
               "grobid",
-              "bibtex"
+              "bibtex",
+              "identifier"
             ],
             "title": "Engine",
             "type": "string"

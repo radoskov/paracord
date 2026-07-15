@@ -636,7 +636,7 @@ class DraftCandidateRead(BaseModel):
 class ParsedDraftRead(BaseModel):
     line_index: int
     raw_line: str
-    engine: Literal["lookup", "grobid", "bibtex"]
+    engine: Literal["lookup", "grobid", "bibtex", "identifier"]
     suggested_title: str | None = None
     suggested_authors: list[str] = []
     suggested_year: int | None = None
@@ -672,7 +672,7 @@ class BatchCommitDraft(BaseModel):
 
 class BatchCommitRequest(BaseModel):
     drafts: list[BatchCommitDraft]
-    engine: Literal["lookup", "grobid", "bibtex"] = "lookup"
+    engine: Literal["lookup", "grobid", "bibtex", "identifier"] = "lookup"
     target_shelf_id: uuid.UUID | None = None
     enrich: bool = True
 

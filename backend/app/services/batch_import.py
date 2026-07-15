@@ -48,7 +48,7 @@ from app.workers.queue import enqueue_embedding, enqueue_enrichment
 
 logger = logging.getLogger(__name__)
 
-EngineKind = Literal["lookup", "grobid", "bibtex"]
+EngineKind = Literal["lookup", "grobid", "bibtex", "identifier"]
 MatchStatus = Literal["matched", "title_only", "no_match"]
 
 
