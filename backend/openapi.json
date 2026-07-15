@@ -2101,6 +2101,17 @@
       },
       "CitingPaperRead": {
         "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
           "authors": {
             "anyOf": [
               {
@@ -20368,6 +20379,66 @@
           }
         },
         "summary": "Bulk Apply Best Metadata",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/from-citing/{external_paper_id}": {
+      "post": {
+        "description": "Create a library work from a cached external citing paper (UX batch).\n\nWorks WITHOUT an identifier too — the work is built from the cached title/year/venue/authors\n(\"Create paper\"); when a DOI/arXiv id is present, enrichment fills the rest in the background\n(\"Direct import\"). Idempotent: an already-resolved citing paper returns its existing work.",
+        "operationId": "import_citing_paper_as_work_api_v1_works_from_citing__external_paper_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_paper_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "External Paper Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Citing Paper As Work",
         "tags": [
           "works"
         ]

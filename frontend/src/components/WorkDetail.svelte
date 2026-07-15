@@ -30,7 +30,7 @@
     type SourceProgress,
   } from '../lib/findWebCache';
   import { ensureTags, refreshTags, tags } from '../lib/catalog';
-  import { pendingLibrarySearch } from '../lib/selection';
+  import { pendingImportText, pendingLibrarySearch } from '../lib/selection';
   import { canEdit, canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage, formatBytes } from '../lib/ui';
   import Modal from './Modal.svelte';
@@ -346,13 +346,26 @@
     });
   }
 
-  // Import a citing paper into the library from its DOI (creates a real, idempotent library paper).
-  async function importCiter(doi: string | null): Promise<void> {
-    if (!doi) return;
+  // Import a citing paper into the library (UX batch): works without a DOI too — the backend
+  // creates the paper from the cached title/year/venue/authors and enriches when an identifier
+  // is present.
+  async function importCiter(citerId: string): Promise<void> {
     await run(async () => {
-      const res = await client.importByIdentifier('doi', doi);
-      message = res.created ? `Imported “${doi}” into the library.` : `“${doi}” is already in the library.`;
-    });
+      await client.importCitingPaperAsWork(citerId);
+      citing = await client.getCitingPapers(work.id);
+      onImported();
+    }, 'Citing paper imported into the library');
+  }
+
+  // "Find & Import" (UX batch): prefill the batch-citation search with this entry (incl. the DOI
+  // when present) and jump to the Import tab's Citations sub-tab, so the user reviews candidates
+  // instead of importing blind. Same mechanism as the reference graph's import push.
+  function findAndImport(title: string | null, year: number | null, doi: string | null): void {
+    const base = (title ?? '').trim() || 'Untitled';
+    let line = year != null ? `${base} (${year})` : base;
+    if (doi) line += ` doi:${doi}`;
+    pendingImportText.set(line);
+    window.location.hash = '#import';
   }
 
   let related: RelatedWork[] = [];
@@ -1516,9 +1529,19 @@
                   title={canModify ? 'This is not the same paper' : INSUFFICIENT_ROLE}>Not a match</button>
               {/if}
               {#if !ref.resolved_work_id}
+                <button type="button" class="secondary small"
+                  on:click={() => findAndImport(ref.title ?? ref.raw_citation, ref.year, ref.doi)}
+                  disabled={loading}
+                  title="Open the Import tab with this citation prefilled — search for candidates and review before importing"
+                  >Find &amp; Import</button>
                 <button type="button" class="secondary small" on:click={() => importReference(ref.id)}
                   disabled={loading || !canModify}
-                  title={canModify ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
+                  title={!canModify
+                    ? INSUFFICIENT_ROLE
+                    : ref.doi || ref.arxiv_id
+                      ? 'Create the paper from this reference now (identifier present — metadata can be enriched)'
+                      : 'Create a paper record from the reference’s title/year/authors (no identifier available)'}
+                  >{ref.doi || ref.arxiv_id ? 'Direct import' : 'Create paper'}</button>
               {/if}
             </div>
             {#if refActionError?.id === ref.id}
@@ -1562,12 +1585,21 @@
                   on:click={() => onSelectWork(c.resolved_work_id)}
                   title="This citing paper is already in the library — open it">in library</button>{/if}
             </small>
-            {#if c.doi && !c.resolved_work_id}
+            {#if !c.resolved_work_id}
               <div class="ref-actions">
-                <button type="button" class="secondary small" on:click={() => importCiter(c.doi)}
+                <button type="button" class="secondary small"
+                  on:click={() => findAndImport(c.title, c.year, c.doi)}
+                  disabled={loading}
+                  title="Open the Import tab with this citation prefilled — search for candidates and review before importing"
+                  >Find &amp; Import</button>
+                <button type="button" class="secondary small" on:click={() => importCiter(c.id)}
                   disabled={loading || !canModify}
-                  title={canModify ? 'Create a library paper from this citing paper' : INSUFFICIENT_ROLE}
-                  >Import</button>
+                  title={!canModify
+                    ? INSUFFICIENT_ROLE
+                    : c.doi || c.arxiv_id
+                      ? 'Create the paper from its identifier now (metadata is enriched in the background)'
+                      : 'Create a paper record from the cached title/year/venue/authors (no identifier available)'}
+                  >{c.doi || c.arxiv_id ? 'Direct import' : 'Create paper'}</button>
               </div>
             {/if}
           </li>

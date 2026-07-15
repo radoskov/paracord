@@ -1065,6 +1065,7 @@ export interface CitingPaper {
   authors: string | null;
   year: number | null;
   doi: string | null;
+  arxiv_id: string | null;
   venue: string | null;
   // The library work this citing paper IS, when the local matcher recognizes it.
   resolved_work_id: string | null;
@@ -1595,6 +1596,12 @@ export class ApiClient {
 
   async importReferenceAsWork(referenceId: string): Promise<Work> {
     return this.request<Work>(`/api/v1/works/from-reference/${referenceId}`, {
+      method: "POST",
+    });
+  }
+
+  async importCitingPaperAsWork(externalPaperId: string): Promise<Work> {
+    return this.request<Work>(`/api/v1/works/from-citing/${externalPaperId}`, {
       method: "POST",
     });
   }

@@ -777,6 +777,72 @@ def import_reference_as_work(
     return work
 
 
+@router.post(
+    "/from-citing/{external_paper_id}",
+    response_model=WorkRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def import_citing_paper_as_work(
+    external_paper_id: uuid.UUID, db: Session = DB_DEP, actor: User = CONTRIBUTOR_DEP
+) -> Work:
+    """Create a library work from a cached external citing paper (UX batch).
+
+    Works WITHOUT an identifier too — the work is built from the cached title/year/venue/authors
+    ("Create paper"); when a DOI/arXiv id is present, enrichment fills the rest in the background
+    ("Direct import"). Idempotent: an already-resolved citing paper returns its existing work.
+    """
+    from app.models.external_citation import ExternalPaper
+    from app.services.default_shelf import place_on_default_if_loose
+
+    external = db.get(ExternalPaper, external_paper_id)
+    if external is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Citing paper not found")
+    if external.resolved_work_id is not None:
+        existing = db.get(Work, external.resolved_work_id)
+        if existing is not None:
+            return existing
+    title = external.title or "Imported citing paper"
+    doi = normalize_doi(external.doi) if external.doi else None
+    work = Work(
+        canonical_title=title,
+        normalized_title=normalize_title(title),
+        doi=doi,
+        arxiv_id=external.arxiv_id,
+        year=external.year,
+        venue=external.venue,
+        canonical_metadata_source="citing",
+        created_by_user_id=actor.id,
+    )
+    db.add(work)
+    db.flush()
+    if external.authors:
+        db.add(
+            MetadataAssertion(
+                entity_type="work",
+                entity_id=work.id,
+                field_name="authors",
+                value=external.authors,
+                source="citing",
+                confidence=1.0,
+                selected_as_canonical=True,
+            )
+        )
+    external.resolved_work_id = work.id
+    # No free-floating papers (#1) + reverse-rescan (batch 12): the new paper may be what other
+    # external references/citers point at.
+    place_on_default_if_loose(db, work.id, actor_id=actor.id)
+    rescan_references_for_new_work(
+        db, work, fuzzy_as_confirmed=effective_use_fuzzy_match_as_confirmed(db)
+    )
+    rescan_external_papers_for_new_work(db, work)
+    db.commit()
+    db.refresh(work)
+    enqueue_embedding(work.id)
+    if doi or external.arxiv_id:
+        enqueue_enrichment(work.id)
+    return work
+
+
 @router.post("", response_model=WorkRead, status_code=status.HTTP_201_CREATED)
 def create_work(
     payload: WorkCreate,
@@ -1635,6 +1701,7 @@ class CitingPaperRead(BaseModel):
     authors: str | None = None
     year: int | None = None
     doi: str | None = None
+    arxiv_id: str | None = None
     venue: str | None = None
     # The library work this citing paper IS, when the local matcher recognizes it (in-library citer).
     resolved_work_id: uuid.UUID | None = None

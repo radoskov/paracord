@@ -443,3 +443,38 @@ def test_fetch_endpoint_respects_admin_cap(client, auth_headers, db, monkeypatch
     monkeypatch.setattr(cp, "fetch_citing_papers", fake_fetch)
     client.post(f"/api/v1/works/{work.id}/citing-papers/fetch", headers=auth_headers("owner"))
     assert captured["limit"] == 7
+
+
+def test_import_citing_paper_without_identifier_creates_work(client, auth_headers, db):
+    """UX batch: /works/from-citing works from cached title/year/venue/authors alone (no DOI)."""
+    base = _work(db, doi="10.1/base")
+    cp.store_citing_papers(
+        db,
+        work=base,
+        papers=[
+            cp.CitingPaper(
+                source="openalex",
+                title="Identifierless Citer",
+                year=2024,
+                venue="Some Venue",
+                authors=["Jane Roe", "John Doe"],
+            )
+        ],
+        source="openalex",
+    )
+    db.commit()
+    external = db.scalar(select(ExternalPaper).where(ExternalPaper.title == "Identifierless Citer"))
+    assert external is not None and external.doi is None
+
+    resp = client.post(f"/api/v1/works/from-citing/{external.id}", headers=auth_headers("owner"))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["canonical_title"] == "Identifierless Citer"
+    assert body["year"] == 2024
+    assert body["venue"] == "Some Venue"
+    db.expire_all()
+    assert str(external.resolved_work_id) == body["id"]
+
+    # Idempotent: a second import returns the same work instead of duplicating.
+    again = client.post(f"/api/v1/works/from-citing/{external.id}", headers=auth_headers("owner"))
+    assert again.json()["id"] == body["id"]
