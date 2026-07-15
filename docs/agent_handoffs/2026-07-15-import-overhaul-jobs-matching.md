@@ -46,3 +46,42 @@ two-level fuzzy-match acceptance + dead "Confirm match" button; two-column admin
   Outdated-Optimize-Dep gotcha). `backend/openapi.json` regenerated. No new migrations.
 - Verified: fast backend tier 889 passed; frontend 293 passed + build; targeted suites for queue,
   chunking, reference matching, citation summary, bibtex/batch import.
+
+---
+
+# Addendum — same day, batch 2 (acceptance policy, unified imports, previews, summary columns)
+
+| Commit | Area |
+| --- | --- |
+| `dfd397b` | DraftReview badge tooltips (what "matched" means + what commit does) |
+| `6b6ac76` | Find & Import + Direct import/Create paper for refs AND citing papers; `POST /works/from-citing/{id}` (works without DOI, enriches when identifier present, sets `resolved_work_id`, default-shelf placement) |
+| `3c1920b` | Panel-header badges (likely / in library / external) on References + Citing papers |
+| `87b1811` | Identifier import Preview & choose (reuses `/citations/external-preview` + DraftReview; commit `engine="identifier"`) |
+| `0911bb0` | Two-level acceptance policy — see below |
+| `43691e9` | Citation summary: admin cap (default 100) + scrollable columns with to-top |
+
+## Acceptance policy (migration 0070)
+
+- yaml (`reference_matching`): `auto_accept_threshold` (now the DEFAULT for the admin threshold,
+  90), `min_auto_accept_threshold` (floor, 90, yaml-only), `high_confidence_threshold` (100,
+  yaml-only, shown read-only in Admin).
+- AppConfig columns: `fuzzy_accept_threshold` (NULL → yaml default; clamped to floor on read,
+  validated on write), `use_high_confidence_auto_accept` (NULL → True). The existing
+  `use_fuzzy_match_as_confirmed` column now backs the "Use fuzzy auto-accept" checkbox.
+- `AcceptPolicy` dataclass lives in `reference_matching.py`; `effective_accept_policy(db)` in
+  `app_config.py`. `resolve_and_persist`/`run_matching_for_references`/
+  `rescan_references_for_new_work` accept `accept_policy=`; the legacy `fuzzy_as_confirmed` bool
+  still works (falls back to legacy-toggle + default high-confidence) for tests/back-compat.
+- Defaults preserve batch-1 behaviour: fuzzy auto-accept OFF, high-confidence ON at 100.
+
+## Notes
+
+- Live DB migrated to **0071** via `docker compose exec api alembic -c backend/alembic.ini upgrade
+  head` (exec, not run — the api hot-reloads code but never re-runs its migrate-on-start
+  entrypoint, so model changes MUST be followed by a manual upgrade or the running API breaks).
+- `citation_summary_item_cap` default is 100 (deliberately > the old 15) — the UI folds columns
+  into ~15-item scroll windows (`.col-scroll`, `max-height: 26rem`), so "show everything" doesn't
+  clutter the page. The `/citations/summary` `limit` param is now optional (admin cap when
+  omitted, `le=500`).
+- `CitingPaperRead`/`CitingPaper` now expose `arxiv_id`.
+- Worker + frontend restarted after the batch; `.vite` cache cleared (504 gotcha).

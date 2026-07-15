@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 2: acceptance policy, unified imports, previews, summary columns (2026-07-15)
+
+- `0911bb0` — two-level fuzzy-match acceptance (migration 0070): admin checkbox "Use fuzzy
+  auto-accept" + editable threshold (default from yaml `reference_matching.auto_accept_threshold`,
+  now 90; floored by yaml-only `min_auto_accept_threshold` 90) and "Use high-confidence
+  auto-accept" checkbox (threshold yaml-only `high_confidence_threshold` 100, shown read-only,
+  implied/disabled while fuzzy auto-accept is on). New `AcceptPolicy` +
+  `effective_accept_policy(db)` replace the bare `fuzzy_as_confirmed` bool at every call site;
+  changing any acceptance setting enqueues a library-wide rescan.
+- `6b6ac76` — unified external-entry imports: references AND citing papers get "Find & Import"
+  (prefills Batch import citations incl. DOI, jumps to Import → Citations) plus "Direct import"
+  (identifier present) / "Create paper" (title-only — new `POST /works/from-citing/{id}` creates
+  from cached metadata, so DOI-less citing papers are importable at last).
+- `3c1920b` — References/Citing panel headers carry "N likely matches / N in library / N external"
+  badges so needed input is visible without expanding.
+- `87b1811` — Identifier import gained Preview & choose (existing `/citations/external-preview`
+  fetch → shared DraftReview → batch commit `engine="identifier"`); direct import unchanged.
+- `dfd397b` — DraftReview badges (matched / title only / no match) explain themselves + the commit
+  outcome in tooltips.
+- `43691e9` — citation summary (migration 0071): per-column item cap is admin-editable
+  (`citation_summary_item_cap`, default 100 — was a fixed 15 that hid entries); columns fold into
+  ~15-item scrollable windows with a per-column "↑ To top" reset.
+- Live DB migrated to 0071; worker + frontend dev server restarted; fast tier 894 passed,
+  frontend suite + build green, migration parity green.
+
 ## UX batch: import sub-tabs, resilient citation import, jobs history, matching (2026-07-15)
 
 - `9744046` — Import page split into sub-tabs (PDF import / Citations / Identifier / Folder
