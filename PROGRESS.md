@@ -9,6 +9,24 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 3 follow-ups: smarter downloads, Elsevier API, graph zoom/sliders (2026-07-15)
+
+- `0e139c3` — embedded-JSON PDF sniffing (layer 4 of `pdf_link_finder`): script-blob URL scan +
+  ScienceDirect `pdfft?md5&pid` reconstruction from `urlMetadata`; **Elsevier Article Retrieval
+  API fetcher** for 10.1016 DOIs (write-only key in Admin → Find-on-web; yaml/env fallback
+  `web_find.elsevier_api_key` / `PARACORD_ELSEVIER_API_KEY`; `api.elsevier.com` allowlisted).
+  Migration 0072.
+- `60cfd6c` — Elsevier API gating (migration 0073): master enable switch (key can stay stored
+  while disabled) + per-user allowance (`users.elsevier_api_allowed`, OFF by default, toggled in
+  Admin → Users; `POST /admin/users/{id}/elsevier-api`). The key is used only when key ∧ master
+  switch ∧ per-user allowance all hold.
+- `72515eb` — reference graph: edge-snapped cursor zoom (wheel near a plot edge pins the zoom
+  window to that data edge — no more zoom-drag-zoom toward the bottom lanes); Visualizations:
+  manual X/Y min/max inputs replaced by native two-handle range sliders (auto-ranging; end-stop =
+  auto) on the temporal map + embedding cluster, plus Show all / Reset view buttons.
+- Live DB migrated to **0073**; web-find suite 141 passed; frontend build + AdminPage tests green;
+  frontend dev server restarted (vite cache cleared).
+
 ## UX batch 3: zen reader, graph UX, ref metadata, badges (2026-07-15)
 
 - `5eb79a8` — **landing-page PDF discovery** (item 4, after owner clarification: manual triggers
