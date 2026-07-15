@@ -164,7 +164,7 @@ def _lookup_one_line(
 
 def _preview_lookup(lines: list[str], *, settings: Settings, fetchers: dict | None) -> BatchPreview:
     threshold = float(getattr(settings, "web_find_batch_match_threshold", 0.6))
-    total_budget = float(getattr(settings, "web_find_total_budget", 25.0))
+    total_budget = float(getattr(settings, "web_find_total_budget", 120.0))
     drafts: list[ParsedDraft] = []
     degraded = False
     start = time.monotonic()

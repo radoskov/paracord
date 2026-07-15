@@ -114,4 +114,50 @@ describe('BatchImport', () => {
     expect(client.batchImportCommit).not.toHaveBeenCalled();
     expect(screen.getByText(/Select at least one paper/i)).toBeTruthy();
   });
+
+  it('looks lines up in chunks so the preview fills in progressively', async () => {
+    const client = mockClient();
+    const draft = previewResponse().drafts[0];
+    client.batchImportPreview = vi.fn().mockImplementation((chunk: string[]) =>
+      Promise.resolve({
+        drafts: chunk.map((line, i) => ({ ...draft, line_index: i, raw_line: line })),
+        degraded: false,
+        grobid_unavailable: false,
+      }),
+    );
+    render(BatchImport, { client: client as never });
+
+    const five = ['l1', 'l2', 'l3', 'l4', 'l5'].join('\n');
+    await fireEvent.input(screen.getByLabelText(/Citations, one per line/i), {
+      target: { value: five },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /^Preview$/i }));
+
+    await waitFor(() => expect(client.batchImportPreview).toHaveBeenCalledTimes(2));
+    expect(client.batchImportPreview).toHaveBeenNthCalledWith(1, ['l1', 'l2', 'l3', 'l4'], 'lookup');
+    expect(client.batchImportPreview).toHaveBeenNthCalledWith(2, ['l5'], 'lookup');
+    await waitFor(() => expect(screen.getAllByLabelText('Title')).toHaveLength(5));
+  });
+
+  it('keeps a failed chunk as editable title-only rows instead of failing the batch', async () => {
+    const client = mockClient();
+    client.batchImportPreview = vi
+      .fn()
+      .mockResolvedValueOnce(previewResponse())
+      .mockRejectedValueOnce(new Error('lookup timed out'));
+    render(BatchImport, { client: client as never });
+
+    const five = ['l1', 'l2', 'l3', 'l4', 'l5'].join('\n');
+    await fireEvent.input(screen.getByLabelText(/Citations, one per line/i), {
+      target: { value: five },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: /^Preview$/i }));
+
+    await waitFor(() => expect(client.batchImportPreview).toHaveBeenCalledTimes(2));
+    // 1 draft from the first chunk + the failed chunk's line as a title-only fallback row.
+    await waitFor(() => expect(screen.getAllByLabelText('Title')).toHaveLength(2));
+    expect(screen.getByText(/1 line\(s\) failed to look up/)).toBeTruthy();
+    const fallbackTitle = screen.getAllByLabelText('Title')[1] as HTMLInputElement;
+    expect(fallbackTitle.value).toBe('l5');
+  });
 });

@@ -56,7 +56,7 @@ web_find:
   unpaywall_email: null        # null → falls back to metadata_enrichment.crossref_mailto
   max_candidates: 10
   per_source_timeout: 8.0      # seconds per source before it is flagged "degraded"
-  total_budget: 25.0           # seconds wall-clock for the whole search
+  total_budget: 120.0          # seconds wall-clock for the whole search (backstop; the batch UI paces itself)
   download_timeout: 60.0       # seconds per PDF download
   max_download_bytes: 104857600  # 100 MB hard cap; oversized downloads are refused
 

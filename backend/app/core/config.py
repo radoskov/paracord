@@ -228,7 +228,10 @@ class Settings(BaseSettings):
     web_find_unpaywall_email: str | None = None
     web_find_max_candidates: int = 10
     web_find_per_source_timeout: float = 8.0
-    web_find_total_budget: float = 25.0
+    # Wall-clock cap for one lookup request (find-on-web fan-out / batch preview). Generous on
+    # purpose: the batch UI sends small line-chunks and offers its own Cancel, so this is a
+    # backstop against a stuck fan-out, not the pacing mechanism.
+    web_find_total_budget: float = 120.0
     web_find_download_timeout: float = 60.0
     web_find_max_download_bytes: int = 100 * 1024 * 1024  # 100 MB
     # find-on-web v2.1: resolve each RETURNED candidate's View/redirect target to its final host

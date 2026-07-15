@@ -47,6 +47,17 @@
   let message = '';
   let lastBatch: ImportBatch | null = null;
 
+  // Chunked lookup (UX batch): lines are looked up a few at a time so the preview fills in
+  // progressively, a failed/timed-out chunk degrades to title-only rows instead of sinking the
+  // whole batch, and the search can be cancelled between chunks. Already-found rows can be
+  // committed while the search keeps running (gradual import).
+  const LOOKUP_CHUNK = 4;
+  let searching = false;
+  let cancelRequested = false;
+  let progressDone = 0;
+  let progressTotal = 0;
+  let failedLines = 0;
+
   // Non-empty, trimmed input lines. Declared reactively (not as a plain function) so the
   // `disabled` binding below re-evaluates when `text` changes — a template expression only
   // tracks variables it references directly, never ones read inside a called function.
@@ -80,20 +91,60 @@
     rows = rows; // trigger reactivity
   }
 
+  function fallbackDraft(line: string, index: number): ParsedDraft {
+    return {
+      line_index: index,
+      raw_line: line,
+      engine,
+      suggested_title: line,
+      suggested_authors: [],
+      suggested_year: null,
+      suggested_doi: null,
+      suggested_venue: null,
+      suggested_abstract: null,
+      match_status: 'title_only',
+      candidates: [],
+    };
+  }
+
   async function preview(): Promise<void> {
-    if (!lines.length) return;
-    loading = true;
+    if (!lines.length || searching || loading) return;
+    const all = lines;
+    searching = true;
+    cancelRequested = false;
     message = '';
     lastBatch = null;
+    rows = [];
+    degraded = false;
+    grobidUnavailable = false;
+    failedLines = 0;
+    progressDone = 0;
+    progressTotal = all.length;
     try {
-      const result = await client.batchImportPreview(lines, engine);
-      rows = result.drafts.map(rowFromDraft);
-      degraded = result.degraded;
-      grobidUnavailable = result.grobid_unavailable;
-    } catch (error) {
-      message = errorMessage(error);
+      for (let offset = 0; offset < all.length; offset += LOOKUP_CHUNK) {
+        if (cancelRequested) {
+          message = `Search cancelled — ${all.length - offset} line(s) were not looked up.`;
+          break;
+        }
+        const chunk = all.slice(offset, offset + LOOKUP_CHUNK);
+        try {
+          const result = await client.batchImportPreview(chunk, engine);
+          // Remap the per-request indices to global ones so row keys stay unique across chunks.
+          rows = [
+            ...rows,
+            ...result.drafts.map((d) => rowFromDraft({ ...d, line_index: offset + d.line_index })),
+          ];
+          degraded = degraded || result.degraded;
+          grobidUnavailable = grobidUnavailable || result.grobid_unavailable;
+        } catch {
+          // One failed chunk must not sink the batch — keep its lines editable as title-only.
+          failedLines += chunk.length;
+          rows = [...rows, ...chunk.map((line, i) => rowFromDraft(fallbackDraft(line, offset + i)))];
+        }
+        progressDone = Math.min(offset + chunk.length, all.length);
+      }
     } finally {
-      loading = false;
+      searching = false;
     }
   }
 
@@ -127,8 +178,14 @@
       message = `Committed: ${s.created ?? 0} created, ${s.matched ?? 0} matched, ${s.skipped ?? 0} skipped${
         s.added_to_shelf ? `, ${s.added_to_shelf} added to shelf` : ''
       }.`;
-      rows = [];
-      text = '';
+      if (searching) {
+        // Gradual import: drop only the committed rows; the ongoing search keeps appending.
+        const committed = new Set(selected.map((r) => r.draft.line_index));
+        rows = rows.filter((r) => !committed.has(r.draft.line_index));
+      } else {
+        rows = [];
+        text = '';
+      }
     } catch (error) {
       message = errorMessage(error);
     } finally {
@@ -164,12 +221,28 @@
       <label><input type="radio" bind:group={engine} value="lookup" /> Lookup</label>
       <label><input type="radio" bind:group={engine} value="grobid" /> GROBID</label>
     </fieldset>
-    <button type="button" on:click={preview} disabled={loading || !lines.length}>
+    <button type="button" on:click={preview} disabled={loading || searching || !lines.length}>
       Preview
     </button>
   </div>
 
+  {#if searching}
+    <div class="progress-row">
+      <progress value={progressDone} max={progressTotal}></progress>
+      <span class="progress-text">Looked up {progressDone} of {progressTotal} line(s)…</span>
+      <button type="button" class="secondary" on:click={() => (cancelRequested = true)}
+        disabled={cancelRequested}
+        title="Stop after the current chunk; already-found entries stay reviewable"
+        >{cancelRequested ? 'Cancelling…' : 'Cancel search'}</button>
+    </div>
+  {/if}
+
   {#if message}<p class="msg">{message}</p>{/if}
+  {#if failedLines}
+    <p class="banner warn">
+      {failedLines} line(s) failed to look up (kept as title-only — edit or commit them anyway).
+    </p>
+  {/if}
   {#if degraded}
     <p class="banner warn">Some lines were skipped for the time budget and left as title-only.</p>
   {/if}
@@ -235,7 +308,11 @@
       <label class="enrich">
         <input type="checkbox" bind:checked={enrich} /> Enrich new papers (DOI metadata)
       </label>
-      <button type="button" on:click={commit} disabled={loading}>Commit selected</button>
+      <button type="button" on:click={commit} disabled={loading}
+        title={searching
+          ? 'Import the checked entries found so far; the search keeps running'
+          : 'Import the checked entries'}
+        >{searching ? 'Commit selected now' : 'Commit selected'}</button>
     </div>
   {/if}
 </div>
@@ -372,6 +449,23 @@
     gap: 0.3rem;
     align-items: center;
     font-size: 0.85rem;
+  }
+
+  .progress-row {
+    align-items: center;
+    display: flex;
+    gap: 0.6rem;
+  }
+
+  .progress-row progress {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .progress-text {
+    color: var(--ink-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
   }
 
   .banner {

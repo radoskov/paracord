@@ -837,7 +837,7 @@ def iter_find_candidates(
     unpaywall_email = getattr(settings, "web_find_unpaywall_email", None) or mailto
     max_candidates = int(getattr(settings, "web_find_max_candidates", 10))
     per_source_timeout = float(getattr(settings, "web_find_per_source_timeout", 8.0))
-    total_budget = float(getattr(settings, "web_find_total_budget", 25.0))
+    total_budget = float(getattr(settings, "web_find_total_budget", 120.0))
 
     fetchers = fetchers or {}
     registry = {
