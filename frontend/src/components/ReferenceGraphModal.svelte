@@ -139,6 +139,46 @@
     );
   }
 
+  // Edge-snapped cursor zoom (UX batch 3): when a wheel-zoom happens with the cursor in the
+  // outer ~15% of the chart, pin the zoom window to that data edge. Fixes the zoom-drag-zoom
+  // dance toward the bottom lanes (citing papers / "no year" items): put the cursor near the
+  // bottom and the vertical window stays glued to the lowest nodes while the horizontal zoom
+  // remains cursor-anchored. One corrective dispatch per wheel tick — no rendering overhead.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function wireEdgeSnapZoom(chart: any): void {
+    const dom = chart.getDom?.();
+    if (!dom) return;
+    const EDGE = 0.15;
+    dom.addEventListener(
+      'wheel',
+      (ev: WheelEvent) => {
+        requestAnimationFrame(() => {
+          const rect = dom.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          const xFrac = (ev.clientX - rect.left) / rect.width;
+          const yFrac = (ev.clientY - rect.top) / rect.height;
+          const dzs = (chart.getOption()?.dataZoom ?? []) as { start?: number; end?: number }[];
+          const snap = (idx: number, toStart: boolean): void => {
+            const z = dzs[idx];
+            if (!z) return;
+            const span = (z.end ?? 100) - (z.start ?? 0);
+            if (span >= 99.5) return; // fully zoomed out — nothing to pin
+            chart.dispatchAction(
+              toStart
+                ? { type: 'dataZoom', dataZoomIndex: idx, start: 0, end: span }
+                : { type: 'dataZoom', dataZoomIndex: idx, start: 100 - span, end: 100 },
+            );
+          };
+          if (xFrac < EDGE) snap(0, true);
+          else if (xFrac > 1 - EDGE) snap(0, false);
+          if (yFrac > 1 - EDGE) snap(1, true); // screen bottom = low axis values
+          else if (yFrac < EDGE) snap(1, false);
+        });
+      },
+      { passive: true },
+    );
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function wireEvents(chart: any): void {
     chart.on('click', (params: { data?: { node?: ReferenceGraphNode } }) => {
@@ -149,6 +189,7 @@
     chart.getDom()?.addEventListener('click', onContainerClick);
     // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
     enableLegendSolo(chart);
+    wireEdgeSnapZoom(chart);
   }
 
   // Y-axis / colour changes are pure client-side restyles — bump the revision, no refetch.

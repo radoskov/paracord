@@ -285,6 +285,10 @@ export const temporalMapRenderer: VizRenderer = {
       dataZoom: [
         { type: "inside", xAxisIndex: 0 },
         { type: "inside", yAxisIndex: 0 },
+        // Two-handle range bars (UX batch 3): drag either end to clamp min/max independently
+        // (replaces the old manual min/max inputs); handles at the end stops = auto.
+        { type: "slider", xAxisIndex: 0, height: 16, bottom: 4 },
+        { type: "slider", yAxisIndex: 0, width: 16, right: 4 },
       ],
       series,
     };

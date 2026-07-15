@@ -86,16 +86,28 @@
     { key: 'keyword_similarity_to_focus', label: 'Keyword similarity to focus' }, // 5b
   ];
 
-  // 5f: optional manual axis view-range (min/max) overriding ECharts auto-range. Empty = auto. A
-  // corrupt outlier (e.g. year 2695) no longer stretches the whole plot once a max is set.
-  let xMin = '';
-  let xMax = '';
-  let yMin = '';
-  let yMax = '';
-  const _num = (s: string): number | undefined => {
-    const n = Number(s);
-    return s.trim() !== '' && Number.isFinite(n) ? n : undefined;
-  };
+  // 5f → UX batch 3: the manual axis-range inputs were replaced by two-handle slider dataZoom
+  // bars built into the scatter renderers (temporalMap / embeddingCluster).
+
+  // Standard graph buttons (UX batch 3). "Show all": reset every dataZoom window to full range
+  // (keeps other state). "Reset view": full notMerge repaint — resets sliders, roam (co-citation)
+  // and legend selection alike.
+  let vizHost: ChartHost | null = null;
+  function vizShowAll(): void {
+    const chart = vizHost?.getChart();
+    if (!chart) return;
+    const count = ((chart.getOption()?.dataZoom ?? []) as unknown[]).length;
+    if (!count) {
+      chartRevision += 1; // roam-based view (co-citation): repaint resets the view
+      return;
+    }
+    for (let i = 0; i < count; i += 1) {
+      chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: i, start: 0, end: 100 });
+    }
+  }
+  function vizResetView(): void {
+    chartRevision += 1;
+  }
 
   // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
   // the axis / color / edge controls do not apply — only the size encoding and node cap do.
@@ -172,14 +184,6 @@
     const renderer = getRenderer(payload.view_type);
     if (!renderer) throw new Error("no renderer");
     chart.setOption(renderer.buildOption(payload, $activeVizTheme), true);
-    // 5f: apply the manual axis view-range on top of the built option (temporal map only — the
-    // scatter view with value axes). A merge setOption keeps everything else; `null` = auto.
-    if (isTemporal) {
-      chart.setOption({
-        xAxis: { min: _num(xMin) ?? null, max: _num(xMax) ?? null },
-        yAxis: { min: _num(yMin) ?? null, max: _num(yMax) ?? null },
-      });
-    }
     chart.off('click');
     chart.on('click', (params: { data?: { name?: string } }) => {
       if (params.data?.name) openPaper(params.data.name);
@@ -282,19 +286,8 @@
             {#each axisOptions as opt (opt.key)}<option value={opt.key}>{opt.label}</option>{/each}
           </select>
         </label>
-        <!-- 5f: manual view-range so a bad outlier (e.g. year 2695) can't stretch the plot. Empty = auto. -->
-        <label class="range">X range
-          <input type="number" bind:value={xMin} on:change={() => void render()} placeholder="min"
-            data-testid="viz-x-min" title="Minimum X shown (blank = auto)" />
-          <input type="number" bind:value={xMax} on:change={() => void render()} placeholder="max"
-            data-testid="viz-x-max" title="Maximum X shown (blank = auto)" />
-        </label>
-        <label class="range">Y range
-          <input type="number" bind:value={yMin} on:change={() => void render()} placeholder="min"
-            data-testid="viz-y-min" title="Minimum Y shown (blank = auto)" />
-          <input type="number" bind:value={yMax} on:change={() => void render()} placeholder="max"
-            data-testid="viz-y-max" title="Maximum Y shown (blank = auto)" />
-        </label>
+        <!-- 5f → UX batch 3: the manual min/max inputs were replaced by the chart's two-handle
+             range sliders (X below, Y beside the plot); handles at the end stops = auto. -->
       {:else if isCluster}
         <label>Layout
           <select bind:value={clusterLayout} on:change={reloadIfLoaded} data-testid="viz-cluster-layout"
@@ -368,6 +361,16 @@
       <button type="button" on:click={load} disabled={busy || !scopeReady} data-testid="viz-build">
         {payload ? 'Refresh' : 'Build'}
       </button>
+      {#if payload}
+      <button type="button" class="secondary" on:click={vizShowAll}
+        title="Reset the zoom windows so everything is visible (keeps filters)">
+        Show all
+      </button>
+      <button type="button" class="secondary" on:click={vizResetView}
+        title="Repaint the chart from scratch: zoom, pan and legend selection all reset">
+        Reset view
+      </button>
+      {/if}
     </div>
 
   </div>
@@ -414,7 +417,7 @@
         <p class="empty">No papers to plot in this scope.</p>
       {:else}
         <div class="chart" data-testid="viz-chart">
-          <ChartHost render={renderChart} onReady={wireEvents} revision={chartRevision} {visible}
+          <ChartHost bind:this={vizHost} render={renderChart} onReady={wireEvents} revision={chartRevision} {visible}
             height="100%" ariaLabel="Visualization chart">
             <svelte:fragment slot="fallback">Interactive chart unavailable in this environment.</svelte:fragment>
           </ChartHost>
