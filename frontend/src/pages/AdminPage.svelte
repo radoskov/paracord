@@ -1288,6 +1288,7 @@
 
   <!-- Find-on-web allowed download hosts (owner+admin; batch 2 #5) -->
   {#if activeAdminTab === 'findweb' && $canManageUsers}
+  <div class="admin-masonry">
     <section class="surface admin-section allowed-hosts">
       <h2>Find-on-web allowed hosts</h2>
       <p class="muted">
@@ -1339,10 +1340,9 @@
       </form>
       <p class="hintline">A bare host (e.g. <code>example.org</code>) also covers its subdomains; use the <code>*.example.org</code> form to allow subdomains only.</p>
     </section>
-  {/if}
 
   <!-- Find-on-web download policy (owner-only; find-on-web v2). -->
-  {#if activeAdminTab === 'findweb' && $isOwner}
+  {#if $isOwner}
     <section class="surface admin-section download-policy">
       <h2>Find-on-web download policy</h2>
       <p class="muted">
@@ -1374,6 +1374,8 @@
         {/each}
       </fieldset>
     </section>
+  {/if}
+  </div>
   {/if}
 
   <!-- Access-control groups (admin-or-owner; Phase H) -->
@@ -1656,6 +1658,7 @@
 {/if}
 
 {#if activeAdminTab === 'backup'}
+  <div class="admin-masonry">
     <section class="surface admin-section">
       <div class="section-head"><h2>Backup</h2></div>
       <p class="small-help">
@@ -1755,6 +1758,7 @@
         </div>
       </section>
     {/if}
+  </div>
   {/if}
 
   {#if activeAdminTab === 'refdupes'}
@@ -1812,7 +1816,7 @@
   {/if}
 
   {#if activeAdminTab === 'settings' && $canManageUsers}
-  <div class="admin-columns">
+  <div class="admin-masonry">
     <section class="surface admin-section">
       <div class="section-head">
         <h2>Library</h2>
@@ -2012,6 +2016,25 @@
   @media (max-width: 900px) {
     .admin-columns {
       grid-template-columns: 1fr;
+    }
+  }
+
+  /* Two packed columns without grid-row holes (UX batch): panels of very different heights
+     (Settings, Find-on-web, Backup) flow top-to-bottom instead of leaving empty space beside a
+     tall neighbour. */
+  .admin-masonry {
+    columns: 2;
+    column-gap: 1rem;
+  }
+
+  .admin-masonry > .admin-section {
+    break-inside: avoid;
+    margin-bottom: 1rem;
+  }
+
+  @media (max-width: 900px) {
+    .admin-masonry {
+      columns: 1;
     }
   }
 
