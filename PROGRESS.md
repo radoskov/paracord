@@ -9,6 +9,25 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 4b: short/detailed summaries, download messaging, job progress (2026-07-16)
+
+- `3e72148` — find-on-web: a policy refusal now carries an actionable hint (names the allowing
+  policy / Admin → Find-on-web; never suggests a denylisted host) and lists the tried URLs, shown
+  as clickable links in the paper view. Root cause of the owner's Springer failure was the
+  `restricted` download policy, not a bug (probed live: works under `careful`). Headless-browser
+  discussion in `docs/WORKPLAN_2026-07-16_ai-insights-downloads.md`.
+- `66d2f78` (earlier) — browser-compatible fetch headers (publisher CDNs 403 bare bot UAs).
+- `7ed10e9` — per-paper **detailed** summaries: whole body (no 12k clip) chunked into section
+  paragraphs + a synthesized intro, stored as `{type}_detailed` so short + detailed coexist;
+  scope `paper_detail`/`regenerate_papers` passthrough.
+- `085caf5` — paper view Summaries panel shows Short + Detailed separately, each with its own
+  Regenerate (the top-actions Summarize button moved here); Insights scope-summary dropdown
+  (use/create · regen × short/detailed) chooses which per-paper summary feeds the synthesis and
+  whether to reuse or regenerate; scope output rendered as formatted sections (bold headings +
+  bullet lists) instead of one run-on block.
+- `21a5dc2` — long scope-summary jobs report progress (N/M papers) and can be **Stopped**
+  cooperatively from the Jobs tab (per-paper summaries already made are kept).
+
 ## UX batch 4: scope-summary overhaul, topics UX, insights graphs (2026-07-15)
 
 - `0c32ea6` — **scope summaries are now map-reduce** (`local-llm-v2-map-reduce`): per-paper LLM
