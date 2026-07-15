@@ -26,6 +26,7 @@ Pure functions (no network, no DB) so they are unit-testable; the caller does al
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from html.parser import HTMLParser
@@ -84,9 +85,12 @@ def publisher_pdf_urls(url: str) -> list[str]:
         _add(url.split("?")[0].rstrip("/") + ".pdf")
     if host.endswith("openreview.net") and "/forum" in path:
         _add(url.replace("/forum", "/pdf", 1))
-    if host.endswith("biorxiv.org") or host.endswith("medrxiv.org"):
-        if "/content/" in path and not path.endswith(".full.pdf"):
-            _add(url.split("?")[0].rstrip("/") + ".full.pdf")
+    if (
+        (host.endswith("biorxiv.org") or host.endswith("medrxiv.org"))
+        and "/content/" in path
+        and not path.endswith(".full.pdf")
+    ):
+        _add(url.split("?")[0].rstrip("/") + ".full.pdf")
     if host.endswith("journals.plos.org") and "article" in path and "id=" in (parsed.query or ""):
         _add(
             f"{parsed.scheme}://{parsed.netloc}{path.replace('/article', '/article/file')}"
@@ -218,10 +222,9 @@ def _pdf_urls_from_scripts(scripts: list[str]) -> list[str]:
                 out.append(url)
         stripped = text.lstrip()
         if stripped[:1] in ("{", "["):
-            try:
+            # Not JSON (or truncated) → the regex pass above was enough.
+            with contextlib.suppress(Exception):
                 _sciencedirect_pdfft_urls(json.loads(stripped), out)
-            except Exception:  # noqa: BLE001 - not JSON (or truncated) → regex pass was enough
-                pass
     return out
 
 
@@ -234,10 +237,9 @@ def find_pdf_links(html: str, base_url: str) -> list[str]:
     only http(s) results are returned.
     """
     parser = _PdfLinkParser()
-    try:
+    # A mangled page yields whatever was parsed up to the failure point.
+    with contextlib.suppress(Exception):
         parser.feed(html)
-    except Exception:  # noqa: BLE001 - a mangled page yields whatever was parsed so far
-        pass
     ordered: list[str] = list(parser.meta_urls) + list(parser.alt_urls)
     scored = [a for a in parser.anchors if a[0] >= 3]
     scored.sort(key=lambda a: (-a[0], a[1]))
