@@ -181,52 +181,53 @@
   {/if}
 
   {#if rows.length}
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Include</th>
-            <th>Confidence</th>
-            <th>Title</th>
-            <th>Authors</th>
-            <th>Year</th>
-            <th>DOI</th>
-            <th>Venue</th>
-            <th>Candidate</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each rows as row (row.draft.line_index)}
-            <tr>
-              <td><input type="checkbox" bind:checked={row.include} aria-label="Include this paper" /></td>
-              <td><span class="pill {row.draft.match_status}">{badge(row.draft.match_status)}</span></td>
-              <td><input bind:value={row.title} aria-label="Title" /></td>
-              <td><input bind:value={row.authors} aria-label="Authors (semicolon-separated)" /></td>
-              <td><input class="yr" bind:value={row.year} aria-label="Year" /></td>
-              <td><input bind:value={row.doi} aria-label="DOI" /></td>
-              <td><input bind:value={row.venue} aria-label="Venue" /></td>
-              <td>
-                {#if row.draft.candidates.length > 1}
-                  <select
-                    bind:value={row.candidateIndex}
-                    on:change={() => applyCandidate(row)}
-                    aria-label="Choose a candidate"
-                  >
-                    <option value={-1}>Custom</option>
-                    {#each row.draft.candidates as cand, i (i)}
-                      <option value={i}>
-                        {cand.title ?? '—'} ({Math.round(cand.confidence * 100)}%)
-                      </option>
-                    {/each}
-                  </select>
-                {:else}
-                  <span class="muted">—</span>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+    <!-- Two rows per draft (UX batch): the title gets the full first row so it stays readable;
+         the shorter fields share the second row. -->
+    <div class="drafts">
+      {#each rows as row (row.draft.line_index)}
+        <div class="draft">
+          <div class="draft-title-row">
+            <input type="checkbox" bind:checked={row.include} aria-label="Include this paper" />
+            <span class="pill {row.draft.match_status}">{badge(row.draft.match_status)}</span>
+            <input class="title-input" bind:value={row.title} aria-label="Title" placeholder="Title" />
+          </div>
+          <div class="draft-fields">
+            <label class="field">
+              <span class="field-label">Authors</span>
+              <input bind:value={row.authors} aria-label="Authors (semicolon-separated)" />
+            </label>
+            <label class="field yr-field">
+              <span class="field-label">Year</span>
+              <input class="yr" bind:value={row.year} aria-label="Year" />
+            </label>
+            <label class="field">
+              <span class="field-label">DOI</span>
+              <input bind:value={row.doi} aria-label="DOI" />
+            </label>
+            <label class="field">
+              <span class="field-label">Venue</span>
+              <input bind:value={row.venue} aria-label="Venue" />
+            </label>
+            {#if row.draft.candidates.length > 1}
+              <label class="field">
+                <span class="field-label">Candidate</span>
+                <select
+                  bind:value={row.candidateIndex}
+                  on:change={() => applyCandidate(row)}
+                  aria-label="Choose a candidate"
+                >
+                  <option value={-1}>Custom</option>
+                  {#each row.draft.candidates as cand, i (i)}
+                    <option value={i}>
+                      {cand.title ?? '—'} ({Math.round(cand.confidence * 100)}%)
+                    </option>
+                  {/each}
+                </select>
+              </label>
+            {/if}
+          </div>
+        </div>
+      {/each}
     </div>
 
     <div class="commit-row">
@@ -277,30 +278,63 @@
     clip: rect(0, 0, 0, 0);
   }
 
-  .table-scroll {
-    overflow-x: auto;
+  .drafts {
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    overflow: hidden;
   }
 
-  table {
+  .draft {
+    padding: 0.45rem 0.6rem 0.55rem;
+  }
+
+  .draft + .draft {
+    border-top: 1px solid var(--border-normal);
+  }
+
+  .draft-title-row {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .title-input {
+    flex: 1;
+    font-weight: 600;
+    min-width: 0;
+  }
+
+  .draft-fields {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(10rem, 2fr) 4.5rem minmax(8rem, 1.5fr) minmax(8rem, 1.5fr) minmax(10rem, 1.5fr);
+    margin-top: 0.35rem;
+  }
+
+  @media (max-width: 900px) {
+    .draft-fields {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .field {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .field input,
+  .field select {
+    min-width: 0;
     width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
   }
 
-  th,
-  td {
-    border-bottom: 1px solid var(--border-normal);
-    padding: 0.3rem 0.4rem;
-    text-align: left;
-  }
-
-  td input {
-    width: 100%;
-    min-width: 8rem;
-  }
-
-  td input.yr {
-    min-width: 4rem;
+  .field-label {
+    color: var(--ink-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .pill {
