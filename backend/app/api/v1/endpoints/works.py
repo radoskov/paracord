@@ -515,6 +515,37 @@ def _batch_library_columns(
         ).all()
     }
 
+    # Reference/citation badges (UX batch 3): papers whose bibliography carries fuzzy "likely"
+    # matches awaiting confirm/reject, and papers with at least one cached citing paper that is
+    # itself in the library. Two grouped queries for the whole page.
+    likely_ref_ids = {
+        row[0]
+        for row in db.execute(
+            select(ReferenceCitation.citing_work_id)
+            .join(Reference, Reference.id == ReferenceCitation.reference_id)
+            .where(
+                ReferenceCitation.citing_work_id.in_(work_ids),
+                Reference.resolution_status == "likely_match",
+                Reference.suggested_work_id.isnot(None),
+            )
+            .group_by(ReferenceCitation.citing_work_id)
+        ).all()
+    }
+    from app.models.external_citation import ExternalCitationLink, ExternalPaper
+
+    local_citer_ids = {
+        row[0]
+        for row in db.execute(
+            select(ExternalCitationLink.work_id)
+            .join(ExternalPaper, ExternalPaper.id == ExternalCitationLink.external_paper_id)
+            .where(
+                ExternalCitationLink.work_id.in_(work_ids),
+                ExternalPaper.resolved_work_id.isnot(None),
+            )
+            .group_by(ExternalCitationLink.work_id)
+        ).all()
+    }
+
     for work in works:
         tokens: list[str] = []
         # A not-yet-extracted local-agent stub reads as "not extracted" regardless of file rows.
@@ -531,6 +562,10 @@ def _batch_library_columns(
                 tokens.append(token)
         if work.id in conflict_ids:
             tokens.append("conflicts")
+        if work.id in likely_ref_ids:
+            tokens.append("likely_refs")
+        if work.id in local_citer_ids:
+            tokens.append("citers_in_library")
         if tokens:
             badges[work.id] = tokens
     return file_counts, work_tags, badges

@@ -59,6 +59,9 @@
     text_none: { label: 'no text layer', state: 'warn' },
     ocr_added: { label: 'OCR', state: 'info' },
     conflicts: { label: 'conflicts', state: 'warn' },
+    // Reference/citation badges (UX batch 3).
+    likely_refs: { label: 'refs to review', state: 'warn' },
+    citers_in_library: { label: 'cited locally', state: 'ok' },
   };
   function badgeMeta(token: string): { label: string; state: string } {
     return BADGE_META[token] ?? { label: token.replaceAll('_', ' '), state: 'muted' };
