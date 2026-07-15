@@ -423,6 +423,17 @@ def _missing_works(
             if node.work_id is not None:
                 held_local_ids.add(node.work_id)
             continue
+        # A fuzzy "likely local" candidate means the paper is very probably already in the library —
+        # don't list it as missing (UX batch: the column kept suggesting works the library holds).
+        # A rejected suggestion does NOT count: the user said it isn't that paper. Hidden works are
+        # excluded so the column can't leak their existence.
+        if (
+            reference.resolution_status == "likely_match"
+            and reference.suggested_work_id is not None
+            and (visible is None or reference.suggested_work_id in visible)
+        ):
+            held_local_ids.add(reference.suggested_work_id)
+            continue
         key = _missing_key(reference)
         if key is None:
             continue

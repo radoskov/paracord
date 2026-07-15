@@ -121,6 +121,27 @@ def test_missing_but_cited_aggregation(db_session, make_reference) -> None:
     assert any(m.title == "Lonely uncollected paper" and m.cited_by_count == 1 for m in missing)
 
 
+def test_likely_local_suggestion_is_not_missing(db_session, make_reference) -> None:
+    """UX batch: a reference the fuzzy matcher flagged as a likely local match (suggested_work_id
+    set, no DOI/arXiv link yet) must not be listed under "frequently cited but missing" — the
+    library almost certainly already holds it. A REJECTED suggestion stays missing."""
+    actor = _owner(db_session)
+    citing = _work(db_session, "Citing", doi="10.1/citing")
+    held = _work(db_session, "Held Paper")  # no DOI — only a fuzzy candidate
+    likely = make_reference(db_session, citing_work_id=citing.id, title="Held Paper")
+    likely.resolution_status = "likely_match"
+    likely.suggested_work_id = held.id
+    rejected = make_reference(db_session, citing_work_id=citing.id, title="Not That Paper")
+    rejected.resolution_status = "rejected_match"
+    rejected.suggested_work_id = held.id
+    db_session.commit()
+
+    summary = citation_summary(db_session, actor, SummaryScope(type="library"))
+    titles = [m.title for m in summary.frequently_cited_missing]
+    assert "Held Paper" not in titles
+    assert "Not That Paper" in titles
+
+
 def test_isolated_papers_detected(db_session, make_reference) -> None:
     actor = _owner(db_session)
     citing = _work(db_session, "Citing", doi="10.1/citing")
