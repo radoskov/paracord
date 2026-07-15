@@ -7,6 +7,7 @@ if the queue is unavailable, callers (e.g. folder import) must still succeed.
 
 import contextlib
 import logging
+from uuid import uuid4
 
 from app.core.config import get_settings
 
@@ -78,11 +79,12 @@ _LIVE_JOB_STATUSES = {"queued", "started", "deferred", "scheduled"}
 
 
 def extraction_job_id(file_id) -> str:
-    """Deterministic RQ job id for a file's extraction (``extract-{file_id}``).
+    """Coalescing key for a file's extraction (``extract-{file_id}``).
 
-    A stable id makes re-enqueuing an already-queued/running file a no-op instead of a duplicate.
-    A dash (not a colon) separator is required: RQ 2.x rejects ``:`` in job ids, and a UUID file id
-    only contains hex digits and dashes.
+    Used with the ``latest-job`` pointer so re-enqueuing an already-queued/running file is a no-op
+    instead of a duplicate (each actual run gets a unique ``{key}-{token}`` id). A dash (not a
+    colon) separator is required: RQ 2.x rejects ``:`` in job ids, and a UUID file id only contains
+    hex digits and dashes.
     """
     return f"extract-{file_id}"
 
@@ -104,6 +106,41 @@ def _live_job_id(conn, job_id: str) -> str | None:
     return job.id if job.get_status(refresh=True) in _LIVE_JOB_STATUSES else None
 
 
+# Re-running a finished/failed job must create a NEW Jobs-tab entry, not overwrite the old one in
+# place (RQ overwrites the job hash when an id is reused, which made history "vanish" and the
+# per-registry counts disagree — UX batch). So every run gets a unique id ``{key}-{token}`` and the
+# live-job coalescing that deterministic ids used to provide comes from a small Redis pointer
+# ``latest-job:{key} -> last job id`` instead.
+_LATEST_JOB_KEY_PREFIX = "paracord:latest-job:"
+_LATEST_JOB_KEY_TTL = 7 * 24 * 3600  # only needs to outlive a job's in-flight window
+
+
+def _fresh_job_id(key: str) -> str:
+    """A unique per-run job id for a coalescing key (keeps the readable ``{key}-`` prefix)."""
+    return f"{key}-{uuid4().hex[:8]}"
+
+
+def _live_coalesced_job(conn, key: str) -> str | None:
+    """Return the id of a previous run for ``key`` that is still in flight, else None.
+
+    Reads the ``latest-job`` pointer; also probes the bare ``key`` id so jobs enqueued before the
+    unique-id scheme (or by an older instance) still coalesce instead of running twice.
+    """
+    raw = conn.get(_LATEST_JOB_KEY_PREFIX + key)
+    previous = raw.decode() if isinstance(raw, bytes) else raw
+    if previous:
+        live = _live_job_id(conn, previous)
+        if live is not None:
+            return live
+    return _live_job_id(conn, key)
+
+
+def _remember_latest_job(conn, key: str, job_id: str) -> None:
+    """Record ``job_id`` as the latest run for ``key`` (best-effort — a miss only costs coalescing)."""
+    with contextlib.suppress(Exception):
+        conn.set(_LATEST_JOB_KEY_PREFIX + key, job_id, ex=_LATEST_JOB_KEY_TTL)
+
+
 def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     """Best-effort enqueue of a GROBID extraction job. Returns the job id, or None.
 
@@ -113,12 +150,12 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
     configured backend / current text-layer quality (#22). Never raises: a missing/unreachable
     Redis must not break the import flow (callers surface the ``None`` as ``extraction_queued``).
     """
-    job_id = extraction_job_id(file_id)
+    key = extraction_job_id(file_id)
     try:
         from rq import Retry
 
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
         # F2: retry a *transient* extraction failure automatically (fast, in-Redis). The job itself
@@ -128,9 +165,10 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
             EXTRACT_JOB,
             str(file_id),
             force_ocr,
-            job_id=job_id,
+            job_id=_fresh_job_id(key),
             retry=Retry(max=2, interval=[15, 60]),
         )
+        _remember_latest_job(queue.connection, key, job.id)
         return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue extraction for file %s: %s", file_id, exc)
@@ -140,45 +178,50 @@ def enqueue_extraction(file_id, *, force_ocr: bool = False) -> str | None:
 def enqueue_staging_extraction(item_id) -> str | None:
     """Best-effort enqueue of a record-free extraction for a staged multi-import PDF (batch10 #1).
 
-    Deterministic id ``stage-extract-{item_id}`` so a re-enqueue of an in-flight item is a no-op.
+    Coalescing key ``stage-extract-{item_id}`` so a re-enqueue of an in-flight item is a no-op.
     Never raises: callers fall back to inline extraction when this returns None (queue unavailable).
     """
-    job_id = f"stage-extract-{item_id}"
+    key = f"stage-extract-{item_id}"
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
-        return queue.enqueue(STAGE_EXTRACT_JOB, str(item_id), job_id=job_id).id
+        job = queue.enqueue(STAGE_EXTRACT_JOB, str(item_id), job_id=_fresh_job_id(key))
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; caller extracts inline on None
         logger.warning("Could not enqueue staging extraction for item %s: %s", item_id, exc)
         return None
 
 
 def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
-    """Best-effort enqueue of a per-work job under a deterministic id ``{prefix}-{work_id}``.
+    """Best-effort enqueue of a per-work job under the coalescing key ``{prefix}-{work_id}``.
 
-    Like extraction (D7), a stable id makes a re-enqueue of an already in-flight job for the same
+    Like extraction (D7), the key makes a re-enqueue of an already in-flight job for the same
     work a no-op instead of a duplicate — so a manual re-run racing the auto-chain (extract →
     enrich → chunk → embed) can't spawn two concurrent jobs whose interleaved writes make results
-    vary run-to-run (issue 1c). A terminal prior job (finished/failed) does not block a fresh run.
+    vary run-to-run (issue 1c). A terminal prior job (finished/failed) does not block a fresh run,
+    and that fresh run gets its own unique job id (a new Jobs-tab entry, keeping history).
     Never raises: a missing/unreachable Redis must not break the caller.
     """
-    job_id = f"{prefix}-{work_id}"
+    key = f"{prefix}-{work_id}"
     try:
         from rq import Retry
 
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
         # S6/S7: transient failures (rate-limited external APIs, network blips, a briefly-down
         # Postgres) re-run automatically. Deterministic failures don't reach the retry: the jobs
         # catch them (e.g. enrich's DOI-conflict path) and record processing_error WITHOUT raising,
         # so only genuinely unexpected/transient exceptions trigger a re-run.
-        return queue.enqueue(
-            job_func, str(work_id), job_id=job_id, retry=Retry(max=2, interval=[30, 120])
-        ).id
+        job = queue.enqueue(
+            job_func, str(work_id), job_id=_fresh_job_id(key), retry=Retry(max=2, interval=[30, 120])
+        )
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue %s for work %s: %s", prefix, work_id, exc)
         return None
@@ -236,10 +279,12 @@ def enqueue_reference_consolidation() -> str | None:
     coalesce into one pending run."""
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, REF_CONSOLIDATE_JOB_ID)
+        existing = _live_coalesced_job(queue.connection, REF_CONSOLIDATE_JOB_ID)
         if existing is not None:
             return existing
-        return queue.enqueue(REF_CONSOLIDATE_JOB, job_id=REF_CONSOLIDATE_JOB_ID).id
+        job = queue.enqueue(REF_CONSOLIDATE_JOB, job_id=_fresh_job_id(REF_CONSOLIDATE_JOB_ID))
+        _remember_latest_job(queue.connection, REF_CONSOLIDATE_JOB_ID, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue reference consolidation: %s", exc)
         return None
@@ -304,18 +349,20 @@ def fetch_job_result(job_id: str, *, requester_id: str, is_admin: bool) -> dict:
 
 def enqueue_backup_export(*, include_pdfs: bool, actor_user_id: str) -> str | None:
     """Best-effort enqueue of a backup export (fixed id: repeated clicks coalesce)."""
-    job_id = "backup-export"
+    key = "backup-export"
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
-        return queue.enqueue(
+        job = queue.enqueue(
             BACKUP_EXPORT_JOB,
             args=(include_pdfs, actor_user_id),
-            job_id=job_id,
+            job_id=_fresh_job_id(key),
             job_timeout=3600,
-        ).id
+        )
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; the endpoint falls back to inline
         logger.warning("Could not enqueue backup export: %s", exc)
         return None
@@ -325,18 +372,20 @@ def enqueue_backup_restore(
     *, archive: str, mode: str, pdf_root_alias: str | None, actor_user_id: str
 ) -> str | None:
     """Best-effort enqueue of a backup restore (fixed id: one restore at a time)."""
-    job_id = "backup-restore"
+    key = "backup-restore"
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
-        return queue.enqueue(
+        job = queue.enqueue(
             BACKUP_RESTORE_JOB,
             args=(archive, mode, pdf_root_alias, actor_user_id),
-            job_id=job_id,
+            job_id=_fresh_job_id(key),
             job_timeout=7200,
-        ).id
+        )
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; the endpoint falls back to inline
         logger.warning("Could not enqueue backup restore: %s", exc)
         return None
@@ -349,10 +398,12 @@ def enqueue_reference_rescan() -> str | None:
     already exists, so repeated clicks coalesce into a single pending rescan."""
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, REF_MATCH_JOB_ID)
+        existing = _live_coalesced_job(queue.connection, REF_MATCH_JOB_ID)
         if existing is not None:
             return existing
-        return queue.enqueue(REF_MATCH_JOB, job_id=REF_MATCH_JOB_ID).id
+        job = queue.enqueue(REF_MATCH_JOB, job_id=_fresh_job_id(REF_MATCH_JOB_ID))
+        _remember_latest_job(queue.connection, REF_MATCH_JOB_ID, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue reference rescan: %s", exc)
         return None
@@ -367,10 +418,12 @@ def enqueue_bm25_rebuild() -> str | None:
     """
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, BM25_REBUILD_JOB_ID)
+        existing = _live_coalesced_job(queue.connection, BM25_REBUILD_JOB_ID)
         if existing is not None:
             return existing
-        return queue.enqueue(BM25_REBUILD_JOB, job_id=BM25_REBUILD_JOB_ID).id
+        job = queue.enqueue(BM25_REBUILD_JOB, job_id=_fresh_job_id(BM25_REBUILD_JOB_ID))
+        _remember_latest_job(queue.connection, BM25_REBUILD_JOB_ID, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue BM25F+ rebuild: %s", exc)
         return None
@@ -397,24 +450,26 @@ def enqueue_model_pull(provider: str, model: str) -> str | None:
 def _enqueue_scope_job(
     job_func: str, prefix: str, scope_type: str, scope_id, **kwargs
 ) -> str | None:
-    """Best-effort enqueue of a per-scope AI job (S15) under a deterministic id.
+    """Best-effort enqueue of a per-scope AI job (S15) under a coalescing key.
 
     ``{prefix}-{scope_type}-{scope_id|library}``: re-clicking while a run for the same scope is in
     flight returns the live job instead of stacking a duplicate. Never raises (queue-down -> None,
     the caller falls back to running inline).
     """
-    job_id = f"{prefix}-{scope_type}-{scope_id or 'library'}"
+    key = f"{prefix}-{scope_type}-{scope_id or 'library'}"
     try:
         queue = get_queue()
-        existing = _live_job_id(queue.connection, job_id)
+        existing = _live_coalesced_job(queue.connection, key)
         if existing is not None:
             return existing
-        return queue.enqueue(
+        job = queue.enqueue(
             job_func,
             args=(scope_type, str(scope_id) if scope_id else None),
             kwargs=kwargs,
-            job_id=job_id,
-        ).id
+            job_id=_fresh_job_id(key),
+        )
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning(
             "Could not enqueue %s for scope %s/%s: %s", prefix, scope_type, scope_id, exc

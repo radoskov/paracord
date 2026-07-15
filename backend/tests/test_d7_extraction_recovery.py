@@ -191,10 +191,14 @@ def test_double_enqueue_yields_a_single_job(monkeypatch) -> None:
     # Use a throwaway queue name so the live worker doesn't consume the job mid-assertion.
     monkeypatch.setattr(queue_mod, "QUEUE_NAME", f"test-d7-{uuid.uuid4().hex}")
     file_id = uuid.uuid4()
+    first = None
     try:
         first = queue_mod.enqueue_extraction(file_id)
         second = queue_mod.enqueue_extraction(file_id)
-        assert first == second == f"extract-{file_id}"
+        # The re-enqueue coalesces onto the live job. Ids are unique per run under the readable
+        # ``extract-{file_id}-`` stem (a re-run after the job finishes gets a fresh id/entry).
+        assert first == second
+        assert first is not None and first.startswith(f"extract-{file_id}-")
         q = queue_mod.get_queue()
         assert q.count == 1  # one job in the queue, not two
         assert q.get_job_ids().count(first) == 1
@@ -206,7 +210,8 @@ def test_double_enqueue_yields_a_single_job(monkeypatch) -> None:
         from rq.job import Job
 
         with contextlib.suppress(Exception):  # best-effort cleanup
-            Job.fetch(f"extract-{file_id}", connection=q.connection).delete()
+            if first:
+                Job.fetch(first, connection=q.connection).delete()
 
 
 # --- Worker clears the marker on both terminal outcomes ---------------------

@@ -51,6 +51,10 @@
 
   $: visibleJobs = (status?.jobs ?? []).filter((j) => filter === 'all' || j.status === filter);
 
+  // "all" = the sum of the per-state registry counts, so the numbers add up with the state tabs
+  // (the job list below is still a recent window and may show fewer).
+  $: totalCount = COUNT_ORDER.reduce((sum, key) => sum + (status?.counts?.[key] ?? 0), 0);
+
   // Queue-health semaphore (D7): GREEN reachable + workers draining, YELLOW reachable but no
   // worker consuming (jobs pile up), RED Redis unreachable (imports won't be processed).
   $: reachable = status ? (status.redis_reachable ?? status.available) : false;
@@ -214,7 +218,7 @@
         <div class="counts">
           <button type="button" class="count count-all" class:active={filter === 'all'} on:click={() => (filter = 'all')}
             title="Show jobs of every status">
-            <span class="n">{status.jobs?.length ?? 0}</span>
+            <span class="n">{totalCount}</span>
             <span class="k">all</span>
           </button>
           {#each COUNT_ORDER as key (key)}

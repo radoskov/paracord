@@ -40,24 +40,55 @@ class _FakeQueue:
         return type("J", (), {"id": job_id})()
 
 
-def test_enqueue_work_job_uses_deterministic_id_and_skips_when_in_flight(monkeypatch) -> None:
-    """1c: a per-work enqueue uses a stable ``{prefix}-{work_id}`` id and is a no-op while a job
-    with that id is already in flight (so a manual re-run can't race the auto-chain)."""
+def test_enqueue_work_job_coalesces_in_flight_and_uniquifies_reruns(monkeypatch) -> None:
+    """1c + UX batch: a per-work enqueue is a no-op while a job for the same work is in flight,
+    but a re-run after a terminal job gets a NEW unique id (a fresh Jobs-tab entry, not an
+    in-place overwrite of the finished one)."""
     wid = "11111111-1111-1111-1111-111111111111"
 
     fake = _FakeQueue()
     monkeypatch.setattr(queue, "get_queue", lambda: fake)
-    # No live job → enqueues under the deterministic id.
-    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, _jid: None)
-    assert queue.enqueue_enrichment(wid) == f"enrich-{wid}"
-    assert fake.enqueued == [(queue.ENRICH_JOB, (wid,), f"enrich-{wid}")]
+    # No live job → enqueues under a fresh unique id keeping the readable {prefix}-{work_id} stem.
+    monkeypatch.setattr(queue, "_live_coalesced_job", lambda _conn, _key: None)
+    first = queue.enqueue_enrichment(wid)
+    assert first is not None and first.startswith(f"enrich-{wid}-")
+    assert fake.enqueued[0][0] == queue.ENRICH_JOB
 
-    # A live job with the same id → skip the enqueue, return the existing id.
+    second = queue.enqueue_enrichment(wid)
+    assert second is not None and second.startswith(f"enrich-{wid}-")
+    assert second != first  # a re-run is a NEW entry
+
+    # A live job for the same work → skip the enqueue, return the live id.
     fake2 = _FakeQueue()
     monkeypatch.setattr(queue, "get_queue", lambda: fake2)
-    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, jid: jid)
-    assert queue.enqueue_keywords(wid) == f"keywords-{wid}"
+    monkeypatch.setattr(queue, "_live_coalesced_job", lambda _conn, key: f"{key}-live1234")
+    assert queue.enqueue_keywords(wid) == f"keywords-{wid}-live1234"
     assert fake2.enqueued == []  # not enqueued a second time
+
+
+def test_live_coalesced_job_reads_pointer_and_falls_back_to_bare_key(monkeypatch) -> None:
+    """The latest-job pointer finds the in-flight run; a bare-key probe covers jobs enqueued
+    before the unique-id scheme."""
+
+    class _Conn:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def get(self, k):
+            return self.mapping.get(k)
+
+    conn = _Conn({queue._LATEST_JOB_KEY_PREFIX + "chunk-w": b"chunk-w-abc12345"})
+    # Pointer target is live → returned.
+    monkeypatch.setattr(
+        queue, "_live_job_id", lambda _c, jid: jid if jid == "chunk-w-abc12345" else None
+    )
+    assert queue._live_coalesced_job(conn, "chunk-w") == "chunk-w-abc12345"
+    # Pointer target terminal, but a legacy job under the bare key is live → returned.
+    monkeypatch.setattr(queue, "_live_job_id", lambda _c, jid: jid if jid == "chunk-w" else None)
+    assert queue._live_coalesced_job(conn, "chunk-w") == "chunk-w"
+    # Nothing live anywhere → None.
+    monkeypatch.setattr(queue, "_live_job_id", lambda _c, _jid: None)
+    assert queue._live_coalesced_job(conn, "chunk-w") is None
 
 
 def test_order_jobs_newest_first_active_above_terminal_and_recent_on_top() -> None:
@@ -95,8 +126,9 @@ def test_enqueue_work_job_declares_transient_retry(monkeypatch) -> None:
             return super().enqueue(func, *args, job_id=job_id, **kw)
 
     monkeypatch.setattr(queue, "get_queue", lambda: _RetryCapturingQueue())
-    monkeypatch.setattr(queue, "_live_job_id", lambda _conn, _jid: None)
-    assert queue.enqueue_enrichment(wid) == f"enrich-{wid}"
+    monkeypatch.setattr(queue, "_live_coalesced_job", lambda _conn, _key: None)
+    job_id = queue.enqueue_enrichment(wid)
+    assert job_id is not None and job_id.startswith(f"enrich-{wid}-")
     retry = captured["retry"]
     assert retry is not None and retry.max == 2
     assert retry.intervals == [30, 120]
