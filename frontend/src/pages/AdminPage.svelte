@@ -1929,7 +1929,10 @@
           you confirm with one click, and it isn’t counted in graphs/metrics until you do. On: a
           match above the configured threshold is linked automatically (a hard link, counted
           everywhere). Turning this on starts a one-time library-wide rescan so existing likely
-          matches are promoted. Exact DOI/arXiv matches are always treated as confirmed regardless.
+          matches are promoted. Exact DOI/arXiv matches are always treated as confirmed regardless,
+          and independently of this toggle a fuzzy score at/above
+          <code>reference_matching.auto_accept_threshold</code> in <code>server.yaml</code>
+          (default 100 = exact normalized title) is auto-confirmed even without a DOI/arXiv id.
         </p>
         <label class="field checkbox-field">
           <input type="checkbox" bind:checked={referenceRescanOnStartup} />

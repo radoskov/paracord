@@ -86,7 +86,12 @@ def test_arxiv_identifier_match_is_local(db) -> None:
 # --- fuzzy title + gates --------------------------------------------------------------------------
 
 
-def test_fuzzy_dash_colon_title_is_likely_match_by_default(db) -> None:
+def test_fuzzy_dash_colon_title_is_likely_match_below_auto_accept(db, monkeypatch) -> None:
+    # Pin the auto-accept threshold out of reach — this test exercises the SOFT likely-match path
+    # (at the default threshold of 100 this exact-normalized-title pair would be auto-confirmed).
+    monkeypatch.setattr(
+        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+    )
     work = _work(db, LOCAL_TITLE, year=2010)
     ref = _ref(db, title=CITED_TITLE, year=2010)
     match = find_reference_match(db, ref)
@@ -102,6 +107,28 @@ def test_fuzzy_as_confirmed_promotes_to_local(db) -> None:
     work = _work(db, LOCAL_TITLE, year=2010)
     ref = _ref(db, title=CITED_TITLE, year=2010)
     resolve_and_persist(db, ref, fuzzy_as_confirmed=True)
+    assert ref.resolution_status == "local_match"
+    assert ref.resolved_work_id == work.id
+
+
+def test_perfect_title_match_is_auto_confirmed_without_identifier(db) -> None:
+    """UX batch: a 100% fuzzy match (exact normalized title) is hard-linked even with the
+    fuzzy-as-confirmed toggle OFF and no DOI/arXiv id on either side."""
+    work = _work(db, LOCAL_TITLE, year=2010)
+    ref = _ref(db, title=LOCAL_TITLE, year=2010)
+    resolve_and_persist(db, ref)
+    assert ref.resolution_status == "local_match"
+    assert ref.resolved_work_id == work.id
+
+
+def test_auto_accept_threshold_is_configurable(db, monkeypatch) -> None:
+    """Lowering reference_matching.auto_accept_threshold promotes near-perfect matches too."""
+    monkeypatch.setattr(
+        get_settings(), "reference_matching_auto_accept_threshold", 90.0, raising=False
+    )
+    work = _work(db, LOCAL_TITLE, year=2010)
+    ref = _ref(db, title=CITED_TITLE, year=2010)  # the ~98-scoring dash/colon variant
+    resolve_and_persist(db, ref)
     assert ref.resolution_status == "local_match"
     assert ref.resolved_work_id == work.id
 
@@ -182,7 +209,10 @@ def test_rejected_candidate_is_not_re_proposed(db) -> None:
     assert ref.resolved_work_id is None
 
 
-def test_rejected_still_surfaces_a_different_better_candidate(db) -> None:
+def test_rejected_still_surfaces_a_different_better_candidate(db, monkeypatch) -> None:
+    monkeypatch.setattr(  # soft-path test: keep the better candidate below auto-accept
+        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+    )
     rejected = _work(db, "KnowRob knowledge base tools", year=2010)
     better = _work(db, LOCAL_TITLE, year=2010)
     ref = _ref(
@@ -237,8 +267,11 @@ def test_disabled_matcher_does_nothing(db, monkeypatch) -> None:
 
 
 def test_per_paper_rescan_endpoint_links_reference(
-    client, auth_headers, db, make_reference
+    client, auth_headers, db, make_reference, monkeypatch
 ) -> None:
+    monkeypatch.setattr(  # soft-path test: keep the match below the auto-accept threshold
+        get_settings(), "reference_matching_auto_accept_threshold", 101.0, raising=False
+    )
     citing = _work(db, "Citing Paper", year=2021)
     target = _work(db, LOCAL_TITLE, year=2010)
     make_reference(db, citing_work_id=citing.id, title=CITED_TITLE, year=2010)

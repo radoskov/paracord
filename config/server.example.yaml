@@ -67,6 +67,9 @@ web_find:
 reference_matching:
   enabled: true
   title_similarity_threshold: 90.0  # similarity_pct (0-100) for a fuzzy title match
+  auto_accept_threshold: 100.0      # fuzzy score at/above which the match is auto-CONFIRMED (hard
+                                    # link) even without a DOI/arXiv id; 100 = exact normalized
+                                    # title only, lower (e.g. 90) accepts every likely match
   author_overlap_threshold: 0.5     # required author overlap (0-1) when both sides list authors
   require_year_match: true          # when both years are present they must agree (see year_tolerance)
   year_tolerance: 1                 # allowed |year difference| (preprint vs published drift); 0 = exact

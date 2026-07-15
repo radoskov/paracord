@@ -469,13 +469,26 @@
     }, 'Reference imported into the library');
   }
 
-  // Confirm / reject a reference's "likely local" match (batch 12).
+  // Confirm / reject a reference's "likely local" match (batch 12). Feedback is shown inline on
+  // the reference row — the shared `message` line sits at the top of a long modal, so an error
+  // there reads as "nothing happened" (UX batch).
+  let refActionPendingId: string | null = null;
+  let refActionError: { id: string; text: string } | null = null;
   async function actOnReference(
     referenceId: string,
     action: 'link' | 'reject',
   ): Promise<void> {
+    refActionPendingId = referenceId;
+    refActionError = null;
     await run(async () => {
-      await client.actOnReference(work.id, referenceId, action);
+      try {
+        await client.actOnReference(work.id, referenceId, action);
+      } catch (error) {
+        refActionError = { id: referenceId, text: errorMessage(error) };
+        throw error;
+      } finally {
+        refActionPendingId = null;
+      }
       references = await client.listWorkReferences(work.id);
     }, action === 'link' ? 'Match confirmed' : 'Marked as not a match');
   }
@@ -1496,7 +1509,8 @@
               {#if ref.resolution_status === 'likely_match' && ref.suggested_work_id}
                 <button type="button" class="small" on:click={() => actOnReference(ref.id, 'link')}
                   disabled={loading || !canModify}
-                  title={canModify ? 'Confirm this is the same paper (links it permanently)' : INSUFFICIENT_ROLE}>Confirm match</button>
+                  title={canModify ? 'Confirm this is the same paper (links it permanently)' : INSUFFICIENT_ROLE}
+                  >{refActionPendingId === ref.id ? 'Confirming…' : 'Confirm match'}</button>
                 <button type="button" class="secondary small" on:click={() => actOnReference(ref.id, 'reject')}
                   disabled={loading || !canModify}
                   title={canModify ? 'This is not the same paper' : INSUFFICIENT_ROLE}>Not a match</button>
@@ -1507,6 +1521,9 @@
                   title={canModify ? 'Create a library paper from this reference' : INSUFFICIENT_ROLE}>Import</button>
               {/if}
             </div>
+            {#if refActionError?.id === ref.id}
+              <p class="ref-action-error" role="alert">⚠ {refActionError.text}</p>
+            {/if}
           </li>
         {/each}
       </ol>
@@ -2444,6 +2461,13 @@
 
   .ref-badge-link:hover {
     text-decoration: underline;
+  }
+
+  /* Inline confirm/reject failure — shown on the row itself, not the far-away top message line. */
+  .ref-action-error {
+    color: var(--status-danger);
+    font-size: 0.8rem;
+    margin: 0.2rem 0 0;
   }
 
   /* "likely match" badge (batch 12) — a soft, unconfirmed candidate; warning-tinted, clickable. */

@@ -374,7 +374,11 @@ def resolve_and_persist(
                 reference.match_score = match.score
                 return True
             return False
-        if fuzzy_as_confirmed:
+        # Two acceptance levels (UX batch): the runtime toggle accepts EVERY likely match, and the
+        # yaml auto-accept threshold hard-links near-perfect title matches (default 100 = exact
+        # normalized title) even without a DOI/arXiv id. The identifier gate above already
+        # disqualified candidates whose identifiers contradict the reference's.
+        if fuzzy_as_confirmed or match.score >= settings.reference_matching_auto_accept_threshold:
             return _set_local(reference, match)
         return _set_likely(reference, match)
 
