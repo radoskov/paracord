@@ -9,6 +9,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 4: scope-summary overhaul, topics UX, insights graphs (2026-07-15)
+
+- `0c32ea6` — **scope summaries are now map-reduce** (`local-llm-v2-map-reduce`): per-paper LLM
+  digests generated through `summarize_work` (persisted → also visible per paper; reused on the
+  next run; outage circuit-breaker), packed into 11k-char chunks, condensed, then synthesized
+  with collection-framed scope prompts (overview + key problems / methods & algorithms /
+  datasets / findings — no more "This paper addresses…" for a shelf). `scope_label` + method
+  stored/returned. Topics carry their member papers (`work_ids`/`works` with titles) and
+  `GET /ai/topics/latest` reconstructs job results from assignments.
+- `e0a4497` — Insights: Summarize / Model topics buttons show a busy state and stay disabled for
+  the whole run incl. the background job, then auto-load the result (whole-library topics used to
+  end with an empty card); "Max topics" control (default 8, was fixed 6); per-topic "Show papers"
+  lists with jump-to-paper; graph node click finally wired (`onOpenWork` was never passed);
+  topic graph gains size (similarity links / citation count) + color (year) selects (+
+  `citation_count` on topic-graph nodes); ⓘ Help popup explains degree/PageRank/betweenness and
+  how topic edges are computed (embedding cosine kNN, k=6, ≥0.30).
+- `b607d35` — ruff SIM102/SIM105 cleanups in `pdf_link_finder`.
+- `33ec89c` — future acceptance contracts graduated: 3 dropped as already enforced (citations in
+  the file docstring), cross-scope topic stability implemented as a real test.
+
 ## UX batch 3 follow-ups: smarter downloads, Elsevier API, graph zoom/sliders (2026-07-15)
 
 - `6780d1d` — fix round: **zen mode portals to `<body>`** (the paper-view modal's containing

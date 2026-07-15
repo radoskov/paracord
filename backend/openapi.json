@@ -7410,6 +7410,17 @@
       },
       "TopicGraphNodeRead": {
         "properties": {
+          "citation_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Count"
+          },
           "id": {
             "title": "Id",
             "type": "string"
