@@ -33,7 +33,12 @@ _LIBRARY_SCOPE_ID = uuid.UUID(int=0)
 
 SUPPORTED_SUMMARY_TYPES = ("abstract", "extractive", "local_llm")
 PROMPT_VERSION = "v1"
-LLM_PROMPT_VERSION = "local-llm-v1"
+LLM_PROMPT_VERSION = "local-llm-v2-map-reduce"
+
+# Per-LLM-call input budget (characters, ≈ chars/4 tokens). Conservative on purpose: small local
+# models often run with a 4-8k-token context. Scope summaries CHUNK to this budget (map-reduce)
+# instead of silently truncating like v1 did.
+LLM_INPUT_CHAR_BUDGET = 11000
 
 # A deliberately small English stop-word set; enough to bias scoring toward content words
 # without pulling in an NLP dependency.
@@ -166,14 +171,10 @@ def work_source_text(db: Session, work: Work) -> str:
     return _work_source(db, work)[0]
 
 
-def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
-    """Call a local Ollama daemon for an abstractive summary. Raises on any failure."""
+def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
+    """Raw single-shot generation against a local Ollama daemon. Raises on any failure."""
     import httpx2 as httpx
 
-    prompt = (
-        "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
-        "method, and key result. Respond with the summary only.\n\n" + text[:12000]
-    )
     with httpx.Client(timeout=120) as client:
         response = client.post(
             f"{base_url.rstrip('/')}/api/generate",
@@ -181,6 +182,79 @@ def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
         )
         response.raise_for_status()
         return (response.json().get("response") or "").strip()
+
+
+def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
+    """Per-PAPER abstractive summary (single document prompt). Raises on any failure."""
+    prompt = (
+        "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
+        "method, and key result. Respond with the summary only.\n\n"
+        + text[:LLM_INPUT_CHAR_BUDGET]
+    )
+    return _ollama_generate(prompt, model=model, base_url=base_url)
+
+
+# --- Scope (collection) prompts — UX batch 4 -------------------------------------------------
+# v1 fed the concatenated abstracts to the PAPER prompt, so the model opened with "This paper
+# addresses…" for a whole shelf. The scope prompts below make the collection framing explicit and
+# ask for the cross-collection view (problems / methods / datasets / findings), with a high-level
+# overview paragraph first.
+
+_SCOPE_DESCRIPTOR = {
+    "library": "the user's entire research library",
+    "shelf": "one shelf — a curated collection of papers",
+    "rack": "one rack — a group of related shelves of papers",
+}
+
+
+def _scope_final_prompt(scope_type: str, paper_count: int, notes: str, *, from_parts: bool) -> str:
+    descriptor = _SCOPE_DESCRIPTOR.get(scope_type, "a collection of papers")
+    source_line = (
+        "Below are condensed notes derived from the papers' individual summaries."
+        if from_parts
+        else 'Below are short per-paper summaries, one per line ("Title (year): summary").'
+    )
+    return (
+        f"You are synthesizing {descriptor}, containing {paper_count} papers. {source_line}\n"
+        "Write a synthesis of the COLLECTION AS A WHOLE — it is a set of papers, not one paper, "
+        'so never write "this paper". Structure the answer as:\n'
+        "1. A short high-level overview paragraph of what the collection covers and how the "
+        "papers relate.\n"
+        "2. Key problems: the main research problems addressed across the collection.\n"
+        "3. Methods & algorithms: recurring or notable approaches.\n"
+        "4. Datasets & benchmarks: any that are mentioned.\n"
+        "5. Key findings: the most important results, attributed to their papers by title where "
+        "specific.\n"
+        "Be concise but do not omit distinct contributions. Respond with the synthesis only.\n\n"
+        + notes
+    )
+
+
+def _scope_chunk_prompt(scope_type: str, part: int, parts: int, notes: str) -> str:
+    descriptor = _SCOPE_DESCRIPTOR.get(scope_type, "a collection of papers")
+    return (
+        f"The following are per-paper summaries from part {part} of {parts} of {descriptor}. "
+        "Condense them into compact notes covering the research problems, methods/algorithms, "
+        "datasets/benchmarks and key findings, KEEPING the paper-title attributions. Respond "
+        "with the condensed notes only.\n\n" + notes
+    )
+
+
+def _pack_blocks(blocks: list[str], budget: int) -> list[str]:
+    """Greedily pack digest blocks into chunks of at most ``budget`` characters (≥1 block each)."""
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for block in blocks:
+        if current and size + len(block) > budget:
+            chunks.append("\n".join(current))
+            current = []
+            size = 0
+        current.append(block)
+        size += len(block) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
 def summarize_work(
@@ -299,6 +373,70 @@ def _scope_works(db, *, scope_type, scope_id, visible_ids):
     return resolve_scope_works(db, scope_type, scope_id, visible_ids=visible_ids)
 
 
+def _work_digest(
+    db: Session,
+    work: Work,
+    *,
+    use_llm: bool,
+    model_name: str,
+    created_by_user_id: uuid.UUID | None,
+    settings: Settings | None,
+) -> tuple[str, str | None] | None:
+    """One paper's digest for the scope map step. Returns ``(text, degraded_reason)`` or None.
+
+    Reuses a previously stored genuine local_llm summary for the paper; otherwise generates one
+    through :func:`summarize_work` (persisting it, so it also appears in the paper's own view).
+    ``degraded_reason`` is non-None when the LLM attempt fell back — the scope loop uses it to
+    stop hammering an unavailable daemon. Without LLM use, the digest is the abstract, else a
+    short extractive digest of the body.
+    """
+    if use_llm:
+        existing = db.scalars(
+            select(Summary)
+            .where(
+                Summary.entity_type == "work",
+                Summary.entity_id == work.id,
+                Summary.summary_type == "local_llm",
+            )
+            .order_by(Summary.created_at.desc())
+        ).first()
+        if existing is not None and existing.provider_used == "local_llm" and existing.text:
+            return existing.text, None
+        try:
+            s = summarize_work(
+                db,
+                work,
+                summary_type="local_llm",
+                model_name=model_name,
+                created_by_user_id=created_by_user_id,
+                settings=settings,
+            )
+        except ValueError:
+            return None  # nothing to summarize for this paper
+        if s.fallback:
+            reason = getattr(s, "fallback_reason", None) or "the local LLM is unavailable"
+            return s.text, reason
+        return s.text, None
+    if work.abstract:
+        return work.abstract.strip(), None
+    text = work_source_text(db, work)
+    if not text:
+        return None
+    return summarize_extractive(text, max_sentences=4), None
+
+
+def _scope_label(db: Session, scope_type: str, scope_id: uuid.UUID | None) -> str | None:
+    """Human label for the summarized scope ("whole library" / shelf name / rack name)."""
+    if scope_type == "library":
+        return "whole library"
+    if scope_id is None:
+        return None
+    from app.models.organization import Rack, Shelf  # noqa: PLC0415 (avoid import cycle)
+
+    container = db.get(Shelf if scope_type == "shelf" else Rack, scope_id)
+    return getattr(container, "name", None)
+
+
 def latest_scope_summary(db: Session, *, scope_type: str, scope_id: uuid.UUID | None):
     """The most recent stored summary for a scope, or None (read path for the S15 async flow)."""
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
@@ -338,7 +476,7 @@ def summarize_scope(
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
 
     abstracts = [w.abstract for w in works if w.abstract]
-    if not abstracts:
+    if not abstracts and summary_type != "local_llm":
         raise ValueError(f"No abstracts available in {scope_type!r} scope to summarize")
     combined = " ".join(abstracts)
 
@@ -346,20 +484,76 @@ def summarize_scope(
     provider_used = summary_type
     fallback_reason: str | None = None
     prompt_version = PROMPT_VERSION
+    method = "extractive"
+    chunk_count = 0
     text = ""
     if summary_type == "local_llm":
         stored_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
-        if ai_cfg.summary_provider == "local_llm":
+        # Map step (UX batch 4): build one digest line per paper. When the LLM is on, per-paper
+        # summaries are generated through summarize_work — so they are also PERSISTED and show up
+        # in each paper's own view — and reused on the next scope run. A single LLM outage stops
+        # further attempts (cheap digests for the rest) instead of stacking N timeouts.
+        digests: list[str] = []
+        llm_ok = ai_cfg.summary_provider == "local_llm"
+        if not llm_ok:
+            fallback_reason = "the local LLM is not enabled"
+        for work in works:
+            digest = _work_digest(
+                db,
+                work,
+                use_llm=llm_ok and fallback_reason is None,
+                model_name=stored_model,
+                created_by_user_id=created_by_user_id,
+                settings=settings,
+            )
+            if digest is None:
+                continue
+            digest_text, degraded_reason = digest
+            if degraded_reason and fallback_reason is None and llm_ok:
+                fallback_reason = degraded_reason
+            title = (work.canonical_title or "Untitled").strip()
+            year = f" ({work.year})" if work.year else ""
+            digests.append(f"- {title}{year}: {digest_text}")
+        if not digests:
+            raise ValueError(f"No text available in {scope_type!r} scope to summarize")
+
+        # Reduce step: pack the digests into context-window-sized chunks; condense each chunk,
+        # then synthesize the final collection summary (single chunk skips the middle pass).
+        if fallback_reason is None:
             try:
-                text = _ollama_summarize(combined, model=stored_model, base_url=ai_cfg.ollama_url)
+                chunks = _pack_blocks(digests, LLM_INPUT_CHAR_BUDGET)
+                chunk_count = len(chunks)
+                if len(chunks) == 1:
+                    text = _ollama_generate(
+                        _scope_final_prompt(scope_type, len(works), chunks[0], from_parts=False),
+                        model=stored_model,
+                        base_url=ai_cfg.ollama_url,
+                    )
+                else:
+                    partials = [
+                        _ollama_generate(
+                            _scope_chunk_prompt(scope_type, i + 1, len(chunks), chunk),
+                            model=stored_model,
+                            base_url=ai_cfg.ollama_url,
+                        )
+                        for i, chunk in enumerate(chunks)
+                    ]
+                    final_notes = "\n\n".join(partials)[:LLM_INPUT_CHAR_BUDGET]
+                    text = _ollama_generate(
+                        _scope_final_prompt(scope_type, len(works), final_notes, from_parts=True),
+                        model=stored_model,
+                        base_url=ai_cfg.ollama_url,
+                    )
+                method = "map_reduce"
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm scope summary unavailable (%s); extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"
-        else:
-            fallback_reason = "the local LLM is not enabled"
         if not text:
-            text = summarize_extractive(combined, max_sentences=max_sentences)
+            # Extractive fallback over the per-paper digests (still better than raw abstracts).
+            text = summarize_extractive(
+                " ".join(d.lstrip("- ") for d in digests), max_sentences=max_sentences
+            )
             provider_used = "extractive"
             stored_model = "tier1-extractive-frequency-scope"
     else:
@@ -394,10 +588,14 @@ def summarize_scope(
             "model_name": model_name,
             # Read back by GET /ai/summaries/latest (S15 async completion).
             "work_count": len(works),
+            # UX batch 4: which scope this summarizes (shown as the summary's title) + how.
+            "scope_label": _scope_label(db, scope_type, scope_id),
+            "method": method,
+            "chunks": chunk_count,
         },
     )
     db.add(summary)
     db.flush()
     # A ``fallback_reason`` is transient (not a column): shown only on a fresh degrade.
     summary.fallback_reason = fallback_reason if fallback else None
-    return summary, len(abstracts)
+    return summary, len(works)

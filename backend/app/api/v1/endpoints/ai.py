@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.models.ai import TopicAssignment
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.user import User
+from app.models.work import Work
 from app.services import access
 from app.services.access_settings import get_default_access_level
 from app.services.app_config import effective_ai_scope_job_threshold
@@ -61,6 +62,10 @@ class ScopeSummaryResponse(BaseModel):
     provider_used: str | None = None
     fallback: bool = False
     fallback_reason: str | None = None
+    # UX batch 4: which scope this summarizes ("whole library" / shelf name / rack name) + how
+    # (v2 map-reduce: per-paper digests → chunked synthesis).
+    scope_label: str | None = None
+    method: str | None = None
 
 
 @router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
@@ -138,6 +143,8 @@ def create_scope_summary(
         provider_used=getattr(summary, "provider_used", None),
         fallback=getattr(summary, "fallback", False),
         fallback_reason=getattr(summary, "fallback_reason", None),
+        scope_label=(summary.params or {}).get("scope_label"),
+        method=(summary.params or {}).get("method"),
     )
 
 
@@ -150,12 +157,20 @@ class TopicRequest(BaseModel):
     embedding_model: str | None = None
 
 
+class TopicWorkRef(BaseModel):
+    id: str
+    title: str | None = None
+
+
 class TopicRead(BaseModel):
     topic_id: int
     keywords: list[str]
     work_count: int
     representative_work_ids: list[str] = []
     coherence_score: float | None = None
+    # UX batch 4: the papers behind this topic (best-fit first), with titles for direct display.
+    work_ids: list[str] = []
+    works: list[TopicWorkRef] = []
 
 
 class TopicModelResponse(BaseModel):
@@ -206,6 +221,8 @@ def read_latest_scope_summary(
         provider_requested=summary.provider_requested,
         provider_used=summary.provider_used,
         fallback=summary.fallback,
+        scope_label=(summary.params or {}).get("scope_label"),
+        method=(summary.params or {}).get("method"),
     )
 
 
@@ -272,7 +289,112 @@ def create_topic_model(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
-    return TopicModelResponse(**result)
+    return _with_topic_titles(db, TopicModelResponse(**result))
+
+
+def _with_topic_titles(db: Session, response: TopicModelResponse) -> TopicModelResponse:
+    """Fill each topic's ``works`` (id+title, best-fit first) from its ``work_ids`` in one query."""
+    all_ids: set[uuid.UUID] = set()
+    for topic in response.topics:
+        for wid in topic.work_ids:
+            try:
+                all_ids.add(uuid.UUID(wid))
+            except ValueError:
+                continue
+    if not all_ids:
+        return response
+    titles = {
+        str(wid): title
+        for wid, title in db.execute(
+            select(Work.id, Work.canonical_title).where(Work.id.in_(all_ids))
+        ).all()
+    }
+    for topic in response.topics:
+        topic.works = [TopicWorkRef(id=wid, title=titles.get(wid)) for wid in topic.work_ids]
+    return response
+
+
+@router.get("/topics/latest", response_model=TopicModelResponse)
+def read_latest_topics(
+    scope_type: Literal["library", "shelf", "rack"],
+    scope_id: uuid.UUID | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> TopicModelResponse:
+    """Reconstruct the stored topic model for a scope from its assignments (UX batch 4).
+
+    This is the async-completion read path (mirror of GET /ai/summaries/latest): a background
+    `topic_model_job` stores `TopicAssignment` rows but the response (keywords etc.) was lost —
+    here the topics are rebuilt from the assignments (members ordered by score) and the keyword
+    labels recomputed deterministically over each topic's member documents.
+    """
+    from app.services.ai_config import get_ai_config
+    from app.services.topic_modeling import _centroid, _cluster_keywords, _doc_text, _tfidf, _tokenize
+
+    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    cfg = get_ai_config(db)
+    suffix = f"{scope_type}:{scope_id or 'all'}"
+    # Deterministic model ids: prefer the configured backend's model, else whichever exists.
+    candidates = [f"keyword-kmeans:{suffix}", f"embedding:{suffix}", f"bertopic:{suffix}"]
+    if cfg.topic_backend != "tfidf":
+        candidates.insert(0, f"{cfg.topic_backend}:{suffix}")
+    model_id = next(
+        (
+            mid
+            for mid in dict.fromkeys(candidates)
+            if db.scalar(
+                select(TopicAssignment.id).where(TopicAssignment.topic_model_id == mid).limit(1)
+            )
+        ),
+        None,
+    )
+    if model_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No topic model for this scope yet"
+        )
+    rows = db.execute(
+        select(TopicAssignment.topic_id, TopicAssignment.work_id, TopicAssignment.score).where(
+            TopicAssignment.topic_model_id == model_id
+        )
+    ).all()
+    visible = access.visible_work_ids(db, actor)
+    by_topic: dict[int, list[tuple[uuid.UUID, float]]] = {}
+    for topic_id, work_id, score in rows:
+        if visible is not None and work_id not in visible:
+            continue
+        by_topic.setdefault(topic_id, []).append((work_id, score or 0.0))
+    works_by_id = {
+        w.id: w
+        for w in db.scalars(
+            select(Work).where(Work.id.in_({wid for m in by_topic.values() for wid, _ in m}))
+        ).all()
+    }
+    topics: list[dict] = []
+    for topic_id in sorted(by_topic):
+        members = sorted(by_topic[topic_id], key=lambda m: -m[1])
+        member_works = [works_by_id[wid] for wid, _ in members if wid in works_by_id]
+        if not member_works:
+            continue
+        docs = [t for t in (_tokenize(_doc_text(w)) for w in member_works) if t]
+        keywords = _cluster_keywords(_centroid(_tfidf(docs))) if docs else []
+        topics.append(
+            {
+                "topic_id": topic_id,
+                "keywords": keywords,
+                "work_count": len(member_works),
+                "work_ids": [str(w.id) for w in member_works],
+            }
+        )
+    response = TopicModelResponse(
+        model_id=model_id,
+        backend=model_id.split(":", 1)[0],
+        scope_type=scope_type,
+        scope_id=str(scope_id) if scope_id else None,
+        work_count=sum(t["work_count"] for t in topics),
+        topics=[TopicRead(**t) for t in topics],
+    )
+    return _with_topic_titles(db, response)
 
 
 class TopicActionRequest(BaseModel):

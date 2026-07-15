@@ -194,6 +194,8 @@ def model_topics(
                 "topic_id": topic_id,
                 "keywords": _cluster_keywords(centroid),
                 "work_count": len(members),
+                # UX batch 4: full member list so the UI can show the papers behind each topic.
+                "work_ids": [str(documents[i][0].id) for i in members],
             }
         )
 
@@ -521,6 +523,8 @@ def _model_topics_embedding(
                     str(documents[i][0].id) for i in scored[:REPRESENTATIVE_PER_TOPIC]
                 ],
                 "coherence_score": round(max(0.0, min(1.0, coherence)), 4),
+                # UX batch 4: full member list (best-fit first) for the per-topic paper list.
+                "work_ids": [str(documents[i][0].id) for i in scored],
             }
         )
         for i in members:

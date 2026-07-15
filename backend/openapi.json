@@ -6039,6 +6039,17 @@
             ],
             "title": "Job Id"
           },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
           "model_name": {
             "anyOf": [
               {
@@ -6087,6 +6098,17 @@
             "default": false,
             "title": "Queued",
             "type": "boolean"
+          },
+          "scope_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Label"
           },
           "summary_type": {
             "anyOf": [
@@ -7652,6 +7674,22 @@
           "work_count": {
             "title": "Work Count",
             "type": "integer"
+          },
+          "work_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Work Ids",
+            "type": "array"
+          },
+          "works": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TopicWorkRef"
+            },
+            "title": "Works",
+            "type": "array"
           }
         },
         "required": [
@@ -7722,6 +7760,30 @@
           "scope_type"
         ],
         "title": "TopicRequest",
+        "type": "object"
+      },
+      "TopicWorkRef": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TopicWorkRef",
         "type": "object"
       },
       "UserCreate": {
@@ -14561,6 +14623,87 @@
           }
         },
         "summary": "Create Shelf From Topic",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/topics/latest": {
+      "get": {
+        "description": "Reconstruct the stored topic model for a scope from its assignments (UX batch 4).\n\nThis is the async-completion read path (mirror of GET /ai/summaries/latest): a background\n`topic_model_job` stores `TopicAssignment` rows but the response (keywords etc.) was lost —\nhere the topics are rebuilt from the assignments (members ordered by score) and the keyword\nlabels recomputed deterministically over each topic's member documents.",
+        "operationId": "read_latest_topics_api_v1_ai_topics_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "library",
+                "shelf",
+                "rack"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopicModelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Latest Topics",
         "tags": [
           "ai"
         ]

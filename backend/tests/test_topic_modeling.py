@@ -446,6 +446,35 @@ def test_topics_api_runs_for_editor(client, auth_headers, db) -> None:
     body = r.json()
     assert body["work_count"] == 3
     assert body["topics"]
+    # UX batch 4: every topic carries its member papers, with titles, best-fit first.
+    for topic in body["topics"]:
+        assert topic["work_ids"]
+        assert len(topic["works"]) == len(topic["work_ids"])
+        assert all(w["title"] for w in topic["works"])
+
+    # The async-completion read path reconstructs the same topics from stored assignments.
+    latest = client.get(
+        "/api/v1/ai/topics/latest",
+        headers=auth_headers("editor"),
+        params={"scope_type": "shelf", "scope_id": str(shelf.id)},
+    )
+    assert latest.status_code == 200
+    lbody = latest.json()
+    assert lbody["work_count"] == 3
+    assert {t["work_count"] for t in lbody["topics"]} == {
+        t["work_count"] for t in body["topics"]
+    }
+    assert all(t["keywords"] for t in lbody["topics"])
+    assert all(w["title"] for t in lbody["topics"] for w in t["works"])
+
+
+def test_topics_latest_404_when_never_modeled(client, auth_headers, db) -> None:
+    r = client.get(
+        "/api/v1/ai/topics/latest",
+        headers=auth_headers("editor"),
+        params={"scope_type": "library"},
+    )
+    assert r.status_code == 404
 
 
 def test_topics_api_requires_editor(client, auth_headers, db) -> None:

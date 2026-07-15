@@ -499,6 +499,10 @@ def test_scope_summary_api_uses_configured_provider(client, auth_headers, db, mo
     monkeypatch.setattr(
         summ, "_ollama_summarize", lambda text, *, model, base_url: f"LLM summary via {model}"
     )
+    # The scope reduce step (map-reduce, UX batch 4) goes through the raw generator.
+    monkeypatch.setattr(
+        summ, "_ollama_generate", lambda prompt, *, model, base_url: f"LLM summary via {model}"
+    )
 
     shelf = Shelf(name="cfg provider")
     db.add(shelf)
@@ -521,6 +525,72 @@ def test_scope_summary_api_uses_configured_provider(client, auth_headers, db, mo
     assert body["fallback"] is False
     assert body["model_name"] == "llama3"
     assert "LLM summary via llama3" in body["text"]
+
+
+def test_scope_summary_map_reduce_prompts_and_chunking(db, monkeypatch) -> None:
+    """UX batch 4: the scope summary (a) frames the prompt as a COLLECTION (never 'this paper'),
+    (b) chunks per-paper digests instead of truncating, and (c) persists per-paper LLM summaries
+    so the paper view gains them too."""
+    import app.services.summarization as summ
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.ai_config import update_ai_config
+    from app.services.summarization import summarize_scope
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    prompts: list[str] = []
+
+    def fake_generate(prompt, *, model, base_url):
+        prompts.append(prompt)
+        if prompt.startswith("Summarize the following academic paper"):
+            return "Digest sentence with several words in it. " * 8  # realistic-length digest
+        return f"OUT-{len(prompts)}"
+
+    monkeypatch.setattr(summ, "_ollama_generate", fake_generate)
+    monkeypatch.setattr(summ, "LLM_INPUT_CHAR_BUDGET", 600)  # force multi-chunk with small input
+
+    shelf = Shelf(name="mr shelf")
+    db.add(shelf)
+    db.flush()
+    for i in range(6):
+        w = Work(
+            canonical_title=f"Paper {i}",
+            normalized_title=f"paper {i}",
+            abstract=("Sentence about topic. " * 10) + f"Unique point {i}.",
+        )
+        db.add(w)
+        db.flush()
+        db.add(ShelfWork(shelf_id=shelf.id, work_id=w.id))
+    db.commit()
+
+    summary, count = summarize_scope(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm"
+    )
+    db.commit()
+    assert count == 6
+    assert summary.provider_used == "local_llm"
+    assert summary.params["method"] == "map_reduce"
+    assert summary.params["chunks"] >= 2  # digests didn't fit one budget → chunked, not truncated
+    assert summary.params["scope_label"] == "mr shelf"
+    # Per-paper map summaries were persisted (reusable in the paper view + next scope run).
+    stored = db.scalars(
+        select(Summary).where(Summary.entity_type == "work", Summary.summary_type == "local_llm")
+    ).all()
+    assert len(stored) == 6
+    # The map prompts are the single-paper prompt; the reduce prompts are collection-framed.
+    reduce_prompts = [p for p in prompts if "COLLECTION AS A WHOLE" in p or "part " in p[:200]]
+    assert reduce_prompts, prompts
+    final = [p for p in prompts if "COLLECTION AS A WHOLE" in p]
+    assert final and "shelf" in final[-1]
+    assert 'never write "this paper"' in final[-1]
+
+    # Second run reuses the stored per-paper summaries (no new map calls) — only reduce calls.
+    before = len(prompts)
+    summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    map_calls_second_run = sum(
+        1 for p in prompts[before:] if p.startswith("Summarize the following academic paper")
+    )
+    assert map_calls_second_run == 0
 
 
 def test_scope_summary_api_defaults_to_extractive_without_model(client, auth_headers, db) -> None:
