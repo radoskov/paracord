@@ -504,9 +504,7 @@ def enrich_work(
             rescan_references_for_new_work,
         )
 
-        rescan_references_for_new_work(
-            db, work, accept_policy=effective_accept_policy(db)
-        )
+        rescan_references_for_new_work(db, work, accept_policy=effective_accept_policy(db))
         rescan_external_papers_for_new_work(db, work)
     if sources:
         work.updated_at = datetime.now(UTC)

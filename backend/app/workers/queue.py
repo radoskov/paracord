@@ -218,7 +218,10 @@ def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
         # catch them (e.g. enrich's DOI-conflict path) and record processing_error WITHOUT raising,
         # so only genuinely unexpected/transient exceptions trigger a re-run.
         job = queue.enqueue(
-            job_func, str(work_id), job_id=_fresh_job_id(key), retry=Retry(max=2, interval=[30, 120])
+            job_func,
+            str(work_id),
+            job_id=_fresh_job_id(key),
+            retry=Retry(max=2, interval=[30, 120]),
         )
         _remember_latest_job(queue.connection, key, job.id)
         return job.id

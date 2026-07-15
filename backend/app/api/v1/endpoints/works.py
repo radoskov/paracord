@@ -30,9 +30,9 @@ from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
 from app.services.app_config import (
+    effective_accept_policy,
     effective_citing_papers_fetch_cap,
     effective_max_papers_per_page,
-    effective_accept_policy,
 )
 from app.services.audit import record_event
 from app.services.citation_graph import build_citation_neighborhood
@@ -767,9 +767,7 @@ def import_reference_as_work(
     # Reverse-rescan (batch 12): this newly-created work may also be what OTHER still-external
     # references cite — link them now (fuzzy stays soft; toggle read from AppConfig) so importing one
     # citation doesn't leave its siblings pointing "external".
-    rescan_references_for_new_work(
-        db, work, accept_policy=effective_accept_policy(db)
-    )
+    rescan_references_for_new_work(db, work, accept_policy=effective_accept_policy(db))
     rescan_external_papers_for_new_work(db, work)
     db.commit()
     db.refresh(work)
@@ -831,9 +829,7 @@ def import_citing_paper_as_work(
     # No free-floating papers (#1) + reverse-rescan (batch 12): the new paper may be what other
     # external references/citers point at.
     place_on_default_if_loose(db, work.id, actor_id=actor.id)
-    rescan_references_for_new_work(
-        db, work, accept_policy=effective_accept_policy(db)
-    )
+    rescan_references_for_new_work(db, work, accept_policy=effective_accept_policy(db))
     rescan_external_papers_for_new_work(db, work)
     db.commit()
     db.refresh(work)
@@ -872,9 +868,7 @@ def create_work(
 
     place_on_default_if_loose(db, work.id, actor_id=actor.id)
     # Reverse-rescan (batch 12): link any still-external references that cite this new paper.
-    rescan_references_for_new_work(
-        db, work, accept_policy=effective_accept_policy(db)
-    )
+    rescan_references_for_new_work(db, work, accept_policy=effective_accept_policy(db))
     rescan_external_papers_for_new_work(db, work)
     db.commit()
     enqueue_embedding(work.id)  # index off the search read path (best-effort)
@@ -1315,9 +1309,7 @@ def delete_work(
     # candidate queries can't re-link to the row being deleted). Uses the current fuzzy toggle.
     if orphaned_refs:
         db.flush()
-        run_matching_for_references(
-            db, orphaned_refs, accept_policy=effective_accept_policy(db)
-        )
+        run_matching_for_references(db, orphaned_refs, accept_policy=effective_accept_policy(db))
     record_event(
         db,
         "work.deleted",
@@ -1632,9 +1624,7 @@ def rescan_work_references(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
     _guard_modify_work(db, actor, work)
     references = references_for_work(db, work_id)
-    changed = run_matching_for_references(
-        db, references, accept_policy=effective_accept_policy(db)
-    )
+    changed = run_matching_for_references(db, references, accept_policy=effective_accept_policy(db))
     db.commit()
     return ReferenceRescanResult(scanned=len(references), changed=changed)
 

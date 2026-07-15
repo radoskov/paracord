@@ -278,7 +278,10 @@ def effective_fuzzy_accept_threshold(db: Session, *, settings: Settings | None =
 
 
 def update_fuzzy_accept_threshold(
-    db: Session, *, value: float, actor_user_id: uuid.UUID | None = None,
+    db: Session,
+    *,
+    value: float,
+    actor_user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
 ) -> float:
     """Persist the admin-set fuzzy auto-accept threshold. Rejects values below the yaml floor."""

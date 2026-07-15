@@ -161,7 +161,9 @@ def test_build_chunks_sanitizes_nul_bytes_and_overlong_section_labels(db_session
     )
     db_session.add(work)
     db_session.flush()
-    db_session.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db_session.add(
+        RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei)
+    )
     db_session.commit()
 
     records = build_chunks_for_work(db_session, work)
@@ -170,5 +172,7 @@ def test_build_chunks_sanitizes_nul_bytes_and_overlong_section_labels(db_session
         assert "\x00" not in r["text"]
         assert r["section"] is None or (len(r["section"]) <= 255 and "\x00" not in r["section"])
     # The over-long head was clamped, not dropped.
-    clamped = [r["section"] for r in records if r["section"] and r["section"].startswith("A ridiculously")]
+    clamped = [
+        r["section"] for r in records if r["section"] and r["section"].startswith("A ridiculously")
+    ]
     assert clamped and all(len(s) == 255 for s in clamped)

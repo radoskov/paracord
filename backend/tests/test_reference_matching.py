@@ -181,7 +181,9 @@ def test_effective_fuzzy_threshold_clamps_to_yaml_floor(db, monkeypatch) -> None
     )
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "reference_matching_min_auto_accept_threshold", 90.0, raising=False)
+    monkeypatch.setattr(
+        settings, "reference_matching_min_auto_accept_threshold", 90.0, raising=False
+    )
     # A sneaky sub-floor value written directly to the row is clamped on read.
     row = _ensure_row(db)
     row.fuzzy_accept_threshold = 10.0
@@ -517,7 +519,9 @@ def test_admin_toggle_round_trips_and_enqueues_rescan(client, auth_headers, monk
     assert calls == [1]  # flipping ON kicks off a library-wide rescan
 
 
-def test_admin_acceptance_settings_round_trip_and_validate(client, auth_headers, monkeypatch) -> None:
+def test_admin_acceptance_settings_round_trip_and_validate(
+    client, auth_headers, monkeypatch
+) -> None:
     """UX batch: the fuzzy threshold + high-confidence toggle are admin-editable; the yaml floor
     and the high-confidence threshold are surfaced read-only and enforced."""
     from app.workers import queue as queue_mod
