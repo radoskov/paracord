@@ -335,6 +335,9 @@
   let citationGraphCap = '';
   let topicGraphCap = '';
   let vizCap = '';
+  let elsevierKeySet = false;
+  let elsevierKeyInput = '';
+  let elsevierKeyMsg = '';
   let useFuzzyAsConfirmed = false;
   let fuzzyAcceptThreshold = '';
   let fuzzyThresholdMin = 90;
@@ -363,6 +366,7 @@
     citationGraphCap = String(cfg.citation_graph_node_cap);
     topicGraphCap = String(cfg.topic_graph_node_cap);
     vizCap = String(cfg.viz_node_cap);
+    elsevierKeySet = cfg.elsevier_api_key_set;
     useFuzzyAsConfirmed = cfg.use_fuzzy_match_as_confirmed;
     fuzzyAcceptThreshold = String(cfg.fuzzy_accept_threshold);
     fuzzyThresholdMin = cfg.fuzzy_accept_threshold_min;
@@ -389,6 +393,24 @@
           : 'Saved.';
     });
     savingMatching = false;
+  }
+
+  async function saveElsevierKey(): Promise<void> {
+    elsevierKeyMsg = '';
+    await run(async () => {
+      applyAppConfig(await client.updateAppConfig({ elsevier_api_key: elsevierKeyInput.trim() }));
+      elsevierKeyInput = '';
+      elsevierKeyMsg = 'Key saved (stored server-side; not shown again).';
+    });
+  }
+
+  async function clearElsevierKey(): Promise<void> {
+    elsevierKeyMsg = '';
+    await run(async () => {
+      applyAppConfig(await client.updateAppConfig({ elsevier_api_key: '' }));
+      elsevierKeyInput = '';
+      elsevierKeyMsg = 'Admin-set key cleared.';
+    });
   }
 
   async function rescanWholeLibrary(): Promise<void> {
@@ -1374,6 +1396,29 @@
         per-download confirmation before fetching from an unknown host. Shadow libraries and internal
         hosts are always blocked, whatever the policy.
       </p>
+      <form class="stack elsevier-key" on:submit|preventDefault={saveElsevierKey}>
+        <label class="field">
+          Elsevier API key {elsevierKeySet ? '(configured ✓)' : '(not set)'}
+          <input type="password" bind:value={elsevierKeyInput} autocomplete="off"
+            placeholder={elsevierKeySet ? 'Enter a new key to replace, or leave blank' : 'Paste your key from dev.elsevier.com'} />
+        </label>
+        <p class="small-help">
+          Free key from <a href="https://dev.elsevier.com" target="_blank" rel="noopener noreferrer">dev.elsevier.com</a>.
+          With a key set, ScienceDirect papers (10.1016 DOIs) are fetched through Elsevier's
+          official Article Retrieval API — entitlement follows your institution's network. Without
+          a key, downloads fall back to landing-page PDF discovery (which JS-only pages defeat).
+          The key is write-only: it is stored server-side and never shown again.
+        </p>
+        <div class="row-inline">
+          <button type="submit" disabled={loading || !elsevierKeyInput.trim()}
+            title="Save the Elsevier API key">Save key</button>
+          {#if elsevierKeySet}
+            <button type="button" class="secondary" disabled={loading}
+              on:click={clearElsevierKey} title="Clear the admin-set key (yaml/env fallback applies, if any)">Clear</button>
+          {/if}
+        </div>
+        {#if elsevierKeyMsg}<p class="muted">{elsevierKeyMsg}</p>{/if}
+      </form>
       <fieldset class="policy-options">
         <legend class="sr-only">Download policy</legend>
         {#each DOWNLOAD_POLICIES as opt (opt.value)}
@@ -2039,6 +2084,17 @@
   /* Numeric threshold input under its checkbox (UX batch) — keep it compact. */
   .threshold-field input {
     max-width: 8rem;
+  }
+
+  .row-inline {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .elsevier-key {
+    border-bottom: 1px solid var(--border-normal);
+    margin-bottom: 0.8rem;
+    padding-bottom: 0.8rem;
   }
 
   .admin-tabs {

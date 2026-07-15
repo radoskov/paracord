@@ -1315,6 +1315,10 @@ export interface AppConfig {
   citing_papers_fetch_cap: number;
   // Citation summary (UX batch): items per ranked column (shown in a scrollable window).
   citation_summary_item_cap: number;
+  // Elsevier API key (UX batch 3): reads report only whether one is configured; the PATCH field
+  // `elsevier_api_key` is write-only ("" clears the admin-set value).
+  elsevier_api_key_set: boolean;
+  elsevier_api_key?: string | null;
   // Per-surface analysis node caps (L-a).
   citation_graph_node_cap: number;
   topic_graph_node_cap: number;

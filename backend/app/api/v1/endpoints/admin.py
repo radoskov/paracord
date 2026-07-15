@@ -51,6 +51,9 @@ class AppConfigOut(BaseModel):
     citing_papers_fetch_cap: int
     # Citation summary (UX batch): items per ranked column (the UI shows them in a scroll window).
     citation_summary_item_cap: int
+    # Elsevier Article Retrieval API key (UX batch 3): WRITE-ONLY — reads report only whether a
+    # key is configured (admin-set row or the yaml/env fallback), never the key itself.
+    elsevier_api_key_set: bool
     # AI scope-job threshold (S15/S16): scopes above this run topics/summaries/graphs on the worker.
     ai_scope_job_threshold: int
     # Per-surface analysis node caps (L-a): highest-degree nodes are kept, hidden counts reported.
@@ -82,6 +85,9 @@ class AppConfigUpdate(BaseModel):
     max_queue_len: int | None = Field(default=None, ge=1)
     citing_papers_fetch_cap: int | None = Field(default=None, ge=1)
     citation_summary_item_cap: int | None = Field(default=None, ge=1, le=500)
+    # Write-only: a non-None value sets the key; an empty string clears the admin-set value
+    # (falling back to the yaml/env default).
+    elsevier_api_key: str | None = Field(default=None, max_length=128)
     ai_scope_job_threshold: int | None = Field(default=None, ge=1)
     citation_graph_node_cap: int | None = Field(default=None, ge=1)
     topic_graph_node_cap: int | None = Field(default=None, ge=1)
@@ -318,6 +324,7 @@ def _app_config_out(db: Session) -> AppConfigOut:
         max_queue_len=app_config_service.effective_max_queue_len(db),
         citing_papers_fetch_cap=app_config_service.effective_citing_papers_fetch_cap(db),
         citation_summary_item_cap=app_config_service.effective_citation_summary_item_cap(db),
+        elsevier_api_key_set=app_config_service.effective_elsevier_api_key(db) is not None,
         ai_scope_job_threshold=app_config_service.effective_ai_scope_job_threshold(db),
         citation_graph_node_cap=app_config_service.effective_citation_graph_node_cap(db),
         topic_graph_node_cap=app_config_service.effective_topic_graph_node_cap(db),
@@ -394,6 +401,11 @@ def update_app_config(
                 app_config_service.update_citation_summary_item_cap(
                     db, value=payload.citation_summary_item_cap, actor_user_id=actor.id
                 )
+            )
+        if payload.elsevier_api_key is not None:
+            # Audit records only whether a key is set — never the key itself.
+            changed["elsevier_api_key_set"] = app_config_service.update_elsevier_api_key(
+                db, value=payload.elsevier_api_key, actor_user_id=actor.id
             )
         if payload.ai_scope_job_threshold is not None:
             changed["ai_scope_job_threshold"] = app_config_service.update_ai_scope_job_threshold(

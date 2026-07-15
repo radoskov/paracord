@@ -135,6 +135,29 @@ def update_citation_summary_item_cap(
     return _update_int(db, "citation_summary_item_cap", value, actor_user_id)
 
 
+def effective_elsevier_api_key(db: Session, *, settings: Settings | None = None) -> str | None:
+    """The Elsevier Article Retrieval API key: admin-set value, else the yaml/env default."""
+    settings = settings or get_settings()
+    fallback = (getattr(settings, "web_find_elsevier_api_key", None) or "").strip() or None
+    if not _app_config_table_present(db):
+        return fallback
+    row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
+    if row is None or not (row.elsevier_api_key or "").strip():
+        return fallback
+    return row.elsevier_api_key.strip()
+
+
+def update_elsevier_api_key(
+    db: Session, *, value: str | None, actor_user_id: uuid.UUID | None = None
+) -> bool:
+    """Persist (or clear, on empty/None) the Elsevier API key. Returns whether a key is now set."""
+    row = _ensure_row(db)
+    row.elsevier_api_key = (value or "").strip() or None
+    row.updated_by_user_id = actor_user_id
+    db.flush()
+    return row.elsevier_api_key is not None
+
+
 def effective_citing_papers_fetch_cap(db: Session, *, settings: Settings | None = None) -> int:
     """Return the effective cap on citing papers fetched+cached per paper (S20)."""
     if not _app_config_table_present(db):

@@ -9,7 +9,7 @@ static ``Settings`` defaults apply.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, Uuid
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -117,6 +117,10 @@ class AppConfig(Base):
     viz_node_cap: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=str(_DEFAULT_VIZ_NODE_CAP)
     )
+    # Elsevier Article Retrieval API key (UX batch 3, owner-set in Admin → Find-on-web). NULL →
+    # fall back to the yaml/env default. Write-only through the admin API (reads report only
+    # whether a key is configured).
+    elsevier_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Reference→library matching (batch 12, owner item #1). When ON, a fuzzy "likely local" candidate
     # that clears the title threshold + gates becomes a HARD link (``resolved_work_id`` set, counted in
     # every graph/metric calculation) instead of a soft one-click suggestion. OFF (default; an absent

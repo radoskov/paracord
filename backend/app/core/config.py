@@ -95,6 +95,8 @@ def _server_settings_from_yaml(data: dict[str, Any]) -> dict[str, Any]:
         values["web_find_enabled"] = web_find["enabled"]
     if "unpaywall_email" in web_find:
         values["web_find_unpaywall_email"] = web_find["unpaywall_email"]
+    if "elsevier_api_key" in web_find:
+        values["web_find_elsevier_api_key"] = web_find["elsevier_api_key"]
     if "max_candidates" in web_find:
         values["web_find_max_candidates"] = web_find["max_candidates"]
     if "per_source_timeout" in web_find:
@@ -238,6 +240,12 @@ class Settings(BaseSettings):
     web_find_enabled: bool = True
     # Unpaywall requires an email param; defaults to crossref_mailto at call time when unset.
     web_find_unpaywall_email: str | None = None
+    # Elsevier Article Retrieval API key (free from dev.elsevier.com; entitlement follows the
+    # institution's IP range). The runtime AppConfig value (Admin → Find-on-web) overrides this
+    # yaml/env default. Used to fetch ScienceDirect PDFs for 10.1016 DOIs.
+    web_find_elsevier_api_key: str | None = Field(
+        default=None, alias="PARACORD_ELSEVIER_API_KEY"
+    )
     web_find_max_candidates: int = 10
     web_find_per_source_timeout: float = 8.0
     # Wall-clock cap for one lookup request (find-on-web fan-out / batch preview). Generous on

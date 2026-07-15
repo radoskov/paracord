@@ -1140,6 +1140,41 @@ def test_landing_page_fallback_follows_download_pdf_button(db_session, tmp_path)
     assert tried[-1] == pdf_url
 
 
+def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_path, monkeypatch):
+    """UX batch 3: with an Elsevier key configured, a ScienceDirect (10.1016) DOI is fetched via
+    the official Article Retrieval API, key in the request header."""
+
+    set_download_policy(db_session, policy="careful")
+    db_session.commit()
+    # This fixture's schema has no app_config table — configure via the settings fallback.
+    settings_obj = _attach_settings(tmp_path)
+    monkeypatch.setattr(settings_obj, "web_find_elsevier_api_key", "sekret-key", raising=False)
+    seen: list[tuple[str, dict | None]] = []
+
+    def fake_stream(url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None,
+                    headers=None):
+        seen.append((url, headers))
+        return _PDF_BYTES if "api.elsevier.com" in url else None
+
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url="https://www.sciencedirect.com/science/article/pii/S123",
+        source="crossref",
+        actor=_Actor(),
+        settings=settings_obj,
+        doi="10.1016/j.artint.2024.104123",
+        streamer=fake_stream,
+        html_fetcher=lambda url, **_kw: ("<html></html>", url),
+    )
+    assert out["status"] == "attached"
+    api_calls = [(u, h) for u, h in seen if "api.elsevier.com" in u]
+    assert api_calls, seen
+    url, headers = api_calls[0]
+    assert "10.1016%2Fj.artint.2024.104123" in url and "httpAccept=application%2Fpdf" in url
+    assert headers == {"X-ELS-APIKey": "sekret-key"}
+
+
 def test_landing_page_fallback_never_escapes_the_policy(db_session, tmp_path):
     """A page-extracted link on a denied/refused host is skipped, never fetched."""
     set_download_policy(db_session, policy="careful")

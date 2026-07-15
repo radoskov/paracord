@@ -54,6 +54,33 @@ def test_mangled_html_does_not_raise() -> None:
     assert find_pdf_links("<a href='/x.pdf' <broken", BASE) in ([], ["https://publisher.example/x.pdf"])
 
 
+def test_json_sniff_finds_pdf_urls_in_script_blobs() -> None:
+    """Layer 4: SPA pages embed the PDF URL in JSON state — no JS execution needed."""
+    html = """
+    <script type="application/json">{"props":{"pdfUrl":"https:\\/\\/cdn.example\\/full\\/paper.pdf?token=1"}}</script>
+    """
+    assert find_pdf_links(html, BASE) == ["https://cdn.example/full/paper.pdf?token=1"]
+
+
+def test_json_sniff_reconstructs_sciencedirect_pdfft_url() -> None:
+    html = """
+    <script type="application/json">
+    {"article":{"pdfDownload":{"urlMetadata":{"path":"science/article/pii","pii":"S0004370224001234",
+      "pdfExtension":"/pdfft","queryParams":{"md5":"abc123","pid":"1-s2.0-main.pdf"}}}}}
+    </script>
+    """
+    links = find_pdf_links(html, "https://www.sciencedirect.com/science/article/pii/S0004370224001234")
+    assert (
+        "https://www.sciencedirect.com/science/article/pii/S0004370224001234/pdfft"
+        "?md5=abc123&pid=1-s2.0-main.pdf" in links
+    )
+
+
+def test_json_sniff_penalized_urls_are_skipped() -> None:
+    html = '<script>{"x":"https://cdn.example/supplementary/extra.pdf"}</script>'
+    assert find_pdf_links(html, BASE) == []
+
+
 def test_publisher_rewrites() -> None:
     assert publisher_pdf_urls("https://arxiv.org/abs/2101.00001") == [
         "https://arxiv.org/pdf/2101.00001"

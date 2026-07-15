@@ -52,7 +52,7 @@ import socket
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx2 as httpx
 from lxml import etree
@@ -126,6 +126,9 @@ DEFAULT_ALLOWED_HOSTS = frozenset(
         "doaj.org",
         "crossref.org",
         "api.crossref.org",
+        # Elsevier's sanctioned Article Retrieval API (key-gated; UX batch 3). The API itself is
+        # always a legitimate destination — the key + entitlement decide what it serves.
+        "api.elsevier.com",
     }
 )
 
@@ -1043,6 +1046,7 @@ def _stream_pdf(
     policy: str | None = None,
     merged_allowed: set[str] | None = None,
     resolver: Callable[[str], list[str]] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> bytes | None:
     """Stream a candidate URL, re-classifying EVERY redirect hop + size/PDF validation.
 
@@ -1061,11 +1065,13 @@ def _stream_pdf(
             raise DownloadRefused(reason)
     elif _is_denied_host(url) or _host_resolves_internal(url, resolver=resolver):
         raise DownloadRefused(f"Refusing download from host {_host(url)!r}")
-    headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
+    request_headers = {"User-Agent": "PaRacORD/0.0 (find-on-web; legit sources only)"}
+    if headers:
+        request_headers.update(headers)
     with (
         httpx.Client(
             timeout=timeout,
-            headers=headers,
+            headers=request_headers,
             follow_redirects=True,
             max_redirects=_REDIRECT_CAP,
         ) as client,
@@ -1231,16 +1237,23 @@ def download_and_attach(
                 "url": candidate_url,
                 "reason": reason,
             }
-        def _attempt(url_try: str) -> bytes | None:
+        try:
+            stream_accepts_headers = "headers" in stream_params
+        except NameError:
+            stream_accepts_headers = False
+
+        def _attempt(url_try: str, headers: dict[str, str] | None = None) -> bytes | None:
             if stream_accepts_policy:
-                return stream(
-                    url_try,
-                    timeout=timeout,
-                    max_bytes=max_bytes,
-                    policy=policy,
-                    merged_allowed=merged_allowed,
-                    resolver=resolver,
-                )
+                kwargs: dict = {
+                    "timeout": timeout,
+                    "max_bytes": max_bytes,
+                    "policy": policy,
+                    "merged_allowed": merged_allowed,
+                    "resolver": resolver,
+                }
+                if headers and stream_accepts_headers:
+                    kwargs["headers"] = headers
+                return stream(url_try, **kwargs)
             return stream(url_try, timeout=timeout, max_bytes=max_bytes)
 
         try:
@@ -1265,6 +1278,28 @@ def download_and_attach(
         # so existing injected-streamer tests keep single-attempt semantics.
         fetched_url = candidate_url
         use_fallbacks = streamer is None or html_fetcher is not None
+        if pdf_bytes is None and use_fallbacks:
+            from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
+
+            # Elsevier's sanctioned API first (UX batch 3): for a 10.1016 DOI with a configured
+            # key, the Article Retrieval API returns the PDF where the institution is entitled —
+            # far more reliable than scraping ScienceDirect's JS-only pages.
+            if doi and normalize_doi(doi) and normalize_doi(doi).startswith("10.1016/"):
+                from app.services.app_config import effective_elsevier_api_key
+
+                api_key = effective_elsevier_api_key(db, settings=settings)
+                if api_key:
+                    api_url = (
+                        "https://api.elsevier.com/content/article/doi/"
+                        f"{quote(normalize_doi(doi), safe='')}?httpAccept=application%2Fpdf"
+                    )
+                    try:
+                        pdf_bytes = _attempt(api_url, headers={"X-ELS-APIKey": api_key})
+                    except Exception:  # noqa: BLE001 - API miss → continue with page discovery
+                        pdf_bytes = None
+                    if pdf_bytes is not None:
+                        fetched_url = api_url
+
         if pdf_bytes is None and use_fallbacks:
             from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
 
