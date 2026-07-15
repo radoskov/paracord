@@ -38,7 +38,24 @@ badges in the Library badges column; move Insights "Export this library" out of 
 7 → 2 → 3 → 6 → 1 → 5 (buttons → tooltips → ctrl-click → snap-zoom last/optional) → 4 (proposal
 text only). Each lands as its own commit with tests where the repo has precedent.
 
-## Proposal: automatic PDF retrieval (item 4 — awaiting owner decision)
+## Item 4 — RESOLVED after owner clarification (2026-07-15, same day)
+
+The owner does NOT want auto-triggered fetch jobs — triggers stay manual (Find-on-web download,
+imports) and the host policy stays. The pain is that an attempt only succeeded on a direct PDF
+URL; an HTML landing page dead-ended. Implemented (`5eb79a8`): `services/pdf_link_finder.py` +
+`download_and_attach` fallbacks — (1) deterministic publisher PDF-URL rewrites (ACM, Springer,
+Wiley, IEEE, Nature, MDPI, arXiv, ACL, OpenReview, bioRxiv/medRxiv, PLOS), (2) one policy-gated
+read of the landing page for `citation_pdf_url` / `<link rel=alternate type=application/pdf>`,
+(3) scored "Download PDF" anchor heuristics (href/.pdf, class/id hints like `xpl-btn-pdf`
+`action-downloadPdf`, link text; supplements/samples penalized). Bounded: ≤5 fallback URLs, one
+page fetch, no recursion; every URL passes the same denylist/SSRF/policy gates; refused hosts are
+skipped, never auto-confirmed. Known limitation: pages that only render the download affordance
+via JavaScript (notably ScienceDirect) still fail → `manual_upload_needed`; a headless-browser
+fetcher (optional compose profile) remains a possible future step — see discussion point 4b.
+
+The original staged auto-fetch proposal below is kept for reference only.
+
+## (superseded) Proposal: automatic PDF retrieval (item 4 — awaiting owner decision)
 
 Current state (verified): PDF download is strictly user-initiated (WorkDetail → Find on web →
 pick → download). Enrichment *sees* open-access PDF URLs (OpenAlex `best_oa_location.pdf_url`,

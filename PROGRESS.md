@@ -11,6 +11,15 @@
 
 ## UX batch 3: zen reader, graph UX, ref metadata, badges (2026-07-15)
 
+- `5eb79a8` — **landing-page PDF discovery** (item 4, after owner clarification: manual triggers
+  + current host policy stay; the *attempt* gets smarter). New `services/pdf_link_finder.py`:
+  publisher PDF-URL rewrites (ACM/Springer/Wiley/IEEE/Nature/MDPI/arXiv/ACL/OpenReview/
+  bioRxiv/PLOS), `citation_pdf_url`/alternate-link metas, scored "Download PDF" anchors (the
+  IEEE `xpl-btn-pdf`-style hints). Wired into `download_and_attach` as bounded fallbacks (≤5
+  URLs, one page read, no recursion) — every URL still passes the denylist/SSRF/policy gates and
+  unknown hosts are never auto-confirmed. JS-only pages (ScienceDirect) still fall back to
+  `manual_upload_needed`. web_find suite 112 passed.
+
 - `112d862` + workplan updates — `docs/WORKPLAN_2026-07-15_ux-batch3.md`, incl. the **automatic
   PDF retrieval proposal + 6 discussion points awaiting the owner** (item 4 not implemented by
   request).
