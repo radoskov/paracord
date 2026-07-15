@@ -814,6 +814,22 @@
     (document.getElementById('attach-pdf-input') as HTMLInputElement | null)?.focus();
   }
 
+  // Split a download-status reason into plain text + clickable URLs (UX batch 4): the backend
+  // lists the URLs it tried, and the user wants to open them directly.
+  function linkifyReason(reason: string): { text?: string; url?: string }[] {
+    const parts: { text?: string; url?: string }[] = [];
+    let last = 0;
+    const re = /https?:\/\/[^\s,)]+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(reason)) !== null) {
+      if (m.index > last) parts.push({ text: reason.slice(last, m.index) });
+      parts.push({ url: m[0] });
+      last = m.index + m[0].length;
+    }
+    if (last < reason.length) parts.push({ text: reason.slice(last) });
+    return parts;
+  }
+
   async function deletePaper(): Promise<void> {
     const title = form.canonical_title || 'this paper';
     if (!window.confirm(`Delete “${title}”? Its files stay in the library; links and notes are removed.`))
@@ -1871,11 +1887,13 @@
                     <span class="cand-status ok">✓ Already attached (deduplicated)</span>
                   {:else if r.status === 'manual_upload_needed'}
                     <span class="cand-status warn">
-                      Could not download automatically{r.reason ? ` — ${r.reason}` : ' (login/paywall)'}.
+                      Could not download automatically —
+                      {#each linkifyReason(r.reason ?? '(login/paywall)') as part}{#if part.url}<a href={part.url} target="_blank" rel="noopener noreferrer">{part.url}</a>{:else}{part.text}{/if}{/each}.
                       <button type="button" class="link" on:click={startManualUpload}>Upload the PDF manually</button>.
                     </span>
                   {:else if r.status === 'blocked'}
-                    <span class="cand-status err">Blocked: {r.reason ?? 'this host is not allowed for downloads'}</span>
+                    <span class="cand-status err">Blocked:
+                      {#each linkifyReason(r.reason ?? 'this host is not allowed for downloads') as part}{#if part.url}<a href={part.url} target="_blank" rel="noopener noreferrer">{part.url}</a>{:else}{part.text}{/if}{/each}</span>
                   {:else}
                     <span class="cand-status err">Error: {r.reason ?? 'download failed'}</span>
                   {/if}

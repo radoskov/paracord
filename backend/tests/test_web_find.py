@@ -1194,6 +1194,27 @@ def test_elsevier_api_fallback_used_for_10_1016_doi_with_key(db_session, tmp_pat
     assert not [u for u, _h in seen if "api.elsevier.com" in u]
 
 
+def test_known_publisher_off_policy_reason_carries_actionable_hint(db_session, tmp_path):
+    """UX batch 4: a known-publisher host refused by the 'restricted' policy keeps its status but
+    the reason now names 'careful' + Admin → Find-on-web, so the refusal is actionable."""
+    set_download_policy(db_session, policy="restricted")
+    db_session.commit()
+
+    out = _download(db_session, tmp_path, "https://link.springer.com/content/pdf/x.pdf")
+    assert out["status"] == "error"  # top-level mode-gate refusal keeps the historical status
+    assert "allowed-downloads" in out["reason"].lower()  # original machine-readable prefix kept
+    assert "careful" in out["reason"] and "Admin → Find-on-web" in out["reason"]
+    assert "springer.com" in out["reason"]  # known publisher → named
+
+
+def test_unknown_host_off_policy_hint_says_add_or_unrestricted(db_session, tmp_path):
+    set_download_policy(db_session, policy="careful")
+    db_session.commit()
+    out = _download(db_session, tmp_path, _UNKNOWN_URL)
+    assert out["status"] == "error"
+    assert "Admin → Find-on-web" in out["reason"] and "unrestricted" in out["reason"]
+
+
 def test_landing_page_fallback_never_escapes_the_policy(db_session, tmp_path):
     """A page-extracted link on a denied/refused host is skipped, never fetched."""
     set_download_policy(db_session, policy="careful")

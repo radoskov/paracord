@@ -1052,6 +1052,29 @@ _BROWSERLIKE_HEADERS = {
 }
 
 
+def _policy_refusal_hint(url: str, policy: str) -> str:
+    """Actionable suffix for a PDF host refused by the download-policy mode gate (UX batch 4).
+
+    A refusal is a configuration choice, not a dead paper — tell the user exactly how to allow it.
+    Appended to the original refusal reason so the machine-readable prefix is preserved.
+    """
+    host = _host(url) or ""
+    if policy == "restricted":
+        if _is_allowed_host(url, KNOWN_PUBLISHER_HOSTS):
+            return (
+                f" {host} is a known publisher — switch the download policy to 'careful' in "
+                f"Admin → Find-on-web to allow it."
+            )
+        return (
+            " The 'restricted' policy only allows built-in open-access hosts; switch to 'careful' "
+            "(known publishers) or add this host in Admin → Find-on-web."
+        )
+    return (
+        " Add this host in Admin → Find-on-web, or use the 'unrestricted' policy to confirm "
+        "unknown hosts per download."
+    )
+
+
 def _stream_pdf(
     url: str,
     *,
@@ -1244,7 +1267,9 @@ def download_and_attach(
         if outcome == "hard_block":
             return {"status": "blocked", "reason": reason}
         if outcome == "error":
-            return {"status": "error", "reason": reason}
+            # A host refused by the mode gate (not a hard block): keep the status, but append the
+            # actionable hint so the user knows it's a policy choice they can change (UX batch 4).
+            return {"status": "error", "reason": reason + _policy_refusal_hint(candidate_url, policy)}
         # In unrestricted mode an unknown public host needs an explicit confirmation; a confirmed
         # item falls through to allow.
         if outcome == "needs_confirmation" and not confirmed:
@@ -1277,8 +1302,12 @@ def download_and_attach(
             # test streamer keeps the original (url, timeout, max_bytes) signature.
             pdf_bytes = _attempt(candidate_url)
         except DownloadRefused as exc:
-            # A redirect that escaped the policy / hit a hard block mid-stream.
-            return {"status": "blocked", "reason": str(exc)}
+            # A redirect escaped the policy (e.g. doi.org → a known publisher under 'restricted').
+            # Hard blocks (denylist/SSRF) keep their raw reason; a mode-gate refusal gets the hint.
+            reason_text = str(exc)
+            if "allowed-downloads list" in reason_text and policy in ("restricted", "careful"):
+                reason_text += _policy_refusal_hint(candidate_url, policy)
+            return {"status": "blocked", "reason": reason_text}
         except ValueError:
             return {"status": "error", "reason": "file exceeds the download size cap"}
         except Exception as exc:  # noqa: BLE001 - network/parse failure → manual fallback
@@ -1294,6 +1323,7 @@ def download_and_attach(
         # so existing injected-streamer tests keep single-attempt semantics.
         fetched_url = candidate_url
         tried_urls: list[str] = [candidate_url]
+        policy_refusal: str | None = None  # a refused PDF URL, if any (drives the actionable hint)
         use_fallbacks = streamer is None or html_fetcher is not None
         if pdf_bytes is None and use_fallbacks:
             from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
@@ -1351,17 +1381,33 @@ def download_and_attach(
                     pdf_bytes = _attempt(url_try, headers={"Referer": page_url})
                 except ValueError:
                     return {"status": "error", "reason": "file exceeds the download size cap"}
-                except Exception:  # noqa: BLE001 - refused/failed fallback → try the next one
+                except DownloadRefused as exc:
+                    # Only a MODE-GATE refusal ("not on the allowed-downloads list") is actionable
+                    # — remember the URL so the final message can offer the policy hint. A HARD
+                    # block (denylist/SSRF) must never be surfaced as "add this host".
+                    if "allowed-downloads list" in str(exc):
+                        policy_refusal = policy_refusal or url_try
+                    continue
+                except Exception:  # noqa: BLE001 - other fetch failure → try the next one
                     continue
                 if pdf_bytes is not None:
                     fetched_url = url_try
                     break
 
         if pdf_bytes is None:
-            # Name what was actually tried (UX batch 4) — "no downloadable PDF" alone made
-            # failures undiagnosable (e.g. a publisher 403ing the fetch despite a visible button).
             shown = ", ".join(tried_urls[:4])
             more = f" (+{len(tried_urls) - 4} more)" if len(tried_urls) > 4 else ""
+            # A found-but-off-policy PDF is a configuration answer, not a dead end: surface it as
+            # blocked with the actionable hint (the frontend shows Admin → Find-on-web guidance).
+            if policy_refusal and policy in ("restricted", "careful"):
+                return {
+                    "status": "blocked",
+                    "reason": (
+                        "A PDF was found but its host isn't allowed for downloads."
+                        + _policy_refusal_hint(policy_refusal, policy)
+                        + f" Tried: {shown}{more}"
+                    ),
+                }
             return {
                 "status": "manual_upload_needed",
                 "reason": f"no downloadable PDF (login/HTML/blocked). Tried: {shown}{more}",
