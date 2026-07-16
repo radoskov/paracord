@@ -289,6 +289,13 @@ def read_latest_scope_summary(
         summary_type=cache_type,
         model_name=cache_model,
     )
+    # Fall back to the newest summary of this effort under ANY model when the exact (effort, model)
+    # cell is empty — e.g. a run made under a different model, so a just-finished job's result is
+    # still shown rather than a spurious 404 (2026-07-16).
+    if summary is None and cache_type is not None:
+        summary = latest_scope_summary(
+            db, scope_type=scope_type, scope_id=scope_id, summary_type=cache_type
+        )
     if summary is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No summary for this scope yet"

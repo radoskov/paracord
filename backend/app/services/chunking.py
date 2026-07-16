@@ -29,7 +29,15 @@ CHUNK_OVERLAP_TOKENS = 60
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 # Section labels that add noise rather than signal to semantic retrieval.
-_SKIP_SECTION = re.compile(r"reference|bibliograph|acknowledg", re.IGNORECASE)
+# Sections that are never part of a summary (references + front/back-matter boilerplate). 2026-07-16:
+# extended so Funding / Acknowledgements / Conflicts / Author contributions / Data availability /
+# Ethics / Declarations never feed any summary (short, detailed, or scope).
+_SKIP_SECTION = re.compile(
+    r"reference|bibliograph|acknowledg|funding|conflict|competing\s+interest|"
+    r"author\s+contribution|data\s+availabilit|declaration|ethic|orcid|"
+    r"supplementary\s+material|supporting\s+information",
+    re.IGNORECASE,
+)
 
 # Postgres rejects NUL (0x00) in text values with a DataError, and the ``section`` column is capped
 # at 255 chars while GROBID ``<head>`` labels are unbounded — a mis-parsed PDF can yield a whole

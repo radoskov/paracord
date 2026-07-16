@@ -484,6 +484,90 @@ def test_scope_reuse_refreshes_a_paper_that_gained_a_pdf(db, monkeypatch) -> Non
     assert refreshed is not None and "abstract-only" not in (refreshed.source_sections or [])
 
 
+def test_coalesce_main_sections_folds_numbered_subsections() -> None:
+    """2026-07-16: the 'section' level groups by MAIN section — numbered subsections fold into their
+    parent (13 main sections, not 20 main+sub)."""
+    from app.services.summarization import _coalesce_main_sections
+
+    secs = [
+        ("1 Introduction", "intro."),
+        ("1.1 Background", "bg."),
+        ("2 Methods", "meth."),
+        ("2.1 Setup", "setup."),
+        ("2.2 Data", "data."),
+        ("3 Results", "res."),
+    ]
+    mains = _coalesce_main_sections(secs)
+    assert [lbl for lbl, _ in mains] == ["1 Introduction", "2 Methods", "3 Results"]
+    methods_text = dict(mains)["2 Methods"]
+    assert "meth." in methods_text and "setup." in methods_text and "data." in methods_text
+
+
+def test_summaries_exclude_funding_and_acknowledgements(db) -> None:
+    """Funding / Acknowledgements never feed the summary source (2026-07-16)."""
+    from app.services.summarization import _work_source
+
+    divs = (
+        "<div><head>Methods</head><p>The attention mechanism drives the model.</p></div>"
+        "<div><head>Funding</head><p>Supported by grant number 12345.</p></div>"
+        "<div><head>Acknowledgements</head><p>We thank our reviewers.</p></div>"
+    )
+    tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
+    work = Work(canonical_title="t", normalized_title="t", abstract="Abstract.")
+    db.add(work)
+    db.flush()
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db.commit()
+
+    text, labels = _work_source(db, work)
+    assert "attention mechanism" in text.lower()  # Methods kept
+    assert "grant number" not in text.lower()  # Funding excluded
+    assert "we thank" not in text.lower()  # Acknowledgements excluded
+    assert "body" in labels
+
+
+def test_scope_summary_keeps_requested_model_when_it_degrades(db, monkeypatch) -> None:
+    """2026-07-16: a scope summary that degrades to extractive keeps the REQUESTED model name (so the
+    effort×model read still finds it) while recording provider_used=extractive."""
+    import app.services.summarization as summ
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.ai_config import update_ai_config
+    from app.services.summarization import latest_scope_summary, summarize_scope
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+
+    def boom(*a, **k):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(summ, "_ollama_generate", boom)
+
+    shelf = Shelf(name="deg")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="P", normalized_title="p", abstract="Sentence one. Sentence two.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    tei = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
+        "<div><head>Intro</head><p>Body text one. Body text two.</p></div>"
+        "</body></text></TEI>"
+    )
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db.commit()
+
+    summary, _ = summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    db.commit()
+    assert summary.provider_used == "extractive"  # degraded honestly
+    assert summary.model_name == "m1"  # but stored under the requested model, not a tier1 name
+    # The effort×model read finds it (the bug was a 404 → empty window).
+    found = latest_scope_summary(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m1"
+    )
+    assert found is not None and found.text
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)

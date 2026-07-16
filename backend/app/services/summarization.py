@@ -21,10 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.ai import Summary
-from app.models.citation import RawTeiDocument
 from app.models.work import Work
 from app.services.scope_resolution import resolve_scope_works
-from app.services.tei_parser import extract_body_text
 
 logger = logging.getLogger(__name__)
 
@@ -147,25 +145,26 @@ def summarize_extractive(text: str, *, max_sentences: int = 5) -> str:
 
 
 def _work_source(db: Session, work: Work) -> tuple[str, list[str]]:
-    """Gather the richest text available for a work plus its provenance labels, in ONE TEI fetch.
+    """Gather the richest text available for a work plus its provenance labels.
 
-    Returns ``(text, labels)``: the abstract plus the latest GROBID body text, and which of
-    those sources are present (abstract / body).
+    Returns ``(text, labels)``: the abstract plus the GROBID body — but the body is built from the
+    section-filtered ``iter_work_sections`` (2026-07-16), so references + boilerplate (Funding,
+    Acknowledgements, Conflicts, …) never leak into ANY summary, not just the detailed ones.
+    ``labels`` records which sources are present (abstract / body).
     """
+    from app.services.chunking import iter_work_sections  # noqa: PLC0415 (avoid import cycle)
+
     parts: list[str] = []
     labels: list[str] = []
     if work.abstract:
         parts.append(work.abstract)
         labels.append("abstract")
-    tei = db.scalar(
-        select(RawTeiDocument)
-        .where(RawTeiDocument.work_id == work.id)
-        .order_by(RawTeiDocument.created_at.desc())
-    )
-    if tei is not None:
-        body = extract_body_text(tei.tei_xml)
-        if body:
-            parts.append(body)
+    # title/abstract come from the work fields above; the rest are the filtered TEI body sections.
+    body = "\n".join(
+        text for label, text in iter_work_sections(db, work) if label not in ("title", "abstract")
+    ).strip()
+    if body:
+        parts.append(body)
         labels.append("body")
     return "\n".join(parts).strip(), labels
 
@@ -494,20 +493,43 @@ def _fast_bucket_sections(db: Session, work: Work, *, model: str, base_url: str)
     return [(b, " ".join(grouped[b])) for b in _FAST_BUCKETS if grouped[b]]
 
 
+_SUBSECTION_LABEL = re.compile(r"^\s*\d+\.\d+")  # "1.1", "2.3.1", … — a numbered SUBsection head
+
+
+def _coalesce_main_sections(sections):
+    """Merge numbered subsections into their MAIN section (2026-07-16).
+
+    GROBID often emits every heading as a flat sibling ("1 Intro", "1.1 …", "2 Methods", …). The
+    "section" effort level should summarize the ~13 MAIN sections, not the ~20 main+sub ones — so a
+    head matching ``N.M`` is folded into the preceding main section's text. Unnumbered heads (or a
+    subsection with no preceding main) start their own group, so an unnumbered paper is unchanged.
+    """
+    out: list[tuple[str | None, str]] = []
+    for label, text in sections:
+        if out and _SUBSECTION_LABEL.match((label or "").strip()):
+            prev_label, prev_text = out[-1]
+            out[-1] = (prev_label, f"{prev_text} {text}".strip())
+        else:
+            out.append((label, text))
+    return out
+
+
 def _section_level_sections(db: Session, work: Work):
-    """detailed_section: top-level sections; if fewer than 3, drop one level to subsections
-    (iff that yields fewer than 10) so a coarsely-parsed paper still gets useful granularity."""
+    """detailed_section: one entry per MAIN section (subsections folded in by numbering). If that
+    still yields fewer than 3, drop to the finer subsection list (iff <10) so a coarsely-parsed
+    paper still gets useful granularity."""
     from app.services.chunking import (  # noqa: PLC0415 (cycle)
         iter_work_leaf_sections,
         iter_work_sections,
     )
 
     top = [(lbl, t) for lbl, t in iter_work_sections(db, work) if lbl != "title"]
-    if len(top) < 3:
+    mains = _coalesce_main_sections(top)
+    if len(mains) < 3 and len(top) < 10:
         leaf = [(lbl, t) for lbl, t in iter_work_leaf_sections(db, work) if lbl != "title"]
-        if len(leaf) < 10:
+        if leaf:
             return leaf
-    return top
+    return mains
 
 
 def _detail_sections(db: Session, work: Work, detail: str, *, model: str, base_url: str):
@@ -1055,7 +1077,11 @@ def summarize_scope(
                 " ".join(d.lstrip("- ") for d in digests), max_sentences=max_sentences
             )
             provider_used = "extractive"
-            stored_model = "tier1-extractive-frequency-scope"
+            # Keep stored_model = the REQUESTED model (like summarize_work), NOT a tier1 name — so the
+            # effort×model read still finds this (degraded) summary. provider_used records the
+            # degradation honestly (2026-07-16 fix: a degraded scope summary was stored under an
+            # extractive model name and the frontend's (effort, configured-model) read 404'd → the
+            # window looked empty even though the job "finished").
 
         use_group_llm = llm_ok and fallback_reason is None
         parts = [main] if main else []
@@ -1072,10 +1098,12 @@ def summarize_scope(
             parts.append(_title_only_paragraph(title_only_works))
         text = "\n\n".join(p for p in parts if p and p.strip())
         # Honest provenance: when the LLM never ran (disabled) or degraded mid-run, the summary is
-        # extractive even if there were no full-text digests to trip the inline fallback above.
+        # extractive even if there were no full-text digests to trip the inline fallback above. Keep
+        # stored_model = the requested model so the (effort, model) read still finds it (see above).
         if not llm_ok or fallback_reason is not None:
             provider_used = "extractive"
-            stored_model = "tier1-extractive-frequency-scope"
+            if not stored_model:  # only when no model was requested/configured at all
+                stored_model = "tier1-extractive-frequency-scope"
         if not text:
             raise ValueError(f"No text available in {scope_type!r} scope to summarize")
     else:
