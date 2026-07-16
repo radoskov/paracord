@@ -342,9 +342,7 @@ def read_scope_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
     note = db.scalar(
-        select(ScopeNote).where(
-            ScopeNote.scope_type == scope_type, ScopeNote.scope_id == entity_id
-        )
+        select(ScopeNote).where(ScopeNote.scope_type == scope_type, ScopeNote.scope_id == entity_id)
     )
     if note is None:
         return ScopeNoteRead(
