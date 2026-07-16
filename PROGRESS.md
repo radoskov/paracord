@@ -9,6 +9,24 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Codebase documentation sweep + CI Redis-test fix (2026-07-16)
+
+- **Doc/comment sweep**: a whole-codebase documentation pass (behavior-preserving) — module/class/
+  function docstrings across `backend/app`, a leading purpose/props/lifecycle comment on every
+  Svelte component + JSDoc on TS libs, and comments on non-obvious logic. Committed as
+  `backend: …` and `frontend: …`. Verified: `compileall` clean, `make frontend-check` (build +
+  300 tests) green, `make test` (927 passed) green.
+- **docs/reference re-verified**: full accuracy pass over `00–11` against current code; corrected
+  count/schema/behavior drift (reader teardown + zen, summary tiers, graph edges, migration/model
+  counts). `06_agent_protocol` + `08_security` were already accurate.
+- **CI Redis-test fix**: `POST /works/{id}/summaries` (detailed local_llm) returns 202 only when
+  `enqueue_work_summary` yields a job id; with no Redis it returns None → inline 201. So the test
+  passed locally (dev Redis) but failed on GitHub's Redis-less `backend` job (201≠202). Fix:
+  (1) the endpoint-contract test now stubs the enqueue (deterministic 202, matches
+  `test_batch_job_endpoints`); (2) new `test_detailed_summary_enqueues_a_real_rq_job` exercises the
+  REAL enqueue + fetches the job back from Redis, self-skipping when Redis is unreachable via the
+  new `requires_redis` fixture (same self-skip convention as `test_migration_parity`).
+
 ## Reader "Read works once then dead" — real root cause (2026-07-16)
 
 The recurring bug (Read opens the reader once, then does nothing until you switch papers and back)

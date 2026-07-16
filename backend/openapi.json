@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "AIConfigUpdate": {
+        "description": "Partial-update payload for the AI provider/model configuration.",
         "properties": {
           "embedding_model": {
             "anyOf": [
@@ -107,6 +108,7 @@
         "type": "object"
       },
       "AccessSettingsOut": {
+        "description": "Site-wide default access-control settings.",
         "properties": {
           "allowed": {
             "items": {
@@ -128,6 +130,7 @@
         "type": "object"
       },
       "AccessSettingsUpdate": {
+        "description": "Update the site-wide default access level.",
         "properties": {
           "default_access_level": {
             "title": "Default Access Level",
@@ -141,6 +144,7 @@
         "type": "object"
       },
       "AgentApproveIn": {
+        "description": "Optional token-lifetime override for approving a pending agent.",
         "properties": {
           "token_ttl_days": {
             "anyOf": [
@@ -160,6 +164,7 @@
         "type": "object"
       },
       "AgentApprovedOut": {
+        "description": "Result of approving a pending agent, including its one-time bearer token.",
         "properties": {
           "agent_id": {
             "format": "uuid",
@@ -184,6 +189,7 @@
         "type": "object"
       },
       "AgentEnrollRequest": {
+        "description": "Owner-issued enrollment token plus the agent's chosen display name.",
         "properties": {
           "name": {
             "title": "Name",
@@ -202,6 +208,7 @@
         "type": "object"
       },
       "AgentEnrollResponse": {
+        "description": "The pending agent record created by an enrollment request.",
         "properties": {
           "agent_id": {
             "format": "uuid",
@@ -221,6 +228,7 @@
         "type": "object"
       },
       "AgentFileOut": {
+        "description": "A file an agent has reported via its manifest.",
         "properties": {
           "display_path": {
             "anyOf": [
@@ -278,6 +286,7 @@
         "type": "object"
       },
       "AgentFileStatus": {
+        "description": "Server-side view of one agent-reported file's import/teleport progress.",
         "properties": {
           "display_path": {
             "anyOf": [
@@ -360,6 +369,7 @@
         "type": "object"
       },
       "AgentManifestItem": {
+        "description": "One local file reported by an agent during a manifest sync.",
         "properties": {
           "display_path": {
             "anyOf": [
@@ -448,6 +458,7 @@
         "type": "object"
       },
       "AgentManifestRequest": {
+        "description": "Batch of local files an agent is reporting/syncing to the server.",
         "properties": {
           "create_stubs": {
             "default": true,
@@ -466,6 +477,7 @@
         "type": "object"
       },
       "AgentOut": {
+        "description": "An enrolled/pending agent as shown in the admin panel.",
         "properties": {
           "can_be_requested": {
             "default": true,
@@ -543,6 +555,7 @@
         "type": "object"
       },
       "AgentPrivilegesUpdate": {
+        "description": "Partial-update payload for an agent's granted privileges.",
         "properties": {
           "can_be_requested": {
             "anyOf": [
@@ -615,6 +628,7 @@
         "type": "object"
       },
       "AgentRegisterRequest": {
+        "description": "Body for a local agent to register itself using a one-time bootstrap token.",
         "properties": {
           "agent_name": {
             "title": "Agent Name",
@@ -633,6 +647,7 @@
         "type": "object"
       },
       "AgentRegisterResponse": {
+        "description": "Returned on successful registration: the agent's id and its long-lived bearer token.",
         "properties": {
           "agent_id": {
             "title": "Agent Id",
@@ -651,6 +666,7 @@
         "type": "object"
       },
       "AgentRenameRequest": {
+        "description": "New display name for an agent.",
         "properties": {
           "name": {
             "title": "Name",
@@ -878,6 +894,7 @@
         "type": "object"
       },
       "AppConfigOut": {
+        "description": "The runtime app configuration as read by the admin panel.",
         "properties": {
           "ai_scope_job_threshold": {
             "title": "Ai Scope Job Threshold",
@@ -986,6 +1003,7 @@
         "type": "object"
       },
       "AppConfigUpdate": {
+        "description": "Partial-update payload for the app config (PATCH semantics).",
         "properties": {
           "ai_scope_job_threshold": {
             "anyOf": [
@@ -1206,6 +1224,7 @@
         "type": "object"
       },
       "AuthorStatModel": {
+        "description": "Aggregate stats for one (normalized) author within a scope.",
         "properties": {
           "count": {
             "title": "Count",
@@ -1237,6 +1256,7 @@
         "type": "object"
       },
       "BackupCreateIn": {
+        "description": "Options for creating a new backup archive.",
         "properties": {
           "include_pdfs": {
             "default": false,
@@ -1248,6 +1268,7 @@
         "type": "object"
       },
       "BackupCreateOut": {
+        "description": "Result of requesting a backup (queued, or its inline result).",
         "properties": {
           "archive": {
             "anyOf": [
@@ -1283,6 +1304,7 @@
         "type": "object"
       },
       "BackupEntry": {
+        "description": "One backup archive on disk.",
         "properties": {
           "archive": {
             "title": "Archive",
@@ -1307,6 +1329,7 @@
         "type": "object"
       },
       "BackupsOut": {
+        "description": "The list of backup archives plus the last restore's summary.",
         "properties": {
           "backups": {
             "items": {
@@ -1475,6 +1498,7 @@
         "type": "object"
       },
       "BatchExtractRequest": {
+        "description": "Scope selector for a library-wide batch keyword/topic extraction run.",
         "properties": {
           "scope": {
             "default": "missing",
@@ -1750,6 +1774,7 @@
         "type": "object"
       },
       "ChangePasswordRequest": {
+        "description": "Self-service password change; requires the current password to authorize.",
         "properties": {
           "current_password": {
             "title": "Current Password",
@@ -2102,6 +2127,7 @@
         "type": "object"
       },
       "CitationSummaryResponse": {
+        "description": "The full scoped citation-analytics summary (SPEC §8.11).",
         "properties": {
           "bridge_method": {
             "title": "Bridge Method",
@@ -2395,6 +2421,7 @@
         "type": "object"
       },
       "DefaultGrantAdd": {
+        "description": "Add a rack/shelf to the set granted by default to every newly created user's personal group.",
         "properties": {
           "target_id": {
             "format": "uuid",
@@ -2414,6 +2441,7 @@
         "type": "object"
       },
       "DefaultGrantOut": {
+        "description": "A default-grant entry as returned by the API.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -2805,6 +2833,7 @@
         "type": "object"
       },
       "EnrollTokenOut": {
+        "description": "A freshly-minted single-use agent enrollment token.",
         "properties": {
           "expires_at": {
             "title": "Expires At",
@@ -2823,6 +2852,7 @@
         "type": "object"
       },
       "ExportRequest": {
+        "description": "Request to export a set of works to a citation file format (e.g. BibTeX, RIS).\n\n``scope_type`` selects what ``scope_id``/``target_id``/``work_ids`` refer to (e.g. a single\nwork, a shelf/rack, or an explicit selection/search result set).",
         "properties": {
           "citation_keys": {
             "anyOf": [
@@ -2902,6 +2932,7 @@
         "type": "object"
       },
       "ExportResponse": {
+        "description": "Rendered export file, returned inline (not streamed) with its content type/filename.",
         "properties": {
           "content": {
             "title": "Content",
@@ -3265,6 +3296,7 @@
         "type": "object"
       },
       "GrantAdd": {
+        "description": "Grant a group access to a rack or shelf.",
         "properties": {
           "target_id": {
             "format": "uuid",
@@ -3284,6 +3316,7 @@
         "type": "object"
       },
       "GrantOut": {
+        "description": "An access grant of a rack/shelf to a group, as returned by the API.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -3502,6 +3535,7 @@
         "type": "object"
       },
       "GroupCreate": {
+        "description": "Body to create a new (non-personal) access group.",
         "properties": {
           "name": {
             "title": "Name",
@@ -3515,6 +3549,7 @@
         "type": "object"
       },
       "GroupMemberOut": {
+        "description": "A user as listed among a group's members.",
         "properties": {
           "display_name": {
             "anyOf": [
@@ -3550,6 +3585,7 @@
         "type": "object"
       },
       "GroupOut": {
+        "description": "A group as returned by the API, including whether it is a user's implicit personal group.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -4057,6 +4093,7 @@
         "type": "object"
       },
       "KnownHashesRequest": {
+        "description": "SHA-256 hashes the agent wants checked against server-held library content.",
         "properties": {
           "sha256": {
             "items": {
@@ -4073,6 +4110,7 @@
         "type": "object"
       },
       "KnownHashesResponse": {
+        "description": "The subset of requested hashes the server still holds as linked library content.",
         "properties": {
           "known": {
             "items": {
@@ -4089,6 +4127,7 @@
         "type": "object"
       },
       "LastConsolidationScan": {
+        "description": "Summary of the most recent reference-consolidation scan.",
         "properties": {
           "at": {
             "anyOf": [
@@ -4174,6 +4213,7 @@
         "type": "object"
       },
       "LoginRequest": {
+        "description": "Username/password login body.",
         "properties": {
           "password": {
             "title": "Password",
@@ -4192,6 +4232,7 @@
         "type": "object"
       },
       "MembershipAdd": {
+        "description": "Add a user to a group.",
         "properties": {
           "user_id": {
             "format": "uuid",
@@ -4367,6 +4408,7 @@
         "type": "object"
       },
       "MissingExportResponse": {
+        "description": "A rendered export (BibTeX/CSV) of the scope's frequently-cited-but-missing works.",
         "properties": {
           "content": {
             "title": "Content",
@@ -4390,6 +4432,7 @@
         "type": "object"
       },
       "MissingWorkModel": {
+        "description": "A frequently-cited-but-not-in-library external work.",
         "properties": {
           "arxiv_id": {
             "anyOf": [
@@ -4463,6 +4506,7 @@
         "type": "object"
       },
       "ModelRef": {
+        "description": "A (provider, model) pair identifying a downloadable/managed model.",
         "properties": {
           "model": {
             "title": "Model",
@@ -4792,6 +4836,7 @@
         "type": "object"
       },
       "PasswordResetRequest": {
+        "description": "Admin-initiated password reset payload for another user.",
         "properties": {
           "new_password": {
             "title": "New Password",
@@ -4805,6 +4850,7 @@
         "type": "object"
       },
       "PendingTeleportItem": {
+        "description": "A local file awaiting the user's approve/reject decision to be teleported to the server.",
         "properties": {
           "display_path": {
             "anyOf": [
@@ -5088,6 +5134,7 @@
         "type": "object"
       },
       "RankedWorkModel": {
+        "description": "One work in a ranked citation-summary column, with its ranking score.",
         "properties": {
           "doi": {
             "anyOf": [
@@ -5153,6 +5200,7 @@
         "type": "object"
       },
       "ReferenceDupeEntry": {
+        "description": "One reference within a consolidation-conflict group.",
         "properties": {
           "arxiv_id": {
             "anyOf": [
@@ -5272,6 +5320,7 @@
         "type": "object"
       },
       "ReferenceDupeGroup": {
+        "description": "A group of references sharing a dedup key whose resolutions disagree (a conflict).",
         "properties": {
           "dedup_key": {
             "title": "Dedup Key",
@@ -5293,6 +5342,7 @@
         "type": "object"
       },
       "ReferenceDupeResolveIn": {
+        "description": "Admin's choice of which reference's resolution wins a conflict group.",
         "properties": {
           "winner_reference_id": {
             "format": "uuid",
@@ -5307,6 +5357,7 @@
         "type": "object"
       },
       "ReferenceDupesOut": {
+        "description": "The pending consolidation conflicts plus the last scan's summary.",
         "properties": {
           "conflicts": {
             "items": {
@@ -5333,6 +5384,7 @@
         "type": "object"
       },
       "ReferenceDupesScanOut": {
+        "description": "Result of kicking off a consolidation scan (queued, or its inline result).",
         "properties": {
           "job_id": {
             "anyOf": [
@@ -5534,6 +5586,7 @@
         "type": "object"
       },
       "RejectTeleportRequest": {
+        "description": "Decline a pending teleport; ``forever`` also blocks future prompts for that file.",
         "properties": {
           "forever": {
             "default": false,
@@ -5637,6 +5690,7 @@
         "type": "object"
       },
       "RestoreIn": {
+        "description": "Restore request for an uploaded/existing archive.",
         "properties": {
           "confirm": {
             "anyOf": [
@@ -5676,6 +5730,7 @@
         "type": "object"
       },
       "RestoreOut": {
+        "description": "Result of requesting a restore (queued, or its inline summary).",
         "properties": {
           "job_id": {
             "anyOf": [
@@ -5725,6 +5780,7 @@
         "type": "string"
       },
       "SavedFilterCreate": {
+        "description": "Body to save a new named Library query.",
         "properties": {
           "name": {
             "title": "Name",
@@ -5849,6 +5905,7 @@
         "type": "object"
       },
       "SavedFilterRead": {
+        "description": "A saved filter as returned by the API.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -5902,6 +5959,7 @@
         "type": "object"
       },
       "SavedFilterUpdate": {
+        "description": "Partial update to a saved filter; omitted fields are left unchanged.",
         "properties": {
           "name": {
             "anyOf": [
@@ -5956,6 +6014,7 @@
         "type": "object"
       },
       "ScopeNoteRead": {
+        "description": "A free-text note attached to a scope (library/shelf/rack).",
         "properties": {
           "scope_id": {
             "anyOf": [
@@ -6007,6 +6066,7 @@
         "type": "object"
       },
       "ScopeNoteUpsert": {
+        "description": "Create/replace payload for a scope note.",
         "properties": {
           "scope_id": {
             "anyOf": [
@@ -6042,6 +6102,7 @@
         "type": "object"
       },
       "ScopeSummaryRequest": {
+        "description": "Request to (re)generate a scope-level summary.",
         "properties": {
           "force": {
             "default": false,
@@ -6125,6 +6186,7 @@
         "type": "object"
       },
       "ScopeSummaryResponse": {
+        "description": "A generated (or queued) scope-level summary, with provider/provenance metadata.",
         "properties": {
           "entity_id": {
             "anyOf": [
@@ -6804,6 +6866,7 @@
         "type": "object"
       },
       "SourceRemovedRequest": {
+        "description": "Local file ids whose source file the agent found gone from disk.",
         "properties": {
           "local_file_ids": {
             "items": {
@@ -7467,6 +7530,7 @@
         "type": "object"
       },
       "TeleportRequest": {
+        "description": "Request to pull one local file from a specific agent up to the server.",
         "properties": {
           "agent_id": {
             "format": "uuid",
@@ -7611,6 +7675,7 @@
         "type": "object"
       },
       "TokenResponse": {
+        "description": "Bearer access token returned on successful login.",
         "properties": {
           "access_token": {
             "title": "Access Token",
@@ -7629,6 +7694,7 @@
         "type": "object"
       },
       "TopicActionRequest": {
+        "description": "Turn one topic's member works into a tag or a shelf.",
         "properties": {
           "name": {
             "title": "Name",
@@ -7798,6 +7864,7 @@
         "type": "object"
       },
       "TopicModelResponse": {
+        "description": "A generated (or queued) topic model over a scope.",
         "properties": {
           "backend": {
             "anyOf": [
@@ -7917,6 +7984,7 @@
         "type": "object"
       },
       "TopicRead": {
+        "description": "One discovered topic: its keywords and member works.",
         "properties": {
           "coherence_score": {
             "anyOf": [
@@ -7978,6 +8046,7 @@
         "type": "object"
       },
       "TopicRequest": {
+        "description": "Request to run the topic model over a scope.",
         "properties": {
           "backend": {
             "anyOf": [
@@ -8040,6 +8109,7 @@
         "type": "object"
       },
       "TopicWorkRef": {
+        "description": "Minimal work reference (id + title) attached to a topic for direct display.",
         "properties": {
           "id": {
             "title": "Id",
@@ -8064,6 +8134,7 @@
         "type": "object"
       },
       "UserCreate": {
+        "description": "Admin-issued body to create a new user account.",
         "properties": {
           "password": {
             "title": "Password",
@@ -8086,6 +8157,7 @@
         "type": "object"
       },
       "UserElsevierApiUpdate": {
+        "description": "Toggle for whether a specific user may use the server's Elsevier API key.",
         "properties": {
           "allowed": {
             "title": "Allowed",
@@ -8099,6 +8171,7 @@
         "type": "object"
       },
       "UserOut": {
+        "description": "A user account as returned by the API (never includes the password/hash).",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -8175,6 +8248,7 @@
         "type": "object"
       },
       "UserRoleUpdate": {
+        "description": "Admin-only change to a user's role.",
         "properties": {
           "role": {
             "$ref": "#/components/schemas/Role"
@@ -8227,6 +8301,7 @@
         "type": "object"
       },
       "VenueAuthorSummaryResponse": {
+        "description": "Venue/author aggregation over a scope's papers (batch10 #7).",
         "properties": {
           "authors": {
             "items": {
@@ -8284,6 +8359,7 @@
         "type": "object"
       },
       "VenueStatModel": {
+        "description": "Aggregate stats for one (normalized) venue within a scope.",
         "properties": {
           "count": {
             "title": "Count",
@@ -9751,6 +9827,7 @@
         "type": "object"
       },
       "WorklistDecisionRequest": {
+        "description": "Upsert payload for one missing-work import/ignore decision.",
         "properties": {
           "decision": {
             "title": "Decision",
@@ -9786,6 +9863,7 @@
         "type": "object"
       },
       "YearCountModel": {
+        "description": "Paper count (and papers) for one publication year in the chronological distribution.",
         "properties": {
           "work_count": {
             "title": "Work Count",
@@ -9818,6 +9896,7 @@
         "type": "object"
       },
       "YearWorkRef": {
+        "description": "Minimal work reference (id + title) listed under a chronological-distribution year.",
         "properties": {
           "title": {
             "title": "Title",
