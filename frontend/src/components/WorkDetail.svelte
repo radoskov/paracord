@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy } from 'svelte';
 
   import {
     ApiClient,
@@ -103,8 +103,11 @@
   let confirmResolve: ((ok: boolean) => void) | null = null;
 
   let readerFile: WorkFile | null = null;
+  // 2026-07-16: the reader is gated SOLELY on readerUrl (non-null = open). A separate showReader
+  // boolean desynced from readerUrl and the false→true toggle got coalesced by Svelte → the reader
+  // needed two clicks / stopped opening. One nullable variable can't desync; each open sets a fresh
+  // URL (mounts / reloads), close nulls it (unmounts).
   let readerUrl: string | null = null;
-  let showReader = false;
   // When the reader is opened to jump straight to a reference's in-text mentions.
   let readerJumpReferenceId: string | null = null;
   // Reference entry to scroll-to + flash when a citation overlay is clicked in the reader.
@@ -1027,19 +1030,17 @@
   }
 
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
-    // Reset to a clean closed state, then AWAIT A TICK so Svelte commits the unmount before we
-    // re-open (2026-07-16). Without the tick, closing + re-opening toggled showReader false→true
-    // within one flush → Svelte coalesced it to no change → the reader didn't remount (the "click
-    // Read does nothing / needs two clicks / stops working until you switch papers" bug). The tick
-    // makes the close land first, so setting showReader=true below is a real change → clean remount.
-    closeReader();
-    await tick();
+    // Fetch the blob, then set the props and finally readerUrl (the mount gate) LAST, so the reader
+    // mounts with everything ready. A fresh object URL every time guarantees a real change → the
+    // {#if readerUrl} block mounts (from closed) or PdfReader reloads (from open) — reliably on the
+    // first click (2026-07-16).
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
-      readerUrl = URL.createObjectURL(blob);
+      const previous = readerUrl;
       readerFile = file;
       readerJumpReferenceId = jumpReferenceId;
-      showReader = true;
+      readerUrl = URL.createObjectURL(blob);
+      if (previous) URL.revokeObjectURL(previous);
     });
   }
 
@@ -1088,10 +1089,8 @@
   }
 
   function closeReader(): void {
-    // Fully reset the modal/objectURL state so the {#if showReader && readerUrl} guard drops the
-    // reader and a later open re-triggers it. Leaving any of these set blocks the reactive re-open
-    // (the bug: clicking "Read" again did nothing until a refresh/tab switch remounted the panel).
-    showReader = false;
+    // Nulling readerUrl (in clearReader) drops the {#if readerUrl} block → the reader unmounts and a
+    // later open re-mounts it cleanly.
     clearReader();
   }
 
@@ -2071,7 +2070,7 @@
   </Modal>
 {/if}
 
-{#if showReader && readerUrl}
+{#if readerUrl}
   <Modal title={readerFile?.original_filename ?? 'PDF reader'} wide onClose={closeReader}>
     <PdfReader
       fileId={readerFile?.id ?? ''}

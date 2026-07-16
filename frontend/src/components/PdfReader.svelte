@@ -61,6 +61,11 @@
   let scale = 1.3;
   let pageWidth = 0;
   let pageHeight = 0;
+  // Unscaled page-1 dimensions — used to RESERVE space for not-yet-rendered scroll pages so the
+  // total height is stable and a jump to a far page lands correctly instead of the lazy renderer
+  // "fighting" a smooth scroll as intervening pages grow from 0 height (2026-07-16).
+  let basePageWidth = 0;
+  let basePageHeight = 0;
   let loadingPdf = false;
   let pdfError = '';
   let canvasEl: HTMLCanvasElement | null = null;
@@ -220,7 +225,7 @@
     pageWrapEl.scrollTo({
       top: Math.max(0, top - 80),
       left: Math.max(0, left - 40),
-      behavior: 'smooth',
+      behavior: 'auto',
     });
   }
 
@@ -265,6 +270,9 @@
       loadedUrl = url;
       numPages = doc.numPages;
       currentPage = 1;
+      const firstViewport = (await doc.getPage(1)).getViewport({ scale: 1 });
+      basePageWidth = firstViewport.width;
+      basePageHeight = firstViewport.height;
       searchHits = [];
       searchPos = -1;
       pageTextCache.clear();
@@ -377,7 +385,10 @@
     if (viewMode === 'scroll') {
       currentPage = Math.min(Math.max(1, n), numPages || n);
       await tick();
-      scrollCanvases.get(currentPage)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      // Instant (not smooth): with reserved page heights the target offset is stable, so one jump
+      // lands correctly. A smooth scroll to a far page got "fought" by the lazy renderer growing
+      // intervening pages mid-animation and stalled around page 4 (2026-07-16).
+      scrollCanvases.get(currentPage)?.scrollIntoView({ block: 'start', behavior: 'auto' });
       await renderScrollPage(currentPage);
     } else {
       await renderPage(n);
@@ -625,23 +636,42 @@
       .trim();
     if (!text) return;
     selectedText = text;
-    annotationPage = String(currentPage);
+    selectionBoxes = boxesForSelection(selection);
+    // Page comes from the selection's own page (scroll mode can select any page), not the
+    // most-visible currentPage.
+    annotationPage = String(selectionBoxes?.[0]?.page ?? currentPage);
     annotationType = 'highlight';
     tab = 'annotations';
-    selectionBoxes = boxesForSelection(selection);
+  }
+
+  // Which canvas + page the selection sits on. In paged mode there's one canvas (currentPage); in
+  // scroll mode the selection can be on ANY page, so find the enclosing .canvas-stage and read its
+  // data-page + own canvas — otherwise boxes were computed against the wrong (or a null) canvas, so
+  // new highlights in scroll mode captured nothing (2026-07-16).
+  function selectionTarget(
+    selection: Selection | null,
+  ): { canvas: HTMLCanvasElement | null; page: number } {
+    const node = selection?.anchorNode ?? null;
+    const el = node instanceof Element ? node : (node?.parentElement ?? null);
+    const stage = el?.closest?.('.canvas-stage') as HTMLElement | null;
+    const canvas = (stage?.querySelector('canvas') as HTMLCanvasElement | null) ?? canvasEl;
+    const page = stage?.dataset.page ? Number(stage.dataset.page) : currentPage;
+    return { canvas, page };
   }
 
   // Map a DOM selection to one top-left-origin box per visual line, in the same scaled-pixel
   // convention the citation overlays use (box.x * scale ⇒ device px). This matches GROBID's
   // top-left coordinate frame and round-trips through boxToStyle() at any zoom level.
   function boxesForSelection(selection: Selection | null): PdfCoordinateBox[] | null {
-    if (!selection?.rangeCount || !canvasEl) return null;
-    const canvasRect = canvasEl.getBoundingClientRect();
+    if (!selection?.rangeCount) return null;
+    const { canvas, page } = selectionTarget(selection);
+    if (!canvas) return null;
+    const canvasRect = canvas.getBoundingClientRect();
     const rects = Array.from(selection.getRangeAt(0).getClientRects()).filter((r) => r.width > 0);
     if (!rects.length) return null;
     const round = (v: number) => Math.round(v * 100) / 100;
     return rects.map((r) => ({
-      page: currentPage,
+      page,
       x: round((r.left - canvasRect.left) / scale),
       y: round((r.top - canvasRect.top) / scale),
       w: round(r.width / scale),
@@ -1052,7 +1082,11 @@
               {#each Array(numPages) as _, i (i)}
                 <div
                   class="canvas-stage scroll-page"
-                  style={`--scale-factor:${scale}`}
+                  style={`--scale-factor:${scale};${
+                    basePageHeight
+                      ? `min-height:${Math.round(basePageHeight * scale)}px;width:${Math.round(basePageWidth * scale)}px;`
+                      : ''
+                  }`}
                   use:registerScrollPage={i + 1}
                 >
                   <canvas use:bindScrollCanvas={i + 1}></canvas>
