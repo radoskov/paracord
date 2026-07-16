@@ -81,3 +81,4 @@ frontend/dist.stale-root/
 documentation_archive.zip
 
 show_git_log.sh
+test_data/

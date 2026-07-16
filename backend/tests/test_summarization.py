@@ -557,7 +557,9 @@ def test_scope_summary_keeps_requested_model_when_it_degrades(db, monkeypatch) -
     db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
     db.commit()
 
-    summary, _ = summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    summary, _ = summarize_scope(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm"
+    )
     db.commit()
     assert summary.provider_used == "extractive"  # degraded honestly
     assert summary.model_name == "m1"  # but stored under the requested model, not a tier1 name

@@ -9,6 +9,33 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 5 polish: summaries, reference graph, PDF reader (2026-07-16)
+
+Follow-up polish after testing batch 5 (migrations 0075/0076 already on the live DB):
+
+- **Summaries**: the detailed "section" level groups by MAIN sections (numbered subsections fold in
+  by `N.M` numbering — a 13-main/20-sub paper summarizes 13). Funding/Acknowledgements/Conflicts/
+  Author-contributions/Data-availability/Ethics/Declarations/ORCID/Supplementary are excluded from
+  ALL summaries (short included — `_work_source` builds the body from the section-filtered
+  `iter_work_sections`). A large scope that degrades to extractive now keeps the requested model on
+  the row, so the frontend's (effort, model) read finds it (was a 404 → "finished but empty" window).
+- **Reference graph**: reference edges are blue, citing gold, ref↔ref green; the ref↔ref toggle is
+  client-side (always-fetched, no refetch/reset) and renders.
+- **Insights scope summary**: the Regenerate button always rebuilds the scope synthesis; "Reuse"
+  keeps existing per-paper summaries (only new/changed papers are summarized), "Regenerate all"
+  redoes them; a per-paper summary made while abstract-only is refreshed once the paper gains a PDF.
+- **PDF reader** (`PdfReader.svelte`): ref-link/annotation overlays rescale on zoom; page buttons
+  work in scroll mode; zoom horizontal centering keeps the left edge reachable (`safe center`);
+  touchpad pan (Space-hold no longer needs page focus); zen fills the viewport + Esc exits zen via a
+  capture-phase listener (no longer closes the whole reader); "Read" opens on the first click; reader
+  actions report in an in-reader status line (no more "Annotation deleted" under the paper title);
+  highlight/citation/reference jumps scroll to the box position, and captured highlight text is
+  de-hyphenated; highlight-note hover tooltip shows the note; Dim/Dark tint the reader chrome too.
+- **KaTeX** was added to `optimizeDeps.include` (an on-demand optimize 504 on it blocked the whole
+  app mount → e2e login timeout).
+- **Notes** (feature): per-paper `Work.notes` (below the abstract) + per-Insights-scope `ScopeNote`
+  (a per-scope Notes card + a folded "All scope notes" panel). Library tag filter is scope-aware.
+
 ## UX batch 5: summary effort levels, no-PDF honesty, jobs, graphs (2026-07-16)
 
 Workplan `docs/WORKPLAN_2026-07-16_summary-effort-tags-graphs.md` (all 12 design questions resolved
