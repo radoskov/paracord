@@ -1022,8 +1022,12 @@
   // Load whenever the authenticated client is (re)created — including the null-token → authed
   // transition on a hard refresh, which a dependency-less `$: void refresh()` would miss (it ran
   // once before the token was read, leaving the page empty until the tab was clicked again).
+  // Also wait for $currentUser: it is seeded by an async /me after the client exists, and the
+  // role-gated loads in refresh() (app config, groups, themes, …) read get(canManageUsers) at
+  // call time — firing before /me lands skipped them all for good (the e2e journey-17 flake,
+  // where the Settings form stayed unseeded).
   let loadedFor: ApiClient | null = null;
-  $: if (client && client !== loadedFor) {
+  $: if (client && $currentUser && client !== loadedFor) {
     loadedFor = client;
     void refresh();
   }
