@@ -328,8 +328,18 @@
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let lastRenderedData: unknown = null;
   function renderChart(chart: any): void {
-    chart.setOption(buildOption(), true);
+    // 2026-07-16 pan/zoom fix: restyle-only repaints (size/colour/filter/focus toggles bumped
+    // `revision` WITHOUT new data) use a MERGE setOption, so the force simulation isn't restarted
+    // and the user's current pan/zoom (roam transform) is preserved. Only a genuine data reload
+    // (Build/Refresh swaps the graph object) does a full non-merge rebuild. The old code did a
+    // non-merge rebuild on EVERY repaint, which restarted the sim and reset roam — the intermittent
+    // "frozen pan/zoom" the user hit (a tab refocus briefly masked it).
+    const dataRef = (graphType === 'topic' ? topicGraph : graph) as unknown;
+    const isRestyle = dataRef !== null && dataRef === lastRenderedData;
+    chart.setOption(buildOption(), !isRestyle);
+    lastRenderedData = dataRef;
   }
 
   // --- Ctrl-click neighborhood focus (UX batch 3) ---------------------------------------------
