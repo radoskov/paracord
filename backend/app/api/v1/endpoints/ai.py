@@ -72,6 +72,10 @@ class ScopeSummaryResponse(BaseModel):
     # (v2 map-reduce: per-paper digests → chunked synthesis).
     scope_label: str | None = None
     method: str | None = None
+    # 2026-07-16 no-PDF honesty: how the scope broke down by available source
+    # ({full_text, abstract_only, title_only}) + when this summary was generated, for the footer.
+    source_breakdown: dict[str, int] | None = None
+    generated_at: str | None = None
 
 
 @router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
@@ -157,6 +161,8 @@ def create_scope_summary(
         fallback_reason=getattr(summary, "fallback_reason", None),
         scope_label=(summary.params or {}).get("scope_label"),
         method=(summary.params or {}).get("method"),
+        source_breakdown=(summary.params or {}).get("source_breakdown"),
+        generated_at=summary.created_at.isoformat() if summary.created_at else None,
     )
 
 
@@ -235,6 +241,8 @@ def read_latest_scope_summary(
         fallback=summary.fallback,
         scope_label=(summary.params or {}).get("scope_label"),
         method=(summary.params or {}).get("method"),
+        source_breakdown=(summary.params or {}).get("source_breakdown"),
+        generated_at=summary.created_at.isoformat() if summary.created_at else None,
     )
 
 

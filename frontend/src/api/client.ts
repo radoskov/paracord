@@ -1174,6 +1174,9 @@ export interface ScopeSummaryResponse {
   // UX batch 4: which scope this summarizes + how (v2 map-reduce).
   scope_label?: string | null;
   method?: string | null;
+  // 2026-07-16 no-PDF honesty: source breakdown + generation timestamp for the footer.
+  source_breakdown?: { full_text: number; abstract_only: number; title_only: number } | null;
+  generated_at?: string | null;
 }
 
 export interface AiConfig {

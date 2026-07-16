@@ -171,6 +171,24 @@ def work_source_text(db: Session, work: Work) -> str:
     return _work_source(db, work)[0]
 
 
+# 2026-07-16 no-PDF honesty: classify what a paper can actually be summarized FROM, so the summary
+# is framed accordingly instead of silently falling back to the title.
+#   full_text     — has GROBID body text (a processed PDF); summarize normally.
+#   abstract_only — has an abstract but no body; summarize the abstract, framed as such.
+#   title_only    — neither; cannot be summarized locally.
+def _source_tier(labels: list[str]) -> str:
+    if "body" in labels:
+        return "full_text"
+    if "abstract" in labels:
+        return "abstract_only"
+    return "title_only"
+
+
+def classify_work_source(db: Session, work: Work) -> str:
+    """Public: which source tier a work can be summarized from (see ``_source_tier``)."""
+    return _source_tier(_work_source(db, work)[1])
+
+
 def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
     """Raw single-shot generation against a local Ollama daemon. Raises on any failure."""
     import httpx2 as httpx
@@ -184,12 +202,28 @@ def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
         return (response.json().get("response") or "").strip()
 
 
-def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
-    """Per-PAPER SHORT abstractive summary (single-paragraph prompt). Raises on any failure."""
-    prompt = (
-        "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
-        "method, and key result. Respond with the summary only.\n\n" + text[:LLM_INPUT_CHAR_BUDGET]
-    )
+def _ollama_summarize(
+    text: str, *, model: str, base_url: str, abstract_only: bool = False
+) -> str:
+    """Per-PAPER SHORT abstractive summary (single-paragraph prompt). Raises on any failure.
+
+    ``abstract_only`` (2026-07-16): the source is the paper's abstract, not its full text — tell the
+    model so it frames the summary as coverage of what the abstract states, WITHOUT fixating on the
+    fact that it's only an abstract.
+    """
+    if abstract_only:
+        prompt = (
+            "You are given only the ABSTRACT of an academic paper (its full text is unavailable). "
+            "Summarize what the abstract conveys in 2-3 sentences — the problem, approach, and "
+            "stated result. Write naturally; do not dwell on the fact that this is an abstract. "
+            "Respond with the summary only.\n\n" + text[:LLM_INPUT_CHAR_BUDGET]
+        )
+    else:
+        prompt = (
+            "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
+            "method, and key result. Respond with the summary only.\n\n"
+            + text[:LLM_INPUT_CHAR_BUDGET]
+        )
     return _ollama_generate(prompt, model=model, base_url=base_url)
 
 
@@ -412,14 +446,25 @@ def summarize_work(
         stored_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
         source_text, source_sections = _work_source(db, work)
+        tier = _source_tier(source_sections)
+        # 2026-07-16 no-PDF honesty: a title-only paper has no summarizable content — say so
+        # plainly rather than silently "summarizing" the title.
+        if tier == "title_only":
+            raise ValueError(
+                "This paper has only a title (no abstract or full text) and cannot be summarized."
+            )
+        abstract_only = tier == "abstract_only"
+        if abstract_only:
+            source_sections.append("abstract-only")
         text = ""
         # The LLM is attempted only when the owner has selected it (ai_config) — otherwise we go
         # straight to the deterministic fallback, so disabled/CI installs never hit the network.
         if ai_cfg.summary_provider == "local_llm" and source_text:
             try:
-                if detailed:
+                if detailed and not abstract_only:
                     # Section-by-section over the GROBID sections so each paragraph is headed by
-                    # its section name (falls back to title+abstract when no TEI).
+                    # its section name. Abstract-only papers have no body to section, so they take
+                    # the abstract-framed short path below regardless of the requested detail.
                     from app.services.chunking import iter_work_sections  # noqa: PLC0415 (cycle)
 
                     sections = [
@@ -436,7 +481,10 @@ def summarize_work(
                     )
                 else:
                     text = _ollama_summarize(
-                        source_text, model=stored_model, base_url=ai_cfg.ollama_url
+                        source_text,
+                        model=stored_model,
+                        base_url=ai_cfg.ollama_url,
+                        abstract_only=abstract_only,
                     )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
@@ -591,6 +639,52 @@ def latest_scope_summary(db: Session, *, scope_type: str, scope_id: uuid.UUID | 
     ).first()
 
 
+_TITLE_ONLY_LIST_CAP = 30  # keep the title-only paragraph readable in a huge scope
+
+
+def _work_ref(work: Work) -> str:
+    title = (work.canonical_title or "Untitled").strip()
+    return f"{title} ({work.year})" if work.year else title
+
+
+def _abstract_only_paragraph(
+    works: list[Work], *, use_llm: bool, model: str, base_url: str
+) -> str:
+    """2026-07-16: ONE grouped paragraph for papers available only as an abstract (no full text)."""
+    entries = [f"{_work_ref(w)}: {(w.abstract or '').strip()}" for w in works]
+    lead = (
+        f"{len(works)} paper(s) in this collection are available only as abstracts "
+        "(no full text was retrieved)"
+    )
+    if use_llm:
+        try:
+            body = _ollama_generate(
+                f"The following {len(works)} papers are available ONLY as abstracts (no full "
+                "text). In a SINGLE paragraph, summarize collectively what they address and how "
+                "they relate, keeping title attributions where useful. Respond with the paragraph "
+                "only.\n\n" + "\n".join(entries)[:LLM_INPUT_CHAR_BUDGET],
+                model=model,
+                base_url=base_url,
+            )
+            if body.strip():
+                return f"{lead}. {body.strip()}"
+        except Exception as exc:  # noqa: BLE001 - fall back to extractive over the abstracts
+            logger.warning("abstract-only paragraph LLM unavailable (%s); extractive fallback", exc)
+    ex = summarize_extractive(" ".join((w.abstract or "") for w in works), max_sentences=5)
+    return f"{lead}. {ex}".strip()
+
+
+def _title_only_paragraph(works: list[Work]) -> str:
+    """2026-07-16: ONE grouped paragraph naming papers that are title-only (unsummarizable)."""
+    refs = [_work_ref(w) for w in works]
+    shown = refs[:_TITLE_ONLY_LIST_CAP]
+    more = f", and {len(refs) - len(shown)} more" if len(refs) > len(shown) else ""
+    return (
+        f"{len(works)} paper(s) are listed by title only (no abstract or full text available) and "
+        f"were not summarized: " + "; ".join(shown) + more + "."
+    )
+
+
 def summarize_scope(
     db: Session,
     *,
@@ -636,24 +730,48 @@ def summarize_scope(
     method = "extractive"
     chunk_count = 0
     text = ""
+
+    # 2026-07-16 no-PDF honesty: split the scope by what each paper can be summarized FROM. Only
+    # full-text papers feed the per-paper map/reduce; abstract-only and title-only papers are each
+    # folded into a single shared paragraph so they are acknowledged, not silently dropped.
+    full_text_works: list[Work] = []
+    abstract_only_works: list[Work] = []
+    title_only_works: list[Work] = []
+    for w in works:
+        tier = _source_tier(_work_source(db, w)[1])
+        bucket = (
+            full_text_works
+            if tier == "full_text"
+            else abstract_only_works
+            if tier == "abstract_only"
+            else title_only_works
+        )
+        bucket.append(w)
+    breakdown = {
+        "full_text": len(full_text_works),
+        "abstract_only": len(abstract_only_works),
+        "title_only": len(title_only_works),
+    }
+
     if summary_type == "local_llm":
         stored_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
-        # Map step (UX batch 4): build one digest line per paper. When the LLM is on, per-paper
-        # summaries are generated through summarize_work — so they are also PERSISTED and show up
-        # in each paper's own view — and reused on the next scope run. A single LLM outage stops
-        # further attempts (cheap digests for the rest) instead of stacking N timeouts.
+        # Map step (UX batch 4): build one digest line per FULL-TEXT paper. When the LLM is on,
+        # per-paper summaries are generated through summarize_work — so they are also PERSISTED and
+        # show up in each paper's own view — and reused on the next scope run. A single LLM outage
+        # stops further attempts (cheap digests for the rest) instead of stacking N timeouts.
         digests: list[str] = []
         llm_ok = ai_cfg.summary_provider == "local_llm"
         if not llm_ok:
             fallback_reason = "the local LLM is not enabled"
-        for idx, work in enumerate(works):
+        total_steps = len(full_text_works)
+        for idx, work in enumerate(full_text_works):
             if cancel_cb is not None and cancel_cb():
                 from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
 
-                raise JobCancelled(f"cancelled after {idx} of {len(works)} papers")
+                raise JobCancelled(f"cancelled after {idx} of {total_steps} papers")
             if progress_cb is not None:
-                progress_cb(idx, len(works))
+                progress_cb(idx, total_steps)
             digest = _work_digest(
                 db,
                 work,
@@ -669,21 +787,20 @@ def summarize_scope(
             digest_text, degraded_reason = digest
             if degraded_reason and fallback_reason is None and llm_ok:
                 fallback_reason = degraded_reason
-            title = (work.canonical_title or "Untitled").strip()
-            year = f" ({work.year})" if work.year else ""
-            digests.append(f"- {title}{year}: {digest_text}")
-        if not digests:
-            raise ValueError(f"No text available in {scope_type!r} scope to summarize")
+            digests.append(f"- {_work_ref(work)}: {digest_text}")
 
-        # Reduce step: pack the digests into context-window-sized chunks; condense each chunk,
-        # then synthesize the final collection summary (single chunk skips the middle pass).
-        if fallback_reason is None:
+        # Reduce step: pack the full-text digests into context-window-sized chunks; condense each
+        # chunk, then synthesize the collection summary (single chunk skips the middle pass).
+        main = ""
+        if digests and fallback_reason is None:
             try:
                 chunks = _pack_blocks(digests, LLM_INPUT_CHAR_BUDGET)
                 chunk_count = len(chunks)
                 if len(chunks) == 1:
-                    text = _ollama_generate(
-                        _scope_final_prompt(scope_type, len(works), chunks[0], from_parts=False),
+                    main = _ollama_generate(
+                        _scope_final_prompt(
+                            scope_type, len(full_text_works), chunks[0], from_parts=False
+                        ),
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
                     )
@@ -697,8 +814,10 @@ def summarize_scope(
                         for i, chunk in enumerate(chunks)
                     ]
                     final_notes = "\n\n".join(partials)[:LLM_INPUT_CHAR_BUDGET]
-                    text = _ollama_generate(
-                        _scope_final_prompt(scope_type, len(works), final_notes, from_parts=True),
+                    main = _ollama_generate(
+                        _scope_final_prompt(
+                            scope_type, len(full_text_works), final_notes, from_parts=True
+                        ),
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
                     )
@@ -706,15 +825,40 @@ def summarize_scope(
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm scope summary unavailable (%s); extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"
-        if not text:
+        if digests and not main:
             # Extractive fallback over the per-paper digests (still better than raw abstracts).
-            text = summarize_extractive(
+            main = summarize_extractive(
                 " ".join(d.lstrip("- ") for d in digests), max_sentences=max_sentences
             )
             provider_used = "extractive"
             stored_model = "tier1-extractive-frequency-scope"
+
+        use_group_llm = llm_ok and fallback_reason is None
+        parts = [main] if main else []
+        if abstract_only_works:
+            parts.append(
+                _abstract_only_paragraph(
+                    abstract_only_works,
+                    use_llm=use_group_llm,
+                    model=stored_model,
+                    base_url=ai_cfg.ollama_url,
+                )
+            )
+        if title_only_works:
+            parts.append(_title_only_paragraph(title_only_works))
+        text = "\n\n".join(p for p in parts if p and p.strip())
+        # Honest provenance: when the LLM never ran (disabled) or degraded mid-run, the summary is
+        # extractive even if there were no full-text digests to trip the inline fallback above.
+        if not llm_ok or fallback_reason is not None:
+            provider_used = "extractive"
+            stored_model = "tier1-extractive-frequency-scope"
+        if not text:
+            raise ValueError(f"No text available in {scope_type!r} scope to summarize")
     else:
-        text = summarize_extractive(combined, max_sentences=max_sentences)
+        parts = [summarize_extractive(combined, max_sentences=max_sentences)]
+        if title_only_works:
+            parts.append(_title_only_paragraph(title_only_works))
+        text = "\n\n".join(p for p in parts if p and p.strip())
         stored_model = "tier1-extractive-frequency-scope"
 
     db.execute(
@@ -750,6 +894,9 @@ def summarize_scope(
             "method": method,
             "chunks": chunk_count,
             "paper_detail": paper_detail,
+            # 2026-07-16 no-PDF honesty: how the scope broke down by available source, so the
+            # footer can show "N with PDFs, M abstract-only, K title-only".
+            "source_breakdown": breakdown,
         },
     )
     db.add(summary)

@@ -2365,6 +2365,16 @@ def create_summary(
 
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
+    # 2026-07-16 no-PDF honesty: a title-only paper cannot be summarized locally — refuse up front
+    # (a clear 400) rather than enqueue a job that would silently do nothing.
+    if summary_type == "local_llm":
+        from app.services.summarization import classify_work_source
+
+        if classify_work_source(db, work) == "title_only":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This paper has only a title (no abstract or full text) and cannot be summarized.",
+            )
     # A detailed local-LLM summary can fire many LLM calls — run it as a background job so the
     # request doesn't hang. Short/extractive stay inline (fast). Queue down → fall through inline.
     if payload.detail == "detailed" and summary_type == "local_llm":

@@ -218,6 +218,20 @@
   // "Heading: - bullet" runs on one line. Parse that into heading paragraphs + bullet lists so it
   // renders as structured sections instead of one run-on block. Falls back to plain paragraphs.
   type SummarySection = { heading?: string; body?: string; bullets?: string[] };
+  // 2026-07-16 no-PDF honesty: footer breakdown of how the scope's papers were summarized.
+  function sourceBreakdownLabel(b: { full_text: number; abstract_only: number; title_only: number }): string {
+    const parts: string[] = [];
+    if (b.full_text) parts.push(`${b.full_text} with PDFs`);
+    if (b.abstract_only) parts.push(`${b.abstract_only} abstract-only`);
+    if (b.title_only) parts.push(`${b.title_only} title-only`);
+    return parts.join(', ');
+  }
+
+  function fmtGenerated(iso: string): string {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+
   function formatSummary(text: string): SummarySection[] {
     const out: SummarySection[] = [];
     // Break before a leading number ("2. Key problems…") or a known section label mid-run.
@@ -427,7 +441,7 @@
             {/if}
           {/each}
         </div>
-        <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}{summary.method === 'map_reduce' ? ' · per-paper digests synthesized' : ''}</p>
+        <p class="hintline">{summary.summary_type} · {summary.work_count} papers · {summary.model_name ?? 'local'}{summary.method === 'map_reduce' ? ' · per-paper digests synthesized' : ''}{summary.source_breakdown ? ` · ${sourceBreakdownLabel(summary.source_breakdown)}` : ''}{summary.generated_at ? ` · generated ${fmtGenerated(summary.generated_at)}` : ''}</p>
         {#if summary.provider_used !== 'local_llm'}
           <p class="extractive-hint" role="status">
             {#if summary.fallback && summary.fallback_reason}

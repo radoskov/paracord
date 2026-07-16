@@ -266,6 +266,82 @@ def test_detailed_summary_reports_progress_and_honors_cancel(db, monkeypatch) ->
         )
 
 
+def test_title_only_work_cannot_be_summarized_locally(client, auth_headers, db) -> None:
+    """2026-07-16 no-PDF honesty: a title-only paper is refused (clear 400 / ValueError), not
+    silently 'summarized' from its title."""
+    from app.services.ai_config import update_ai_config
+    from app.services.summarization import summarize_work
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    work = Work(canonical_title="Bare title", normalized_title="bare title")  # no abstract, no TEI
+    db.add(work)
+    db.commit()
+
+    with pytest.raises(ValueError, match="only a title"):
+        summarize_work(db, work, summary_type="local_llm")
+
+    r = client.post(
+        f"/api/v1/works/{work.id}/summaries",
+        headers=auth_headers("editor"),
+        json={"summary_type": "local_llm", "detail": "detailed"},
+    )
+    assert r.status_code == 400
+    assert "only a title" in r.json()["detail"]
+
+
+def test_abstract_only_work_is_framed_as_abstract(db, monkeypatch) -> None:
+    """An abstract-only paper is summarized, and the prompt tells the model it has only the
+    abstract so the summary is framed correctly."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+    from app.services.summarization import summarize_work
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    seen: list[str] = []
+    monkeypatch.setattr(summ, "_ollama_generate", lambda p, **k: seen.append(p) or "Framed summary.")
+
+    work = Work(canonical_title="A", normalized_title="a", abstract="We study X and find Y.")
+    db.add(work)
+    db.commit()
+    s = summarize_work(db, work, summary_type="local_llm")
+    assert s.text == "Framed summary."
+    assert any("only the ABSTRACT" in p for p in seen)
+
+
+def test_scope_summary_groups_no_pdf_papers_and_reports_breakdown(db) -> None:
+    """A scope with mixed sources: full-text papers are summarized; abstract-only and title-only
+    papers are each folded into one paragraph, and the breakdown is recorded for the footer."""
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.summarization import summarize_scope
+
+    shelf = Shelf(name="mixed")
+    db.add(shelf)
+    db.flush()
+
+    full = Work(canonical_title="Full", normalized_title="full", abstract="Full abstract sentence.")
+    abs_only = Work(canonical_title="AbsOnly", normalized_title="absonly", abstract="Only an abstract here.")
+    title_only = Work(canonical_title="TitleOnly", normalized_title="titleonly")
+    for w in (full, abs_only, title_only):
+        db.add(w)
+        db.flush()
+        db.add(ShelfWork(shelf_id=shelf.id, work_id=w.id))
+    tei = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
+        "<div><head>Intro</head><p>Body sentence one. Body sentence two.</p></div>"
+        "</body></text></TEI>"
+    )
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=full.id, source="grobid", tei_xml=tei))
+    db.commit()
+
+    summary, count = summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    assert count == 3
+    assert summary.params["source_breakdown"] == {"full_text": 1, "abstract_only": 1, "title_only": 1}
+    # The title-only paper is named in a grouped paragraph, not silently dropped.
+    assert "title only" in summary.text and "TitleOnly" in summary.text
+    assert "only as abstracts" in summary.text
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)
@@ -688,6 +764,14 @@ def test_scope_summary_map_reduce_prompts_and_chunking(db, monkeypatch) -> None:
         db.add(w)
         db.flush()
         db.add(ShelfWork(shelf_id=shelf.id, work_id=w.id))
+        # Full-text papers (a GROBID body) feed the per-paper map/reduce; abstract-only papers are
+        # instead folded into a single grouped paragraph (2026-07-16), so this test needs bodies.
+        tei = (
+            '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
+            f"<div><head>Intro</head><p>{'Body sentence about the topic. ' * 8}Unique {i}.</p></div>"
+            "</body></text></TEI>"
+        )
+        db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=w.id, source="grobid", tei_xml=tei))
     db.commit()
 
     summary, count = summarize_scope(
