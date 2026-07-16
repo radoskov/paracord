@@ -1454,10 +1454,12 @@ export interface JobRecord {
   // F2: RQ retries remaining (null = no retry policy). A "scheduled" job with this set is a pending
   // automatic retry — the Jobs tab surfaces it so a retry looks like progress, not a stuck job.
   retries_left?: number | null;
-  // UX batch 4: long jobs (scope summary) report progress; a stop-requested job shows "stopping".
+  // UX batch 4: long jobs (scope summary, detailed paper summary) report progress; a stop-requested
+  // job shows "stopping" while live and "stopped" once it has reached a terminal state (2026-07-16).
   progress_done?: number | null;
   progress_total?: number | null;
   stopping?: boolean;
+  stopped?: boolean;
 }
 
 export interface QueueStatus {

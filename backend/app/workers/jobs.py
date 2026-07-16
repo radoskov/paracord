@@ -762,6 +762,7 @@ def summarize_work_job(work_id: str, detail: str = "short") -> None:
     from app.models.work import Work
     from app.services.ai_config import get_ai_config
     from app.services.summarization import summarize_work
+    from app.workers.queue import JobCancelled, job_cancel_requested, job_report_progress
 
     with SessionLocal() as db:
         work = db.get(Work, uuid.UUID(str(work_id)))
@@ -770,7 +771,19 @@ def summarize_work_job(work_id: str, detail: str = "short") -> None:
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
         try:
-            summarize_work(db, work, summary_type=summary_type, detail=detail)
+            # The detailed path reports per-section progress and honors a Stop from the Jobs tab
+            # (2026-07-16); short summaries are single-shot so the cbs are harmless there.
+            summarize_work(
+                db,
+                work,
+                summary_type=summary_type,
+                detail=detail,
+                progress_cb=job_report_progress,
+                cancel_cb=job_cancel_requested,
+            )
+        except JobCancelled:
+            db.rollback()
+            return
         except ValueError:
             return
         db.commit()

@@ -947,11 +947,18 @@ def queue_status(limit: int = 25) -> dict:
                 kind, target_id = _target(job)
                 meta = job.get_meta(refresh=False) or {}
                 progress = meta.get("progress")
+                job_status = job.get_status(refresh=False) or fallback_status
+                cancel_requested = bool(meta.get("cancel_requested"))
+                # A cancel flag reads as "stopping" only while the job is still live; once it
+                # reaches a terminal state it has actually stopped, so surface "stopped" instead
+                # (the flag is never cleared, so without this gate the row shows "stopping…"
+                # forever — 2026-07-16 fix).
+                still_live = job_status in _LIVE_JOB_STATUSES
                 rows.append(
                     {
                         "id": job.id,
                         "task": _label(job),
-                        "status": (job.get_status(refresh=False) or fallback_status),
+                        "status": job_status,
                         "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
                         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
                         "error": _job_error(job) if fallback_status == "failed" else None,
@@ -963,11 +970,13 @@ def queue_status(limit: int = 25) -> dict:
                         # policy). A "scheduled" job with retries_left set is a pending retry — the
                         # Jobs tab labels it so users see the app is retrying, not stuck.
                         "retries_left": getattr(job, "retries_left", None),
-                        # UX batch 4: long jobs (scope summary) report {done,total}; a job that set
-                        # a cancel flag is shown as stopping.
+                        # UX batch 4: long jobs (scope summary, detailed paper summary) report
+                        # {done,total}; a job that set a cancel flag is shown as stopping while
+                        # live, and "stopped" once it has reached a terminal state.
                         "progress_done": progress.get("done") if progress else None,
                         "progress_total": progress.get("total") if progress else None,
-                        "stopping": bool(meta.get("cancel_requested")),
+                        "stopping": cancel_requested and still_live,
+                        "stopped": cancel_requested and not still_live,
                     }
                 )
             return rows

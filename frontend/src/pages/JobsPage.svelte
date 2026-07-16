@@ -262,10 +262,12 @@
                   <strong>{job.task}</strong>
                   <small class="muted">{fmt(job.enqueued_at)}{job.ended_at ? ` → ${fmt(job.ended_at)}` : ''}</small>
                   {#if job.progress_total}
-                    <small class="muted" title="Papers processed so far">{job.progress_done ?? 0}/{job.progress_total}</small>
+                    <small class="muted" title="Progress so far (papers, or sections for a detailed summary)">{job.progress_done ?? 0}/{job.progress_total}</small>
                   {/if}
                   {#if job.stopping}
                     <small class="muted">stopping…</small>
+                  {:else if job.stopped}
+                    <small class="muted" title="This job was stopped before finishing; work already done is kept">stopped</small>
                   {:else if ['queued', 'scheduled', 'deferred'].includes(job.status)}
                     <button type="button" class="linkish cancel-btn" on:click={() => cancelJob(job.id)}
                       title="Cancel this pending job">Cancel</button>

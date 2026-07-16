@@ -221,6 +221,51 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
     assert any('"Section 1" section' in p for p in seen)
 
 
+def test_detailed_summary_reports_progress_and_honors_cancel(db, monkeypatch) -> None:
+    """2026-07-16: the detailed per-paper summary reports per-section progress and stops
+    cooperatively when the Jobs-tab Stop flag is set (JobCancelled propagates, not swallowed)."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+    from app.workers.queue import JobCancelled
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    monkeypatch.setattr(summ, "_ollama_generate", lambda *a, **k: "para.")
+
+    divs = "".join(
+        f"<div><head>Section {i}</head><p>{('word ' * 8)}</p></div>" for i in range(3)
+    )
+    tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
+    work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence.")
+    db.add(work)
+    db.flush()
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db.commit()
+
+    # Progress is reported (done, total) with total > sections (the +1 intro step) and reaches full.
+    calls: list[tuple[int, int]] = []
+    summarize_work(
+        db,
+        work,
+        summary_type="local_llm",
+        detail="detailed",
+        progress_cb=lambda done, total: calls.append((done, total)),
+    )
+    db.commit()
+    assert calls and calls[-1][0] == calls[-1][1]  # ends at done == total
+    assert calls[-1][1] >= 3  # at least the 3 sections were counted
+
+    # A cancel flag mid-run raises JobCancelled out of summarize_work (no silent extractive fallback).
+    with pytest.raises(JobCancelled):
+        summarize_work(
+            db,
+            work,
+            summary_type="local_llm",
+            detail="detailed",
+            cancel_cb=lambda: True,
+        )
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)
@@ -712,11 +757,11 @@ def _mk_works(db, n: int) -> None:
     db.commit()
 
 
-def test_large_scope_summary_is_queued(client, auth_headers, db, monkeypatch) -> None:
-    from app.services.app_config import update_ai_scope_job_threshold
+def test_scope_summary_is_queued_when_queue_available(client, auth_headers, db, monkeypatch) -> None:
+    """As of 2026-07-16 every scope summary enqueues a job (so it shows in the Jobs tab), not just
+    library-sized scopes — even a 3-paper scope returns 202 when the queue is reachable."""
     from app.workers import queue as queue_mod
 
-    update_ai_scope_job_threshold(db, value=2)
     _mk_works(db, 3)
     monkeypatch.setattr(queue_mod, "enqueue_scope_summary", lambda *a, **k: "summary-scope-library")
     resp = client.post(
@@ -730,8 +775,9 @@ def test_large_scope_summary_is_queued(client, auth_headers, db, monkeypatch) ->
     assert body["work_count"] == 3
 
 
-def test_small_scope_summary_stays_inline_and_latest_reads_back(client, auth_headers, db) -> None:
-    _mk_works(db, 2)  # at the default threshold (100) → inline
+def test_scope_summary_inline_fallback_when_queue_down_reads_back(client, auth_headers, db) -> None:
+    # The autouse _scope_summary_runs_inline fixture simulates a down queue → inline fallback.
+    _mk_works(db, 2)
     resp = client.post(
         "/api/v1/ai/summaries", headers=auth_headers("owner"), json={"scope_type": "library"}
     )

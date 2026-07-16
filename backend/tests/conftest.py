@@ -112,6 +112,22 @@ def _reindex_runs_inline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _scope_summary_runs_inline(monkeypatch):
+    """Force scope summaries down the inline (queue-down) fallback so the suite is deterministic.
+
+    As of 2026-07-16 ``POST /ai/summaries`` always tries to enqueue a background job (so every
+    insights summary shows in the Jobs tab), falling back to an inline run only when the queue is
+    unavailable. The unit suite runs without a worker (a background job could not see a test's
+    in-memory DB anyway), and whether the dev stack's Redis happens to be reachable would otherwise
+    make the response 202-vs-201 flaky. Pin it to the inline path here; the queued-path test
+    monkeypatches ``enqueue_scope_summary`` back to a live id itself.
+    """
+    from app.workers import queue
+
+    monkeypatch.setattr(queue, "enqueue_scope_summary", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _audit_file_sink_tmp(tmp_path, monkeypatch):
     """Redirect the append-only audit file sink (D31.1) to a throwaway path per test.
 

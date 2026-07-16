@@ -238,16 +238,32 @@ def _paragraphs(text: str, budget: int) -> list[str]:
 
 
 def _detailed_llm_summary(
-    sections: list[tuple[str | None, str]], *, model: str, base_url: str
+    sections: list[tuple[str | None, str]],
+    *,
+    model: str,
+    base_url: str,
+    progress_cb=None,
+    cancel_cb=None,
 ) -> str:
     """Per-PAPER DETAILED summary (UX batch 4): one paragraph PER SECTION, each headed by the
     section's name (from GROBID) so the reader sees which part of the paper it covers, plus a
     high-level intro synthesized from the section paragraphs. The whole body is used (no 12k clip);
     an over-long section is split to the context budget and its pieces are joined. Sections are
     rendered as ``"Label: <paragraph>"``. Raises on any LLM failure.
+
+    ``progress_cb(done, total)`` and ``cancel_cb() -> bool`` let the background job report
+    per-section progress and stop cooperatively (2026-07-16); the intro is the final step.
     """
+    # +1 for the synthesized intro step so the progress bar reaches total only when fully done.
+    total = len(sections) + 1
     out: list[str] = []
-    for label, text in sections:
+    for idx, (label, text) in enumerate(sections):
+        if cancel_cb is not None and cancel_cb():
+            from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+
+            raise JobCancelled(f"cancelled after {idx} of {len(sections)} sections")
+        if progress_cb is not None:
+            progress_cb(idx, total)
         text = (text or "").strip()
         if not text:
             continue
@@ -263,12 +279,18 @@ def _detailed_llm_summary(
     if not out:
         return ""
     if len(out) == 1:
+        if progress_cb is not None:
+            progress_cb(total, total)
         return out[0]
+    if progress_cb is not None:
+        progress_cb(len(sections), total)  # entering the final intro-synthesis step
     intro = _ollama_generate(
         _DETAIL_INTRO_PROMPT + "\n\n".join(out)[:LLM_INPUT_CHAR_BUDGET],
         model=model,
         base_url=base_url,
     )
+    if progress_cb is not None:
+        progress_cb(total, total)
     body = "\n\n".join(out)
     return f"{intro}\n\n{body}" if intro.strip() else body
 
@@ -346,6 +368,8 @@ def summarize_work(
     model_name: str | None = None,
     created_by_user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
+    progress_cb=None,
+    cancel_cb=None,
 ) -> Summary:
     """Create (replacing any prior summary of the same type+detail) a provenance-tagged summary.
 
@@ -404,13 +428,21 @@ def summarize_work(
                         if label != "title"
                     ]
                     text = _detailed_llm_summary(
-                        sections, model=stored_model, base_url=ai_cfg.ollama_url
+                        sections,
+                        model=stored_model,
+                        base_url=ai_cfg.ollama_url,
+                        progress_cb=progress_cb,
+                        cancel_cb=cancel_cb,
                     )
                 else:
                     text = _ollama_summarize(
                         source_text, model=stored_model, base_url=ai_cfg.ollama_url
                     )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
+                from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+
+                if isinstance(exc, JobCancelled):
+                    raise  # a user Stop must abort the job, not silently fall back to extractive
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"
         else:

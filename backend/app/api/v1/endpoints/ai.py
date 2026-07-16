@@ -108,23 +108,25 @@ def create_scope_summary(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    if scope_size > effective_ai_scope_job_threshold(db):
-        from app.workers.queue import enqueue_scope_summary
+    # Every scope summary runs on the worker so it shows up in the Jobs tab with progress + a Stop
+    # button (2026-07-16) — not just library-sized scopes above the old ai_scope_job_threshold.
+    # If the queue is unavailable (job_id is None) we fall through and run inline rather than fail.
+    from app.workers.queue import enqueue_scope_summary
 
-        job_id = enqueue_scope_summary(
-            payload.scope_type,
-            payload.scope_id,
-            summary_type=summary_type,
-            max_sentences=max(3, min(payload.max_sentences, 20)),
-            model_name=payload.model_name,
-            actor_user_id=str(actor.id),
-            paper_detail=payload.paper_detail,
-            regenerate_papers=payload.regenerate_papers,
-        )
-        if job_id is not None:
-            response.status_code = status.HTTP_202_ACCEPTED
-            return ScopeSummaryResponse(queued=True, job_id=job_id, work_count=scope_size)
-        # Queue unavailable — fall through and run inline rather than fail the request.
+    job_id = enqueue_scope_summary(
+        payload.scope_type,
+        payload.scope_id,
+        summary_type=summary_type,
+        max_sentences=max(3, min(payload.max_sentences, 20)),
+        model_name=payload.model_name,
+        actor_user_id=str(actor.id),
+        paper_detail=payload.paper_detail,
+        regenerate_papers=payload.regenerate_papers,
+    )
+    if job_id is not None:
+        response.status_code = status.HTTP_202_ACCEPTED
+        return ScopeSummaryResponse(queued=True, job_id=job_id, work_count=scope_size)
+    # Queue unavailable — fall through and run inline rather than fail the request.
     try:
         summary, work_count = summarize_scope(
             db,
