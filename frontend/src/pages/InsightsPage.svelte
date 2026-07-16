@@ -1,3 +1,11 @@
+<!-- InsightsPage — scope-level analysis: citation/topic graph, topic modeling, and an
+     LLM-generated scope summary, plus a free-form per-scope note. Props: client (ApiClient),
+     visible (forwarded to CitationGraph, which mis-sizes while hidden).
+     Non-obvious: large scopes are answered as a queued background job (awaitAnalysis/pollJob poll
+     until done); scope notes and the cached scope summary each reactively reload whenever the
+     resolved scope (or, for the summary, the chosen detail level) changes; "Summarize" always
+     forces recomputation of the scope-level synthesis while optionally also regenerating the
+     underlying per-paper summaries (regeneratePapers). -->
 <script lang="ts">
   import {
     ApiClient,

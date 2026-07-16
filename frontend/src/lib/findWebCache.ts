@@ -21,14 +21,17 @@ export interface FindWebCacheEntry {
 
 const cache = new Map<string, FindWebCacheEntry>();
 
+/** Read the cached find-on-web state for a paper, if any. */
 export function getFindWebCache(workId: string): FindWebCacheEntry | undefined {
   return cache.get(workId);
 }
 
+/** Store/replace the find-on-web state for a paper. */
 export function setFindWebCache(workId: string, entry: FindWebCacheEntry): void {
   cache.set(workId, entry);
 }
 
+/** Drop the cached find-on-web state for a paper (e.g. on explicit "Reset"). */
 export function clearFindWebCache(workId: string): void {
   cache.delete(workId);
 }

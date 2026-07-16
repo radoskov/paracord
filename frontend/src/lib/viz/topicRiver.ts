@@ -8,6 +8,7 @@ import type { VizPayload } from '../../api/client';
 import { registerRenderer, type EChartsOptionLike, type VizRenderer } from './registry';
 import type { VizTheme } from './theme';
 
+/** Blank chart (no series) themed to match the rest of the viz, used when there's no series data. */
 function emptyOption(theme: VizTheme): EChartsOptionLike {
   return {
     backgroundColor: theme.background,
@@ -18,6 +19,11 @@ function emptyOption(theme: VizTheme): EChartsOptionLike {
 
 export const topicRiverRenderer: VizRenderer = {
   viewType: 'topic_river',
+  /**
+   * Build the stacked-area streamgraph option from the payload's `series` ({years, topics}).
+   * Each topic becomes its own 100%-stacked `line`+`areaStyle` series (stack: 'total'), colored
+   * from the shared categorical palette cycling by index.
+   */
   buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
     const series = payload.series;
     if (!series || series.years.length === 0) return emptyOption(theme);

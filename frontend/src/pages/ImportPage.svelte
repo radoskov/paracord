@@ -1,3 +1,9 @@
+<!-- ImportPage — all paper-ingest paths (PDF upload, identifier lookup, server folder scan,
+     BibTeX/RIS/CSL paste) behind a local sub-tab strip. Props: client (ApiClient).
+     Non-obvious: sub-tab selection persists in sessionStorage; a pushed reference-graph citation
+     (pendingImportText store) auto-switches to the citations sub-tab; multi-PDF import polls the
+     staging batch (pollLoop) while extraction runs on the worker, merging in new item defaults
+     without clobbering user checkbox choices. -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';

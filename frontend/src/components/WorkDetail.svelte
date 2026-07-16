@@ -1,3 +1,15 @@
+<!-- WorkDetail — the full single-paper detail panel: editable metadata/fields, files, references,
+     citation contexts, annotations, summaries, tags, shelf membership, find-on-web search/download,
+     and reference-graph modal. Props: client, work (the open paper), onUpdated/onClose/onDeleted/
+     onImported/onSelectWork/onBack callbacks. Events/callbacks: calls onUpdated(work) after any
+     server-confirmed edit, onSelectWork(workId) to navigate to a related/citing paper, onBack() to
+     pop the host page's paper-view history. Non-obvious lifecycle/state: `$: if (work.id !==
+     loadedId) loadDetail(work)` re-loads all paper sub-resources whenever the parent swaps in a
+     different work; a poll loop (JOB_POLL_MS) watches the Jobs queue for extract/enrich/topic/
+     keyword jobs targeting this work or its files and refetches once they settle; the PDF reader is
+     gated solely on the nullable `readerUrl` (see inline note) to avoid a stale-boolean desync bug;
+     find-on-web state is persisted to a per-work cache (findWebCache) so it survives closing/
+     reopening the panel; onDestroy revokes the reader's object URL and stops job polling. -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
 

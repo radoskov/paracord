@@ -1,3 +1,11 @@
+<!-- RacksPage — manage racks (groups of shelves): create/rename/archive/delete a rack, set its
+     access level, and add/remove member shelves.
+     Props: client (ApiClient).
+     Events/callbacks: none (page-level; syncs the shared `racks`/`shelves` catalog stores).
+     Non-obvious lifecycle/state: on mount, re-selects whichever rack was remembered in the
+     cross-tab `selectedRackId` store, if it still exists; deleting a non-empty rack asks a second
+     confirmation for whether to cascade-delete its shelves too (orphaned papers move to the
+     default shelf) or just detach them. -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';

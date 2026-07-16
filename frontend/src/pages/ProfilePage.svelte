@@ -1,3 +1,11 @@
+<!-- ProfilePage — the signed-in user's account settings: profile fields, password change, theme
+     picker, reference-graph section weights, and a read-only summary of their own role.
+     Props: client (ApiClient).
+     Events/callbacks: none (page-level; updates the shared `currentUser`/theme stores directly).
+     Non-obvious lifecycle/state: profile fields are re-seeded from the `currentUser` store only
+     when the signed-in account id changes (not on every store update, so in-progress edits
+     survive unrelated store refreshes); theme selection applies live app-wide before being
+     persisted to the server. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

@@ -1,3 +1,8 @@
+<!-- DuplicatesPage — review/resolve duplicate & version candidates (merge, link, split, keep-separate).
+     Props: client (ApiClient). Non-obvious: splits candidates into "duplicates" vs "multiwork_file"
+     sub-tabs; tracks a per-candidate chosen base/source (baseIds) with a fetched merge preview
+     (previews) that is refreshed whenever the base is swapped; scan() polls the worker job queue
+     (waitForScanJob) since a full scan runs asynchronously off the response. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

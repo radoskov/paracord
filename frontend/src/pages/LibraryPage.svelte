@@ -1,3 +1,12 @@
+<!-- LibraryPage — the main paper-browsing view: a filterable/sortable/paginated paper list on the
+     left and a paper-detail pane on the right, split by a draggable divider.
+     Props: client (ApiClient).
+     Events/callbacks: none (page-level; talks to the backend via `client` and to sibling tabs via
+     the `lib/selection` and `lib/catalog` stores).
+     Non-obvious lifecycle/state: column prefs and list-column-width are seeded from localStorage
+     synchronously then reconciled against the backend on mount; search has ranked modes
+     (semantic/hybrid, capped at 50 + client-filtered) vs. paginated exact-field/metadata modes;
+     `viewHistory` backs an in-page "Previous" navigation stack across paper hops. -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';

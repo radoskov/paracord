@@ -1,3 +1,11 @@
+<!-- BatchImport — paste-many-citations workflow: chunked lookup/GROBID preview, then review/commit.
+     Props: client (ApiClient).
+     Events/callbacks: none exported — wraps DraftReview, which emits `committed`.
+     Non-obvious lifecycle/state: subscribes to the `pendingImportText` store so an external
+     "push to import" action (reference-graph node) can prefill the textarea; lines are looked
+     up in small chunks (LOOKUP_CHUNK) so results stream in, a failed/timed-out chunk degrades to
+     title-only rows instead of failing the whole batch, and the search can be cancelled between
+     chunks while already-found rows stay committable via DraftReview's `gradual` mode. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

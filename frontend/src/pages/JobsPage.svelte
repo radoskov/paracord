@@ -1,3 +1,8 @@
+<!-- JobsPage — background worker/queue status and job list, with owner/admin queue recovery
+     controls. Props: client (ApiClient), visible (whether this tab is the active one — pauses
+     auto-refresh while hidden). Non-obvious: `health` derives a red/yellow/green semaphore from
+     Redis reachability + worker count + queue depth; `refresh` guards against overlapping polls
+     and keeps the last-good status on error so the tab doesn't blank out. -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
 

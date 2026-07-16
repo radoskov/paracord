@@ -10,6 +10,13 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EChart = any;
 
+/**
+ * Wire up shift-click legend-solo behavior on an already-created ECharts instance (see file header
+ * for the gesture). Attaches a capture-phase DOM click listener to record the shift key (ECharts'
+ * own `legendselectchanged` event carries no modifier info) plus a `legendselectchanged` handler
+ * that re-dispatches `legendSelect`/`legendUnSelect` actions to enforce the solo state. Call once
+ * per chart instance.
+ */
 export function enableLegendSolo(chart: EChart): void {
   let lastClickShift = false;
   let solo: string | null = null;

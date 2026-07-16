@@ -1,3 +1,10 @@
+<!-- CitationSummaryPage — scoped citation analytics (§8.11): most-cited local/external papers,
+     a frequently-cited-but-missing worklist (with import/ignore decisions and external preview),
+     a chronological chart, and lazy-loaded Venues/Authors aggregation sub-tabs.
+     Props: client (ApiClient), visible (ECharts must not build while display:none).
+     Non-obvious: `currentScopeArgs` caches the resolved scope for missing-list exports and the
+     venue/author refetch; the venue/author aggregation is only (re)loaded when its sub-tab is
+     actually open, to avoid paying for an aggregation nobody views. -->
 <script lang="ts">
   import {
     ApiClient,
@@ -265,6 +272,8 @@
     });
   }
 
+  // Bump the chart revision on every new summary so ChartHost's {#key} forces a full rebuild
+  // rather than reusing a stale ECharts instance sized for the previous scope.
   $: if (summary) chartRevision += 1;
 </script>
 

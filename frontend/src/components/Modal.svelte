@@ -1,3 +1,9 @@
+<!-- Modal — generic dialog chrome: backdrop, header with title + close button, and a scrollable
+     body slot. Props: title (header text), wide (widens the panel for content like the reference
+     graph), onClose (invoked on backdrop click, close button or Escape).
+     Events/callbacks: onClose only (no dispatched events).
+     Non-obvious: Escape is bound globally via svelte:window, so nested modals should each supply
+     their own onClose that only closes themselves. -->
 <script lang="ts">
   export let title = '';
   export let wide = false;

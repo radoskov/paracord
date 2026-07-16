@@ -1,3 +1,12 @@
+<!-- PaperTable — configurable table of works (library list, shelf/rack contents, search results).
+     Props: works, selectedWorkId (highlights the row), flashWorkId (row-flash affordance),
+     columns (ordered visible ColumnDef[], default = LIBRARY_COLUMNS.default set), compact (hides
+     the Venue column), sortable/sortKey/sortOrder/onSort (clickable-header sorting, off by default),
+     selectable/selectedIds/allSelected/onToggleSelect/onToggleAll (checkbox column, off by default),
+     onSelect (row click/Enter), onStatusChange (reading-status select).
+     Events/callbacks: none dispatched — all via the exported callback props above.
+     Non-obvious: column rendering is a big {#if col.id === ...} chain keyed off ColumnDef.id, so
+     adding a column requires both a LIBRARY_COLUMNS entry and a branch here. -->
 <script lang="ts">
   import type { ReadingStatus, Work, WorkSortKey } from '../api/client';
   import { type ColumnDef, type ColumnId, LIBRARY_COLUMNS } from '../lib/columns';

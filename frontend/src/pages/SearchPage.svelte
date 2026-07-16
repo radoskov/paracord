@@ -1,3 +1,12 @@
+<!-- SearchPage — standalone search over the whole library: hybrid/semantic/lexical ranked search
+     plus exact keyword:/topic: field search, with per-result actions (open in Library, read
+     details, add to shelf).
+     Props: client (ApiClient); visible (whether the Search tab is the active tab — used only to
+     autofocus the query box on tab entry).
+     Events/callbacks: none (page-level; hands off to the Library tab via `pendingLibraryOpen`).
+     Non-obvious lifecycle/state: the `visible` reactive block below is edge-triggered (fires only
+     on the false→true transition) so the query box is refocused each time the user switches back
+     into this tab, not on every re-render while it's already showing. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

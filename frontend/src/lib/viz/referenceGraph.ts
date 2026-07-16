@@ -211,6 +211,17 @@ export function yValueFor(
   }
 }
 
+/**
+ * Build the per-paper reference-graph ECharts scatter option from a fetched graph payload.
+ * X is always publication year (a "no year" lane sits left of the earliest year); Y is the
+ * selectable axis in `opts.yAxis` (default "weighted", see REFERENCE_Y_AXES); node size is always
+ * the section-weighted mention count. Nodes are grouped by kind (or by venue when
+ * `opts.colorBy === "venue"`) into separate scatter series so ECharts renders a legend; co-located
+ * nodes collapse into one count-badged marker (see groupByCoord), and nodes sharing a plotted spot
+ * but with different click actions are fanned out (see kindsAt/xPlot) so a click is unambiguous.
+ * Reference/citing/ref-ref edges are added as separate `lines` series colour-coded by relation to
+ * the base paper; ref-ref edges are included only when `opts.showRefEdges` is true.
+ */
 export function buildReferenceGraphOption(
   graph: ReferenceGraph,
   weights: Record<string, number>,

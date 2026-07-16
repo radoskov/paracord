@@ -27,6 +27,7 @@ export async function refreshShelves(client: ApiClient): Promise<Shelf[]> {
   return list;
 }
 
+/** Force a re-fetch of racks and publish to subscribers; see {@link refreshShelves}. */
 export async function refreshRacks(client: ApiClient): Promise<Rack[]> {
   const list = await client.listRacks();
   racks.set(list);
@@ -34,6 +35,7 @@ export async function refreshRacks(client: ApiClient): Promise<Rack[]> {
   return list;
 }
 
+/** Force a re-fetch of tags and publish to subscribers; see {@link refreshShelves}. */
 export async function refreshTags(client: ApiClient): Promise<Tag[]> {
   const list = await client.listTags();
   tags.set(list);
@@ -54,6 +56,7 @@ export async function ensureShelves(client: ApiClient): Promise<Shelf[]> {
   return shelvesInflight;
 }
 
+/** Fetch racks once (deduped), reusing the cache on later mounts; see {@link ensureShelves}. */
 export async function ensureRacks(client: ApiClient): Promise<Rack[]> {
   if (racksLoaded) return get(racks);
   if (!racksInflight) {
@@ -64,6 +67,7 @@ export async function ensureRacks(client: ApiClient): Promise<Rack[]> {
   return racksInflight;
 }
 
+/** Fetch tags once (deduped), reusing the cache on later mounts; see {@link ensureShelves}. */
 export async function ensureTags(client: ApiClient): Promise<Tag[]> {
   if (tagsLoaded) return get(tags);
   if (!tagsInflight) {

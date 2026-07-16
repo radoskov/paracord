@@ -1,3 +1,20 @@
+<!-- PdfReader — in-app PDF.js viewer with three tabs: Paper (rendered pages + citation/annotation
+     overlays), References (extracted citation contexts) and Notes (annotations). Supports paged and
+     smooth-scroll rendering, zoom, reading-mode page easing (dim/dark), a zen full-viewport mode,
+     whole-document search (with a server-text/OCR fallback for scanned PDFs), selection-to-
+     annotation capture, and jump/flash navigation between citations, references and annotations.
+     Props: fileId, fileName, fileUrl, contexts, annotations, onCreateAnnotation, onDeleteAnnotation,
+     onNavigateToReference (switch tab + scroll/flash the reference in the parent detail view),
+     initialJumpReferenceId (opens and jumps to the first in-text mention), onFetchText (server-side
+     text fetcher, used for search/copy when the in-browser text layer is empty), canAnnotate.
+     Events/callbacks: none dispatched — all via the exported callback props above.
+     Non-obvious lifecycle/state: zen mode portals the reader DOM node to <body> (position:fixed
+     needs a real viewport, not a modal's containing block) and restores it via a comment anchor on
+     exit; onDestroy must be exception-safe (see `safely()`) because a mid-view prop reassignment
+     (e.g. a background job-poll refresh) can leave pdf.js objects in a state whose teardown throws,
+     which would otherwise corrupt Svelte's effect tree and permanently break the reader's
+     {#key} remount. Search/highlighting relies on replaying the same item-join (ITEM_SEP) used to
+     build each page's cached text so char offsets map back to the rendered text-layer spans. -->
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
   import { get } from 'svelte/store';

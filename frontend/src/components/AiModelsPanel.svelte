@@ -1,3 +1,12 @@
+<!-- AiModelsPanel — AI/Models settings: per-capability provider config, model pull/delete, and
+     index status (embeddings, lexical).
+     Props: client (ApiClient).
+     Events/callbacks: none — self-contained; all state is local and persisted via `client`.
+     Non-obvious lifecycle/state: on mount, loads status/config/models then validates the
+     configured Ollama embedding model so the warning banner is present without user action;
+     model-pull progress is tracked by polling the Jobs list (no streaming endpoint) via
+     `pollPull`; per-card availability badges are recomputed in a reactive block keyed off
+     status/config because the markup can't use {@const} directly under a plain <article>. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

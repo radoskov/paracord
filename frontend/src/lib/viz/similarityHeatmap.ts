@@ -8,6 +8,7 @@ import type { VizPayload } from '../../api/client';
 import { registerRenderer, type EChartsOptionLike, type VizRenderer } from './registry';
 import type { VizTheme } from './theme';
 
+/** Blank chart (no series) themed to match the rest of the viz, used when there's no matrix data. */
 function emptyOption(theme: VizTheme): EChartsOptionLike {
   return {
     backgroundColor: theme.background,
@@ -18,6 +19,12 @@ function emptyOption(theme: VizTheme): EChartsOptionLike {
 
 export const similarityHeatmapRenderer: VizRenderer = {
   viewType: 'similarity_heatmap',
+  /**
+   * Build the ECharts heatmap option from the payload's `matrix` ({labels, ids, values}).
+   * Cells are emitted as [columnIndex, rowIndex, value] to match ECharts' heatmap data shape,
+   * and the visualMap's min is clamped to the observed minimum (values may go negative) so the
+   * ramp always spans the actual data.
+   */
   buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
     const matrix = payload.matrix;
     if (!matrix || matrix.labels.length === 0) return emptyOption(theme);

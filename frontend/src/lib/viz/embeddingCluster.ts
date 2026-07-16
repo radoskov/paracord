@@ -30,6 +30,7 @@ function symbolSizer(payload: VizPayload): (size: number | null) => number {
   };
 }
 
+/** ECharts tooltip formatter for a scatter point: title, cluster (from meta or color_group), year. */
 function tooltipFormatter(params: { data?: { node?: VizPayload['nodes'][number] } }): string {
   const node = params.data?.node;
   if (!node) return '';
@@ -43,6 +44,7 @@ function tooltipFormatter(params: { data?: { node?: VizPayload['nodes'][number] 
   return rows.join('<br>');
 }
 
+/** Minimal HTML-escape for values interpolated into ECharts tooltip HTML. */
 function escapeHtml(s: string): string {
   return s.replace(
     /[&<>"]/g,
@@ -50,6 +52,8 @@ function escapeHtml(s: string): string {
   );
 }
 
+/** Renderer for the `embedding_cluster` view: 2D PCA scatter of papers, one ECharts series per
+ * k-means cluster (see file header for the overall design). */
 export const embeddingClusterRenderer: VizRenderer = {
   viewType: 'embedding_cluster',
   buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {

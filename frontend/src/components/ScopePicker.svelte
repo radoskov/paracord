@@ -1,3 +1,10 @@
+<!-- ScopePicker — shared "what set of papers" control for the analysis tabs (graph/visualize/
+     summarize…). Props: client, scopeType/scopeId/searchQuery/batchId/savedFilterId (bindable
+     scope state owned by the parent page), ready (bindable out — whether the current selection
+     resolves to a concrete paper set), verb (hint text), testid. Events/callbacks: none — parent
+     reads back the bound scope fields and builds the request via lib/scope.resolveScopeRequest.
+     Non-obvious lifecycle/state: loads shelves/racks into shared catalog stores plus its own
+     batches/savedFilters lists on mount; `ready` is derived reactively from the scope fields. -->
 <script lang="ts">
   // Shared scope picker for the analysis tabs (Insights audit C3, 2026-07-14). One select for the
   // seven scope types + the matching sub-control (shelf/rack/batch/saved-filter dropdowns, search

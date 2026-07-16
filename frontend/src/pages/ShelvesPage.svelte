@@ -1,3 +1,10 @@
+<!-- ShelvesPage — manage shelves: create/rename/archive/delete a shelf, set its access level, and
+     add/remove member papers (with a title filter over the whole library for the add picker).
+     Props: client (ApiClient).
+     Events/callbacks: none (page-level; syncs the shared `shelves` catalog store).
+     Non-obvious lifecycle/state: on mount, re-selects whichever shelf was remembered in the
+     cross-tab `selectedShelfId` store, if it still exists; deleting a shelf moves papers that are
+     only on it to the default shelf (papers also on other shelves just leave this one). -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';

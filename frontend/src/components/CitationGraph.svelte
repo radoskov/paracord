@@ -1,3 +1,13 @@
+<!-- CitationGraph — ECharts force/circular graph of citation or topic-similarity links, with a
+     Graph/List render toggle, its own legend-chip filtering and ctrl-click neighborhood focus.
+     Props: label, disabled, load (citation-graph fetcher), loadTopic (topic-graph fetcher,
+     optional — enables the Citation/Topic toggle), onOpenWork, onImportExternal, visible.
+     Events/callbacks: none exported — interactions are surfaced via onOpenWork/onImportExternal.
+     Non-obvious lifecycle/state: node size/color/filter/layout changes are pure client-side
+     ECharts option rebuilds (no refetch) driven by bumping `revision`; renderChart distinguishes
+     a genuine data reload from a restyle-only repaint (same graph object) to decide between a
+     full non-merge setOption (restarts the force sim) and a merge (preserves pan/zoom); a
+     one-shot delayed `fitView` re-centers the force layout after it settles. -->
 <script lang="ts">
   // Citation / topic graph on ECharts (owner decision 2026-07-13: one charting stack — the
   // previous Cytoscape renderer was the only non-ECharts surface). Force-directed `graph` series;

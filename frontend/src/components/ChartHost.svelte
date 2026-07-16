@@ -1,3 +1,12 @@
+<!-- ChartHost — shared ECharts lifecycle wrapper (lazy-load, init, resize, dispose, theme repaint).
+     Props: render (paint callback), onReady (one-time post-init hook), revision (bump to
+     repaint), visible (resize-on-show), height, ariaLabel.
+     Events/callbacks: none — callers drive repaints via `revision` and get the chart instance
+     via `onReady`/`getChart()`.
+     Non-obvious lifecycle/state: `paint()` fails silently into `failed` (no canvas-capable DOM,
+     e.g. tests/SSR) so callers can show a list fallback via the `fallback` slot; resize is
+     triggered both by a ResizeObserver on the container and by a visible-tab transition, since
+     ECharts mis-measures inside `display:none`. -->
 <script lang="ts">
   // Shared ECharts host (Insights audit M-a, 2026-07-14). Every chart surface previously
   // reimplemented the same lifecycle: lazy `import('echarts')`, init, ResizeObserver resize,

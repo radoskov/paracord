@@ -1,3 +1,11 @@
+<!-- DraftReview — review/edit table for parsed import drafts (batch citation import) before they
+     are committed into the library. Props: client (ApiClient), gradual (parent is still streaming
+     drafts in via addDrafts(), e.g. chunked search — committed rows are removed but the table stays
+     open for more). Exposes imperative methods addDrafts()/reset() for the parent to push rows in
+     and clear the table.
+     Events/callbacks: dispatches `committed` with { remaining, batch } after a successful commit.
+     Non-obvious: `include` defaults to checked only for confident, not-already-in-library matches;
+     picking a candidate from the dropdown overwrites the row's editable fields (applyCandidate). -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 

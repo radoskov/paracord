@@ -1,3 +1,9 @@
+<!-- ShelfPicker — dropdown for picking (and optionally creating) a shelf. Props: client, autofocus,
+     value (bindable — selected shelf id, '' for none), label, disabled, modifiableOnly (hide shelves
+     the caller can't modify), excludeDefault (hide the Inbox/default shelf). Events/callbacks: none
+     — caller reads back bound `value`. Non-obvious lifecycle/state: loads the shared shelves store
+     on mount; inline "create shelf" is gated on canManageStructure and publishes through
+     refreshShelves so every other picker sees the new shelf too. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

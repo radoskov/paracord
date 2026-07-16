@@ -1,3 +1,5 @@
+<!-- AiModelsPage — thin page wrapper that hosts the AiModelsPanel. Props: client (ApiClient).
+     No local state; all AI-model config logic lives in AiModelsPanel. -->
 <script lang="ts">
   import { ApiClient } from '../api/client';
   import AiModelsPanel from '../components/AiModelsPanel.svelte';

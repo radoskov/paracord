@@ -1,3 +1,10 @@
+<!-- ColumnPicker — modal for choosing which library-list columns show and their order.
+     Props: order (full column-id sequence), visible (currently-shown column ids), onApply
+     (called with the new {order, visible} on Apply), onClose (called on Apply and Cancel).
+     Events/callbacks: none (plain prop callbacks, not Svelte events).
+     Non-obvious lifecycle/state: edits local copies of order/visible so Cancel doesn't mutate
+     the caller's state; Apply re-derives `visible` from `localOrder` so the emitted list is
+     always in canonical column order regardless of toggle sequence. -->
 <script lang="ts">
   import {
     type ColumnId,

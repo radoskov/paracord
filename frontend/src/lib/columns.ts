@@ -103,6 +103,7 @@ const VALID_SORT_KEYS = new Set<string>(
   LIBRARY_COLUMNS.filter((c) => c.sortKey).map((c) => c.sortKey as string),
 );
 
+/** The factory-default column prefs (order/visibility/sort) for a fresh install. */
 export function defaultColumnPrefs(): ColumnPrefs {
   return {
     version: COLUMN_PREFS_VERSION,
@@ -177,6 +178,7 @@ export function visibleColumnDefs(prefs: ColumnPrefs): ColumnDef[] {
     .filter((c): c is ColumnDef => !!c);
 }
 
+/** Read + validate the localStorage column-prefs cache; falls back to defaults on any error. */
 export function loadColumnPrefs(): ColumnPrefs {
   try {
     const stored = localStorage.getItem(COLUMN_PREFS_STORAGE_KEY);
@@ -187,6 +189,7 @@ export function loadColumnPrefs(): ColumnPrefs {
   }
 }
 
+/** Persist column prefs to the localStorage cache (best-effort; see catch below). */
 export function saveColumnPrefs(prefs: ColumnPrefs): void {
   try {
     localStorage.setItem(COLUMN_PREFS_STORAGE_KEY, JSON.stringify(prefs));

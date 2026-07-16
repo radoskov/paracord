@@ -1506,6 +1506,11 @@ export interface QueueStatus {
   require_redis?: boolean;
 }
 
+/**
+ * Thin fetch-based wrapper around the backend REST API. Methods are mostly one-line passthroughs
+ * to {@link ApiClient.request} (JSON) or raw `fetch` (multipart uploads / NDJSON streaming); see
+ * inline comments on the less obvious ones (queued/background-job responses, streaming, previews).
+ */
 export class ApiClient {
   constructor(
     private readonly baseUrl: string,
@@ -1519,6 +1524,7 @@ export class ApiClient {
     private readonly onQueueFull?: (detail: string) => void,
   ) {}
 
+  /** Clone this client with a different bearer token (same callbacks/baseUrl), e.g. on login/logout. */
   withToken(token: string | null): ApiClient {
     return new ApiClient(
       this.baseUrl,
@@ -1528,6 +1534,7 @@ export class ApiClient {
     );
   }
 
+  /** Authenticate and return the bearer access token (unauthenticated request). */
   async login(username: string, password: string): Promise<string> {
     const response = await this.request<{ access_token: string }>(
       "/api/v1/auth/login",
@@ -1970,6 +1977,7 @@ export class ApiClient {
     });
   }
 
+  /** Attach a PDF to an existing paper. Multipart, so it bypasses the JSON `request` helper. */
   async uploadWorkFile(workId: string, file: File): Promise<WorkFile> {
     const form = new FormData();
     form.append("file", file);
@@ -2431,6 +2439,7 @@ export class ApiClient {
     });
   }
 
+  /** Single-PDF import (creates a new paper). Multipart, so it bypasses the JSON `request` helper. */
   async uploadPdf(
     file: File,
     targetShelfId?: string | null,
@@ -2885,6 +2894,7 @@ export class ApiClient {
     await this.request(`/api/v1/admin/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
   }
 
+  /** Upload a backup archive to restore from. Multipart, so it bypasses the JSON `request` helper. */
   async uploadBackup(file: globalThis.File): Promise<Record<string, unknown>> {
     const form = new FormData();
     form.append("upload", file);
@@ -3460,6 +3470,12 @@ export class ApiClient {
     return this.request<CitationStyle[]>("/api/v1/exports/styles");
   }
 
+  /**
+   * Core JSON request helper used by nearly every method: attaches the bearer token/JSON headers,
+   * translates a non-OK response into a thrown Error (using the server's `detail` when present),
+   * and routes 401 / "queue is full" failures through `onUnauthorized`/`onQueueFull` so the app can
+   * react consistently wherever they occur. A 204 response resolves to `undefined`.
+   */
   private async request<T>(
     path: string,
     options: {
@@ -3518,6 +3534,7 @@ export class ApiClient {
     return response.json() as Promise<T>;
   }
 
+  /** Like {@link request} but for binary responses (e.g. file downloads); no JSON body support. */
   private async requestBlob(path: string): Promise<Blob> {
     const headers: Record<string, string> = {};
     if (this.token) headers.Authorization = `Bearer ${this.token}`;

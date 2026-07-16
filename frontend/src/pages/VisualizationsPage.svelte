@@ -1,3 +1,15 @@
+<!-- VisualizationsPage — top-level page for building and exploring library visualizations
+     (temporal map, embedding cluster, co-citation network, topic river, similarity heatmap).
+     Props: client (ApiClient); visible (whether the page tab is currently shown — passed through
+     to ChartHost so it can resize once shown, since ECharts mis-sizes when built under
+     display:none).
+     Events/callbacks: none emitted; navigates to the Library tab (via pendingLibraryOpen +
+     location.hash) when a paper point/link is clicked.
+     Non-obvious lifecycle/state: fetches a VizPayload from the server on "Build"/"Refresh" and
+     re-derives view-specific control visibility (isTemporal/isCluster/isNetwork/isChart) from
+     viewType; supports client-side "restyle" (re-encode size/color without refetch) for the
+     temporal map only; tracks an optional ctrl-click "focus" (node/legend group + its direct
+     neighbors) that filters the payload before rendering, independent of the fetched data. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 
@@ -76,6 +88,8 @@
     ['none', 'None'],
   ];
 
+  // Axis choices come from the server payload (view-specific); before the first Build, fall back
+  // to the full static list so the axis selects aren't empty.
   $: axisOptions = payload?.axis_options ?? [
     { key: 'year', label: 'Publication year' },
     { key: 'citation_count', label: 'Citation count' },
@@ -148,6 +162,8 @@
     chartRevision += 1;
   }
 
+  // Resolve the focused id to its human-readable node label for the "Focused on …" note; falls
+  // back to the raw id/group name if it's a legend-group focus (not a node id).
   $: vizFocusLabelText = vizFocus
     ? (payload?.nodes.find((n) => n.id === vizFocus?.label)?.label ?? vizFocus.label)
     : '';
@@ -162,6 +178,8 @@
   // Topic river / similarity heatmap are chart views with no per-view controls.
   $: isChart = viewType === 'topic_river' || viewType === 'similarity_heatmap';
 
+  // The focus-paper picker only appears when a "similarity to focus" axis is selected — those
+  // axis keys are conventionally suffixed "_to_focus".
   $: needsFocus = isTemporal && (xAxis.endsWith('_to_focus') || yAxis.endsWith('_to_focus'));
 
   onMount(async () => {

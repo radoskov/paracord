@@ -1,3 +1,11 @@
+<!-- ReferenceGraphModal — modal wrapping the interactive reference/citation scatter graph for one
+     paper (ECharts via ChartHost). Props: client (ApiClient), workId, onClose.
+     Events/callbacks: onClose only.
+     Non-obvious lifecycle/state: loads section weights + the graph on mount; Y-axis/colour/ref-edge
+     toggles are pure client-side restyles driven by bumping `revision` (no refetch), while
+     max-external and "show citing papers" changes refetch via loadGraph(). Ctrl-click on a node or
+     legend series sets `focusIds` to restrict the rendered graph to a neighborhood (see
+     neighborhoodOf/renderChart) without touching the fetched `graph` data itself. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

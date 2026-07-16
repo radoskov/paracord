@@ -125,6 +125,12 @@ function escapeHtml(s: string): string {
 // them is a client-side restyle — no refetch. Mirrors the server's `_size_value`/`_color_group`
 // encodings (and its legend construction) exactly; the server's params stay the source of truth
 // for the initial build.
+/**
+ * Recompute `size`/`color_group` (and the derived `legend`) for every node from its existing
+ * `meta`, without refetching. Must mirror the server's initial-build encodings exactly.
+ * @param sizeBy - "none" | "citation_count" | "year" | (default) local_degree
+ * @param colorBy - "none" | "work_type" | "year" | "venue" | (default) reading_status
+ */
 export function restyleTemporalMap(
   payload: VizPayload,
   sizeBy: string,
@@ -168,6 +174,10 @@ export function restyleTemporalMap(
 export const temporalMapRenderer: VizRenderer = {
   viewType: "temporal_map",
   order: 0, // lead the view-type selector — the temporal map is the default visualization
+  /**
+   * Build the ECharts scatter option: one series per color group (for the legend), coordinate
+   * overlap grouped into count-badged markers, and an optional citation-edge `lines` overlay.
+   */
   buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
     const nodes = plottable(payload);
     const sizeFor = symbolSizer(payload);

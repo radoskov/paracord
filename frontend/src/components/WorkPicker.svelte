@@ -1,3 +1,8 @@
+<!-- WorkPicker — debounced paper-search typeahead. Props: client, excludeId (paper to omit from
+     results), placeholder, onSelect (callback fired with the chosen Work), autofocusInput,
+     initialQuery (seeds and auto-runs a search on mount). Events/callbacks: onSelect(work).
+     Non-obvious lifecycle/state: input is debounced 250ms before calling listWorks; results are
+     capped at 8 and filtered to exclude `excludeId`. -->
 <script lang="ts">
   // A small typeahead for choosing another paper (issue 4: move-file target / merge source).
   // Debounced metadata search via listWorks; excludes the current paper; emits the pick via onSelect.

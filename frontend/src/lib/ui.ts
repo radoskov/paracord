@@ -1,17 +1,21 @@
 // Small shared UI helpers used across the page components.
 
+/** Human-readable byte size, auto-scaling B -> KB -> MB (1 decimal place). */
 export function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Extract a display message from a caught value, falling back for non-Error throws. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Request failed';
 }
 
-// Format an ISO timestamp as a short local YYYY-MM-DD date (e.g. for the library "Added" column).
-// Returns '-' for missing/invalid input so a cell never shows "Invalid Date".
+/**
+ * Format an ISO timestamp as a short local YYYY-MM-DD date (e.g. for the library "Added" column).
+ * Returns '-' for missing/invalid input so a cell never shows "Invalid Date".
+ */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '-';
   const date = new Date(iso);

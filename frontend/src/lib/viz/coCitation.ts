@@ -16,6 +16,8 @@ const DEFAULT_SYMBOL = 14;
 const MIN_EDGE_WIDTH = 1;
 const MAX_EDGE_WIDTH = 6;
 
+/** Build a linear size-in-[MIN_SYMBOL, MAX_SYMBOL] mapper from the payload's node sizes;
+ * a null size (or an all-null payload) falls back to DEFAULT_SYMBOL. */
 function symbolSizer(payload: VizPayload): (size: number | null) => number {
   const sizes = payload.nodes.map((n) => n.size).filter((s): s is number => s !== null);
   if (sizes.length === 0) return () => DEFAULT_SYMBOL;
@@ -28,6 +30,8 @@ function symbolSizer(payload: VizPayload): (size: number | null) => number {
   };
 }
 
+/** Build a linear edge-width-in-[MIN_EDGE_WIDTH, MAX_EDGE_WIDTH] mapper from the payload's edge
+ * weights (weight 1 is the minimum possible, so the scale starts there, not at 0). */
 function edgeWidther(payload: VizPayload): (weight: number) => number {
   const weights = (payload.edges ?? []).map((e) => e.weight);
   if (weights.length === 0) return () => MIN_EDGE_WIDTH;
@@ -38,6 +42,7 @@ function edgeWidther(payload: VizPayload): (weight: number) => number {
   };
 }
 
+/** ECharts tooltip formatter: node hover shows title/year/degree, edge hover shows shared weight. */
 function tooltipFormatter(params: {
   dataType?: string;
   data?: { node?: VizPayload['nodes'][number]; value?: number };
@@ -56,6 +61,7 @@ function tooltipFormatter(params: {
   return '';
 }
 
+/** Minimal HTML-escape for values interpolated into ECharts tooltip HTML. */
 function escapeHtml(s: string): string {
   return s.replace(
     /[&<>"]/g,
@@ -63,6 +69,8 @@ function escapeHtml(s: string): string {
   );
 }
 
+/** Renderer for the `co_citation` view: co-citation/bibliographic-coupling network as an ECharts
+ * force-directed graph (see file header for the overall design). */
 export const coCitationRenderer: VizRenderer = {
   viewType: 'co_citation',
   buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {

@@ -29,14 +29,17 @@ const READING_MODE_FILTERS: Record<ReadingMode, string> = {
   dark: DARK_FILTER,
 };
 
+/** The CSS `filter` value to apply to the reader's page canvas for the given mode. */
 export function readingModeFilter(mode: ReadingMode): string {
   return READING_MODE_FILTERS[mode];
 }
 
+/** Type guard for a stored/user-supplied reading-mode value. */
 export function isReadingMode(value: unknown): value is ReadingMode {
   return typeof value === 'string' && (READING_MODES as readonly string[]).includes(value);
 }
 
+/** Read the persisted reading-mode choice, defaulting to 'original' if unset/invalid/unavailable. */
 export function readStoredReadingMode(): ReadingMode {
   try {
     const stored = localStorage.getItem(READING_MODE_KEY);

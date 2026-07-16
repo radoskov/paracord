@@ -1,3 +1,10 @@
+<!-- App — root shell: auth gate, tab navigation and lazy-mounted page routing.
+     Props: none (top-level component).
+     Events/callbacks: none — owns its own state and passes `client` down to page components.
+     Non-obvious lifecycle/state: tabs are lazy-mounted on first visit then kept mounted and
+     hidden via CSS so their state survives switching away (`visited` set); role changes can
+     make the active tab disappear, which falls back to Library; a lightweight Jobs-queue poll
+     runs independently of the Jobs page's own poll to keep the nav badge live everywhere. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

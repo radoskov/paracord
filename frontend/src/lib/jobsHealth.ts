@@ -22,6 +22,7 @@ export interface JobsBadge {
   title: string;
 }
 
+/** Map raw queue status into the badge color/counts/tooltip described in {@link JobsBadgeColor}. */
 export function deriveJobsBadge(status: QueueStatus | null): JobsBadge {
   if (!status) {
     return { color: 'grey', queued: 0, running: 0, title: 'Job queue status unknown' };

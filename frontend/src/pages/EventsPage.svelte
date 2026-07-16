@@ -1,3 +1,6 @@
+<!-- EventsPage — paginated, filterable view of the audit log. Props: client (ApiClient).
+     Non-obvious: re-loads on client identity change (fixes blank page after re-auth/refresh),
+     and `visible` applies a client-side type filter on top of the server-paginated `events`. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 

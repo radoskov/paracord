@@ -1,3 +1,13 @@
+<!-- AdminPage — the admin/owner console: users, groups, find-on-web allowlist/policy, folders
+     (owner-only), themes, agents, app settings, reference-dupe scanning, and backup/restore. Props:
+     client (ApiClient). No emitted events — all actions call the API directly and update local
+     state. Non-obvious lifecycle/state: sub-tabs are gated by role ($isOwner) via visibleAdminTabs,
+     with a reactive fallback off a hidden tab; `$: if (client && client !== loadedFor)` re-runs
+     refresh() whenever a NEW authenticated client appears (including the null-token → authed
+     transition on a hard refresh, which a dependency-less refresh() call would miss); the Backup and
+     Reference-dupes tabs lazy-load their data only the first time each tab is opened; long-running
+     server jobs (backup/restore, dupe scan) are tracked via polling loops (pollBackupJob/
+     pollDupesJob) against the Jobs queue. -->
 <script lang="ts">
   import {
     ApiClient,
@@ -531,6 +541,7 @@
     });
   }
 
+  // Load the list the first time the Backup tab is opened.
   $: if (activeAdminTab === 'backup' && backups === null && !loading) void loadBackups();
 
   async function pollBackupJob(jobId: string, doneMsg: string): Promise<void> {

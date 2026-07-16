@@ -1,3 +1,11 @@
+<!-- ExportDialog — citation export controls (format + style pickers, Preview/Copy/Download).
+     Props: label (text shown next to the format select), disabled, onExport (legacy mode: parent
+     performs the export/download itself), fetchExport (rich mode: dialog fetches content itself and
+     offers Preview/Copy/Download), fetchStyles (optional dynamic citation-style list from the
+     backend).
+     Events/callbacks: none dispatched — everything goes through the exported callback props.
+     Non-obvious: presence of `fetchExport` switches the whole UI between legacy and rich mode; the
+     style select only appears for the 'styled' format. -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import {

@@ -1,3 +1,12 @@
+<!-- TagsPage — create tags and manage existing ones (rename, recolor, describe, delete, and scope
+     to specific shelves/racks); tags are applied to papers/shelves/racks elsewhere.
+     Props: client (ApiClient); visible (whether the Tags tab is the active tab — used only to
+     autofocus the new-tag name box on tab entry).
+     Events/callbacks: none (page-level; syncs the shared `tags`/`shelves`/`racks` catalog stores).
+     Non-obvious lifecycle/state: the `visible` reactive block below is edge-triggered (false→true
+     transition only), so the name box refocuses each time this tab is switched into, not on every
+     re-render while already showing; a tag with no shelf/rack scope is "global" (offered
+     everywhere) — `scopeLabel`/`filteredTags` treat empty scope as always-matching. -->
 <script lang="ts">
   import { onMount } from 'svelte';
 
