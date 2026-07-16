@@ -9,6 +9,16 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 4c: citation-count sizing, detailed-summary job, section names (2026-07-16)
+
+- `f6a150c` — citation graph gains a **"citation count"** node-size option (external/global count
+  on local nodes; backfilled for out-of-scope resolved targets). Help popup + hint updated.
+- `002e258` — detailed per-paper summary now **runs as a background job** (paper view polls the
+  Jobs list, then reloads) — its section-by-section LLM passes no longer block the request; short/
+  extractive stay inline. Each section paragraph is **headed by its GROBID section name**
+  ("Methods: …") and the chunk prompt no longer opens with "This section" (starts with content).
+  `enqueue_work_summary(work_id, detail)` keys short vs detailed as distinct jobs.
+
 ## UX batch 4b: short/detailed summaries, download messaging, job progress (2026-07-16)
 
 - `3e72148` — find-on-web: a policy refusal now carries an actionable hint (names the allowing
