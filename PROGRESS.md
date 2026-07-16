@@ -9,6 +9,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Full-battery clean run + journey-17 flake root-caused (2026-07-16)
+
+- **Full battery green**: `make ready-full` (1227 + 73 + 4 backend, 300 frontend), `make test-safety`
+  (160 passed; 1 by-design skip — nginx.conf lives only in the frontend image), `make e2e` (35 passed;
+  3 by-design skips — Journey 19 needs `E2E_ONLINE=1`, plus the two `describe.skip` future specs).
+  Output is warning-free end to end.
+- **Journey-17 flake root cause**: `AdminPage`'s `$: if (client && client !== loadedFor)` fired
+  `refresh()` the instant the authed client existed, but `currentUser` is seeded by an async `/me`
+  *after* client creation — when `refresh()` won that race, every `get(canManageUsers)`-gated load
+  (app config seeding the Settings form, groups, themes, …) was skipped for good; the existing
+  `loadAppConfig` retry never ran at all. Fix: the trigger now also waits for `$currentUser`
+  (unit tests already seed it before mounting). Two `make e2e` runs after the fix: zero flakes.
+- **Build-output noise silenced**: `build.chunkSizeWarningLimit: 1300` in `vite.config.ts` (the
+  over-500 kB chunks are echarts ~1.13 MB and the pdf.js worker ~1.25 MB — already lazily-imported
+  vendor chunks that can't be usefully subdivided) and `frontend/.npmrc` with
+  `update-notifier=false` (npm is pinned by the image; the self-update nag is non-actionable).
+- **Operational reminder confirmed twice this session**: any `make frontend-*` / `ready-full` run
+  (compose `run` on the shared bind mount) invalidates the live dev server's optimize-dep cache —
+  clear `frontend/node_modules/.vite` + `docker compose restart frontend` before `make e2e`, or the
+  reader journeys (8/10) fail on stale pre-bundles.
+
 ## Codebase documentation sweep + CI Redis-test fix (2026-07-16)
 
 - **Doc/comment sweep**: a whole-codebase documentation pass (behavior-preserving) — module/class/
