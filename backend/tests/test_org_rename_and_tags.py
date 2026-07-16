@@ -148,3 +148,47 @@ def test_work_tags_hidden_for_missing_work(client, auth_headers) -> None:
     owner = auth_headers("owner")
     res = client.get(f"/api/v1/works/{uuid.uuid4()}/tags", headers=owner)
     assert res.status_code == 404
+
+
+def test_tag_scope_and_assignable_tags(client, auth_headers, db) -> None:
+    """2026-07-16: a tag scoped to a shelf/rack is only OFFERED for papers there; global tags
+    (no scope rows) are always offered."""
+    owner = auth_headers("owner")
+    contributor = auth_headers("contributor")
+
+    shelf_id = client.post("/api/v1/shelves", headers=owner, json={"name": "Scoped shelf"}).json()["id"]
+    other_shelf = client.post("/api/v1/shelves", headers=owner, json={"name": "Other shelf"}).json()["id"]
+    rack_id = client.post("/api/v1/racks", headers=owner, json={"name": "Rack"}).json()["id"]
+    client.post(f"/api/v1/racks/{rack_id}/shelves", headers=owner, json={"shelf_id": shelf_id})
+
+    work_id = client.post(
+        "/api/v1/works", headers=owner, json={"canonical_title": "Paper", "authors": []}
+    ).json()["id"]
+    client.post(f"/api/v1/shelves/{shelf_id}/works", headers=owner, json={"work_id": work_id})
+
+    global_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "global"}).json()["id"]
+    shelf_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "shelfscoped"}).json()["id"]
+    rack_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "rackscoped"}).json()["id"]
+    off_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "offscope"}).json()["id"]
+
+    client.put(f"/api/v1/tags/{shelf_tag}/scope", headers=contributor, json={"shelf_ids": [shelf_id]})
+    # rack-scoped: the paper qualifies via its shelf being in the rack.
+    client.put(f"/api/v1/tags/{rack_tag}/scope", headers=contributor, json={"rack_ids": [rack_id]})
+    # scoped to a shelf the paper is NOT on → must be excluded.
+    client.put(f"/api/v1/tags/{off_tag}/scope", headers=contributor, json={"shelf_ids": [other_shelf]})
+
+    res = client.get(f"/api/v1/tags/assignable?work_id={work_id}", headers=contributor)
+    assert res.status_code == 200
+    ids = {t["id"] for t in res.json()}
+    assert global_tag in ids  # global always offered
+    assert shelf_tag in ids  # scoped to the paper's shelf
+    assert rack_tag in ids  # scoped to a rack containing the paper's shelf
+    assert off_tag not in ids  # scoped elsewhere → not offered
+
+    # The scope round-trips on the tag list.
+    listed = {t["id"]: t for t in client.get("/api/v1/tags", headers=contributor).json()}
+    assert listed[shelf_tag]["shelf_ids"] == [shelf_id]
+    assert listed[rack_tag]["rack_ids"] == [rack_id]
+    # Filtering the tag list by shelf returns the shelf tag + globals, not the off-scope one.
+    by_shelf = {t["id"] for t in client.get(f"/api/v1/tags?shelf_id={shelf_id}", headers=contributor).json()}
+    assert shelf_tag in by_shelf and global_tag in by_shelf and off_tag not in by_shelf

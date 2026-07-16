@@ -18,7 +18,16 @@ from app.models.group import DefaultGrant, Group, GroupGrant, GroupMembership
 from app.models.import_root import ImportRoot
 from app.models.import_staging import ImportStagingBatch, ImportStagingItem
 from app.models.metadata import MetadataAssertion
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+    TagRack,
+    TagShelf,
+)
 from app.models.saved_filter import SavedFilter
 from app.models.session import UserSession
 from app.models.source import ImportBatch, Source
@@ -68,6 +77,8 @@ __all__ = [
     "Summary",
     "Tag",
     "TagLink",
+    "TagRack",
+    "TagShelf",
     "TopicAssignment",
     "User",
     "UserSession",

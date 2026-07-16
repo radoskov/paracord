@@ -7287,6 +7287,24 @@
           "normalized_name": {
             "title": "Normalized Name",
             "type": "string"
+          },
+          "rack_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Rack Ids",
+            "type": "array"
+          },
+          "shelf_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Shelf Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -7296,6 +7314,31 @@
           "created_at"
         ],
         "title": "TagRead",
+        "type": "object"
+      },
+      "TagScopeUpdate": {
+        "description": "Replace a tag's scope. Empty lists → the tag becomes global (offered everywhere).",
+        "properties": {
+          "rack_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Rack Ids",
+            "type": "array"
+          },
+          "shelf_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Shelf Ids",
+            "type": "array"
+          }
+        },
+        "title": "TagScopeUpdate",
         "type": "object"
       },
       "TagUpdate": {
@@ -19631,9 +19674,43 @@
     },
     "/api/v1/tags": {
       "get": {
-        "description": "List tags.",
+        "description": "List tags. ``shelf_id``/``rack_id`` filter to tags OFFERED there (global tags always shown).",
         "operationId": "list_tags_api_v1_tags_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "shelf_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Shelf Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rack Id"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -19736,6 +19813,70 @@
           }
         },
         "summary": "Create Tag",
+        "tags": [
+          "tags"
+        ]
+      }
+    },
+    "/api/v1/tags/assignable": {
+      "get": {
+        "description": "Tags offered for a given paper (2026-07-16): global tags (no scope rows) PLUS tags scoped to\nany shelf the paper is on OR any rack containing one of those shelves.",
+        "operationId": "list_assignable_tags_api_v1_tags_assignable_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagRead"
+                  },
+                  "title": "Response List Assignable Tags Api V1 Tags Assignable Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Assignable Tags",
         "tags": [
           "tags"
         ]
@@ -19990,6 +20131,76 @@
           }
         },
         "summary": "Add Tag Link",
+        "tags": [
+          "tags"
+        ]
+      }
+    },
+    "/api/v1/tags/{tag_id}/scope": {
+      "put": {
+        "description": "Replace which shelves/racks a tag is offered for (2026-07-16). Empty lists = global.\n\nUnknown shelf/rack ids are ignored (kept idempotent); contributor+ like the rest of tag CRUD.",
+        "operationId": "set_tag_scope_api_v1_tags__tag_id__scope_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tag Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagScopeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Tag Scope",
         "tags": [
           "tags"
         ]

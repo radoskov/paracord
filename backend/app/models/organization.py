@@ -151,3 +151,38 @@ class TagLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
+
+
+# 2026-07-16: tag scoping. A tag with NO scope rows is GLOBAL (offered everywhere). One or more
+# rows restrict which shelves/racks it is OFFERED for when tagging papers there. This is distinct
+# from ``TagLink`` (which means "this entity IS tagged with X"); these mean "X is AVAILABLE here".
+class TagShelf(Base):
+    """Restricts a tag's availability to a shelf (see note above; no rows = global)."""
+
+    __tablename__ = "tag_shelves"
+
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    shelf_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("shelves.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+
+class TagRack(Base):
+    """Restricts a tag's availability to a rack (a paper qualifies via any shelf it's on in the rack)."""
+
+    __tablename__ = "tag_racks"
+
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    rack_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("racks.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )

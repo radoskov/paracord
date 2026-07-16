@@ -11,7 +11,16 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_contributor, require_min_role
 from app.core.security import Role
 from app.db.session import get_db
-from app.models.organization import Rack, Shelf, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+    TagRack,
+    TagShelf,
+)
 from app.models.user import User
 from app.models.work import Work
 from app.services import access
@@ -75,14 +84,110 @@ class TagRead(BaseModel):
     color: str | None = None
     description: str | None = None
     created_at: datetime
+    # 2026-07-16 tag scoping: the shelves/racks this tag is OFFERED for. Both empty = global.
+    shelf_ids: list[uuid.UUID] = []
+    rack_ids: list[uuid.UUID] = []
 
     model_config = {"from_attributes": True}
 
 
+class TagScopeUpdate(BaseModel):
+    """Replace a tag's scope. Empty lists → the tag becomes global (offered everywhere)."""
+
+    shelf_ids: list[uuid.UUID] = []
+    rack_ids: list[uuid.UUID] = []
+
+
+def _tag_reads(db: Session, tags: list[Tag]) -> list[TagRead]:
+    """Serialize tags with their scope (batched: two queries, not N)."""
+    ids = [t.id for t in tags]
+    shelves: dict[uuid.UUID, list[uuid.UUID]] = {}
+    racks: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if ids:
+        for tag_id, shelf_id in db.execute(
+            select(TagShelf.tag_id, TagShelf.shelf_id).where(TagShelf.tag_id.in_(ids))
+        ).all():
+            shelves.setdefault(tag_id, []).append(shelf_id)
+        for tag_id, rack_id in db.execute(
+            select(TagRack.tag_id, TagRack.rack_id).where(TagRack.tag_id.in_(ids))
+        ).all():
+            racks.setdefault(tag_id, []).append(rack_id)
+    return [
+        TagRead(
+            id=t.id,
+            name=t.name,
+            normalized_name=t.normalized_name,
+            color=t.color,
+            description=t.description,
+            created_at=t.created_at,
+            shelf_ids=shelves.get(t.id, []),
+            rack_ids=racks.get(t.id, []),
+        )
+        for t in tags
+    ]
+
+
+def _tag_read(db: Session, tag: Tag) -> TagRead:
+    return _tag_reads(db, [tag])[0]
+
+
 @router.get("", response_model=list[TagRead])
-def list_tags(db: Session = DB_DEP) -> list[Tag]:
-    """List tags."""
-    return list(db.scalars(select(Tag).order_by(Tag.name)).all())
+def list_tags(
+    shelf_id: uuid.UUID | None = Query(default=None),
+    rack_id: uuid.UUID | None = Query(default=None),
+    db: Session = DB_DEP,
+) -> list[TagRead]:
+    """List tags. ``shelf_id``/``rack_id`` filter to tags OFFERED there (global tags always shown)."""
+    tags = list(db.scalars(select(Tag).order_by(Tag.name)).all())
+    reads = _tag_reads(db, tags)
+    if shelf_id is None and rack_id is None:
+        return reads
+    out = []
+    for r in reads:
+        is_global = not r.shelf_ids and not r.rack_ids
+        matches = (shelf_id is not None and shelf_id in r.shelf_ids) or (
+            rack_id is not None and rack_id in r.rack_ids
+        )
+        if is_global or matches:
+            out.append(r)
+    return out
+
+
+@router.get("/assignable", response_model=list[TagRead])
+def list_assignable_tags(
+    work_id: uuid.UUID = Query(),
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> list[TagRead]:
+    """Tags offered for a given paper (2026-07-16): global tags (no scope rows) PLUS tags scoped to
+    any shelf the paper is on OR any rack containing one of those shelves."""
+    work = db.get(Work, work_id)
+    if work is None or not access.can_see_work(db, actor, work):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
+    shelf_ids = set(
+        db.scalars(select(ShelfWork.shelf_id).where(ShelfWork.work_id == work_id)).all()
+    )
+    rack_ids = (
+        set(db.scalars(select(RackShelf.rack_id).where(RackShelf.shelf_id.in_(shelf_ids))).all())
+        if shelf_ids
+        else set()
+    )
+    scoped_ids = set(db.scalars(select(TagShelf.tag_id)).all()) | set(
+        db.scalars(select(TagRack.tag_id)).all()
+    )
+    matching = (
+        set(db.scalars(select(TagShelf.tag_id).where(TagShelf.shelf_id.in_(shelf_ids))).all())
+        if shelf_ids
+        else set()
+    )
+    if rack_ids:
+        matching |= set(
+            db.scalars(select(TagRack.tag_id).where(TagRack.rack_id.in_(rack_ids))).all()
+        )
+    tags = list(db.scalars(select(Tag).order_by(Tag.name)).all())
+    # A tag is offered when it is global (no scope rows) or its scope matches this paper's places.
+    assignable = [t for t in tags if t.id not in scoped_ids or t.id in matching]
+    return _tag_reads(db, assignable)
 
 
 @router.post("", response_model=TagRead, status_code=status.HTTP_201_CREATED)
@@ -95,7 +200,7 @@ def create_tag(
     normalized_name = normalize_title(payload.name)
     tag = db.scalar(select(Tag).where(Tag.normalized_name == normalized_name))
     if tag is not None:
-        return tag
+        return _tag_read(db, tag)
     tag = Tag(
         name=payload.name,
         normalized_name=normalized_name,
@@ -105,7 +210,7 @@ def create_tag(
     db.add(tag)
     db.commit()
     db.refresh(tag)
-    return tag
+    return _tag_read(db, tag)
 
 
 @router.patch("/{tag_id}", response_model=TagRead)
@@ -149,7 +254,42 @@ def update_tag(
     )
     db.commit()
     db.refresh(tag)
-    return tag
+    return _tag_read(db, tag)
+
+
+@router.put("/{tag_id}/scope", response_model=TagRead)
+def set_tag_scope(
+    tag_id: uuid.UUID,
+    payload: TagScopeUpdate,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> TagRead:
+    """Replace which shelves/racks a tag is offered for (2026-07-16). Empty lists = global.
+
+    Unknown shelf/rack ids are ignored (kept idempotent); contributor+ like the rest of tag CRUD.
+    """
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    valid_shelves = set(
+        db.scalars(select(Shelf.id).where(Shelf.id.in_(payload.shelf_ids))).all()
+    )
+    valid_racks = set(db.scalars(select(Rack.id).where(Rack.id.in_(payload.rack_ids))).all())
+    db.execute(delete(TagShelf).where(TagShelf.tag_id == tag_id))
+    db.execute(delete(TagRack).where(TagRack.tag_id == tag_id))
+    db.add_all(TagShelf(tag_id=tag_id, shelf_id=sid) for sid in valid_shelves)
+    db.add_all(TagRack(tag_id=tag_id, rack_id=rid) for rid in valid_racks)
+    record_event(
+        db,
+        "tag.scope_set",
+        actor_user_id=actor.id,
+        entity_type="tag",
+        entity_id=str(tag_id),
+        details={"shelves": len(valid_shelves), "racks": len(valid_racks)},
+    )
+    db.commit()
+    db.refresh(tag)
+    return _tag_read(db, tag)
 
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
