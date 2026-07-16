@@ -81,6 +81,9 @@ class GraphEdge:
     target: str
     weight: int
     resolution: str  # "local_match" | "external"
+    # 2026-07-16: direction relative to the scope — "reference" (scope work → cited work) or
+    # "citing" (a paper → scope work). Lets the UI colour the two kinds of edge differently.
+    relation: str = "reference"
 
 
 @dataclass
@@ -105,6 +108,8 @@ def build_citation_graph(
     color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
     max_external: int = DEFAULT_MAX_EXTERNAL,
+    max_external_citing: int | None = None,
+    include_citing: bool = True,
     max_nodes: int | None = None,
 ) -> CitationGraph:
     """Build the citation graph for a scope.
@@ -155,6 +160,7 @@ def build_citation_graph(
     nodes: dict[str, GraphNode] = {str(work.id): _local_node(work) for work in scope_works.values()}
     edge_weights: dict[tuple[str, str], int] = defaultdict(int)
     edge_resolution: dict[tuple[str, str], str] = {}
+    edge_relation: dict[tuple[str, str], str] = {}  # 2026-07-16: "reference" | "citing"
     unresolved = 0
 
     for reference in references:
@@ -191,27 +197,103 @@ def build_citation_graph(
             key = (str(citing_wid), target_node.id)
             edge_weights[key] += 1
             edge_resolution[key] = resolution
+            edge_relation[key] = "reference"
+
+    # Citing papers (2026-07-16, Q9): the papers that CITE the scope works, from the already-fetched
+    # incoming-citation data (ExternalCitationLink → ExternalPaper). Edge points citer → scope work
+    # (relation "citing"). An in-library citer (resolved + visible) links as a local node; otherwise
+    # it's an external node. Skipped in local_only mode for external citers. `citing_available` lets
+    # the UI distinguish "no citing papers fetched" from "none exist".
+    citing_available = False
+    if include_citing:
+        from app.models.external_citation import ExternalCitationLink, ExternalPaper
+
+        cited_ids = {str(wid) for wid in scope_works}
+        link_rows = db.execute(
+            select(ExternalPaper, ExternalCitationLink.work_id)
+            .join(ExternalCitationLink, ExternalCitationLink.external_paper_id == ExternalPaper.id)
+            .where(ExternalCitationLink.work_id.in_(scope_works.keys()))
+        ).all()
+        citing_available = bool(link_rows)
+        for ext, cited_wid in link_rows:
+            cited_id = str(cited_wid)
+            if cited_id not in cited_ids:
+                continue
+            rwid = ext.resolved_work_id
+            if rwid is not None and (visible_ids is None or rwid in visible_ids):
+                citer_id = str(rwid)
+                if citer_id not in nodes:
+                    citer_work = db.get(Work, rwid)
+                    if citer_work is None:
+                        continue
+                    nodes[citer_id] = _local_node(citer_work)
+                resolution = "local_match"
+            else:
+                if node_mode == "local_only":
+                    continue
+                citer_id = f"citing:{ext.id}"
+                if citer_id not in nodes:
+                    nodes[citer_id] = GraphNode(
+                        id=citer_id,
+                        label=ext.title or ext.doi or "Citing paper",
+                        type="external",
+                        work_id=None,
+                        year=ext.year,
+                        doi=ext.doi,
+                    )
+                resolution = "external"
+            if citer_id == cited_id:
+                continue
+            key = (citer_id, cited_id)
+            # A reference edge for the same directed pair already says "A cites B" — don't double it.
+            if edge_relation.get(key) == "reference":
+                continue
+            edge_weights[key] += 1
+            edge_resolution[key] = resolution
+            edge_relation[key] = "citing"
 
     # Cap the external fan-out (item 1, 2026-07-13; even distribution 2026-07-16): a large scope can
     # drag in thousands of cited-but-not-in-library nodes that drown the layout. Rather than a global
     # top-N (where one paper with 800 refs eats the whole budget), distribute the ``max_external``
     # budget ACROSS the scope papers — see ``_distribute_external_keep``.
+    # References (external edge TARGETS) and citing papers (external edge SOURCES) get SEPARATE
+    # budgets (2026-07-16, owner request) so a paper's many references never starve the citing half
+    # (or vice versa); each is distributed across the scope papers independently.
+    cap_citing = max_external if max_external_citing is None else max_external_citing
     external_hidden = 0
-    external_ids = [nid for nid, node in nodes.items() if node.type == "external"]
-    if node_mode == "include_external" and len(external_ids) > max(0, max_external):
-        # Per scope paper: the external targets it cites, with edge weight (for picking its top-k).
-        ext_by_source: dict[str, list[tuple[str, int]]] = defaultdict(list)
-        external_set = set(external_ids)
+    citing_hidden = 0
+    if node_mode == "include_external":
+        external_set = {nid for nid, node in nodes.items() if node.type == "external"}
+        ref_by_source: dict[str, list[tuple[str, int]]] = defaultdict(list)  # scope → ext refs
+        cit_by_cited: dict[str, list[tuple[str, int]]] = defaultdict(list)  # scope → ext citers
         for (source, target), weight in edge_weights.items():
-            if target in external_set:
-                ext_by_source[source].append((target, weight))
-        keep = _distribute_external_keep(ext_by_source, max(0, max_external))
+            if edge_relation.get((source, target)) == "citing":
+                if source in external_set:
+                    cit_by_cited[target].append((source, weight))
+            elif target in external_set:
+                ref_by_source[source].append((target, weight))
+        ref_ext = {t for refs in ref_by_source.values() for t, _ in refs}
+        cit_ext = {s for cits in cit_by_cited.values() for s, _ in cits}
+        keep_ref = (
+            _distribute_external_keep(ref_by_source, max(0, max_external))
+            if len(ref_ext) > max(0, max_external)
+            else ref_ext
+        )
+        keep_cit = (
+            _distribute_external_keep(cit_by_cited, max(0, cap_citing))
+            if len(cit_ext) > max(0, cap_citing)
+            else cit_ext
+        )
+        keep = keep_ref | keep_cit
         dropped = external_set - keep
-        external_hidden = len(dropped)
+        external_hidden = len(ref_ext - keep_ref)
+        citing_hidden = len(cit_ext - keep_cit)
         for nid in dropped:
             nodes.pop(nid, None)
         edge_weights = {
-            key: weight for key, weight in edge_weights.items() if key[1] not in dropped
+            key: weight
+            for key, weight in edge_weights.items()
+            if key[0] not in dropped and key[1] not in dropped
         }
 
     edges = [
@@ -220,6 +302,7 @@ def build_citation_graph(
             target=target,
             weight=weight,
             resolution=edge_resolution[(source, target)],
+            relation=edge_relation.get((source, target), "reference"),
         )
         for (source, target), weight in edge_weights.items()
     ]
@@ -253,6 +336,11 @@ def build_citation_graph(
         edges = [e for e in edges if e.source in kept_ids and e.target in kept_ids]
     summary = _summary(node_list, edges, scope_count=len(scope_works), unresolved=unresolved)
     summary["external_hidden"] = external_hidden
+    summary["citing_hidden"] = citing_hidden
+    # True when incoming-citation data was fetched for the scope (so the UI can say "no citing
+    # papers fetched" rather than implying none exist).
+    summary["citing_available"] = citing_available
+    summary["citing_edge_count"] = sum(1 for e in edges if e.relation == "citing")
     summary["nodes_hidden"] = nodes_hidden
     graph = CitationGraph(
         nodes=node_list,
@@ -644,6 +732,11 @@ def _attach_node_metrics(
         for node in graph.nodes:
             if node.work_id is not None:
                 node.color_group = groups.get(node.work_id)
+            # 2026-07-16: external nodes conform to the colour scheme where they carry the value —
+            # `year` is the only attribute they have — so they aren't forced into a flat grey. Other
+            # color-by modes (status/shelf/tag/topic) have no external data → they stay uncoloured.
+            elif node.type == "external" and color_by == "year":
+                node.color_group = str(node.year) if node.year is not None else "unknown"
     warned = _warning_work_ids(db, local_ids)
     for node in graph.nodes:
         if node.work_id is not None and node.work_id in warned:

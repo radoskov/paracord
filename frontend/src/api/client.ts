@@ -271,6 +271,8 @@ export interface GraphEdge {
   target: string;
   weight: number;
   resolution: string;
+  // 2026-07-16: "reference" (scope work → cited work) or "citing" (a paper → scope work).
+  relation?: string;
 }
 
 export interface CitationGraphResponse {
@@ -3180,6 +3182,8 @@ export class ApiClient {
     collapseVersions?: boolean;
     colorBy?: GraphColorBy;
     maxExternal?: number;
+    maxExternalCiting?: number;
+    includeCiting?: boolean;
   }): Promise<CitationGraphResponse> {
     return this.request<CitationGraphResponse>("/api/v1/graphs/citation", {
       method: "POST",
@@ -3193,6 +3197,8 @@ export class ApiClient {
         collapse_versions: payload.collapseVersions ?? false,
         color_by: payload.colorBy ?? "none",
         max_external: payload.maxExternal ?? 50,
+        max_external_citing: payload.maxExternalCiting ?? 50,
+        include_citing: payload.includeCiting ?? true,
       },
     });
   }

@@ -55,8 +55,12 @@ class CitationGraphRequest(BaseModel):
     # are never colored). Node *sizing* (degree/pagerank/betweenness) is a pure client re-style — all
     # three centrality metrics ship on every node, so the frontend switches size without a refetch.
     color_by: Literal["none", "shelf", "tag", "topic", "status", "year"] = "none"
-    # Cap on external (cited-but-not-in-library) nodes; the most-cited ones are kept (item 1).
+    # Separate caps (2026-07-16) on external REFERENCE nodes (cited-but-not-in-library) and external
+    # CITING nodes (papers that cite the scope), each distributed across the scope papers.
     max_external: int = Field(default=50, ge=0, le=500)
+    max_external_citing: int = Field(default=50, ge=0, le=500)
+    # Include the fetched incoming-citation data (papers that cite the scope) as citing nodes/edges.
+    include_citing: bool = True
 
 
 class GraphNodeRead(BaseModel):
@@ -80,6 +84,7 @@ class GraphEdgeRead(BaseModel):
     target: str
     weight: int
     resolution: str
+    relation: str = "reference"  # "reference" | "citing" (2026-07-16)
 
 
 class CitationGraphResponse(BaseModel):
@@ -131,6 +136,8 @@ def citation_graph(
                 "collapse_versions": payload.collapse_versions,
                 "color_by": payload.color_by,
                 "max_external": payload.max_external,
+                "max_external_citing": payload.max_external_citing,
+                "include_citing": payload.include_citing,
             },
             actor_user_id=str(actor.id),
         )
@@ -148,6 +155,8 @@ def citation_graph(
             color_by=payload.color_by,
             visible_ids=access.visible_work_ids(db, actor),
             max_external=payload.max_external,
+            max_external_citing=payload.max_external_citing,
+            include_citing=payload.include_citing,
             max_nodes=effective_citation_graph_node_cap(db),
         )
     except ValueError as exc:

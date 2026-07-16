@@ -40,6 +40,7 @@
   let busy = false;
   let hideSingletons = true;
   let hideExternalLeaves = false;
+  let showCiting = true; // 2026-07-16: toggle citing papers (incoming citations) on/off
   let revision = 0;
   // 2026-07-16: surface build state (a large graph can take a while, and failures were silent).
   let buildState: 'idle' | 'building' | 'done' | 'failed' = 'idle';
@@ -95,7 +96,7 @@
   // don't exist on similarity nodes, but citation count and year do.
   let topicSizeBy: 'degree' | 'citations' = 'degree';
   let topicColorBy: 'none' | 'year' = 'none';
-  type REdge = { source: string; target: string; weight: number; resolution?: string };
+  type REdge = { source: string; target: string; weight: number; resolution?: string; relation?: string };
 
   $: rNodes = (() => {
     if (graphType === 'topic' && topicGraph) {
@@ -123,7 +124,7 @@
     if (graphType === 'topic' && topicGraph)
       return topicGraph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight }));
     if (graph)
-      return graph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight, resolution: e.resolution }));
+      return graph.edges.map<REdge>((e) => ({ source: e.source, target: e.target, weight: e.weight, resolution: e.resolution, relation: e.relation }));
     return [] as REdge[];
   })();
 
@@ -178,6 +179,9 @@
     const viz = $activeVizTheme;
     const hiddenIds = new Set<string>();
     if (hideExternalLeaves) for (const n of rNodes) if (n.kind === 'external') hiddenIds.add(n.id);
+    // 2026-07-16: client-side hide of citing papers (external citers only — an in-library citer
+    // stays as a normal local node) and their edges.
+    if (!showCiting) for (const n of rNodes) if (n.id.startsWith('citing:')) hiddenIds.add(n.id);
     // Legend-chip filtering: groups the user toggled off (click) or excluded via solo (shift-click).
     if (hiddenGroups.size) {
       for (const n of rNodes) if (n.colorGroup && hiddenGroups.has(n.colorGroup)) hiddenIds.add(n.id);
@@ -187,7 +191,12 @@
     if (focusIds) {
       for (const n of rNodes) if (!focusIds.has(n.id)) hiddenIds.add(n.id);
     }
-    const visibleEdges = rEdges.filter((e) => !hiddenIds.has(e.source) && !hiddenIds.has(e.target));
+    const visibleEdges = rEdges.filter(
+      (e) =>
+        !hiddenIds.has(e.source) &&
+        !hiddenIds.has(e.target) &&
+        (showCiting || e.relation !== 'citing'),
+    );
     if (hideSingletons) {
       const touched = new Set<string>();
       for (const e of visibleEdges) {
@@ -225,7 +234,13 @@
         : []),
     ];
     const categoryIndex = (n: RNode): number => {
-      if (n.kind === 'external') return colorGroups.length;
+      // 2026-07-16: an external node that carries a colour-group value (e.g. its year) conforms to
+      // the chosen scheme like a local node — only its diamond shape marks it external. Externals
+      // with no value for the active scheme fall back to the flat "external" colour.
+      if (n.kind === 'external') {
+        const idx = n.colorGroup ? colorGroups.indexOf(n.colorGroup) : -1;
+        return idx >= 0 ? idx : colorGroups.length;
+      }
       if (colorGroups.length === 0) return colorGroups.length + 1;
       return Math.max(0, colorGroups.indexOf(n.colorGroup ?? ''));
     };
@@ -243,10 +258,11 @@
         confine: true,
         formatter: (params: { dataType?: string; data?: Record<string, unknown> }) => {
           if (params.dataType === 'edge') {
-            const d = params.data as { source: string; target: string; weight: number; resolution?: string };
-            return `${nodeLabel(d.source)} ${graphType === 'topic' ? '↔' : '→'} ${nodeLabel(d.target)}${
+            const d = params.data as { source: string; target: string; weight: number; resolution?: string; relation?: string };
+            const rel = d.relation === 'citing' ? 'cites' : graphType === 'topic' ? '↔' : '→';
+            return `${nodeLabel(d.source)} ${rel} ${nodeLabel(d.target)}${
               d.resolution ? ` · ${d.resolution}` : ` · sim ${Number(d.weight).toFixed(2)}`
-            }`;
+            }${d.relation === 'citing' ? ' · citing paper' : ''}`;
           }
           const d = params.data as { name?: string; meta?: RNode; sizeValue?: number };
           const m = d.meta;
@@ -320,7 +336,12 @@
             target: e.target,
             weight: e.weight,
             resolution: e.resolution,
-            lineStyle: { width: 1 + (e.weight / maxWeight) * 5 },
+            relation: e.relation,
+            // 2026-07-16: colour citing edges (a paper → scope work) distinctly from references.
+            lineStyle: {
+              width: 1 + (e.weight / maxWeight) * 5,
+              ...(e.relation === 'citing' ? { color: '#e07b39' } : {}),
+            },
           })),
         },
       ],
@@ -494,6 +515,7 @@
     topicColorBy;
     hideSingletons;
     hideExternalLeaves;
+    showCiting;
     layout;
     revision += 1;
   }
@@ -582,6 +604,10 @@
           <input type="checkbox" bind:checked={hideExternalLeaves} aria-label="Hide external nodes" />
           Hide external
         </label>
+        <label class="toggle" title="Show papers that CITE the scope (incoming citations, orange edges) — from data you've fetched">
+          <input type="checkbox" bind:checked={showCiting} aria-label="Show citing papers" />
+          Citing papers
+        </label>
       {/if}
       <button type="button" on:click={build} disabled={disabled || busy}
         title={graphType === 'topic' ? 'Build the topic graph for the chosen scope' : 'Build the citation graph for the chosen scope'}
@@ -592,6 +618,9 @@
         <small class="build-state failed" role="alert">Build failed: {buildError || 'see the console / Jobs tab'}</small>
       {:else if buildState === 'done' && !hasGraph}
         <small class="build-state muted" role="status">Built — no nodes for this scope.</small>
+      {/if}
+      {#if graphType === 'citation' && nodeMode === 'include_external' && hasGraph && showCiting && graph?.summary && !(graph.summary as Record<string, unknown>).citing_available}
+        <small class="build-state muted" role="status" title="Fetch citing papers from a paper's Citing-papers panel or the library batch action">No citing papers fetched for this scope yet.</small>
       {/if}
       {#if hasGraph}
         <button type="button" class="secondary" on:click={showAll} disabled={busy}

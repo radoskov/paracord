@@ -167,6 +167,8 @@ describe('ApiClient request contracts', () => {
       collapse_versions: true,
       color_by: 'none',
       max_external: 50,
+      max_external_citing: 50,
+      include_citing: true,
     });
   });
 

@@ -1989,11 +1989,23 @@
             "title": "Color By",
             "type": "string"
           },
+          "include_citing": {
+            "default": true,
+            "title": "Include Citing",
+            "type": "boolean"
+          },
           "max_external": {
             "default": 50,
             "maximum": 500.0,
             "minimum": 0.0,
             "title": "Max External",
+            "type": "integer"
+          },
+          "max_external_citing": {
+            "default": 50,
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Max External Citing",
             "type": "integer"
           },
           "node_mode": {
@@ -3310,6 +3322,11 @@
       },
       "GraphEdgeRead": {
         "properties": {
+          "relation": {
+            "default": "reference",
+            "title": "Relation",
+            "type": "string"
+          },
           "resolution": {
             "title": "Resolution",
             "type": "string"

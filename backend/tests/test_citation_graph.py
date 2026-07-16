@@ -6,6 +6,7 @@ import pytest
 from app.db.base import Base
 from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
+from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink
 from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch
@@ -39,6 +40,8 @@ def db_session(tmp_path: Path):
             File.__table__,
             FileWorkLink.__table__,
             DuplicateCandidate.__table__,
+            ExternalPaper.__table__,
+            ExternalCitationLink.__table__,
         ],
     )
     session_local = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -78,6 +81,54 @@ def test_local_match_edge_between_scope_works(db_session, make_reference) -> Non
     assert edge.resolution == "local_match"
     assert graph.summary["edge_count"] == 1
     assert graph.summary["external_node_count"] == 0
+
+
+def test_citing_papers_add_typed_edges_into_scope(db_session) -> None:
+    """2026-07-16: fetched incoming citations appear as external 'citing' nodes with edges pointing
+    INTO the scope work (relation='citing'); local_only hides the external citer."""
+    cited = Work(canonical_title="Cited", normalized_title="cited", doi="10.1/cited")
+    shelf = _shelf_with_works(db_session, [cited])
+    ext = ExternalPaper(dedup_key="10.1/citer", source="openalex", doi="10.1/citer", title="Citer")
+    db_session.add(ext)
+    db_session.flush()
+    db_session.add(ExternalCitationLink(external_paper_id=ext.id, work_id=cited.id))
+    db_session.commit()
+
+    g = build_citation_graph(db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external")
+    citing_edges = [e for e in g.edges if e.relation == "citing"]
+    assert len(citing_edges) == 1
+    assert citing_edges[0].target == str(cited.id)  # edge points INTO the scope work
+    assert g.summary["citing_available"] is True
+    assert any(n.id.startswith("citing:") and n.type == "external" for n in g.nodes)
+
+    # local_only drops the external citer entirely.
+    g2 = build_citation_graph(db_session, scope_type="shelf", scope_id=shelf.id, node_mode="local_only")
+    assert not [e for e in g2.edges if e.relation == "citing"]
+
+
+def test_separate_caps_for_references_and_citing(db_session, make_reference) -> None:
+    """References and citing papers have INDEPENDENT budgets — a tiny citing cap doesn't shrink the
+    reference set, and vice versa."""
+    work = Work(canonical_title="W", normalized_title="w", doi="10.1/w")
+    shelf = _shelf_with_works(db_session, [work])
+    for i in range(5):  # 5 external references
+        make_reference(db_session, citing_work_id=work.id, doi=f"10.9/ref{i}", title=f"Ref {i}")
+    for i in range(5):  # 5 external citing papers
+        ext = ExternalPaper(dedup_key=f"10.8/cit{i}", source="openalex", doi=f"10.8/cit{i}", title=f"Cit {i}")
+        db_session.add(ext)
+        db_session.flush()
+        db_session.add(ExternalCitationLink(external_paper_id=ext.id, work_id=work.id))
+    db_session.commit()
+
+    g = build_citation_graph(
+        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external",
+        max_external=5, max_external_citing=1,
+    )
+    ref_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("ext:")]
+    cit_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("citing:")]
+    assert len(ref_ext) == 5  # references keep their full budget
+    assert len(cit_ext) == 1  # citing capped independently
+    assert g.summary["citing_hidden"] == 4
 
 
 def test_local_only_drops_external_references(db_session, make_reference) -> None:
