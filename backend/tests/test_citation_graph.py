@@ -694,6 +694,31 @@ def test_endpoint_neighborhood_enforces_reader_see_filter(
     assert str(hidden_cited.id) in {n["work_id"] for n in owner_resp.json()["nodes"]}
 
 
+def test_distribute_external_keep_is_even_not_first_come() -> None:
+    """2026-07-16: the external budget is spread across scope papers — a paper with many refs must
+    not starve a paper with few."""
+    from app.services.citation_graph import _distribute_external_keep
+
+    ext = {
+        "A": [(f"a{i}", 1) for i in range(10)],  # 10 external refs
+        "B": [("b0", 1), ("b1", 1)],  # only 2
+    }
+    keep = _distribute_external_keep(ext, 6)
+    assert "b0" in keep and "b1" in keep  # the small paper is not starved
+    assert sum(1 for k in keep if k.startswith("a")) <= 5  # the big paper doesn't eat the budget
+    assert len(keep) <= 6
+
+
+def test_distribute_external_keep_exhausts_budget_when_limit_below_paper_count() -> None:
+    """When limit < N, the absolute pass exhausts the budget and later papers get none (no relative
+    pass)."""
+    from app.services.citation_graph import _distribute_external_keep
+
+    ext = {"A": [("a0", 1)], "B": [("b0", 1)], "C": [("c0", 1)]}
+    keep = _distribute_external_keep(ext, 1)
+    assert len(keep) == 1  # only one paper's ref survives
+
+
 def test_citation_graph_node_cap_keeps_best_connected(db, make_user) -> None:
     """L-a: above max_nodes, the highest-degree nodes survive and the hidden count is reported."""
     from app.models.citation import Reference, ReferenceCitation

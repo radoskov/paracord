@@ -7,6 +7,7 @@ metadata. ``node_mode="local_only"`` keeps only edges between works inside the s
 ``include_external`` also surfaces cited works that are not in the library yet.
 """
 
+import math
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -191,22 +192,21 @@ def build_citation_graph(
             edge_weights[key] += 1
             edge_resolution[key] = resolution
 
-    # Cap the external fan-out (item 1, 2026-07-13): a large scope can drag in thousands of
-    # cited-but-not-in-library nodes that drown the layout. Keep the ``max_external`` most-cited
-    # ones (by total incoming edge weight from the scope) and report how many were hidden.
+    # Cap the external fan-out (item 1, 2026-07-13; even distribution 2026-07-16): a large scope can
+    # drag in thousands of cited-but-not-in-library nodes that drown the layout. Rather than a global
+    # top-N (where one paper with 800 refs eats the whole budget), distribute the ``max_external``
+    # budget ACROSS the scope papers — see ``_distribute_external_keep``.
     external_hidden = 0
     external_ids = [nid for nid, node in nodes.items() if node.type == "external"]
     if node_mode == "include_external" and len(external_ids) > max(0, max_external):
-        weight_into: dict[str, int] = defaultdict(int)
+        # Per scope paper: the external targets it cites, with edge weight (for picking its top-k).
+        ext_by_source: dict[str, list[tuple[str, int]]] = defaultdict(list)
+        external_set = set(external_ids)
         for (source, target), weight in edge_weights.items():
-            weight_into[target] += weight
-            _ = source
-        keep = set(
-            sorted(external_ids, key=lambda nid: (-weight_into.get(nid, 0), nid))[
-                : max(0, max_external)
-            ]
-        )
-        dropped = set(external_ids) - keep
+            if target in external_set:
+                ext_by_source[source].append((target, weight))
+        keep = _distribute_external_keep(ext_by_source, max(0, max_external))
+        dropped = external_set - keep
         external_hidden = len(dropped)
         for nid in dropped:
             nodes.pop(nid, None)
@@ -446,6 +446,52 @@ def _resolve_reference(
     if reference.title or reference.doi or reference.arxiv_id:
         return _external_node(reference), "external"
     return None
+
+
+def _distribute_external_keep(
+    ext_by_source: dict[str, list[tuple[str, int]]], limit: int
+) -> set[str]:
+    """Which external node ids to keep, distributing the ``limit`` budget across scope papers.
+
+    (2026-07-16, owner's algorithm.) N = scope papers that cite ≥1 external work.
+      - Absolute pass: A = ceil((limit/2) / N) targets per paper (≥1), assigned greedily by paper id
+        and capped at the total ``limit`` — so when ``limit < N`` the budget is exhausted and later
+        papers get none (and there is no relative pass).
+      - Relative pass: with remainder E = limit - A·N (if > 0), each paper gets R_i = E·C_i/S more
+        (C_i = its external-ref count, S = ΣC_i), rounded largest-remainder.
+    Each paper keeps its top-k external targets by edge weight; the kept set is their union (shared
+    externals count once, so the union may be smaller than the nominal budget — that's fine)."""
+    papers = sorted(s for s, refs in ext_by_source.items() if refs)
+    n = len(papers)
+    if n == 0 or limit <= 0:
+        return set()
+    a = max(1, math.ceil((limit / 2) / n))
+    keep: set[str] = set()
+    quota: dict[str, int] = {}
+    spent = 0
+    for s in papers:
+        refs = sorted(ext_by_source[s], key=lambda t: (-t[1], t[0]))
+        take = min(a, len(refs), max(0, limit - spent))
+        quota[s] = take
+        keep.update(tid for tid, _ in refs[:take])
+        spent += take
+        if spent >= limit:
+            break
+    remainder = limit - a * n
+    if remainder > 0:
+        counts = {s: len(ext_by_source[s]) for s in papers}
+        total = sum(counts.values())
+        if total > 0:
+            raw = {s: remainder * counts[s] / total for s in papers}
+            extra = {s: int(raw[s]) for s in papers}
+            leftover = remainder - sum(extra.values())
+            for s in sorted(papers, key=lambda s: (-(raw[s] - extra[s]), s))[: max(0, leftover)]:
+                extra[s] += 1
+            for s in papers:
+                refs = sorted(ext_by_source[s], key=lambda t: (-t[1], t[0]))
+                start = quota.get(s, 0)
+                keep.update(tid for tid, _ in refs[start : start + extra[s]])
+    return keep
 
 
 def _local_node(work: Work) -> GraphNode:
