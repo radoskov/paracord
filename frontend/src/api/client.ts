@@ -173,6 +173,15 @@ export interface EmbeddingModelsResponse {
 // 'abstract'/'extractive' force a specific engine.
 export type SummaryType = "auto" | "abstract" | "extractive";
 
+// 2026-07-16: detailed summaries have three effort levels (cost vs granularity). 'detailed' is a
+// back-compat alias for 'detailed_deep'.
+export type SummaryDetail =
+  | "short"
+  | "detailed"
+  | "detailed_fast"
+  | "detailed_section"
+  | "detailed_deep";
+
 export interface Summary {
   id: string;
   entity_type: string;
@@ -2510,7 +2519,11 @@ export class ApiClient {
   async createScopeScope(
     scopeType: "library" | "shelf" | "rack",
     scopeId: string | null,
-    opts: { paperDetail?: "short" | "detailed"; regeneratePapers?: boolean } = {},
+    opts: {
+      paperDetail?: SummaryDetail;
+      regeneratePapers?: boolean;
+      force?: boolean;
+    } = {},
   ): Promise<ScopeSummaryResponse> {
     return this.request<ScopeSummaryResponse>("/api/v1/ai/summaries", {
       method: "POST",
@@ -2519,6 +2532,7 @@ export class ApiClient {
         scope_id: scopeId ?? null,
         paper_detail: opts.paperDetail ?? "short",
         regenerate_papers: opts.regeneratePapers ?? false,
+        force: opts.force ?? false,
       },
     });
   }
@@ -2526,9 +2540,11 @@ export class ApiClient {
   async getLatestScopeSummary(
     scopeType: "library" | "shelf" | "rack",
     scopeId: string | null,
+    detail?: SummaryDetail,
   ): Promise<ScopeSummaryResponse> {
     const params = new URLSearchParams({ scope_type: scopeType });
     if (scopeId) params.set("scope_id", scopeId);
+    if (detail) params.set("detail", detail);
     return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/latest?${params}`);
   }
 
@@ -3133,7 +3149,7 @@ export class ApiClient {
   async createSummary(
     workId: string,
     summaryType: SummaryType,
-    detail: "short" | "detailed" = "short",
+    detail: SummaryDetail = "short",
   ): Promise<Summary> {
     return this.request<Summary>(`/api/v1/works/${workId}/summaries`, {
       method: "POST",

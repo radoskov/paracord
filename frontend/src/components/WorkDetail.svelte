@@ -15,6 +15,7 @@
     type ReferenceRecord,
     type RelatedWork,
     type Summary,
+    type SummaryDetail,
     type WebCandidate,
     type WebFindDownloadItem,
     type WebFindDownloadResult,
@@ -315,13 +316,26 @@
     }, 'Saved');
   }
 
-  // UX batch 4: short vs detailed summaries are stored separately (detailed under
-  // "{type}_detailed"). Split the loaded list so the panel shows each with its own regenerate.
-  $: shortSummary = summaries.find((s) => !s.summary_type.endsWith('_detailed')) ?? null;
-  $: detailedSummary = summaries.find((s) => s.summary_type.endsWith('_detailed')) ?? null;
-  let summarisingDetail: 'short' | 'detailed' | null = null;
+  // UX batch 4 / 2026-07-16: short vs detailed summaries are stored separately; detailed has three
+  // effort levels ("{provider}_detailed_{fast|section|deep}"). The panel shows the short one and the
+  // detailed one for the SELECTED effort, each with its own generate/regenerate; a history popup
+  // exposes every cached (effort × model) variant read-only.
+  const isDetailedType = (t: string) => t.includes('_detailed');
+  const DETAIL_EFFORTS: { value: SummaryDetail; label: string; hint: string }[] = [
+    { value: 'detailed_fast', label: 'Fast', hint: 'Group sections into ~4 buckets (cheapest)' },
+    { value: 'detailed_section', label: 'Section', hint: 'One pass per top-level section' },
+    { value: 'detailed_deep', label: 'Deep', hint: 'One pass per subsection (most detail, slowest)' },
+  ];
+  let detailedEffort: SummaryDetail = 'detailed_section';
+  let historyOpen = false;
+  let historyView: Summary | null = null;
+  $: shortSummary = summaries.find((s) => !isDetailedType(s.summary_type)) ?? null;
+  $: detailedSummary =
+    summaries.find((s) => s.summary_type.endsWith(`_${detailedEffort}`)) ?? null;
+  $: detailedHistory = summaries.filter((s) => isDetailedType(s.summary_type));
+  let summarisingDetail: SummaryDetail | null = null;
 
-  async function summariseDetail(detail: 'short' | 'detailed'): Promise<void> {
+  async function summariseDetail(detail: SummaryDetail): Promise<void> {
     summarisingDetail = detail;
     let backgrounded = false;
     await run(async () => {
@@ -334,7 +348,7 @@
         return;
       }
       summaries = await client.listSummaries(work.id);
-    }, detail === 'detailed' ? 'Detailed summary generated' : 'Summary generated');
+    }, detail !== 'short' ? 'Detailed summary generated' : 'Summary generated');
     if (!backgrounded) summarisingDetail = null;
   }
 
@@ -1705,7 +1719,7 @@
       <div class="head">
         <h4>Short summary</h4>
         <button type="button" class="secondary small" on:click={() => summariseDetail('short')}
-          disabled={loading || !canModify}
+          disabled={loading || !canModify || summarisingDetail !== null}
           title={canModify ? 'One-paragraph AI summary (configured model, else extractive)' : INSUFFICIENT_ROLE}
           >{summarisingDetail === 'short' ? 'Summarizing…' : shortSummary ? 'Regenerate' : 'Summarize'}</button>
       </div>
@@ -1722,11 +1736,37 @@
     <div class="summary-block">
       <div class="head">
         <h4>Detailed summary</h4>
-        <button type="button" class="secondary small" on:click={() => summariseDetail('detailed')}
-          disabled={loading || !canModify}
-          title={canModify ? 'Section-by-section summary of the whole paper, with a high-level intro' : INSUFFICIENT_ROLE}
-          >{summarisingDetail === 'detailed' ? 'Summarizing…' : detailedSummary ? 'Regenerate' : 'Generate detailed'}</button>
+        <div class="effort-radios" role="radiogroup" aria-label="Detailed summary effort">
+          {#each DETAIL_EFFORTS as e}
+            <label class="effort" class:active={detailedEffort === e.value} title={e.hint}>
+              <input type="radio" name="detail-effort" value={e.value} bind:group={detailedEffort} />
+              {e.label}
+            </label>
+          {/each}
+        </div>
+        <button type="button" class="secondary small" on:click={() => summariseDetail(detailedEffort)}
+          disabled={loading || !canModify || summarisingDetail !== null}
+          title={canModify ? 'Detailed summary at the selected effort (runs as a background job)' : INSUFFICIENT_ROLE}
+          >{summarisingDetail === detailedEffort ? 'Summarizing…' : detailedSummary ? 'Regenerate' : 'Generate detailed'}</button>
+        {#if detailedHistory.length}
+          <button type="button" class="linkish small" on:click={() => (historyOpen = !historyOpen)}
+            title="View previously generated detailed summaries (other efforts / models)">History ({detailedHistory.length})</button>
+        {/if}
       </div>
+      {#if historyOpen}
+        <ul class="summary-history">
+          {#each detailedHistory as h}
+            <li>
+              <button type="button" class="linkish" on:click={() => (historyView = historyView === h ? null : h)}>
+                {h.summary_type.replace(/^.*_detailed_/, '')} · {h.model_name ?? h.provider_used ?? 'local'}{#if h.created_at} · {new Date(h.created_at).toLocaleDateString()}{/if}
+              </button>
+              {#if historyView === h}
+                <div class="history-text">{#each h.text.split(/\n\n+/) as para}<p class="summary-text">{para}</p>{/each}</div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
       {#if detailedSummary}
         {#if detailedSummary.fallback}
           <p class="degraded-hint" role="status">Summarized with the extractive fallback (LLM unavailable).</p>
@@ -1734,7 +1774,7 @@
         <p class="muted small">Generated by {detailedSummary.model_name ?? detailedSummary.provider_used}{#if detailedSummary.created_at} · {new Date(detailedSummary.created_at).toLocaleDateString()}{/if}</p>
         {#each detailedSummary.text.split(/\n\n+/) as para}<p class="summary-text">{para}</p>{/each}
       {:else}
-        <p class="empty">No detailed summary yet.</p>
+        <p class="empty">No {DETAIL_EFFORTS.find((e) => e.value === detailedEffort)?.label.toLowerCase()} detailed summary yet.</p>
       {/if}
     </div>
   </details>
@@ -2032,6 +2072,46 @@
     display: flex;
     gap: 0.6rem;
     justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  /* 2026-07-16 detailed-summary effort selector + history */
+  .effort-radios {
+    display: inline-flex;
+    gap: 0.15rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    overflow: hidden;
+  }
+  .effort-radios .effort {
+    font-size: 0.78rem;
+    padding: 0.12rem 0.45rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .effort-radios .effort.active {
+    background: var(--accent-soft, rgba(120, 120, 255, 0.18));
+    font-weight: 600;
+  }
+  .effort-radios .effort input {
+    display: none;
+  }
+  .summary-history {
+    list-style: none;
+    margin: 0.3rem 0;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+  .summary-history li {
+    margin: 0.15rem 0;
+  }
+  .history-text {
+    margin: 0.2rem 0 0.4rem 0.6rem;
+    padding-left: 0.5rem;
+    border-left: 2px solid var(--border);
   }
 
   .summary-block h4 {

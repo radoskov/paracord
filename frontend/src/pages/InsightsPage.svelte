@@ -5,6 +5,7 @@
     type GraphNodeMode,
     type GraphScopeType,
     type ScopeSummaryResponse,
+    type SummaryDetail,
     type Topic,
   } from '../api/client';
   import CitationGraph from '../components/CitationGraph.svelte';
@@ -271,21 +272,33 @@
     | 'regen_short'
     | 'regen_detailed' = 'use_short';
 
+  // 2026-07-16: when a "detailed" source is picked, the effort level (fast/section/deep) is chosen
+  // via radios below the dropdown; short has a single level.
+  const SCOPE_EFFORTS: { value: SummaryDetail; label: string; hint: string }[] = [
+    { value: 'detailed_fast', label: 'Fast', hint: 'Group sections into ~4 buckets (cheapest)' },
+    { value: 'detailed_section', label: 'Section', hint: 'One pass per top-level section' },
+    { value: 'detailed_deep', label: 'Deep', hint: 'One pass per subsection (most detail, slowest)' },
+  ];
+  let scopeEffort: SummaryDetail = 'detailed_section';
+  $: summaryDetail = (summarySource.endsWith('detailed') ? scopeEffort : 'short') as SummaryDetail;
+
   async function summarise(): Promise<void> {
     summaryBusy = true;
     let backgrounded = false;
-    const paperDetail = summarySource.endsWith('detailed') ? 'detailed' : 'short';
-    const regeneratePapers = summarySource.startsWith('regen');
+    // "regen_*" forces a fresh scope synthesis (and regenerates the per-paper digests); "use_*"
+    // returns the cached (scope, effort, model) summary when one exists.
+    const force = summarySource.startsWith('regen');
     await run(async () => {
       const response = await client.createScopeScope(scope.scopeType, scope.scopeId, {
-        paperDetail,
-        regeneratePapers,
+        paperDetail: summaryDetail,
+        regeneratePapers: force,
+        force,
       });
       if (response.queued && response.job_id) {
         backgrounded = true;
         message = `Summarizing ${response.work_count} papers in the background…`;
         void pollJob(response.job_id, async () => {
-          summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId);
+          summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId, summaryDetail);
           message = 'Summary ready.';
         }).finally(() => (summaryBusy = false));
         return;
@@ -294,6 +307,19 @@
     }, 'Summary generated');
     if (!backgrounded) summaryBusy = false;
   }
+
+  // Show the cached summary for the selected (scope, effort) if one exists, so the button reads
+  // "Regenerate" and the footer shows its provenance — else the Generate interface (2026-07-16).
+  async function loadCachedSummary(): Promise<void> {
+    if (!scopeReady || !isClassicScope || summaryBusy) return;
+    try {
+      summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId, summaryDetail);
+    } catch {
+      summary = null; // 404 → nothing cached for this cell yet
+    }
+  }
+  // Re-fetch when the scope or the selected effort/source changes.
+  $: void (scope.scopeType, scope.scopeId, summaryDetail, loadCachedSummary());
 
 </script>
 
@@ -418,6 +444,16 @@
             <option value="regen_detailed">Regenerate detailed</option>
           </select>
         </label>
+        {#if summarySource.endsWith('detailed')}
+          <div class="effort-radios" role="radiogroup" aria-label="Detailed effort">
+            {#each SCOPE_EFFORTS as e}
+              <label class="effort" class:active={scopeEffort === e.value} title={e.hint}>
+                <input type="radio" name="scope-effort" value={e.value} bind:group={scopeEffort} disabled={summaryBusy} />
+                {e.label}
+              </label>
+            {/each}
+          </div>
+        {/if}
         <button type="button" class:busy={summaryBusy} on:click={summarise}
           disabled={loading || summaryBusy || !scopeReady || !isClassicScope}
           title={isClassicScope ? (scopeReady ? 'Summarize the scope (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}
@@ -515,6 +551,28 @@
 
   .summary-source select {
     font-size: 0.85rem;
+  }
+
+  /* 2026-07-16 detailed-summary effort selector */
+  .effort-radios {
+    display: inline-flex;
+    gap: 0.15rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    overflow: hidden;
+  }
+  .effort-radios .effort {
+    font-size: 0.78rem;
+    padding: 0.12rem 0.45rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .effort-radios .effort.active {
+    background: var(--accent-soft, rgba(120, 120, 255, 0.18));
+    font-weight: 600;
+  }
+  .effort-radios .effort input {
+    display: none;
   }
 
   .summary-heading {
