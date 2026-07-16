@@ -502,6 +502,7 @@ _MARKER_RE = re.compile(r"^\s*([IVXLCDM]+|[A-Z]|\d+(?:\.\d+)*)[.)]?\s+\S")
 
 
 def _roman_to_int(s: str) -> int | None:
+    """Convert a roman numeral to an int (subtractive notation handled), or None if invalid/zero."""
     total = prev = 0
     for ch in reversed(s):
         v = _ROMAN_VALUES.get(ch)

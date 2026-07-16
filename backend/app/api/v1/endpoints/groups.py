@@ -34,6 +34,7 @@ ADMIN_DEP = Depends(require_admin)
 
 
 def _map_group_error(exc: groups_service.GroupError) -> HTTPException:
+    """Translate a service-level validation error (e.g. duplicate name) into a 400 response."""
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 

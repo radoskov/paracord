@@ -326,6 +326,7 @@ class StagingCommitResponse(BaseModel):
 
 
 def _staging_items(db: Session, batch_id: uuid.UUID) -> list[ImportStagingItem]:
+    """Load a staging batch's items in stable creation order (for both display and re-polling)."""
     return list(
         db.scalars(
             select(ImportStagingItem)
@@ -338,6 +339,7 @@ def _staging_items(db: Session, batch_id: uuid.UUID) -> list[ImportStagingItem]:
 def _staging_read(
     db: Session, batch: ImportStagingBatch, *, extraction_queued: bool = True
 ) -> StagingBatchRead:
+    """Serialize a staging batch plus its items into the response schema."""
     items = [StagingItemRead.model_validate(i) for i in _staging_items(db, batch.id)]
     return StagingBatchRead.model_validate(batch).model_copy(
         update={"items": items, "extraction_queued": extraction_queued}
@@ -345,6 +347,7 @@ def _staging_read(
 
 
 def _require_own_staging_batch(db: Session, batch_id: uuid.UUID, actor: User) -> ImportStagingBatch:
+    """Fetch a staging batch, 404-ing if missing or (for non-admin/owner) not the caller's own."""
     from app.services import access
 
     batch = db.get(ImportStagingBatch, batch_id)
@@ -615,6 +618,7 @@ class BatchPreviewRequest(BaseModel):
     engine: Literal["lookup", "grobid"] = "lookup"
 
     def resolved_lines(self) -> list[str]:
+        """Return ``lines`` if given, else split ``text`` on newlines, else an empty list."""
         if self.lines is not None:
             return self.lines
         if self.text is not None:

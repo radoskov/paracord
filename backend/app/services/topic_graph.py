@@ -33,6 +33,8 @@ DEFAULT_MIN_SIMILARITY = 0.30
 
 @dataclass
 class TopicGraphNode:
+    """One paper as a graph node."""
+
     id: str
     label: str
     work_id: uuid.UUID
@@ -43,6 +45,8 @@ class TopicGraphNode:
 
 @dataclass
 class TopicGraphEdge:
+    """One kNN similarity link between two papers."""
+
     source: str
     target: str
     weight: float  # cosine similarity (inverted semantic distance)
@@ -50,6 +54,8 @@ class TopicGraphEdge:
 
 @dataclass
 class TopicGraph:
+    """Result of :func:`build_topic_graph`: nodes, edges, and a diagnostic summary dict."""
+
     nodes: list[TopicGraphNode] = field(default_factory=list)
     edges: list[TopicGraphEdge] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
@@ -63,6 +69,8 @@ def _resolve_works(
     work_ids: list[uuid.UUID] | None,
     visible_ids: set[uuid.UUID] | None,
 ) -> list[Work]:
+    """Resolve the graph's paper set: an explicit ``work_ids`` list, or a scope; either way
+    clamped to ``visible_ids`` (defense in depth) and returned in a stable order."""
     if work_ids is not None:
         works = list(
             db.scalars(select(Work).where(Work.id.in_(work_ids), Work.merged_into_id.is_(None)))

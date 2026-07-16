@@ -55,6 +55,8 @@ ColorBy = Literal["none", "shelf", "tag", "topic", "status", "year"]
 
 @dataclass
 class GraphNode:
+    """One work (local or external) rendered as a graph node."""
+
     id: str
     label: str
     type: str  # "local" | "external"
@@ -77,6 +79,8 @@ class GraphNode:
 
 @dataclass
 class GraphEdge:
+    """A directed citation edge between two node ids, aggregated by shared reference/citer."""
+
     source: str
     target: str
     weight: int
@@ -88,6 +92,8 @@ class GraphEdge:
 
 @dataclass
 class CitationGraph:
+    """Result of a graph build: the node/edge set plus a summary dict of counts/flags."""
+
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
@@ -499,6 +505,7 @@ def _local_work_index(
 
 
 def _identifier_keys(*, doi: str | None, arxiv_id: str | None) -> list[str]:
+    """Build the ``doi:``/``arxiv:`` lookup keys used to match a work/reference in the local index."""
     keys: list[str] = []
     base = split_arxiv_id(arxiv_id)["base"] if arxiv_id else None
     if doi:
@@ -583,6 +590,7 @@ def _distribute_external_keep(
 
 
 def _local_node(work: Work) -> GraphNode:
+    """Build a ``type="local"`` node from an in-library work."""
     return GraphNode(
         id=str(work.id),
         label=work.canonical_title or f"Untitled work ({str(work.id)[:8]})",
@@ -595,6 +603,7 @@ def _local_node(work: Work) -> GraphNode:
 
 
 def _external_node(reference: Reference) -> GraphNode:
+    """Build a ``type="external"`` node for a reference that didn't resolve to a local work."""
     # Stable id so repeated references to the same external work collapse to one node.
     key = next(iter(_identifier_keys(doi=reference.doi, arxiv_id=reference.arxiv_id)), None)
     node_id = f"ext:{key}" if key else f"ext:ref:{reference.id}"
@@ -611,6 +620,7 @@ def _external_node(reference: Reference) -> GraphNode:
 def _summary(
     nodes: list[GraphNode], edges: list[GraphEdge], *, scope_count: int, unresolved: int
 ) -> dict:
+    """Build the base summary dict (counts); callers add extra keys (e.g. hidden-node counts)."""
     return {
         "scope_work_count": scope_count,
         "node_count": len(nodes),

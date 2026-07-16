@@ -122,6 +122,11 @@ def _spawn() -> subprocess.Popen:
 
 
 class _Supervisor:
+    """Owns a fixed-size pool of ``rq worker`` child processes and keeps them alive.
+
+    ``count`` is fixed for the process's lifetime (apply-on-restart); see :func:`main`.
+    """
+
     def __init__(self, count: int) -> None:
         self.count = count
         self.children: list[subprocess.Popen] = []
@@ -136,6 +141,7 @@ class _Supervisor:
         self._stopping = True
 
     def start(self) -> None:
+        """Spawn ``self.count`` worker children (initial launch, not a restart)."""
         logger.info(
             "Worker supervisor: launching %d RQ worker(s) on queue %r", self.count, QUEUE_NAME
         )
@@ -156,6 +162,7 @@ class _Supervisor:
         self.shutdown()
 
     def shutdown(self) -> None:
+        """Terminate all children, waiting up to ``_SHUTDOWN_GRACE_SECONDS`` before killing."""
         for child in self.children:
             if child.poll() is None:
                 child.terminate()

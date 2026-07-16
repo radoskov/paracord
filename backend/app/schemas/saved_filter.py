@@ -24,6 +24,8 @@ class SavedFilterParams(BaseModel):
 
 
 class SavedFilterCreate(BaseModel):
+    """Body to save a new named Library query."""
+
     name: str
     search_mode: Literal["metadata", "semantic", "hybrid"] = "metadata"
     query_text: str | None = None
@@ -31,6 +33,8 @@ class SavedFilterCreate(BaseModel):
 
 
 class SavedFilterUpdate(BaseModel):
+    """Partial update to a saved filter; omitted fields are left unchanged."""
+
     name: str | None = None
     search_mode: Literal["metadata", "semantic", "hybrid"] | None = None
     query_text: str | None = None
@@ -38,6 +42,8 @@ class SavedFilterUpdate(BaseModel):
 
 
 class SavedFilterRead(BaseModel):
+    """A saved filter as returned by the API."""
+
     id: uuid.UUID
     name: str
     search_mode: str

@@ -8,16 +8,22 @@ _THEME_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 
 class LoginRequest(BaseModel):
+    """Username/password login body."""
+
     username: str
     password: str
 
 
 class TokenResponse(BaseModel):
+    """Bearer access token returned on successful login."""
+
     access_token: str
     token_type: str = "bearer"
 
 
 class ChangePasswordRequest(BaseModel):
+    """Self-service password change; requires the current password to authorize."""
+
     current_password: str
     new_password: str
 

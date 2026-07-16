@@ -10,7 +10,13 @@ from app.db.base import Base
 
 
 class UserSession(Base):
-    """Revocable bearer-token session for an authenticated user."""
+    """Revocable bearer-token session for an authenticated user.
+
+    The raw bearer token is never stored: only ``token_hash`` (looked up per request) is
+    persisted, so a leaked DB dump cannot be used to forge sessions. A session is valid while
+    ``revoked_at`` is NULL and ``expires_at`` is in the future; logout / password change etc. set
+    ``revoked_at`` rather than deleting the row (keeps an audit trail).
+    """
 
     __tablename__ = "user_sessions"
 

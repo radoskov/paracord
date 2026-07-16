@@ -96,8 +96,11 @@ class FileSegment(Base):
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # "full_file" (whole document, the default) or a narrower kind (e.g. a bound-in offprint range).
     segment_type: Mapped[str] = mapped_column(String(64), default="full_file")
+    # Who/what created this segment: "system" (auto-detected) or a user-driven value.
     created_by: Mapped[str] = mapped_column(String(32), default="system")
+    # 0-100 confidence in this segment boundary; 100 = certain (e.g. user-defined or whole file).
     confidence: Mapped[int] = mapped_column(Integer, default=100)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
@@ -128,8 +131,11 @@ class FileWorkLink(Base):
         nullable=True,
         index=True,
     )
+    # How this file relates to the work, e.g. "primary" (the default) vs a supplement/preprint link.
     relationship_type: Mapped[str] = mapped_column(String(64), default="primary")
+    # 0-100 confidence in this file-to-work match (from automatic linking); 100 = certain.
     confidence: Mapped[int] = mapped_column(Integer, default=100)
+    # "none" (default) or a flag describing why this link needs user attention (e.g. a mismatch).
     warning_state: Mapped[str] = mapped_column(String(128), default="none")
     user_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(

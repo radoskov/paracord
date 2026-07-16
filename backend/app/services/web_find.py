@@ -694,6 +694,7 @@ def deduplicate(candidates: list[WebCandidate]) -> list[WebCandidate]:
 
 
 def _author_overlap(query_authors: list[str], cand_authors: list[str]) -> float:
+    """Fraction of the query's last names also present among the candidate's (0.0 if either empty)."""
     if not query_authors or not cand_authors:
         return 0.0
 

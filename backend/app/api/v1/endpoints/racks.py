@@ -195,6 +195,8 @@ def add_shelf_to_rack(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to modify this shelf",
         )
+    # RackShelf's primary key is the (rack_id, shelf_id) pair, so a composite-key lookup takes a
+    # dict of column name -> value rather than a single id.
     link = db.get(RackShelf, {"rack_id": rack_id, "shelf_id": payload.shelf_id})
     if link is None:
         db.add(

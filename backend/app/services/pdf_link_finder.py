@@ -126,6 +126,8 @@ class _PdfLinkParser(HTMLParser):
         self._in_script = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Capture metas/alternate-links (layer 2), start scoring an anchor (layer 3), or open a
+        <script> body for layer-4 sniffing."""
         a = {k.lower(): (v or "") for k, v in attrs}
         if tag == "script":
             self._in_script = self._script_bytes < _MAX_SCRIPT_BYTES
@@ -166,6 +168,7 @@ class _PdfLinkParser(HTMLParser):
             self._open_anchor = [score, self._order, href, False]
 
     def handle_data(self, data: str) -> None:
+        """Feed text into the open <script> buffer, or score the open anchor's link text."""
         if self._in_script:
             if self._script_bytes < _MAX_SCRIPT_BYTES and self.scripts:
                 self.scripts[-1] += data
@@ -181,6 +184,7 @@ class _PdfLinkParser(HTMLParser):
             anchor[0] -= 6
 
     def handle_endtag(self, tag: str) -> None:
+        """Close the <script> buffer, or finalize the open anchor's score into ``self.anchors``."""
         if tag == "script":
             self._in_script = False
             return

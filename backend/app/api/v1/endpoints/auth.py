@@ -95,6 +95,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
 
 def _profile_payload(user: User) -> dict:
+    """Build the caller-facing profile dict shared by ``/me`` (read) and profile-update (write)."""
     return {
         "id": str(user.id),
         "username": user.username,

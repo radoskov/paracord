@@ -172,6 +172,13 @@ def _lookup_one_line(
 
 
 def _preview_lookup(lines: list[str], *, settings: Settings, fetchers: dict | None) -> BatchPreview:
+    """Run ``_lookup_one_line`` per line, bounded by a whole-batch wall-clock budget.
+
+    A line whose candidates' top score clears ``web_find_batch_match_threshold`` becomes a
+    "matched" draft prefilled from that candidate; otherwise (or once the budget is exhausted)
+    the draft degrades to "title_only" (and sets ``degraded`` on the batch when the budget cut it
+    short) rather than failing.
+    """
     threshold = float(getattr(settings, "web_find_batch_match_threshold", 0.6))
     total_budget = float(getattr(settings, "web_find_total_budget", 120.0))
     drafts: list[ParsedDraft] = []
@@ -223,6 +230,12 @@ def _preview_lookup(lines: list[str], *, settings: Settings, fetchers: dict | No
 def _preview_grobid(
     lines: list[str], *, settings: Settings, grobid: GrobidClient | None
 ) -> BatchPreview:
+    """Parse every line in one ``processCitationList`` call and build a draft per line.
+
+    A line resolved to a title becomes "matched"; a line GROBID couldn't extract a title for (or,
+    when GROBID itself is unreachable, every line) degrades to "title_only" rather than failing
+    the whole batch.
+    """
     client = grobid or GrobidClient(settings.grobid_url, settings=settings)
     try:
         tei_xml = client.process_citation_list_sync(lines)

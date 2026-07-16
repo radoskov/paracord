@@ -32,6 +32,8 @@ LIBRARIAN_DEP = Depends(require_min_role(Role.LIBRARIAN))
 
 
 class ScopeSummaryRequest(BaseModel):
+    """Request to (re)generate a scope-level summary."""
+
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
     # 'local_llm' uses the configured Ollama model over the scope's abstracts, degrading to the
@@ -55,6 +57,8 @@ class ScopeSummaryRequest(BaseModel):
 
 
 class ScopeSummaryResponse(BaseModel):
+    """A generated (or queued) scope-level summary, with provider/provenance metadata."""
+
     # Optional-with-defaults so the queued variant (S15: no summary yet, just a job id) validates;
     # the inline path always fills them.
     entity_type: str | None = None
@@ -203,6 +207,8 @@ def create_scope_summary(
 
 
 class TopicRequest(BaseModel):
+    """Request to run the topic model over a scope."""
+
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
     max_topics: int = 5
@@ -212,11 +218,15 @@ class TopicRequest(BaseModel):
 
 
 class TopicWorkRef(BaseModel):
+    """Minimal work reference (id + title) attached to a topic for direct display."""
+
     id: str
     title: str | None = None
 
 
 class TopicRead(BaseModel):
+    """One discovered topic: its keywords and member works."""
+
     topic_id: int
     keywords: list[str]
     work_count: int
@@ -228,6 +238,8 @@ class TopicRead(BaseModel):
 
 
 class TopicModelResponse(BaseModel):
+    """A generated (or queued) topic model over a scope."""
+
     # Optional so the queued variant (S15) validates; the inline path always fills it.
     model_id: str | None = None
     backend: str | None = None
@@ -309,6 +321,8 @@ _LIBRARY_SCOPE_ID = uuid.UUID(int=0)  # sentinel scope_id for the whole-library 
 
 
 class ScopeNoteRead(BaseModel):
+    """A free-text note attached to a scope (library/shelf/rack)."""
+
     scope_type: str
     scope_id: str | None = None
     scope_label: str | None = None
@@ -317,12 +331,15 @@ class ScopeNoteRead(BaseModel):
 
 
 class ScopeNoteUpsert(BaseModel):
+    """Create/replace payload for a scope note."""
+
     scope_type: Literal["library", "shelf", "rack"]
     scope_id: uuid.UUID | None = None
     text: str = ""
 
 
 def _scope_note_read(db: Session, note) -> ScopeNoteRead:
+    """Build the response for a stored ``ScopeNote`` row (library sentinel id → None)."""
     from app.services.summarization import _scope_label
 
     sid = None if note.scope_id == _LIBRARY_SCOPE_ID else note.scope_id
@@ -585,6 +602,8 @@ def read_latest_topics(
 
 
 class TopicActionRequest(BaseModel):
+    """Turn one topic's member works into a tag or a shelf."""
+
     topic_model_id: str
     topic_id: int
     name: str  # tag name / shelf name
@@ -593,6 +612,7 @@ class TopicActionRequest(BaseModel):
 def _topic_work_ids(
     db: Session, model_id: str, topic_id: int, *, visible: set[uuid.UUID] | None
 ) -> list[uuid.UUID]:
+    """Work ids assigned to one topic, filtered to ``visible`` (404 if none remain)."""
     ids = list(
         db.scalars(
             select(TopicAssignment.work_id).where(

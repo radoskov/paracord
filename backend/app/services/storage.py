@@ -252,6 +252,7 @@ def _source_root(source: Source) -> Path:
 
 
 def _assert_inside_root(root: Path, path: Path) -> None:
+    """Path-traversal guard: raise ``ValueError`` if ``path`` resolves outside ``root``."""
     path.resolve().relative_to(root.resolve())
 
 
@@ -275,6 +276,11 @@ def _import_pdf_path(
     pdf_path: Path,
     import_batch_id: uuid.UUID | None = None,
 ) -> dict[str, bool]:
+    """Import (or refresh) a single PDF path found by a folder scan; see :func:`import_server_folder`.
+
+    Returns ``{"created_file": bool, "created_work": bool}`` so the caller can tally batch stats.
+    Called inside the batch's per-file SAVEPOINT, so any exception here rolls back only this file.
+    """
     now = datetime.now(UTC)
 
     # Incremental scan (E7): if this path was already imported and the file hasn't been modified
@@ -387,6 +393,9 @@ def _sha256_file(path: Path) -> str:
 
 
 def _extract_pdf_preview(path: Path) -> dict[str, Any]:
+    """Best-effort first-page preview text + page count via PyMuPDF; fails OPEN to "unknown"/None
+    on any error (missing dependency, corrupt PDF) rather than raising — contrast with the
+    fail-CLOSED :func:`probe_pdf_openable` used for upload validation."""
     try:
         import fitz  # type: ignore[import-not-found]
     except ImportError:

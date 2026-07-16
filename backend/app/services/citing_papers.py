@@ -43,6 +43,8 @@ MAX_CITING = 1000
 
 @dataclass
 class CitingPaper:
+    """A single incoming-citation record from a provider, before dedup/storage as an ExternalPaper."""
+
     source: str
     external_id: str | None = None
     title: str | None = None

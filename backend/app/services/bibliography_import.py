@@ -71,6 +71,7 @@ def _ris_first(fields: dict[str, list[str]], tags: tuple[str, ...]) -> str | Non
 
 
 def _ris_to_record(fields: dict[str, list[str]]) -> BiblioRecord:
+    """Map one RIS record's raw tag->values into a ``BiblioRecord``."""
     year_raw = _ris_first(fields, ("PY", "Y1", "DA"))
     year = None
     if year_raw:
@@ -105,6 +106,9 @@ def parse_csl(content: str) -> list[BiblioRecord]:
 
 
 def _csl_to_record(item: dict) -> BiblioRecord:
+    """Map one CSL-JSON item into a ``BiblioRecord`` (authors joined from given+family or literal;
+    year taken from the first ``issued.date-parts`` entry; container-title may be a list or a
+    string in the wild, so both are handled)."""
     authors: list[str] = []
     for author in item.get("author", []) or []:
         if not isinstance(author, dict):
@@ -143,6 +147,7 @@ def _csl_to_record(item: dict) -> BiblioRecord:
 
 
 def _find_existing(db: Session, *, doi: str | None, normalized_title: str | None) -> Work | None:
+    """Dedup lookup: an existing work by normalized DOI, else by normalized title, else None."""
     if doi:
         existing = db.scalar(select(Work).where(Work.doi == doi))
         if existing:

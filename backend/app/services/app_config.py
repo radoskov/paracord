@@ -239,6 +239,8 @@ def update_ai_scope_job_threshold(
 
 
 def _effective_int(db: Session, field: str, default: int) -> int:
+    """Shared read path for the simple int-valued app_config columns: DB row value if set, else
+    ``default``. Backs the ``effective_*_cap``/``effective_*_threshold`` one-liners above."""
     if not _app_config_table_present(db):
         return default
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
@@ -247,6 +249,8 @@ def _effective_int(db: Session, field: str, default: int) -> int:
 
 
 def _update_int(db: Session, field: str, value: int, actor_user_id: uuid.UUID | None) -> int:
+    """Shared write path for the simple int-valued app_config columns: validate ``>= 1``, persist,
+    and return the stored value. Backs the ``update_*_cap`` one-liners above."""
     if value < 1:
         raise ValueError(f"{field} must be >= 1")
     row = _ensure_row(db)
@@ -419,6 +423,7 @@ def update_reference_rescan_on_startup(
 
 
 def _ensure_row(db: Session) -> AppConfig:
+    """Fetch the singleton app_config row, creating it (unsaved, pending flush) if absent."""
     row = db.get(AppConfig, APP_CONFIG_SINGLETON_ID)
     if row is None:
         row = AppConfig(id=APP_CONFIG_SINGLETON_ID)

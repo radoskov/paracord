@@ -9,16 +9,22 @@ from app.core.security import Role
 
 
 class UserCreate(BaseModel):
+    """Admin-issued body to create a new user account."""
+
     username: str
     password: str
     role: Role = Role.READER
 
 
 class UserRoleUpdate(BaseModel):
+    """Admin-only change to a user's role."""
+
     role: Role
 
 
 class UserOut(BaseModel):
+    """A user account as returned by the API (never includes the password/hash)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID

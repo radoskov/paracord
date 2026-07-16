@@ -1,4 +1,9 @@
-"""Shelves, racks, and tags."""
+"""Shelves, racks, and tags.
+
+Shelves group works, racks group shelves (both many-to-many, via the join tables below), and tags
+attach freeform labels to any entity type via ``TagLink``. ``TagShelf``/``TagRack`` are a separate
+concept: they scope *where a tag may be offered* when tagging, not what is tagged with it.
+"""
 
 import uuid
 from datetime import UTC, datetime

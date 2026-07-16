@@ -28,6 +28,8 @@ RRF_DEPTH = 60
 
 @dataclass
 class HybridHit:
+    """One fused search result: the ranked ``work`` plus its RRF score and per-engine ranks."""
+
     work: Work
     score: float
     passage: str | None = None

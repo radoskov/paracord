@@ -277,6 +277,7 @@ def _compute(
 
 
 def _load_works(db: Session, ids: set[uuid.UUID]) -> dict[uuid.UUID, Work]:
+    """Fetch works by id in one query, keyed by id (empty dict for an empty ``ids``)."""
     if not ids:
         return {}
     return {w.id: w for w in db.scalars(select(Work).where(Work.id.in_(ids))).all()}

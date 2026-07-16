@@ -179,6 +179,7 @@ def build_reference_graph(
     base_topics = {str(t).casefold() for t in (work.topics or [])}
 
     def _topic_similarity(wid: uuid.UUID) -> float | None:
+        """Jaccard similarity of this work's topics vs the base paper's (None if either has none)."""
         terms = {str(t).casefold() for t in topics_by_work.get(wid, [])}
         if not base_topics or not terms:
             return None

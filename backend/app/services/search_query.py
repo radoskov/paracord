@@ -54,6 +54,8 @@ _FALSE = {"false", "no", "n", "0", "none"}
 
 @dataclass
 class ParsedQuery:
+    """Structured result of :func:`parse_search_query`: recognized field filters plus leftover free text."""
+
     text: str = ""  # free-text remainder (matched against title/abstract/venue)
     author: str | None = None
     venue: str | None = None
@@ -91,6 +93,7 @@ class ParsedQuery:
 
 
 def _apply_year(parsed: ParsedQuery, value: str) -> None:
+    """Parse a ``year:`` value (``YYYY``, ``>=YYYY``, ``<=YYYY``, or ``YYYY-YYYY``) into min/max bounds."""
     m = _YEAR_RE.match(value)
     if not m:
         return
@@ -106,6 +109,7 @@ def _apply_year(parsed: ParsedQuery, value: str) -> None:
 
 
 def _apply_has(parsed: ParsedQuery, value: str) -> None:
+    """Map a ``has:<value>`` token to its boolean flag; unrecognized values are recorded in ``flags``."""
     v = value.lower()
     if v in ("pdf", "file"):
         parsed.has_pdf = True

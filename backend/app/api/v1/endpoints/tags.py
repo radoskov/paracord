@@ -36,6 +36,8 @@ EDITOR_DEP = Depends(require_min_role(Role.EDITOR))
 ENTITY_TYPE_QUERY = Query()
 ENTITY_ID_QUERY = Query()
 
+# Maps a TagLink.entity_type string to its ORM class, so link/unlink handlers can generically look
+# up "does this entity exist" and dispatch to the right access.can_modify_* check.
 TAGGABLE_MODELS = {
     "work": Work,
     "shelf": Shelf,

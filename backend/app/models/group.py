@@ -60,6 +60,7 @@ class GroupMembership(Base):
         primary_key=True,
         index=True,
     )
+    # No FK: audit-only reference to the granting user, kept even if that user is later deleted.
     added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

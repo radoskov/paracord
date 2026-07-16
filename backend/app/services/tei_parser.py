@@ -15,6 +15,8 @@ XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 
 @dataclass
 class ParsedReference:
+    """One bibliography entry parsed from a TEI ``biblStruct`` (a reference the paper cites)."""
+
     key: str | None = None
     raw_citation: str | None = None
     title: str | None = None
@@ -28,6 +30,8 @@ class ParsedReference:
 
 @dataclass
 class ParsedCitationMention:
+    """One in-text citation marker (e.g. "[3]") linked to its reference and surrounding context."""
+
     reference_key: str
     marker_text: str | None = None
     section_label: str | None = None
@@ -40,6 +44,8 @@ class ParsedCitationMention:
 
 @dataclass
 class ParsedPaper:
+    """The normalized record extracted from one GROBID TEI document (:func:`parse_tei`)."""
+
     title: str | None = None
     abstract: str | None = None
     doi: str | None = None
@@ -158,6 +164,7 @@ def _first(*elements):
 
 
 def _year(date_element) -> int | None:
+    """Extract a 4-digit year from a TEI ``date`` element's ``@when`` or text content."""
     if date_element is None:
         return None
     candidate = date_element.get("when") or _text(date_element) or ""
@@ -311,6 +318,8 @@ def _parse_coords(coords: str | None) -> list[dict[str, float | int]]:
 
 
 def _context_sentence(element) -> str | None:
+    """Text of the sentence (``<s>``) containing ``element``, or its enclosing paragraph if
+    GROBID didn't segment sentences."""
     sentence = _ancestor(element, "s")
     if sentence is not None:
         return _text(sentence)
@@ -319,6 +328,8 @@ def _context_sentence(element) -> str | None:
 
 
 def _neighbor_sentence(element, *, previous: bool) -> str | None:
+    """Text of the previous/next sibling ``<s>`` sentence to ``element``'s enclosing sentence,
+    skipping any non-``<s>`` siblings in between (e.g. inline markup)."""
     sentence = _ancestor(element, "s")
     if sentence is None:
         return None

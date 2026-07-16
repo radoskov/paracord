@@ -186,6 +186,7 @@ def _work_author_names(db: Session, work_id: uuid.UUID) -> list[str]:
 
 
 def _works_by_identifier(db: Session, reference: Matchable) -> list[Work]:
+    """Works sharing the reference's DOI or arXiv base (bridging the arXiv-DOI spelling too)."""
     conditions = []
     if reference.doi:
         conditions.append(func.lower(Work.doi) == normalize_doi(reference.doi))
@@ -339,6 +340,7 @@ def _fallback_policy(settings: Settings, *, fuzzy_as_confirmed: bool) -> AcceptP
 
 
 def _set_local(reference: Reference, match: ReferenceMatch) -> bool:
+    """Hard-link the reference to ``match`` (identifier match or accepted fuzzy). Returns changed."""
     changed = (
         reference.resolved_work_id != match.work_id or reference.resolution_status != "local_match"
     )
@@ -350,6 +352,7 @@ def _set_local(reference: Reference, match: ReferenceMatch) -> bool:
 
 
 def _set_likely(reference: Reference, match: ReferenceMatch) -> bool:
+    """Record ``match`` as a soft suggestion only (``resolved_work_id`` stays unset). Returns changed."""
     changed = (
         reference.suggested_work_id != match.work_id
         or reference.resolution_status != "likely_match"
@@ -363,6 +366,7 @@ def _set_likely(reference: Reference, match: ReferenceMatch) -> bool:
 
 
 def _clear_to(reference: Reference, status: str) -> bool:
+    """Wipe any resolved/suggested link and set ``status`` (e.g. "external"/"unresolved"). Returns changed."""
     changed = (
         reference.resolved_work_id is not None
         or reference.suggested_work_id is not None

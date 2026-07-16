@@ -1,4 +1,11 @@
-"""Duplicate and version-candidate detection."""
+"""Duplicate and version-candidate detection.
+
+Scans a newly created/updated work or file against the rest of the library for likely duplicates
+(same DOI, same arXiv id, fuzzy-matched title, shared/identical PDF) and records each hit as a
+:class:`DuplicateCandidate` row (upserted, so re-scanning the same pair strengthens rather than
+duplicates the record). Candidates start life with ``status="open"`` for a human (or later
+automation) to confirm/reject; nothing here merges works automatically.
+"""
 
 import uuid
 from difflib import SequenceMatcher
@@ -154,6 +161,7 @@ def find_file_candidates(db: Session, *, file: File) -> list[DuplicateCandidate]
 
 
 def _multiwork_file_candidates(db: Session, file: File) -> list[DuplicateCandidate]:
+    """Flag a single PDF that looks like it bundles multiple papers (e.g. proceedings volume)."""
     signals = _multiwork_signals(file)
     if not signals:
         return []
@@ -172,6 +180,12 @@ def _multiwork_file_candidates(db: Session, file: File) -> list[DuplicateCandida
 
 
 def _multiwork_signals(file: File) -> dict[str, Any]:
+    """Heuristic score (+ reason) that a file's preview text looks like a multi-paper bundle.
+
+    Two independent signals, either sufficient: repeated "abstract"/"references" section markers
+    (likely several distinct papers concatenated), or a long page count plus proceedings-style
+    markers (table of contents, "session", etc). Returns ``{}`` (no candidate) when neither fires.
+    """
     preview = (file.preview_text or "").lower()
     abstract_count = preview.count("abstract")
     references_count = preview.count("references")
@@ -203,6 +217,7 @@ def _multiwork_signals(file: File) -> dict[str, Any]:
 
 
 def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
+    """Other (non-merged) works sharing this work's normalized DOI — always a certain match."""
     if not work.doi:
         return []
     doi = normalize_doi(work.doi)
@@ -226,6 +241,9 @@ def _same_doi_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
 
 
 def _same_arxiv_candidates(db: Session, work: Work) -> list[DuplicateCandidate]:
+    """Other works sharing this work's arXiv base id (version-agnostic); a version mismatch shaves
+    the score slightly since it's most likely the *same paper, different revision* rather than an
+    exact duplicate."""
     base = work.arxiv_base_id or (split_arxiv_id(work.arxiv_id)["base"] if work.arxiv_id else None)
     if not base:
         return []
@@ -331,6 +349,13 @@ def _upsert_candidate(
     score: float,
     signals: dict[str, Any],
 ) -> DuplicateCandidate:
+    """Insert or refresh the ``DuplicateCandidate`` for one (type, entity, entity) pair.
+
+    Entities are ordered into a canonical ``(a, b)`` order first so the same pair is never stored
+    twice under swapped sides. An existing OPEN candidate gets its score bumped to the max seen and
+    its signals merged in; a resolved/dismissed candidate is left untouched (a past human decision
+    is not silently overwritten by a re-scan).
+    """
     entity_a_type, entity_a_id, entity_b_type, entity_b_id = _canonical_pair(
         entity_a_type,
         entity_a_id,
@@ -371,6 +396,7 @@ def _canonical_pair(
     entity_b_type: str,
     entity_b_id: uuid.UUID,
 ) -> tuple[str, uuid.UUID, str, uuid.UUID]:
+    """Order the two entities by ``(type, str(id))`` so a pair always stores the same way round."""
     left = (entity_a_type, str(entity_a_id))
     right = (entity_b_type, str(entity_b_id))
     if left <= right:

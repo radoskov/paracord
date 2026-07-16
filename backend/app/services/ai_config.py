@@ -48,6 +48,8 @@ OCR_BACKENDS = ("none", "ocrmypdf", "pymupdf")
 
 @dataclass
 class EffectiveAIConfig:
+    """Resolved AI provider/model settings in effect right now (DB overlay applied)."""
+
     embedding_provider: str
     embedding_model: str | None
     summary_provider: str

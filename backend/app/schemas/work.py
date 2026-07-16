@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 
 class WorkRead(BaseModel):
+    """API-facing summary view of a Work (paper) — a small subset of its identifying fields."""
+
     id: str
     canonical_title: str | None = None
     doi: str | None = None

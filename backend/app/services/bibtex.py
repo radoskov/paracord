@@ -228,6 +228,11 @@ def _read_balanced(content: str, start: int) -> tuple[str, int]:
 
 
 def _parse_entry_body(entry_type: str, body: str) -> BibtexEntry | None:
+    """Turn one entry's inner ``key, field = value, ...`` body into a ``BibtexEntry``.
+
+    The first comma-separated part is the citation key; the rest are ``field = value`` pairs
+    (anything without an ``=`` is ignored). Returns None if there is no key at all.
+    """
     parts = _split_top_level(body)
     if not parts:
         return None
@@ -290,6 +295,8 @@ def _first_field(fields: dict[str, str], names: tuple[str, ...]) -> str | None:
 
 
 def _arxiv_id(fields: dict[str, str]) -> str | None:
+    """Extract an arXiv id from whichever BibTeX convention the entry used: a direct ``arxiv``
+    field, or ``eprint`` when ``archiveprefix``/``eprinttype`` names arXiv as the source."""
     if fields.get("arxiv"):
         return fields["arxiv"]
     archive = (fields.get("archiveprefix") or fields.get("eprinttype") or "").lower()
@@ -299,6 +306,7 @@ def _arxiv_id(fields: dict[str, str]) -> str | None:
 
 
 def _find_existing(db: Session, *, doi: str | None, normalized_title: str | None) -> Work | None:
+    """Dedup lookup: an existing work by normalized DOI, else by normalized title, else None."""
     if doi:
         # doi is expected to be already normalized (bare, lowercase, no prefix).
         existing = db.scalar(select(Work).where(Work.doi == doi))

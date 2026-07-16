@@ -46,21 +46,29 @@ def _safe_archive_path(name: str):
 
 
 class BackupEntry(BaseModel):
+    """One backup archive on disk."""
+
     archive: str
     size_bytes: int
     created_at: datetime
 
 
 class BackupsOut(BaseModel):
+    """The list of backup archives plus the last restore's summary."""
+
     backups: list[BackupEntry]
     last_restore: dict | None = None
 
 
 class BackupCreateIn(BaseModel):
+    """Options for creating a new backup archive."""
+
     include_pdfs: bool = False
 
 
 class BackupCreateOut(BaseModel):
+    """Result of requesting a backup (queued, or its inline result)."""
+
     queued: bool
     job_id: str | None = None
     # Filled when the queue was unavailable and the export ran inline.
@@ -68,6 +76,8 @@ class BackupCreateOut(BaseModel):
 
 
 class RestoreIn(BaseModel):
+    """Restore request for an uploaded/existing archive."""
+
     mode: Literal["merge", "replace"]
     # A configured import-root alias whose folder is scanned (sha256) for PDFs to pair.
     pdf_root_alias: str | None = None
@@ -76,6 +86,8 @@ class RestoreIn(BaseModel):
 
 
 class RestoreOut(BaseModel):
+    """Result of requesting a restore (queued, or its inline summary)."""
+
     queued: bool
     job_id: str | None = None
     summary: dict | None = None

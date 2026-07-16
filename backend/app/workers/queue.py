@@ -938,6 +938,8 @@ def queue_status(limit: int = 25) -> dict:
             return (exc_string or "").strip()[-2000:] or None
 
         def _collect(job_ids, fallback_status: str) -> list[dict]:
+            """Build one summary row per job id (``fallback_status`` covers registries whose
+            jobs don't report a live status, e.g. finished/failed)."""
             rows: list[dict] = []
             for job_id in list(job_ids)[:limit]:
                 try:

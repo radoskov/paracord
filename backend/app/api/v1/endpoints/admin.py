@@ -32,15 +32,21 @@ router = APIRouter()
 
 
 class EnrollTokenOut(BaseModel):
+    """A freshly-minted single-use agent enrollment token."""
+
     token: str
     expires_at: str
 
 
 class PasswordResetRequest(BaseModel):
+    """Admin-initiated password reset payload for another user."""
+
     new_password: str
 
 
 class AppConfigOut(BaseModel):
+    """The runtime app configuration as read by the admin panel."""
+
     max_papers_per_page: int
     rate_limit_per_client_per_min: int
     rate_limit_global_per_min: int
@@ -79,6 +85,8 @@ class AppConfigOut(BaseModel):
 
 
 class AppConfigUpdate(BaseModel):
+    """Partial-update payload for the app config (PATCH semantics)."""
+
     # All fields optional: the admin panel PATCHes only the section it edits (partial update).
     max_papers_per_page: int | None = Field(default=None, ge=1)
     rate_limit_per_client_per_min: int | None = Field(default=None, ge=1)
@@ -104,6 +112,8 @@ class AppConfigUpdate(BaseModel):
 
 
 class AgentOut(BaseModel):
+    """An enrolled/pending agent as shown in the admin panel."""
+
     id: uuid.UUID
     name: str
     status: str
@@ -120,6 +130,8 @@ class AgentOut(BaseModel):
 
 
 class AgentPrivilegesUpdate(BaseModel):
+    """Partial-update payload for an agent's granted privileges."""
+
     can_index: bool | None = None
     can_extract: bool | None = None
     can_teleport: bool | None = None
@@ -129,16 +141,22 @@ class AgentPrivilegesUpdate(BaseModel):
 
 
 class AgentRenameRequest(BaseModel):
+    """New display name for an agent."""
+
     name: str
 
 
 class AgentApprovedOut(BaseModel):
+    """Result of approving a pending agent, including its one-time bearer token."""
+
     agent_id: uuid.UUID
     status: str
     agent_token: str
 
 
 class AgentFileOut(BaseModel):
+    """A file an agent has reported via its manifest."""
+
     id: uuid.UUID
     local_file_id: str
     sha256: str
@@ -205,6 +223,8 @@ def update_user_role(
 
 
 class UserElsevierApiUpdate(BaseModel):
+    """Toggle for whether a specific user may use the server's Elsevier API key."""
+
     allowed: bool
 
 
@@ -349,6 +369,7 @@ def list_audit_events(
 
 
 def _app_config_out(db: Session) -> AppConfigOut:
+    """Assemble the effective app-config response from the individual config-service getters."""
     return AppConfigOut(
         max_papers_per_page=app_config_service.effective_max_papers_per_page(db),
         rate_limit_per_client_per_min=app_config_service.effective_rate_limit_per_client_per_min(
@@ -613,6 +634,8 @@ def delete_agent(
 
 
 class AgentApproveIn(BaseModel):
+    """Optional token-lifetime override for approving a pending agent."""
+
     # D3: optional token lifetime in days — omit for a permanent token (the owner's own agents);
     # set it to hand a short-lived token to a temporary user.
     token_ttl_days: int | None = Field(default=None, ge=1, le=3650)
@@ -648,6 +671,8 @@ def approve_agent(
 
 
 class ReferenceDupeEntry(BaseModel):
+    """One reference within a consolidation-conflict group."""
+
     id: uuid.UUID
     title: str | None = None
     doi: str | None = None
@@ -663,11 +688,15 @@ class ReferenceDupeEntry(BaseModel):
 
 
 class ReferenceDupeGroup(BaseModel):
+    """A group of references sharing a dedup key whose resolutions disagree (a conflict)."""
+
     dedup_key: str
     references: list[ReferenceDupeEntry]
 
 
 class LastConsolidationScan(BaseModel):
+    """Summary of the most recent reference-consolidation scan."""
+
     at: datetime | None = None
     groups_scanned: int = 0
     folded: int = 0
@@ -675,11 +704,15 @@ class LastConsolidationScan(BaseModel):
 
 
 class ReferenceDupesOut(BaseModel):
+    """The pending consolidation conflicts plus the last scan's summary."""
+
     last_scan: LastConsolidationScan | None = None
     conflicts: list[ReferenceDupeGroup]
 
 
 class ReferenceDupesScanOut(BaseModel):
+    """Result of kicking off a consolidation scan (queued, or its inline result)."""
+
     queued: bool
     job_id: str | None = None
     # Filled when the queue was unavailable and the scan ran inline instead.
@@ -687,11 +720,14 @@ class ReferenceDupesScanOut(BaseModel):
 
 
 class ReferenceDupeResolveIn(BaseModel):
+    """Admin's choice of which reference's resolution wins a conflict group."""
+
     # The reference whose resolution the admin declares correct for its conflict group.
     winner_reference_id: uuid.UUID
 
 
 def _last_consolidation_scan(db: Session) -> LastConsolidationScan | None:
+    """Return the most recent ``reference.consolidation_completed`` audit event, if any."""
     event = db.scalars(
         select(AuditEvent)
         .where(AuditEvent.event_type == "reference.consolidation_completed")

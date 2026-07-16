@@ -551,6 +551,7 @@ def has_reversible_shadow(db: Session, work_id: uuid.UUID) -> bool:
 
 
 def _mark_duplicate_file_candidate(db: Session, candidate: DuplicateCandidate) -> None:
+    """Flag entity_b as a confirmed duplicate copy of entity_a's work (no file/work deletion)."""
     if {candidate.entity_a_type, candidate.entity_b_type} != {"file"}:
         raise ValueError("mark_duplicate_file requires a file/file candidate")
     duplicate_file_id = candidate.entity_b_id
@@ -566,6 +567,11 @@ def _work_pair(
     *,
     target_work_id: uuid.UUID | None,
 ) -> tuple[Work, Work]:
+    """Resolve the candidate's two works to ``(base, source)``, honouring an explicit target.
+
+    Falls back to :func:`choose_target_work` when the caller does not specify which side should
+    survive as canonical.
+    """
     if candidate.entity_a_type != "work" or candidate.entity_b_type != "work":
         raise ValueError("Action requires a work/work candidate")
     work_a = db.get(Work, candidate.entity_a_id)
@@ -766,6 +772,12 @@ def _transfer_identifiers(db: Session, *, base: Work, source: Work, record: dict
 
 
 def _move_owned_entities(db: Session, *, base: Work, source: Work, record: dict[str, Any]) -> None:
+    """Repoint every entity the source work owns onto the base, recording moves for unmerge.
+
+    Each block below follows the same pattern: skip when the base already has an equivalent
+    (file/shelf/tag/reference-edge) rather than creating a duplicate, else repoint and record the
+    moved id so :func:`unmerge_work` can reverse it exactly.
+    """
     moved = record["moved"]
 
     # File links: repoint to the base, unless the base already links that same file (then leave the
@@ -898,6 +910,7 @@ def _resolve(
     status: str,
     action: DuplicateAction,
 ) -> None:
+    """Mark a candidate resolved (accepted/rejected) and stamp who resolved it with which action."""
     candidate.status = status
     candidate.resolved_by_user_id = actor.id
     candidate.resolved_at = datetime.now(UTC)

@@ -39,11 +39,15 @@ _MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB hard limit, mirrors /imports/upl
 
 
 class AgentEnrollRequest(BaseModel):
+    """Owner-issued enrollment token plus the agent's chosen display name."""
+
     token: str
     name: str
 
 
 class AgentEnrollResponse(BaseModel):
+    """The pending agent record created by an enrollment request."""
+
     agent_id: uuid.UUID
     status: str
 
@@ -248,6 +252,8 @@ def agent_self(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> dict:
 
 
 class SourceRemovedRequest(BaseModel):
+    """Local file ids whose source file the agent found gone from disk."""
+
     local_file_ids: list[str]
 
 
@@ -300,10 +306,14 @@ def list_agent_file_status(db: Session = DB_DEP, agent: Agent = AGENT_DEP) -> li
 
 
 class KnownHashesRequest(BaseModel):
+    """SHA-256 hashes the agent wants checked against server-held library content."""
+
     sha256: list[str]
 
 
 class KnownHashesResponse(BaseModel):
+    """The subset of requested hashes the server still holds as linked library content."""
+
     known: list[str]
 
 

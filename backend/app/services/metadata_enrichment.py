@@ -45,6 +45,8 @@ TRUSTED_SOURCES = {"user", "grobid", "crossref", "arxiv", "openalex", "semantics
 
 @dataclass
 class ExternalMetadata:
+    """Bibliographic fields parsed from one external source's response for a single work."""
+
     source: str
     title: str | None = None
     abstract: str | None = None
@@ -320,6 +322,7 @@ def _arxiv_base(arxiv_id: str) -> str:
 
 
 def _apply_field(work: Work, field_name: str, value: str, source: str) -> None:
+    """Write a promoted external value onto the work's canonical column (per-field coercion)."""
     if field_name == "title":
         work.canonical_title = value
         work.normalized_title = normalize_title(value)

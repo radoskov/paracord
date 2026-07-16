@@ -117,6 +117,8 @@ class VizScope:
 
 @dataclass
 class VizNode:
+    """One rendered point/vertex; ``x``/``y`` are ``None`` for node-link views (no fixed layout)."""
+
     id: str
     x: float | None
     y: float | None
@@ -129,6 +131,8 @@ class VizNode:
 
 @dataclass
 class VizEdge:
+    """One rendered edge between two node ids (``source``/``target`` are string work ids)."""
+
     source: str
     target: str
     weight: float
@@ -206,6 +210,11 @@ class _AxisContext:
 def _similarity_axis(
     db: Session, works: list[Work], ctx: _AxisContext
 ) -> tuple[dict[uuid.UUID, float | None], str | None]:
+    """Cosine similarity (over dense embedding vectors) of each work to the focus paper.
+
+    Returns per-work ``None`` plus an explanatory note when there is no focus paper, the focus
+    isn't visible, or no real embedding model is indexed (the baseline hash-BOW is not used here).
+    """
     if ctx.focus_work_id is None:
         return (
             {w.id: None for w in works},
@@ -246,6 +255,8 @@ def _similarity_axis(
 def _topic_similarity_axis(
     works: list[Work], ctx: _AxisContext
 ) -> tuple[dict[uuid.UUID, float | None], str | None]:
+    """Jaccard overlap of ``Work.topics`` vs the focus paper's topics (requires a prior topic-model
+    run — see :func:`_keyword_similarity_axis` for the keyword-based equivalent)."""
     if ctx.focus_work_id is None:
         return (
             {w.id: None for w in works},
@@ -338,6 +349,7 @@ def _axis_values(
 
 
 def _size_value(work: Work, size_by: str, degree: dict[str, int]) -> float | None:
+    """Node-size metric for the requested ``size_by`` encoding (``None`` hides sizing)."""
     if size_by == "none":
         return None
     if size_by == "citation_count":
@@ -348,6 +360,7 @@ def _size_value(work: Work, size_by: str, degree: dict[str, int]) -> float | Non
 
 
 def _color_group(work: Work, color_by: str) -> str | None:
+    """Discrete color-group key for the requested ``color_by`` encoding (``None`` hides coloring)."""
     if color_by == "none":
         return None
     if color_by == "work_type":

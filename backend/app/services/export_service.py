@@ -145,6 +145,12 @@ def _resolve_works(
     saved_filter_work_ids: list[uuid.UUID] | None = None,
     visible_ids: set[uuid.UUID] | None = None,
 ) -> list[Work]:
+    """Dispatch on ``scope_type`` to load the works an export covers, in display order.
+
+    Every branch is run through ``_filter`` (drops merged shadows + applies the ``visible_ids``
+    clamp) before returning, so the individual per-scope queries need not repeat that check.
+    """
+
     def _filter(works: list[Work]) -> list[Work]:
         # Always drop merged shadows (Batch D) — never exported for anyone — then apply the
         # per-user visibility clamp (``visible_ids`` is None for admin/owner).

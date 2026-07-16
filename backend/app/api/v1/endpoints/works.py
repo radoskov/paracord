@@ -141,6 +141,11 @@ _recent_views: dict[tuple[str, str], float] = {}
 
 
 def _should_record_view(user_id: uuid.UUID, work_id: uuid.UUID) -> bool:
+    """True on the first view (or first view past the debounce window) of ``work_id`` by ``user_id``.
+
+    Also opportunistically prunes stale entries from the in-process ``_recent_views`` cache once it
+    grows past 4096 keys, so the dict can't grow unbounded across a long-running process.
+    """
     import time
 
     key = (str(user_id), str(work_id))
@@ -1949,6 +1954,7 @@ def _file_content_available(db: Session, file: File) -> bool:
 
 
 def _file_read(db: Session, file: File, *, also_in_count: int = 0) -> WorkFileRead:
+    """Build the API read-model for ``file``, filling the derived ``content_available`` flag."""
     return WorkFileRead.model_validate(file).model_copy(
         update={
             "content_available": _file_content_available(db, file),
@@ -2418,6 +2424,11 @@ def create_summary(
 
 
 def _apply_assertion_to_work(work: Work, field_name: str, value: str, source: str) -> None:
+    """Write a chosen metadata-assertion value onto the matching ``Work`` column in place.
+
+    Keeps ``normalized_title``/``canonical_metadata_source`` in sync when the title changes, and
+    normalizes ``doi``/coerces ``year``; unknown ``field_name`` values are silently ignored.
+    """
     if field_name == "title":
         work.canonical_title = value
         work.normalized_title = normalize_title(value)
@@ -2737,6 +2748,7 @@ class WebFindDownloadResponse(BaseModel):
 
 
 def _candidate_read(candidate: WebCandidate) -> WebCandidateRead:
+    """Adapt a service-layer ``WebCandidate`` to its API response model."""
     return WebCandidateRead(
         candidate_id=candidate.candidate_id,
         source=candidate.source,

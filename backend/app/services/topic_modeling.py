@@ -296,6 +296,8 @@ def _is_postgres(db: Session) -> bool:
 
 
 def _l2(vec: list[float]) -> list[float]:
+    """L2-normalize a dense vector (no-op on a zero vector) — used before concatenating per-model
+    vectors in multimode so no single model's scale dominates."""
     norm = math.sqrt(sum(x * x for x in vec))
     return [x / norm for x in vec] if norm else vec
 
@@ -639,6 +641,7 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _tfidf(token_lists: list[list[str]]) -> list[dict[str, float]]:
+    """Sparse TF-IDF vectors (smoothed idf) for each document's token list, one dict per document."""
     n_docs = len(token_lists)
     doc_freq: Counter[str] = Counter()
 
@@ -657,6 +660,9 @@ def _tfidf(token_lists: list[list[str]]) -> list[dict[str, float]]:
 
 
 def _kmeans(vectors: list[dict[str, float]], k: int) -> list[int]:
+    """Deterministic k-means (cosine distance) over sparse vectors; returns each vector's cluster
+    index. Seeds are picked evenly across the (already stably-ordered) input rather than randomly,
+    so results are reproducible across runs/platforms. Converges early when assignments stop changing."""
     if k <= 1:
         return [0] * len(vectors)
 
@@ -693,6 +699,7 @@ def _kmeans(vectors: list[dict[str, float]], k: int) -> list[int]:
 
 
 def _centroid(vectors: list[dict[str, float]]) -> dict[str, float]:
+    """Elementwise mean of sparse vectors (missing keys treated as 0)."""
     total: dict[str, float] = {}
 
     for vector in vectors:

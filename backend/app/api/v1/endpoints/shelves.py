@@ -250,6 +250,8 @@ def remove_work_from_shelf(
     if shelf is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")
     _guard_modify_shelf(db, actor, shelf)
+    # ShelfWork's primary key is the (shelf_id, work_id) pair, so the composite-key lookup takes a
+    # dict of column name -> value rather than a single id.
     link = db.get(ShelfWork, {"shelf_id": shelf_id, "work_id": work_id})
     if link is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shelf work not found")

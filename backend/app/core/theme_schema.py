@@ -118,6 +118,8 @@ def _resolve_refs(node: Any, palette: dict[str, Any]) -> Any:
 
 
 def _require_str(mapping: dict[str, Any], key: str, label: str) -> str:
+    """Return the stripped string at ``mapping[key]``, raising ``ThemeValidationError`` (labelled
+    ``label``) if it is missing, not a string, or blank."""
     value = mapping.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ThemeValidationError(f"Missing or empty required field: {label}")
@@ -125,6 +127,12 @@ def _require_str(mapping: dict[str, Any], key: str, label: str) -> str:
 
 
 def _validate_tokens(tokens: Any) -> dict[str, dict[str, str]]:
+    """Check ``tokens`` against ``REQUIRED_TOKEN_ROLES`` and return the resolved role map.
+
+    Raises ``ThemeValidationError`` if a required role group/key is missing or blank. Extra,
+    forward-compatible keys within a known group are preserved (stringified) alongside the
+    required ones.
+    """
     if not isinstance(tokens, dict):
         raise ThemeValidationError("`tokens` must be a mapping of role groups")
     resolved: dict[str, dict[str, str]] = {}

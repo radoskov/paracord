@@ -43,6 +43,8 @@ ADMIN_DEP = Depends(require_admin)
 
 
 class AIConfigUpdate(BaseModel):
+    """Partial-update payload for the AI provider/model configuration."""
+
     embedding_provider: str | None = None
     embedding_model: str | None = None
     summary_provider: str | None = None
@@ -55,6 +57,8 @@ class AIConfigUpdate(BaseModel):
 
 
 class ModelRef(BaseModel):
+    """A (provider, model) pair identifying a downloadable/managed model."""
+
     provider: str
     model: str
 
@@ -255,6 +259,8 @@ def _batch_field_work_ids(db: Session, field: str, scope: str) -> list:
 
 
 class BatchExtractRequest(BaseModel):
+    """Scope selector for a library-wide batch keyword/topic extraction run."""
+
     # 'missing' only touches papers lacking the field; 'all' re-extracts/replaces for every paper.
     scope: Literal["all", "missing"] = "missing"
 
@@ -272,6 +278,10 @@ def keyword_topic_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> 
 
 
 def _run_batch(db: Session, owner: User, *, field: str, scope: str, enqueue, event: str) -> dict:
+    """Enqueue ``enqueue`` for each eligible work id, audit the run, and report counts.
+
+    Raises 503 if there were eligible ids but the queue accepted none of them.
+    """
     ids = _batch_field_work_ids(db, field, scope)
     queued = sum(1 for wid in ids if enqueue(wid) is not None)
     if ids and queued == 0:

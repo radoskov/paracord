@@ -436,6 +436,7 @@ def rescan_reference_matches_job() -> None:
     from app.utils.normalization import normalize_title
 
     def _id_batches(ids: list) -> list[list]:
+        """Split ``ids`` into ``_RESCAN_COMMIT_EVERY``-sized pages (in order)."""
         return [ids[i : i + _RESCAN_COMMIT_EVERY] for i in range(0, len(ids), _RESCAN_COMMIT_EVERY)]
 
     with SessionLocal() as db:

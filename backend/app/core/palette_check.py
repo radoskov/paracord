@@ -34,6 +34,7 @@ _MACHADO = {
 
 
 def _hex_to_srgb(value: str) -> tuple[float, float, float]:
+    """Parse a ``#rgb``/``#rrggbb`` hex colour to (r, g, b) in [0, 1] sRGB. Raises on bad input."""
     s = value.strip().lstrip("#")
     if len(s) == 3:
         s = "".join(ch * 2 for ch in s)
@@ -41,15 +42,18 @@ def _hex_to_srgb(value: str) -> tuple[float, float, float]:
 
 
 def _s2lin(c: float) -> float:
+    """sRGB gamma-decode a single channel to linear light."""
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def _lin(value: str) -> tuple[float, float, float]:
+    """Hex colour -> linear-light (r, g, b). Raises on unparsable ``value``."""
     r, g, b = _hex_to_srgb(value)
     return _s2lin(r), _s2lin(g), _s2lin(b)
 
 
 def _rel_lum(value: str) -> float:
+    """WCAG relative luminance of a hex colour."""
     r, g, b = _lin(value)
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
@@ -61,6 +65,7 @@ def contrast(a: str, b: str) -> float:
 
 
 def _oklch(value: str) -> tuple[float, float]:
+    """Hex colour -> (OKLCH lightness, chroma). Hue is not needed by the checks below."""
     r, g, b = _lin(value)
     lp = math.pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1 / 3)
     mp = math.pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1 / 3)
@@ -72,6 +77,7 @@ def _oklch(value: str) -> tuple[float, float]:
 
 
 def _lin2lab(r: float, g: float, b: float) -> tuple[float, float, float]:
+    """Linear-light (r, g, b) -> CIE L*a*b* (D65 white point), for the CVD ΔE distance below."""
     x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b
     y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b
     z = 0.0193339 * r + 0.119192 * g + 0.9503041 * b
@@ -84,6 +90,8 @@ def _lin2lab(r: float, g: float, b: float) -> tuple[float, float, float]:
 
 
 def _simulate(value: str, kind: str) -> tuple[float, float, float]:
+    """Apply the Machado-2009 CVD simulation matrix for ``kind`` ("protan"/"deutan") to a hex colour,
+    returning the simulated linear-light (r, g, b) clamped to [0, 1]."""
     r, g, b = _lin(value)
     m = _MACHADO[kind]
 
@@ -98,6 +106,7 @@ def _simulate(value: str, kind: str) -> tuple[float, float, float]:
 
 
 def _delta_e(a: str, b: str, kind: str) -> float:
+    """CIE76 ΔE (Euclidean Lab distance) between two hex colours as seen under CVD ``kind``."""
     la = _lin2lab(*_simulate(a, kind))
     lb = _lin2lab(*_simulate(b, kind))
     return math.dist(la, lb)

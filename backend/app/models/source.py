@@ -26,12 +26,19 @@ class Source(Base):
         nullable=True,
         index=True,
     )
+    # Set when this source is backed by a paired Teleport Agent rather than a server-local path
+    # or a plain URL.
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
         index=True,
     )
+    # For type="server_folder": the alias into the merged server-roots map (yaml + ImportRoot)
+    # this source was created from. See app.services.storage.merged_server_roots.
     path_alias: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    # sha256 of the resolved absolute root path at creation time, so a later alias-to-path remap
+    # (yaml edit or ImportRoot change) can be detected instead of silently importing from a
+    # different directory under the same alias.
     canonical_root_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     config: Mapped[dict | None] = mapped_column(_JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

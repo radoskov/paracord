@@ -52,6 +52,8 @@ _ScopeType = Literal[
 
 
 class RankedWorkModel(BaseModel):
+    """One work in a ranked citation-summary column, with its ranking score."""
+
     work_id: uuid.UUID
     title: str
     year: int | None = None
@@ -60,6 +62,8 @@ class RankedWorkModel(BaseModel):
 
 
 class MissingWorkModel(BaseModel):
+    """A frequently-cited-but-not-in-library external work."""
+
     key: str
     title: str
     doi: str | None = None
@@ -71,11 +75,15 @@ class MissingWorkModel(BaseModel):
 
 
 class YearWorkRef(BaseModel):
+    """Minimal work reference (id + title) listed under a chronological-distribution year."""
+
     work_id: uuid.UUID
     title: str
 
 
 class YearCountModel(BaseModel):
+    """Paper count (and papers) for one publication year in the chronological distribution."""
+
     year: int | None = None
     work_count: int
     # The year's papers (id + title), so the chart can list/open them on click.
@@ -83,6 +91,8 @@ class YearCountModel(BaseModel):
 
 
 class CitationSummaryResponse(BaseModel):
+    """The full scoped citation-analytics summary (SPEC §8.11)."""
+
     scope_work_count: int
     coverage_held: int
     coverage_total: int
@@ -150,6 +160,8 @@ def get_citation_summary(
 
 
 class VenueStatModel(BaseModel):
+    """Aggregate stats for one (normalized) venue within a scope."""
+
     name: str
     count: int
     pct: float
@@ -159,6 +171,8 @@ class VenueStatModel(BaseModel):
 
 
 class AuthorStatModel(BaseModel):
+    """Aggregate stats for one (normalized) author within a scope."""
+
     name: str
     count: int
     pct: float
@@ -166,6 +180,8 @@ class AuthorStatModel(BaseModel):
 
 
 class VenueAuthorSummaryResponse(BaseModel):
+    """Venue/author aggregation over a scope's papers (batch10 #7)."""
+
     scope_work_count: int
     venues: list[VenueStatModel]
     authors: list[AuthorStatModel]
@@ -318,6 +334,8 @@ class WorklistResponse(BaseModel):
 
 
 class WorklistDecisionRequest(BaseModel):
+    """Upsert payload for one missing-work import/ignore decision."""
+
     key: str
     decision: str
 
@@ -355,6 +373,8 @@ def delete_worklist_decision(
 
 
 class MissingExportResponse(BaseModel):
+    """A rendered export (BibTeX/CSV) of the scope's frequently-cited-but-missing works."""
+
     filename: str
     content_type: str
     content: str
