@@ -102,7 +102,7 @@
       return graph.nodes.map<RNode>((n) => ({
         id: n.id, label: n.label, kind: n.type, workId: n.work_id, year: n.year,
         venue: n.venue ?? null, doi: n.doi, degree: n.degree ?? 0, pagerank: n.pagerank ?? 0,
-        betweenness: n.betweenness ?? 0, citationCount: null,
+        betweenness: n.betweenness ?? 0, citationCount: n.citation_count ?? null,
         colorGroup: n.color_group ?? null,
         warning: n.warning ?? false,
       }));
@@ -194,7 +194,8 @@
         ? n.pagerank
         : graphType === 'citation' && sizeBy === 'betweenness'
           ? n.betweenness
-          : graphType === 'topic' && topicSizeBy === 'citations'
+          : (graphType === 'citation' && sizeBy === 'citations') ||
+              (graphType === 'topic' && topicSizeBy === 'citations')
             ? (n.citationCount ?? 0)
             : n.degree || deg[n.id] || 0;
     const values = nodes.map(metric);
@@ -244,7 +245,9 @@
           // Encoded channels (UX batch 3): spell out what size/color mean for THIS node.
           const sizeMetric =
             graphType === 'citation'
-              ? sizeBy
+              ? sizeBy === 'citations'
+                ? 'citation count'
+                : sizeBy
               : topicSizeBy === 'citations'
                 ? 'citation count'
                 : 'degree (similarity links)';
@@ -526,6 +529,7 @@
           <option value="degree">Size: degree</option>
           <option value="pagerank">Size: PageRank</option>
           <option value="betweenness">Size: betweenness</option>
+          <option value="citations">Size: citation count</option>
         </select>
         <select bind:value={colorBy} on:change={() => { if (graph) void build(); }}
           disabled={disabled || busy} data-testid="graph-color-by"
@@ -625,7 +629,7 @@
         ariaLabel={graphType === 'topic' ? 'Topic graph' : 'Citation graph'}>
         <svelte:fragment slot="fallback">Interactive view unavailable here — switch to List.</svelte:fragment>
       </ChartHost>
-      <p class="hint">Node size ≈ {graphType === 'citation' ? sizeBy : topicSizeBy === 'citations' ? 'citation count' : 'similarity links'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''} · ctrl-click a node to show only it + neighbors.{#if colorGroups.length}
+      <p class="hint">Node size ≈ {graphType === 'citation' ? (sizeBy === 'citations' ? 'citation count' : sizeBy) : topicSizeBy === 'citations' ? 'citation count' : 'similarity links'} · red ring = review warning · hover for details · click an in-library node to open it{onImportExternal ? ' (external nodes offer import)' : ''} · ctrl-click a node to show only it + neighbors.{#if colorGroups.length}
           Color chips: hover highlights, click hides/shows, shift-click solos, ctrl-click focuses a group + neighbors.{/if}</p>
     {:else}
       <ul class="edges">
@@ -676,7 +680,8 @@
           higher than one cited the same number of times by isolated papers.
           <strong>Betweenness</strong>: bridge-ness — how often the paper sits on the shortest
           path between two other papers; high values are papers connecting otherwise separate
-          areas.</dd>
+          areas. <strong>Citation count</strong>: the paper's global (external) citation count from
+          stored metadata — its real-world impact, independent of this scope's edges.</dd>
         <dt>Color</dt>
         <dd><em>Color: status/shelf/tag/topic/year</em> groups papers by that attribute (computed
           server-side; the chips above the graph filter the groups).</dd>

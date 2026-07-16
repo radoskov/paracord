@@ -70,6 +70,7 @@ class GraphNodeRead(BaseModel):
     degree: int = 0
     pagerank: float = 0.0
     betweenness: float = 0.0
+    citation_count: int | None = None
     color_group: str | None = None
     warning: bool = False
 

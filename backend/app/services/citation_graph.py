@@ -65,6 +65,9 @@ class GraphNode:
     degree: int = 0
     pagerank: float = 0.0
     betweenness: float = 0.0
+    # External/global citation count from stored metadata (local nodes only; None for external
+    # nodes and works with no count fetched). A selectable node-size channel (UX batch 4b).
+    citation_count: int | None = None
     # Categorical color group per the request's ``color_by`` (``None`` when uncolored/external).
     color_group: str | None = None
     # Review-warning marker: the work has a file-link warning state or an open duplicate candidate.
@@ -221,6 +224,20 @@ def build_citation_graph(
         for (source, target), weight in edge_weights.items()
     ]
     node_list = list(nodes.values())
+    # Backfill citation_count for any local node built via the reference fast-path (out-of-scope
+    # resolved target, no Work loaded) so the citation-count size channel covers every local node.
+    missing_cc = [
+        n.work_id for n in node_list if n.type == "local" and n.work_id and n.citation_count is None
+    ]
+    if missing_cc:
+        counts = dict(
+            db.execute(
+                select(Work.id, Work.citation_count).where(Work.id.in_(missing_cc))
+            ).all()
+        )
+        for n in node_list:
+            if n.type == "local" and n.work_id in counts:
+                n.citation_count = counts[n.work_id]
     # L-a (owner decision): cap the TOTAL node count, keeping the best-connected nodes, BEFORE the
     # O(V·E) centrality pass — previously a library scope ran exact betweenness over an unbounded
     # graph on the request path. The cap is admin-configurable per surface; hidden counts ship in
@@ -441,6 +458,7 @@ def _local_node(work: Work) -> GraphNode:
         work_id=work.id,
         year=work.year,
         doi=work.doi,
+        citation_count=work.citation_count,
     )
 
 

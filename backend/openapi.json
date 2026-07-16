@@ -3343,6 +3343,17 @@
             "title": "Betweenness",
             "type": "number"
           },
+          "citation_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation Count"
+          },
           "color_group": {
             "anyOf": [
               {

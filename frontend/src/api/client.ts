@@ -225,7 +225,7 @@ export type GraphScopeType =
   | "saved_filter";
 export type GraphNodeMode = "local_only" | "include_external";
 // §8.9 depth (Track C P5b). Node sizing is a client re-style — all three metrics ship on every node.
-export type GraphSizeBy = "degree" | "pagerank" | "betweenness";
+export type GraphSizeBy = "degree" | "pagerank" | "betweenness" | "citations";
 export type GraphColorBy =
   | "none"
   | "shelf"
@@ -247,6 +247,8 @@ export interface GraphNode {
   degree?: number;
   pagerank?: number;
   betweenness?: number;
+  // External/global citation count (local nodes only); a selectable size channel (UX batch 4b).
+  citation_count?: number | null;
   color_group?: string | null;
   warning?: boolean;
 }
