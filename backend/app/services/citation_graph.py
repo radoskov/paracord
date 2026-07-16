@@ -231,9 +231,7 @@ def build_citation_graph(
     ]
     if missing_cc:
         counts = dict(
-            db.execute(
-                select(Work.id, Work.citation_count).where(Work.id.in_(missing_cc))
-            ).all()
+            db.execute(select(Work.id, Work.citation_count).where(Work.id.in_(missing_cc))).all()
         )
         for n in node_list:
             if n.type == "local" and n.work_id in counts:

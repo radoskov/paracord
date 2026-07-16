@@ -264,9 +264,7 @@ def enqueue_work_summary(work_id, detail: str = "short") -> str | None:
     """Best-effort enqueue of a per-paper summary (batch action / detailed summary). None if the
     queue is down. Short and detailed are distinct jobs (they store separate rows)."""
     suffix = "" if detail == "short" else f"-{detail}"
-    return _enqueue_work_job(
-        SUMMARIZE_WORK_JOB, "summarize", work_id, detail, key_suffix=suffix
-    )
+    return _enqueue_work_job(SUMMARIZE_WORK_JOB, "summarize", work_id, detail, key_suffix=suffix)
 
 
 def enqueue_keywords(work_id) -> str | None:
