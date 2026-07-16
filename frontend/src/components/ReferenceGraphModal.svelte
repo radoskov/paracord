@@ -81,6 +81,23 @@
     message = `Added ${appendedCount} paper${appendedCount === 1 ? '' : 's'} to the import box — open the Import tab when ready.`;
   }
 
+  // Live case-insensitive filter for the grouped-node tooltip's paper list (2026-07-16): hide the
+  // member rows whose title/year don't match, in place (the enterable tooltip stays put while the
+  // mouse is over it, so typing is stable). Purely DOM — no re-render, no framework state.
+  function onTooltipSearch(ev: Event): void {
+    const input = (ev.target as HTMLElement | null)?.closest(
+      '[data-viz-search]',
+    ) as HTMLInputElement | null;
+    if (!input) return;
+    const box = input.parentElement?.querySelector('[data-viz-members]');
+    if (!box) return;
+    const q = input.value.trim().toLowerCase();
+    box.querySelectorAll('a').forEach((a) => {
+      const hit = !q || (a.textContent ?? '').toLowerCase().includes(q);
+      (a as HTMLElement).style.display = hit ? '' : 'none';
+    });
+  }
+
   // Delegate clicks on the enterable tooltip's links (an overlap-cluster lists its members): open a
   // single member, or prefill the Import box with every not-in-library member of the cluster.
   // ctrl / middle-click on an external member appends it to the import box without switching tabs.
@@ -318,6 +335,8 @@
     // 'auxclick' catches middle-click (button 1); 'click' also fires with ctrl/meta held.
     chart.getDom()?.addEventListener('click', onContainerClick);
     chart.getDom()?.addEventListener('auxclick', onContainerClick);
+    // 2026-07-16: live-filter the grouped-node tooltip's paper list (delegated, CSP-safe).
+    chart.getDom()?.addEventListener('input', onTooltipSearch);
     // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
     enableLegendSolo(chart);
     wireEdgeSnapZoom(chart);

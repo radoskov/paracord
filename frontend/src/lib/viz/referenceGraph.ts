@@ -129,7 +129,7 @@ const ACTION_LABEL: Record<ActionKind, string> = {
 const OVERLAP_DX = 0.18;
 
 // How many overlapping members a cluster tooltip lists before summarizing the rest ("…and N more").
-const TOOLTIP_MEMBER_LIMIT = 25;
+const TOOLTIP_MEMBER_LIMIT = 200; // scrollable + filterable; capped so a huge cluster can't hang
 
 export interface YAxisOption {
   key: string;
@@ -472,10 +472,17 @@ export function buildReferenceGraphOption(
               return `<a data-viz-open="${escapeHtml(m.id)}" style="${link}" title="${title}">${escapeHtml(m.label)}${m.year != null ? ` (${m.year})` : ""}</a>`;
             })
             .join("");
-          const rowsBox = `<div style="max-height:220px;overflow-y:auto">${rows}</div>`;
+          const rowsBox = `<div data-viz-members style="max-height:220px;overflow-y:auto">${rows}</div>`;
+          // 2026-07-16: a live case-insensitive filter over the listed papers (title + year), for
+          // large clusters. Shown only when it helps; filtering is done in the host via a delegated
+          // 'input' listener (CSP-safe — no inline handlers), hiding non-matching rows in place.
+          const search =
+            shown.length > 8
+              ? `<input data-viz-search type="search" placeholder="filter ${members.length} papers…" style="width:100%;box-sizing:border-box;margin:4px 0;padding:2px 5px;font:inherit;border:1px solid ${theme.axisLine};border-radius:4px;background:${theme.tooltipBg};color:${theme.tooltipText}" />`
+              : "";
           const more =
             members.length > shown.length
-              ? `<div style="margin-top:2px;opacity:0.8">…and ${members.length - shown.length} more</div>`
+              ? `<div style="margin-top:2px;opacity:0.8">…and ${members.length - shown.length} more (narrow with a search)</div>`
               : "";
           const importable = members
             .filter((m) => !m.resolved_work_id && m.kind !== "base")
@@ -484,7 +491,7 @@ export function buildReferenceGraphOption(
             ? `<a data-viz-import-all="${escapeHtml(importable.join(","))}" style="${link};margin-top:6px;font-weight:bold" title="Prefill the import box with the papers here that aren't in your library">Import all ${importable.length} →</a>`
             : "";
           // Groups are split by action kind, so one label describes the whole cluster.
-          return `<strong>${members.length} papers here · ${ACTION_LABEL[actionKindOf(members[0])]}</strong>${rowsBox}${more}${importAll}`;
+          return `<strong>${members.length} papers here · ${ACTION_LABEL[actionKindOf(members[0])]}</strong>${search}${rowsBox}${more}${importAll}`;
         }
         const n = params.data?.node ?? members?.[0];
         if (!n) return "";
