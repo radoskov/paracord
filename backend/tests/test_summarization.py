@@ -743,6 +743,15 @@ def test_detailed_summary_api_runs_as_a_job(client, auth_headers, db, monkeypatc
     update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
     db.commit()
 
+    # Pin the enqueue to a deterministic id: the unit suite runs without Redis, so a live
+    # enqueue_work_summary returns None (queue down) and the endpoint would fall through to the
+    # inline 201 path. Whether the dev stack's Redis happens to be reachable otherwise makes this
+    # 202-vs-201 flaky — green locally, red on CI. Stub it to the queued path we mean to assert.
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.works.enqueue_work_summary",
+        lambda work_id, detail="short": f"summarize-{work_id}-{detail}",
+    )
+
     work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three.")
     db.add(work)
     db.commit()
@@ -757,6 +766,47 @@ def test_detailed_summary_api_runs_as_a_job(client, auth_headers, db, monkeypatc
     # A real detailed summary job was enqueued (coalescing key names the work + the detailed variant).
     assert body["job_id"].startswith("summarize-") and "detailed" in body["job_id"]
     assert body["summary_type"] == "local_llm_detailed_deep"
+
+
+def test_detailed_summary_enqueues_a_real_rq_job(client, auth_headers, db, requires_redis) -> None:
+    """Integration: with a real Redis/RQ present, the detailed-summary endpoint actually enqueues a
+    job on the queue (not just the stubbed branch the unit test above asserts).
+
+    Runs on a dev box whose docker stack includes Redis; self-skips on the Redis-less CI backend
+    job (see the ``requires_redis`` fixture). This is the test that proves the queue plumbing —
+    endpoint -> enqueue_work_summary -> get_queue().enqueue -> a fetchable RQ job — works end to end.
+    """
+    from app.services.ai_config import update_ai_config
+    from app.workers.queue import SUMMARIZE_WORK_JOB, get_queue
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+
+    work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three.")
+    db.add(work)
+    db.commit()
+    work_id = work.id
+
+    r = client.post(
+        f"/api/v1/works/{work_id}/summaries",
+        headers=auth_headers("editor"),
+        json={"summary_type": "auto", "detail": "detailed"},
+    )
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+
+    # Fetch the job straight back out of Redis to prove it was really registered, then delete it so
+    # a live dev worker never runs a summary for this rolled-back test work.
+    from rq.job import Job
+
+    queue = get_queue()
+    job = Job.fetch(job_id, connection=queue.connection)
+    try:
+        assert job.func_name == SUMMARIZE_WORK_JOB
+        assert job.args[0] == str(work_id)
+        assert job.args[1] == "detailed"
+    finally:
+        job.delete()
 
 
 def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:

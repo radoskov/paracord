@@ -127,6 +127,26 @@ def _scope_summary_runs_inline(monkeypatch):
     monkeypatch.setattr(queue, "enqueue_scope_summary", lambda *a, **k: None)
 
 
+@pytest.fixture()
+def requires_redis():
+    """Skip the test unless the configured Redis (for RQ) is actually reachable.
+
+    RQ-integration tests exercise the *real* enqueue path (no stub), which needs a live Redis. A
+    dev box running the docker stack has one; GitHub's ``backend`` CI job brings up only Postgres,
+    so those tests self-skip there — the same "skip when the infra is absent" convention
+    ``test_migration_parity`` uses for Postgres. The short connect timeout keeps collection snappy
+    when nothing is listening.
+    """
+    from app.core.config import get_settings
+    from redis import Redis
+    from redis.exceptions import RedisError
+
+    try:
+        Redis.from_url(get_settings().redis_url, socket_connect_timeout=0.5).ping()
+    except (RedisError, OSError) as exc:
+        pytest.skip(f"Redis not reachable for RQ integration test: {exc}")
+
+
 @pytest.fixture(autouse=True)
 def _audit_file_sink_tmp(tmp_path, monkeypatch):
     """Redirect the append-only audit file sink (D31.1) to a throwaway path per test.
