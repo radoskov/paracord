@@ -591,13 +591,6 @@
 
   // Scroll-to + flash a context entry inside the reader's own References (contexts) tab.
   async function revealContextInTab(contextId: string): Promise<void> {
-    // The References tab has no controls in zen (the tab nav is hidden), so switching to it there
-    // would strand the user on an unreachable, un-styled ("black") pane. Leave zen first so the tab
-    // nav returns and the pane paints under normal styling (2026-07-16).
-    if (zen) {
-      exitZen();
-      await tick();
-    }
     tab = 'contexts';
     await tick();
     const el = document.getElementById(`reader-ctx-${contextId}`);
@@ -1137,6 +1130,13 @@
       </div>
     {/if}
   {:else if tab === 'contexts'}
+    <!-- The tab nav lives in <header>, which is hidden in zen — so a citation click that lands here
+         in zen would otherwise strand the reader with no way back to the pages. This in-pane button
+         is always available (and is the ONLY route back while in zen). -->
+    <div class="ctx-nav">
+      <button type="button" class="back-to-paper" on:click={() => (tab = 'pdf')}
+        title="Return to the PDF pages">← Back to paper</button>
+    </div>
     {#if contexts.length === 0}
       <p class="empty">No citation contexts extracted</p>
     {:else}
@@ -1314,7 +1314,10 @@
     z-index: 1000; /* above the paper-view modal backdrop */
   }
 
-  .reader.zen header,
+  /* Direct-child only: the tab nav lives in the reader's top <header>. A bare `.reader.zen header`
+     also matched the <header> inside each References/Notes article, blanking their marker + section
+     line — the "black"/empty References pane seen in zen (2026-07-16). */
+  .reader.zen > header,
   .reader.zen .search,
   .reader.zen .copy-text-btn,
   .reader.zen .select-btn,
@@ -1600,6 +1603,22 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
+  }
+
+  .ctx-nav {
+    margin-bottom: 0.6rem;
+  }
+
+  .back-to-paper {
+    padding: 0.3rem 0.6rem;
+  }
+
+  /* In zen the top nav is gone, so this is the only way back to the pages — keep it legible on the
+     dark backdrop. */
+  .reader.zen .back-to-paper {
+    background: #1b1e24;
+    border-color: #2c313a;
+    color: #cdd3dc;
   }
 
   .error {

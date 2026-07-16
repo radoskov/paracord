@@ -27,9 +27,12 @@ passed while the bug survived manually.
   real background job, holds the reader open across two 4s poll ticks so a refresh fires mid-view,
   then closes + re-opens — asserting the reader returns AND no page error escaped teardown. This is
   the only test that reproduces it.
-- **Zen citation fix**: clicking an in-text citation in zen switched to the (hidden-nav) References
-  tab, stranding the user on an un-styled "black" pane; it now leaves zen first so the nav returns
-  and the pane paints normally.
+- **Zen References fix**: clicking an in-text citation in zen switches to the References tab and now
+  **stays in zen** (per user preference — leaving zen was the wrong call). Two real fixes make that
+  usable: (1) a `← Back to paper` button in the References pane (`.ctx-nav`) — the only route back to
+  the pages while zen hides the top tab nav; (2) the zen `display:none` rule was scoped from
+  `.reader.zen header` to `.reader.zen > header`, so it no longer blanks the `<header>` inside each
+  References/Notes article — that descendant match was the actual "black"/empty References pane.
 - **Known separate bug (not fixed)**: extraction jobs intermittently fail with
   `StaleDataError: UPDATE ... works expected to update 1 row(s); 0 were matched` at
   `store_parsed_extraction`'s flush. `Work` has no optimistic-lock column, so the row is being
