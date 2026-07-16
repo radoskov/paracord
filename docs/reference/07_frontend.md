@@ -7,8 +7,10 @@ served separately from the API (Vite dev on `127.0.0.1:5173`, nginx in prod) and
 backend over CORS at `/api/v1`.
 
 > Components are written in the **Svelte 4 dialect** (`export let`, `$:`, `on:click`, slots) even
-> though the app boots via Svelte 5's `mount()` API — no runes. Heavy deps (`cytoscape`+`fcose`,
-> `echarts`, `pdfjs-dist`) are all **lazy-loaded**.
+> though the app boots via Svelte 5's `mount()` API — no runes. Heavy deps (`echarts`,
+> `pdfjs-dist`) are all **lazy-loaded** (a shared `ChartHost.svelte` owns the ECharts
+> lazy-import/init/resize/dispose lifecycle for every chart surface — the previous Cytoscape+fcose
+> graph renderer was replaced by ECharts on 2026-07-13, one charting stack for the whole app).
 
 ---
 
@@ -53,7 +55,7 @@ Every page takes `client: ApiClient` (some also `visible`). `WorkDetail` is the 
 (metadata review, files, references, summaries, topics, keywords, find-on-web, merge/unmerge, citing
 papers). `PaperTable` is the reusable sortable/selectable table.
 
-## 3. API client (`src/api/client.ts`, ~3160 lines)
+## 3. API client (`src/api/client.ts`, ~3560 lines)
 
 A single `ApiClient` class + **all shared domain TypeScript interfaces** (the single type source for
 the app: `Work`, `Shelf`, `Rack`, `Tag`, graph/viz/citation-summary/import/admin types).
@@ -65,8 +67,11 @@ the app: `Work`, `Shelf`, `Rack`, `Tag`, graph/viz/citation-summary/import/admin
   **401 → `onUnauthorized` (logout)**; **429/503 matching `/queue is full/i` → `onQueueFull`**
   (phrase-keyed so ordinary rate-limit 429s don't fire it); `204 → undefined`.
 - Raw-fetch helpers bypass the JSON path for multipart/streaming/blobs (`uploadWorkFile`,
-  `uploadPdf`, `uploadPdfsMulti`, `streamFindOnWeb` NDJSON reader, `getFileBlob`), each
-  re-implementing auth + 401.
+  `uploadPdf`, `uploadPdfsMulti`, `streamFindOnWeb` NDJSON reader, `getFileBlob` via the private
+  `requestBlob()`), each re-implementing the bearer header. Only `streamFindOnWeb` and
+  `getFileBlob`/`requestBlob` also re-implement 401 → `onUnauthorized`; `uploadWorkFile`, `uploadPdf`
+  and `uploadPdfsMulti` do **not** — an expired session during a file/PDF upload throws an error but
+  does not force the app-wide logout the way every other call does.
 
 ⚠️ Two client flags to know: `actOnReference` likely **double-stringifies** its body (passes
 `JSON.stringify({action})` where `request()` also stringifies) — probable bug; and the raw-fetch
@@ -96,13 +101,13 @@ theme has a `tokens` block (`surface/ink/border/accent/status`) injected as CSS 
 and a `graph` block (categorical palette validated for CVD-safety + contrast, node/edge/label
 colors). `store.ts` holds `activeThemeId`/`activeTheme`/`activeVizTheme`/`followSystem`. Boot priority
 (no flash): localStorage cache → server `theme` (from `/auth/me`) → default. **Live re-styling** —
-Cytoscape/ECharts re-read the resolved theme on `$activeThemeId` change without a rebuild. Owner/admin
+ECharts surfaces re-read the resolved theme on `$activeThemeId` change without a rebuild. Owner/admin
 custom themes (uploaded YAML) merge into everyone's picker. Full operator guide:
 [`docs/runbooks/features.md`](../runbooks/features.md).
 
 ## 6. Notable UI features
 
-- **PdfReader (~1400 lines)** — PDF.js lazy-loaded; Paper/References/Notes tabs; paged vs scroll
+- **PdfReader (~1740 lines)** — PDF.js lazy-loaded; Paper/References/Notes tabs; paged vs scroll
   view (IntersectionObserver lazy render); reading modes original/dim/dark applied as a CSS filter on
   the canvas only (text-selection layer keeps true colors); clickable citation overlay boxes +
   annotation highlights (`lib/reader/overlayBoxes.ts`) tracked across zoom; whole-document search with
@@ -110,20 +115,31 @@ custom themes (uploaded YAML) merge into everyone's picker. Full operator guide:
   annotation mapping to GROBID-style scaled coords; bidirectional citation↔reference navigation.
   **Zen mode** (UX batch 3): the reader portals itself to `<body>` (a modal ancestor's containing
   block would otherwise clip `position:fixed`) and fills the viewport over a dark backdrop; only
-  paging/zoom/view-mode/reading-mode + Exit zen remain; Esc exits.
+  paging/zoom/view-mode/reading-mode + Exit zen remain; Esc exits. The tab nav (which holds the
+  References/Notes switcher) lives in the hidden header, so clicking a citation overlay while in zen
+  switches to the References tab *without leaving zen* — an in-pane "← Back to paper" button is the
+  only way back to the pages in that state.
   ⚠️ the PDF is fully buffered (`.arrayBuffer()`) — large scans load entirely into RAM.
-- **CitationGraph (~740 lines)** — Cytoscape + fcose. Citation (directed) vs Topic (similarity)
-  graph; Graph vs List modes. Controls: node mode, collapse-versions, size-by
-  (degree/PageRank/betweenness — live restyle), color-by (this one **refetches**), hide-singletons/
-  external. Perf (D17): a topology signature decides rebuild-vs-restyle; filters just show/hide.
+  Teardown (`onDestroy`) is wrapped to be exception-safe: a mid-view prop reassignment (e.g. a
+  background job-poll refresh landing while the reader is open) can leave pdf.js objects in a state
+  whose teardown throws, which would otherwise corrupt Svelte's effect tree.
+- **CitationGraph (~920 lines)** — ECharts `graph` series via the shared `ChartHost` (the previous
+  Cytoscape+fcose renderer was retired 2026-07-13 — ECharts is now the only charting stack). Citation
+  (directed) vs Topic (similarity) graph; Graph vs List modes. Controls: node mode, collapse-versions,
+  size-by (degree/PageRank/betweenness — live restyle), color-by (this one **refetches**),
+  hide-singletons/external, show/hide citing papers. Rebuild-vs-restyle: `renderChart` compares the
+  fetched graph object by reference — a genuine reload does a full non-merge `setOption` (restarts
+  the force sim), a filter/size/color-only repaint does a merge `setOption` (preserves pan/zoom).
   Themed from `VizTheme.graph`; tap local → open, tap external-with-DOI → import.
 - **ExportDialog** — legacy (`onExport(format)`) vs rich (`fetchExport` → preview/copy/download). 10
   formats; `styled` reveals a CSL style dropdown.
 - **PaperTable + LibraryPage** — `table-layout:fixed`, column registry (`lib/columns.ts`,
   `LIBRARY_COLUMNS`), sortable headers, multi-select; LibraryPage adds a resizable two-pane split
-  (persisted %), lucene-ish filters + search modes (metadata/semantic/hybrid), saved filters,
-  server-controlled pagination (D18) with client sort for semantic/hybrid (capped 50 ranked ∩ 500
-  filtered), and batch ops with bounded concurrency (`runBatched`, chunks of 6, `Promise.allSettled`).
+  (persisted %), lucene-ish filters + search modes — ranked `metadata`/`semantic`/`hybrid` plus
+  exact-field modes `keywords`/`topic`/`author`/`venue` that wrap the free text in the matching
+  structured operator (`keyword:"…"` etc.) — saved filters, server-controlled pagination (D18) with
+  client sort for semantic/hybrid (capped 50 ranked ∩ 500 filtered), and batch ops with bounded
+  concurrency (`runBatched`, chunks of 6, `Promise.allSettled`).
 - **Visualizations registry (`lib/viz/registry.ts`)** — `view_type → VizRenderer` with pure
   `buildOption(payload, theme)` (never imports echarts, so jsdom-unit-testable). Five renderers:
   temporalMap (default), embeddingCluster, coCitation, topicRiver, similarityHeatmap.
@@ -137,8 +153,11 @@ custom themes (uploaded YAML) merge into everyone's picker. Full operator guide:
   Shift-click legend/chip = solo. Tooltips append the encoded channels (`size = …`, `color = …`).
   Reference graph extras: edge-snapped wheel zoom (cursor near a plot edge pins the window to
   that data edge), Max-external base 500 persisted per user (`reference_graph_max_external`
-  preference). Temporal map / embedding cluster: two-handle slider dataZoom bars replaced the
-  manual min/max inputs (end stops = auto).
+  preference), and edges fixed-colored by relation to the base paper — reference edges (blue),
+  citing edges (gold), ref↔ref edges (teal, shown only when "local reference-to-reference edges"
+  is on); external citing papers render as a lighter tint of the citing color so in-library vs
+  external citers stay distinguishable. Temporal map / embedding cluster: two-handle slider dataZoom
+  bars replaced the manual min/max inputs (end stops = auto).
 
 ## 7. "Paper" (UI) vs "Work" (code)
 

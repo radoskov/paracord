@@ -14,7 +14,7 @@ flowchart TB
     up["Upload / import / agent push<br/>(files · imports · agents · works endpoints)"]
     cap{"assert_queue_has_capacity<br/>429 if full"}
     store["Store PDF → /app/storage (content-addressed sha256)<br/>File.extraction_requested_at = now (D7 owed)<br/>commit"]
-    enq["enqueue_extraction(file_id)<br/>id = extract-{file_id}"]
+    enq["enqueue_extraction(file_id)<br/>key = extract-{file_id}, id = key-{token}"]
     redis[("Redis / RQ queue 'paracord'")]
     recover["startup sweep_owed_extractions()<br/>re-enqueues if Redis was down"]
     job["worker: extract_pdf_job"]
@@ -53,7 +53,8 @@ file is not re-swept (no poison loop).
 (`resolve_backend_readable_pdf_path`), read OCR config, run the OCR pre-step, POST to
 `{GROBID_URL}/api/processFulltextDocument` (120 s timeout, consolidation + `teiCoordinates` flags).
 
-**D · OCR pre-step** (`ocr.py`): `_text_layer_quality` classifies the file; `_resolve_ocr_engine`
+**D · OCR pre-step** (`extraction.py`'s `_text_layer_quality`/`_resolve_ocr_engine`, calling into
+`ocr.py`'s `maybe_ocr`/`pymupdf_ocr`): `_text_layer_quality` classifies the file; `_resolve_ocr_engine`
 picks `ocrmypdf`/`pymupdf`/none from backend + availability + quality (or `force_ocr`). OCR runs
 into a temp dir and the searchable copy feeds GROBID; the derived copy is saved under
 `derived_ocr/<sha[:2]>/<sha>.pdf` (never pollutes the content-addressed original). **OCR never fails
@@ -81,8 +82,12 @@ title/abstract/TEI sections; deterministic ⇒ idempotent.
 **I · Embedding** (`embed_work_job`): `index_one_work` (doc-level baseline `Embedding` + pgvector
 copy) and `embed_work_chunks` (chunk-level pgvector, **Postgres + a registered model column only**).
 
-**J · Topics / summaries** (manual/admin): `topic_work_job`, `keywords_work_job`.
-`summarize_scope_job` and `topic_model_job` are currently **no-op stubs**.
+**J · Topics / summaries** (manual/admin): `topic_work_job`, `keywords_work_job` re-run per-paper.
+`summarize_scope_job` and `topic_model_job` run the real large-scope summary / topic-model pipelines
+(`summarize_scope`, `model_topics`) on the worker when a scope exceeds `ai_scope_job_threshold`
+(S15/S16) — they are **not** stubs. `fetch_citing_work_job` (refresh citing papers) and
+`summarize_work_job` (per-paper summary, short or detailed) are newer manual/batch-action jobs
+(2026-07-15) added alongside these.
 
 ## 2. The job queue
 
@@ -105,10 +110,15 @@ flowchart LR
 
 - **Redis + RQ**, single queue `paracord`. Redis/RQ imported lazily so the module loads without a
   live Redis.
-- **Idempotency via deterministic job ids**: `extract-{file_id}`, `{prefix}-{work_id}` for
-  enrich/embed/chunk/topic/keywords, fixed `bm25-rebuild`/`reference-rescan-all`. `_live_job_id`
-  no-ops an enqueue if a live job with that id already exists — this is what stops the recovery
-  sweep and a manual re-extract from racing into two jobs.
+- **Idempotency via coalescing keys, not fixed job ids**: every actual run gets a unique id
+  `{key}-{token}` (e.g. `extract-{file_id}-a1b2c3d4`, `{prefix}-{work_id}-...` for
+  enrich/embed/chunk/topic/keywords/citing/summarize) so re-running a finished/failed job creates a
+  new Jobs-tab entry instead of overwriting history. Library-singleton jobs still use a fixed id
+  (`bm25-rebuild`, `reference-rescan-all`, `reference-consolidation`, `backup-export`,
+  `backup-restore`). A Redis `latest-job:{key} -> job id` pointer (`_remember_latest_job`) plus
+  `_live_job_id` (`queue.py`) let `_live_coalesced_job` skip the enqueue when the previous run for
+  that key is still queued/started/deferred/scheduled — this is what stops the recovery sweep and a
+  manual re-extract from racing into two jobs.
 - **Supervisor** (`workers/supervisor.py`): waits for the DB to reach Alembic head, reads
   `rq_worker_count` **once at startup**, forks that many `rq worker` children, restarts any that die,
   SIGTERM-drains with a 10 s grace. **Changing worker count needs a container restart.**
@@ -154,5 +164,7 @@ enrichment itself is best-effort and intentionally not auto-recovered (a missed 
   call); raising `rq_worker_count` parallelizes extraction only up to GROBID's capacity.
 - **OCR** is the heaviest per-file CPU step (page rasterization); bounded by a timeout.
 - `rescan_reference_matches_job` also rematches every cached `ExternalPaper` (incoming direction).
-- `scan_duplicates_job` and `rescan_reference_matches_job` load the **entire corpus** into one
-  transaction (O(N) memory, one big commit) — will not scale to a large library without pagination.
+- `scan_duplicates_job` loads the **entire corpus** into one transaction (O(N) memory, one big
+  commit) — will not scale to a large library without pagination. `rescan_reference_matches_job`
+  (S8/S9) already builds its match indexes from the whole library once (still O(N) memory) but
+  commits every `_RESCAN_COMMIT_EVERY` (500) rows, so a crash/poison row loses at most one batch.

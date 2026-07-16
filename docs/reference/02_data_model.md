@@ -2,8 +2,10 @@
 
 [← Architecture](01_architecture.md) · [Backend services →](03_backend_services.md)
 
-Source of truth: `backend/app/models/*.py` (27 model files) and the 61 Alembic migrations in
-`backend/alembic/versions/`. This documents the schema the ORM defines **today**.
+Source of truth: `backend/app/models/*.py` (26 model files) and the 10 Alembic migrations in
+`backend/alembic/versions/` — the historical `0001`…`0067` chain (68 files) was squashed on
+2026-07-13 into a single `0067_squashed_baseline` revision, followed by `0068`…`0076`. This
+documents the schema the ORM defines **today**.
 
 ---
 
@@ -63,6 +65,10 @@ erDiagram
     racks ||--o{ rack_shelves : contains
     shelves ||--o{ rack_shelves : "member of"
     tags ||--o{ tag_links : "attached via"
+    tags ||--o{ tag_shelves : "scoped to"
+    shelves ||--o{ tag_shelves : "member of"
+    tags ||--o{ tag_racks : "scoped to"
+    racks ||--o{ tag_racks : "member of"
 
     agents ||--o{ agent_files : indexed
     agents ||--o{ agent_enrollment_tokens : issued
@@ -74,18 +80,22 @@ erDiagram
     works }o..o{ summaries : "soft: entity_id"
     works }o..o{ topic_assignments : "soft: work_id"
     works }o..o{ tag_links : "soft: entity_id"
+    works }o..o{ scope_notes : "soft: scope_id"
 ```
 
 **Singletons** (fixed-id single-row overlays over static `Settings`, no relationships):
 `ai_config`, `app_config`, `web_find_settings`, `access_settings`.
-`app_config` grew in the 2026-07-15 UX batches (migrations 0070–0073): matching acceptance
-(`fuzzy_accept_threshold`, `use_high_confidence_auto_accept`), `citation_summary_item_cap`,
-and the Elsevier API pair (`elsevier_api_key` — write-only through the admin API — and the
-`elsevier_api_enabled` master switch); `users.elsevier_api_allowed` (0073, NULL→False) is the
-per-user gate for that key.
+`app_config` grew across migrations `0069`–`0073`: per-surface analysis graph node caps
+(`citation_graph_node_cap`/`topic_graph_node_cap`/`viz_node_cap`, `0069`), matching acceptance
+(`fuzzy_accept_threshold`, `use_high_confidence_auto_accept`, `0070`), `citation_summary_item_cap`
+(`0071`), and the Elsevier API pair (`elsevier_api_key` — write-only through the admin API — and the
+`elsevier_api_enabled` master switch, `0072`); `users.elsevier_api_allowed` (`0073`, NULL→False) is
+the per-user gate for that key. `agents.token_expires_at` (`0068`, NULL = permanent) lets an
+approval mint a short-lived agent token.
 **Standalone**: `web_find_allowed_hosts`, `import_roots`, `audit_events` (soft actor links),
 `duplicate_candidates` (soft polymorphic pair), `embedding_model_registry`, `missing_work_decisions`,
-`custom_themes`, `default_grants`.
+`custom_themes`, `default_grants`, `scope_notes` (soft `scope_type`/`scope_id`, `0076`),
+`tag_shelves`/`tag_racks` (tag-availability scoping, `0075`).
 
 ## 2.3 The polymorphic (discriminator) pattern
 
@@ -99,6 +109,7 @@ rows to a work/shelf/rack/citation-context/search-result generically:
 | `embeddings` | `entity_type`, `entity_id`, `model_name` |
 | `summaries` | `entity_type`, `entity_id`, `summary_type` |
 | `topic_assignments` | `scope_type`, `scope_id`, `work_id` |
+| `scope_notes` | `scope_type`, `scope_id` (unique pair; library scope uses an all-zero sentinel id) |
 | `duplicate_candidates` | `entity_a_type/id`, `entity_b_type/id` (a **pair**) |
 | `audit_events` | `entity_type`, `entity_id` (as `String255`) |
 | `group_grants`, `default_grants` | `target_type` (`rack`/`shelf`), `target_id` |
@@ -119,6 +130,7 @@ classDiagram
         +Text canonical_title
         +Text normalized_title
         +Text abstract
+        +Text notes  «free-form, shown below abstract in paper view»
         +String doi
         +String arxiv_id / arxiv_base_id
         +String venue
@@ -222,9 +234,14 @@ warning state); `WorkVersion` and `FileSegment` model multi-version and multi-wo
 | `shelf_works` | `ShelfWork` | PK `(shelf_id, work_id)`; `work_id` separately indexed for access filtering |
 | `rack_shelves` | `RackShelf` | PK `(rack_id, shelf_id)`; `shelf_id` separately indexed |
 | `tag_links` | `TagLink` | polymorphic PK `(tag_id, entity_type, entity_id)` |
+| `tag_shelves` | `TagShelf` | PK `(tag_id, shelf_id)`; restricts where a tag is *offered* (`0075`) |
+| `tag_racks` | `TagRack` | PK `(tag_id, rack_id)`; same, for racks (a paper qualifies via any shelf on that rack) |
 
 Membership is many-to-many both ways: a work can be on many shelves; a shelf can be in many racks.
 The `access_level` on shelves/racks is the anchor of the whole access-control model (§2.4 Access).
+A tag with **no** `tag_shelves`/`tag_racks` rows is global (offered everywhere); one or more rows
+restrict where it is offered when tagging — distinct from `tag_links`, which records an actual
+tagging.
 
 ### Extraction & citations
 
@@ -279,7 +296,7 @@ classDiagram
         +int position  «unique per work»
         +Text text
         +int token_count
-        +vector vec_minilm_vec_nomic  «Postgres-only, off-ORM»
+        +vector vec_minilm, vec_nomic  «per-model, Postgres-only, off-ORM»
     }
     Reference "1" --> "*" ReferenceCitation
     Work "1" --> "*" ReferenceCitation
@@ -305,10 +322,11 @@ works, keyed by a stable normalized `missing_key`.
 | Table | Class | Purpose |
 |-------|-------|---------|
 | `embeddings` | `Embedding` | Polymorphic dense vector. `vector` (JSON, source of truth, Python kNN) + optional Postgres-only `vector_pg`. Unique `(entity_type, entity_id, model_name)`. |
-| `summaries` | `Summary` | Polymorphic summary with rich provenance (`model_name`, `provider_requested`/`provider_used`, `fallback`, `source_sections`, `content_hash`). |
+| `summaries` | `Summary` | Polymorphic summary with rich provenance (`model_name`, `provider_requested`/`provider_used`, `fallback`, `source_sections`, `content_hash`). `summary_type` encodes the effort level as a suffix; since `0074` the old single `_detailed` level is three (`_fast`/`_section`/`_deep`) — a data-only migration, no schema change. |
 | `topic_assignments` | `TopicAssignment` | Work→topic under a `(topic_model_id, scope_type, scope_id)` scope. |
 | `ai_config` | `AIConfig` | **Singleton** provider config (embedding/summary/topic backends, OCR, Ollama URL). |
 | `embedding_model_registry` | — | Dynamic model→pgvector-column map (PK = `slug`); drives runtime DDL. |
+| `scope_notes` | `ScopeNote` | Free-form per-Insights-scope note (`0076`); one row per `(scope_type, scope_id)`, upserted in place. Defined in `app/models/ai.py` alongside `Summary`/`TopicAssignment`. |
 
 ### Access control
 
@@ -371,7 +389,7 @@ SEE/MODIFY decisions.
 
 | Table | Class | Notes |
 |-------|-------|-------|
-| `agents` | `Agent` | `token_hash`, `status`, per-agent privilege booleans (`can_index`/`can_extract`/`can_teleport`=false/`can_be_requested`/`processing_visibility`/`server_status_visibility`), `capabilities` JSONB |
+| `agents` | `Agent` | `token_hash`, `token_expires_at` (soft-expiring tokens, `0068`, NULL = permanent), `status`, per-agent privilege booleans (`can_index`/`can_extract`/`can_teleport`=false/`can_be_requested`/`processing_visibility`/`server_status_visibility`), `capabilities` JSONB |
 | `agent_enrollment_tokens` | `AgentEnrollmentToken` | single-use owner-issued token (hashed) |
 | `agent_files` | `AgentFile` | `local_file_id`, `sha256`, display-only paths, `import_action` (`index_only`/`index_and_extract`/`teleport`), `teleport_policy`, `processing_state`, soft `file_id`/`work_id` |
 
@@ -410,18 +428,34 @@ allowlist), `ImportRoot` (GUI-added scan roots), `CustomTheme` (runtime YAML the
 
 ## 2.6 Migration history at a glance
 
-64 revisions, from `0001` (users + audit) through `0063` (F2 per-paper processing error) plus one
-hash-named `6a310e33c3d6` (timestamptz conversion). Milestones worth knowing:
+**The historical chain was squashed on 2026-07-13.** The old `0001`…`0067` chain (68 files,
+including one hash-named `6a310e33c3d6` for the timestamptz conversion) is gone from
+`backend/alembic/versions/`; it is replaced by a single `0067_squashed_baseline` revision that
+keeps the *same* revision id as the old head (`0067_citing_cap_ai_threshold`) so an existing
+database stamped at that id sees itself at head, while a fresh database gets the whole schema in
+one step. The baseline is frozen, pinned autogenerate output — it must never be regenerated — and
+its docstring/comments are now the only record of the pre-squash milestones (core library,
+extraction + TEI + mentions, dup candidates, citation PDF coordinates, AI config, pgvector, the
+`0024` role redesign, `0028`/`0029`/`0039` access control, chunks + chunk vectors + model registry,
+import staging, the `0057`→`0058` external-citations denormalized→normalized restructuring, `0059`
+canonical references, `0060` fuzzy-match toggle, `0061` reference-rescan-on-startup, `0062`
+`files.extraction_attempts`, `0063` `works.processing_error`, `0064` external-citer local-matcher
+`resolved_work_id`). See [§11](11_future_and_revision_notes.md#data-model).
 
-- `0003` core library · `0004`/`0005` extraction + raw TEI + mentions · `0006` dup candidates
-- `0013` citation PDF coordinates → JSONB · `0018` AI config · `0019` pgvector
-- `0024` role redesign · `0028`/`0029`/`0039` access control · `0034`/`0035`/`0036` chunks + chunk
-  vectors + model registry
-- `0056` import staging · `0057`→`0058` external citations (denormalized → normalized) · `0059`
-  canonical references · `0060` fuzzy-match toggle
-- `0061` reference-rescan-on-startup toggle (F3a) · `0062` `files.extraction_attempts` (F2 retry cap)
-  · `0063` `works.processing_error` (F2 loud per-paper failures)
+There are now **10 files** in `backend/alembic/versions/`, forming a single linear chain
+`0067_citing_cap_ai_threshold` → `0076_notes`:
 
-> Two entries show schema churn worth noting when reading migration history: `0057` created a
-> denormalized `external_citations` table that `0058` immediately restructured into
-> `external_papers` + `external_citation_links`. See [§11](11_future_and_revision_notes.md#data-model).
+- `0067_squashed_baseline` — the frozen baseline described above.
+- `0068_agent_token_expiry` — `agents.token_expires_at` (D3), NULL = permanent token.
+- `0069_graph_node_caps` — `app_config` per-surface analysis graph node caps (Insights audit L-a):
+  `citation_graph_node_cap`, `topic_graph_node_cap`, `viz_node_cap`.
+- `0070_matching_acceptance` — `app_config.fuzzy_accept_threshold` +
+  `use_high_confidence_auto_accept`.
+- `0071_citation_summary_cap` — `app_config.citation_summary_item_cap`.
+- `0072_elsevier_api_key` — `app_config.elsevier_api_key` (nullable, write-only through the admin
+  API; falls back to `PARACORD_ELSEVIER_API_KEY`).
+- `0073_elsevier_api_gating` — `app_config.elsevier_api_enabled` + `users.elsevier_api_allowed`.
+- `0074_summary_effort_levels` — data-only: migrates existing `summaries.summary_type` rows from a
+  single `_detailed` suffix to `_detailed_deep` (the level split into fast/section/deep).
+- `0075_tag_scope` — new `tag_shelves`/`tag_racks` join tables (tag-availability scoping).
+- `0076_notes` — `works.notes` column + new `scope_notes` table (per-Insights-scope notes).

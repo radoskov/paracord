@@ -35,10 +35,10 @@ floor unless noted.
 | Way in | Endpoint | Notes |
 |--------|----------|-------|
 | Single PDF | `POST /imports/upload` (multipart, opt `target_shelf_id`) | 200 MB cap + `%PDF` magic + openability probe; content-addressed dedup; mints Work+File+ImportBatch; sets owed marker; enqueues extraction |
-| Multi-PDF staging | `POST /imports/upload-multi` (`mode=preview\|direct`) | extract-before-store; poll `GET /imports/staging/{id}` → `ready` (TEI preview + detected duplicates) → `POST .../commit` |
+| Multi-PDF staging | `POST /imports/upload-multi` (`mode=preview\|direct`) | extract-before-store; poll `GET /imports/staging/{id}` → `ready` (TEI preview + detected duplicates) → `POST .../commit` (commit itself is contributor floor) |
 | By identifier | `POST /imports/identifier` (`doi\|arxiv`) | idempotent; mints a metadata-only Work; `enrich_work` pulls external metadata |
 | Bibliography | `POST /imports/bibtex\|/ris\|/csl` (pasted) | maps entries → Works + author assertions |
-| Batch raw citations | `POST /imports/batch/preview` (`engine=lookup\|grobid`) → `POST /imports/batch/commit` | preview writes nothing; confirm to commit |
+| Batch raw citations | `POST /imports/batch/preview` (`engine=lookup\|grobid`) → `POST /imports/batch/commit` | **contributor** floor (not editor); preview writes nothing (no queue-capacity check either) and confirm to commit |
 | Server folder | owner `POST /admin/import-roots` → editor `POST /sources/server-folder` → `POST /imports/folder` | imports PDFs **in place** (no copy) |
 | Agent teleport | see [§3.11](#311-multi-user--lan-setup) + [06 — Agent](06_agent_protocol.md) | opaque-id manifest → request → hash-verified push |
 
@@ -58,7 +58,9 @@ contexts + raw TEI → arXiv/Crossref enrichment → chunking → embedding. Ful
   orphaned papers fall back to it (invariant: every work is on ≥1 shelf).
 - **Tags** are global labels: `GET/POST /tags` (create-or-return, contributor+), `DELETE` (editor+),
   attach/detach via `/{id}/links` (needs modify on the target). Tags can be hierarchical
-  (`parent_tag_id`).
+  (`parent_tag_id`). Tags can also be scoped to specific shelves/racks (`PUT /tags/{id}/scope`,
+  contributor+); an unscoped tag stays global. `GET /tags/assignable?work_id=` lists the tags
+  offered for a given paper (global ones plus those scoped to a shelf/rack the paper is on).
 - "Where is this paper?" → `GET /works/{id}/shelves`.
 
 ## 3.5 Search: keyword, semantic, hybrid
@@ -68,8 +70,9 @@ contexts + raw TEI → arXiv/Crossref enrichment → chunking → embedding. Ful
   over title/abstract/DOI/arXiv/venue, sha256 lookup; allowlisted sort + server-clamped pagination.
 - **Ranking search** `POST /search`: `mode ∈ lexical | semantic | hybrid` (default hybrid = BM25F+ ⊕
   dense via RRF); optional `embedding_model` (or `multimode`); per-item `relevance` + honest
-  `degraded`/`provider_used`. `POST /search/semantic` for chunk-level; `POST /search/warm` on library
-  open; `POST /search/reindex` (editor, queued).
+  `degraded`/`provider_used`. `POST /search/semantic` for chunk-level; `POST /search/warm` rebuilds
+  the in-memory BM25F+ index (any authenticated user; not currently auto-called by the frontend on
+  library open); `POST /search/reindex` (editor, queued).
 - All results are SEE-clamped to the actor's visible works.
 
 ## 3.6 Duplicate detection & resolution
@@ -82,7 +85,8 @@ flowchart LR
     act -. reversible .-> unmerge["POST /works/{id}/unmerge"]
 ```
 
-Candidates are also produced during extraction reference-matching. Merges are **reversible** (a
+Candidates are only produced by an explicit scan (single-work/-file scans run inline; a full-library
+scan — no `work_id`/`file_id` — always runs on the background worker). Merges are **reversible** (a
 shadow is restored on unmerge). Candidates touching a hidden work are filtered from the list.
 Scan/preview/apply need **editor**.
 
@@ -94,10 +98,14 @@ each SEE-gated + visible-clamped.
 1. `POST /graphs/citation` — works + citation edges (`node_mode`, `collapse_versions`, `color_by`;
    degree/PageRank/betweenness precomputed) → Cytoscape.
 2. `POST /graphs/topic` — embedding-similarity kNN graph.
-3. `GET /citations/summary` — most-cited local/external, missing, bridge, isolated, chronological,
+3. `GET /works/{id}/reference-graph` — per-paper reference/citing scatter graph (base paper + one
+   node per reference, local vs external; `include_ref_edges` adds local ref→ref links,
+   `include_citing` adds external citing papers); edges are colour-coded by relation to the base
+   paper (reference / citing / ref↔ref) in the frontend `ReferenceGraphModal`.
+4. `GET /citations/summary` — most-cited local/external, missing, bridge, isolated, chronological,
    coverage (cached by scope signature).
-4. `GET /citations/venue-author-summary`; `GET /citations/external-preview` (identifier-only egress).
-5. Missing-work worklist `GET/PUT/DELETE /citations/worklist`; `GET /citations/missing-export`
+5. `GET /citations/venue-author-summary`; `GET /citations/external-preview` (identifier-only egress).
+6. Missing-work worklist `GET/PUT/DELETE /citations/worklist`; `GET /citations/missing-export`
    (bibtex/csv); import a missing ref via `POST /works/from-reference/{reference_id}`.
 
 ## 3.8 Export
@@ -110,14 +118,19 @@ each SEE-gated + visible-clamped.
 ## 3.9 AI summaries, topics, keywords
 
 Providers default to dependency-free baselines (hash-BOW embeddings, extractive summaries, TF-IDF
-topics); heavier engines are opt-in from **Admin → AI & Models** (owner).
+topics); heavier engines are opt-in from **Admin → AI & Models** (owner-or-admin, per `require_admin`).
 
 1. Admin config: `GET /admin/ai/status`, `PUT /admin/ai-config` (changing the embedding model
    auto-queues a reindex), `POST /admin/ai/models/pull|validate`, `/reindex`, `/lexical-rebuild`,
    `/keywords|topics/batch`. Ollama via `make up-ai`.
 2. Per-paper summary `POST /works/{id}/summaries` (`auto|extractive|local_llm`, degrades gracefully).
+   `detail ∈ short | detailed_fast | detailed_section | detailed_deep` (`detailed` is a back-compat
+   alias for `detailed_deep`) trades cost for granularity — `detailed_fast` groups sections into
+   ≤4 LLM-categorized buckets, `detailed_section` is one call per top-level (coalesced) section,
+   `detailed_deep` is one call per subsection; anything beyond `short` local_llm runs as a queued
+   background job.
 3. Scope summary `POST /ai/summaries` (`library|shelf|rack`).
-4. Topics `POST /ai/topics` (`tfidf|embedding`) → act via `POST /ai/topics/accept-as-tag` or
+4. Topics `POST /ai/topics` (`tfidf|embedding`) → act via `POST /ai/topics/accept-as-tag` (editor) or
    `/create-shelf` (librarian). Per-paper `POST /works/{id}/keywords|topics` (queued).
 
 ## 3.10 Reading mode
@@ -132,6 +145,10 @@ topics); heavier engines are opt-in from **Admin → AI & Models** (owner).
 5. Reading queue: `reading_status` per work; `GET /works/reading-queue`,
    `POST /works/reading-queue/reorder`.
 6. Opening a paper records a debounced `paper.viewed` audit event.
+7. **Zen mode** (`PdfReader.svelte`) portals the reader to a full viewport; clicking an in-text
+   citation still opens References without leaving zen, so a "← Back to paper" button is the route
+   back to the pages. Teardown (`onDestroy`) is wrapped exception-safe, since a background job-poll
+   refresh can reassign props mid-view and leave a pdf.js object in a state whose teardown throws.
 
 ## 3.11 Multi-user / LAN setup
 
@@ -148,9 +165,9 @@ The server runs on the LAN; access always requires auth (no guest).
 4. Everything is SEE-clamped; audit at `GET /admin/audit-events`.
 5. Runtime config `/admin/app-config` (page-size max, rate limits, batch caps, worker count, queue
    length, fuzzy-match toggle).
-6. **Add an agent**: owner mints `POST /admin/agents/enroll-token` → workstation runs
+6. **Add an agent**: owner-or-admin mints `POST /admin/agents/enroll-token` → workstation runs
    `paracord-agent enroll --token … --server … --name …` → `POST /agents/enroll-request` (pending) →
-   owner `POST /admin/agents/{id}/approve` (returns the scoped token once) →
+   owner-or-admin `POST /admin/agents/{id}/approve` (returns the scoped token once) →
    `PATCH /admin/agents/{id}/privileges` → the agent scans/syncs/teleports. See
    [06 — Agent](06_agent_protocol.md).
 

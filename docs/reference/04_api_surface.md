@@ -52,7 +52,8 @@ Details in [08 — Security](08_security.md#82-authorization-authz).
 **Router-level auth** (`router.py`): a blanket `Depends(require_authenticated_user)` is attached to
 `sources, imports, files, works, shelves, racks, tags, citations, duplicates, graphs, viz, exports,
 ai, jobs, search, preferences, themes(read), saved-filters`. **Not** router-gated: `health` (public),
-`auth` (per-endpoint), the six `/admin` routers (per-endpoint `require_admin`/`require_owner`), and
+`auth` (per-endpoint), the seven `/admin` routers — `admin`, `backups`, `ai_admin`, `import_roots`,
+`web_find_allowed_hosts`, `groups`, `themes` (per-endpoint `require_admin`/`require_owner`) — and
 `agents` (agent-token per-endpoint).
 
 ## 2. App setup & middleware (`app/main.py`)
@@ -60,13 +61,19 @@ ai, jobs, search, preferences, themes(read), saved-filters`. **Not** router-gate
 - `create_app()` → `FastAPI(title="PaRacORD API")`, asserts no guest roles, mounts the router.
 - **CORS**: `allow_origins=settings.cors_origins` (default `127.0.0.1:5173`/`localhost:5173`),
   `allow_credentials=True`, methods/headers `*`.
-- **Exception handling**: only `BatchTooLargeError → 413` is registered globally; per-endpoint
-  `ValueError → 400`; everything else falls to FastAPI's default 500.
+- **Exception handling**: `BatchTooLargeError → 413` and `DomainError → its .status_code` (S4;
+  `NotFoundError`→404, `ConflictError`→409, `PermissionDeniedError`→403, base `DomainError`→400 —
+  see `app/errors.py`) are registered globally; per-endpoint `ValueError → 400`; everything else
+  falls to FastAPI's default 500.
 - **Rate-limit middleware**: skips exempt paths (`/health`, `/docs`, `/redoc`, `/openapi.json`);
   per-client + global Redis windows; 429 + `Retry-After` on exceed; **fails open** unless
   `PARACORD_PRODUCTION_REQUIRE_REDIS` (then 503).
-- **Lifespan (startup only)**: (D11) backfill loose papers onto the default shelf; (D7)
-  `sweep_owed_extractions()` re-enqueue. Both best-effort so startup never blocks.
+- **Lifespan (startup only, all best-effort)**: (D11) backfill loose papers onto the default
+  shelf; (D7) `sweep_owed_extractions()` re-enqueue; (F2) `sweep_owed_downstream()` recovers
+  chunk/embed for extracted-but-unindexed works; (D3) logs a loud warning if serving plaintext
+  HTTP on a non-loopback bind; (S13/S14) enqueues a one-shot reference-consolidation job; (F3a)
+  optionally enqueues a full reference rescan when the owner has toggled
+  `reference_rescan_on_startup`. None of these block the API from serving.
 - **Login throttle** (in `auth.login`): per-username lockout → 429 + `Retry-After`.
 - Session TTL default 720 min.
 
@@ -96,7 +103,8 @@ anywhere.
 
 **Audit emission.** `record_event` + commit at auth (login/logout/password), works/metadata
 (`paper.viewed` debounced 300 s, `paper.metadata_edited`, `work.deleted`, reference confirm/reject),
-org (shelf/rack/tag), admin (config/agent/ai/import-root/web-find/theme/queue), and `file.downloaded`.
+org (shelf/rack/tag), admin (config/agent/ai/import-root/web-find/theme/queue/backup), and
+`file.downloaded`.
 
 ## 4. Route tables by module
 
@@ -125,6 +133,7 @@ Read routes call `_guard_see_work` (404 if not see-able); mutations call `_guard
 | POST | `/references/rescan-all` | **editor** | Library-wide rematch (queued) |
 | GET | `/{id}/reference-graph`, `/{id}/citation-neighborhood`, `/{id}/citation-contexts` | auth | Per-paper graphs & contexts |
 | GET | `/{id}/citing-papers`, POST `/{id}/citing-papers/fetch` | auth / contrib | Incoming citers (fetch = egress; refreshes the `citation_count` snapshot; items carry `resolved_work_id` for in-library citers) |
+| POST | `/{id}/citing-papers/fetch-job`, `/{id}/summaries/job` | contrib | Background-job variants of citing-fetch/summarize for the Library batch actions (202, same guards as the inline routes) |
 | GET/POST/DELETE | `/{id}/files`, PUT `/{id}/main-file/{fid}`, POST `/{id}/files/{fid}/move` | auth / contrib | Attached files |
 | GET/POST/DELETE | `/{id}/annotations`, GET `/annotations/search`, `/{id}/annotations/export` | auth / contrib | Reader annotations |
 | GET/POST | `/{id}/summaries` | auth / contrib | Per-paper summaries |
@@ -139,7 +148,7 @@ Read routes call `_guard_see_work` (404 if not see-able); mutations call `_guard
 
 ### imports — `/imports`
 `POST /folder|/bibtex|/ris|/csl|/upload|/upload-multi|/identifier|/teleport` (**editor**),
-`POST /batch/preview|/batch/commit` and `/staging/{id}/commit` (contrib),
+`POST /batch/preview|/bibtex/preview|/batch/commit` and `/staging/{id}/commit` (contrib),
 `GET /staging/{id}|/batches|/{id}` (auth, own/admin). See [10 — Workflows](10_user_workflows.md#32-add-papers).
 
 ### sources — `/sources`
@@ -151,8 +160,10 @@ Read routes call `_guard_see_work` (404 if not see-able); mutations call `_guard
 `/{id}/shelves` (racks) — always via ACL-checked helpers; the default shelf can't be deleted.
 
 ### tags — `/tags`
-`GET ``` (auth — **unscoped, no limit**), `POST` (contrib, create-or-return), `PATCH` (contrib, 409
-on clash), `DELETE` (**editor**), `POST/DELETE /{id}/links` (contrib + modify target).
+`GET ``` (auth — **unscoped, no limit**), `GET /assignable` (contrib; scopes offered tags to
+global + the paper's own shelves/racks), `POST` (contrib, create-or-return), `PATCH` (contrib, 409
+on clash), `PUT /{id}/scope` (contrib; sets which shelves/racks a tag is offered for — empty =
+global), `DELETE` (**editor**), `POST/DELETE /{id}/links` (contrib + modify target).
 
 ### citations — `/citations`
 `GET /summary`, `/venue-author-summary`, `/external-preview`, `/worklist` (+`PUT`/`DELETE`),
@@ -173,7 +184,9 @@ Scope SEE-checked, nodes/edges clamped to visible works.
 `scope_id`, `work_ids`, `format`, `style`, `citation_keys`); ~11 formats.
 
 ### ai — `/ai`
-`POST /summaries` (editor), `/topics` (editor), `/topics/accept-as-tag` (editor),
+`POST /summaries` (editor), `GET /summaries/latest` (editor, scope + detail/summary_type filters),
+`GET/PUT /scope-notes`, `GET /scope-notes/latest` (editor; a free-text note per scope), `POST
+/topics` (editor), `GET /topics/latest` (editor), `/topics/accept-as-tag` (editor),
 `/topics/create-shelf` (**librarian**).
 
 ### search — `/search`
@@ -184,7 +197,10 @@ Scope SEE-checked, nodes/edges clamped to visible works.
 `GET ``` (**auth only — no role floor**, queue status + recent jobs, incl. RQ `retries_left` and
 scheduled retries — F2), `POST /clear` (editor), `/reprocess-pending` (**admin**; runs both the D7
 owed-extraction sweep **and** the F2 downstream chunk/embed recovery sweep) / `/clear-queue` /
-`/reset-workers` (**admin**).
+`/reset-workers` (**admin**). Per-job: `POST /{id}/cancel` (editor; drops a queued/scheduled/
+deferred job), `POST /{id}/stop` (editor; cooperative stop of a running long job, or cancel if
+still queued), `GET /{id}/result` (editor, requester-gated — 404 if not yours/not admin; poll
+until `status=="finished"` for a worker-computed payload cached in Redis).
 
 ### preferences · themes (read) · saved-filters
 `GET/PUT /preferences` (auth, own YAML blob). `GET /themes`, `/themes/{slug}`, `/themes/{slug}/source`
@@ -201,8 +217,9 @@ owed-extraction sweep **and** the F2 downstream chunk/embed recovery sweep) / `/
 ### admin routers — `/admin`
 | Router | Floor | Routes |
 |---|---|---|
-| `admin` | require_admin (privileged subset owner-only in service) | `/users` CRUD + `disable`/`enable`/`reset-password`, `/audit-events`, `/agents` (+`enroll-token`, `approve`, `privileges`, `files`), `/app-config` |
-| `ai_admin` | require_admin | `/ai-config`, `/ai/providers`/`models`/`embedding-models`/`status`, `/ai/models/pull\|validate`, `/reindex`, `/lexical-rebuild`, `/keywords\|topics/batch` |
+| `admin` | require_admin (privileged subset owner-only in service) | `/users` CRUD + `disable`/`enable`/`reset-password`/`elsevier-api`, `/audit-events`, `/agents` (+`enroll-token`, `approve`, `privileges`, rename, delete, `files`), `/app-config`, `/reference-dupes` (+`/scan`, `/resolve` — the S13/S14 consolidation review queue) |
+| `backups` | admin (create/list/download/delete); **require_owner** (analyze/upload/restore) | `GET/POST ``` (create queues on the worker, falls back inline), `GET/DELETE /{name}`, `GET /{name}/download`, `GET /{name}/analyze` (owner, dry-run compat report), `POST /upload` (owner), `POST /{name}/restore` (owner; `merge`/`replace`, replace needs `confirm="REPLACE"`) |
+| `ai_admin` | require_admin | `/ai-config`, `/ai/providers`/`models`/`embedding-models`/`status`, `/ai/models/pull\|validate`, `DELETE /ai/models`, `/reindex` (+`/reindex/status`), `/lexical-rebuild`, `/keyword-topic-status`, `/keywords\|topics/batch` |
 | `import_roots` | **require_owner** | `/import-roots` (POST body carries a raw server **path**, validated exists+dir) |
 | `web_find_allowed_hosts` | owner (policy) / admin (hosts) | `/web-find/download-policy`, `/web-find/allowed-hosts` |
 | `groups` | require_admin | `/groups`(+members/grants), `/default-grants`, `/access-settings` |

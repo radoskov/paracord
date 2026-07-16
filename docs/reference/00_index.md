@@ -11,8 +11,8 @@ gitignored `documentation_archive.zip` on 2026-07-13) have drifted from reality,
 set supersedes them — see [§11 Future work & revision notes](11_future_and_revision_notes.md) for a
 list of stale documents.
 
-_Generated 2026-07-12 against `main` @ `4115278`. When you change the code, update the matching
-section here._
+_Generated 2026-07-12 against `main` @ `4115278`; re-verified 2026-07-16 against `main` @ `1ee92f0`.
+When you change the code, update the matching section here._
 
 ---
 
@@ -22,7 +22,7 @@ section here._
 |-----|----------------|---------------------------|
 | [01 — Architecture](01_architecture.md) | Runtime topology, containers, request/data-flow overview, tech stack, build/run/test tooling | Understand the moving parts and how to run the system |
 | [02 — Data model](02_data_model.md) | Every table/ORM model, relationships, ER + class diagrams, schema-design decisions | Add a column, write a migration, understand an entity |
-| [03 — Backend services](03_backend_services.md) | All 65 service modules grouped into 9 clusters, key functions, algorithms, collaboration diagram | Change business logic or an algorithm |
+| [03 — Backend services](03_backend_services.md) | All 71 service modules grouped into 9 clusters, key functions, algorithms, collaboration diagram | Change business logic or an algorithm |
 | [04 — API surface](04_api_surface.md) | Every HTTP route, the auth dependency chain, request lifecycle, cross-cutting patterns | Add/modify an endpoint or a client call |
 | [05 — Pipelines & workers](05_pipelines_workers.md) | The async ingestion pipeline (upload → GROBID → parse → dedup → embed), the RQ queue, OCR, recovery | Work on extraction, embeddings, or background jobs |
 | [06 — Local agent](06_agent_protocol.md) | The workstation agent, manifest/teleport protocol, agent↔server API, security boundary | Work on the agent or remote-machine import |
@@ -59,14 +59,14 @@ intentional and load-bearing — **do not rename code identifiers to "paper"**. 
 
 ```text
 backend/app/
-  api/v1/endpoints/   26 HTTP endpoint modules      → 04_api_surface.md
+  api/v1/endpoints/   27 HTTP endpoint modules      → 04_api_surface.md
   api/deps.py         auth/DI dependency chain       → 04, 08
-  services/           65 service modules (business logic) → 03
-  models/             27 SQLAlchemy models            → 02
+  services/           71 service modules (business logic) → 03
+  models/             26 SQLAlchemy models            → 02
   workers/            RQ jobs, queue, supervisor, recovery → 05
   core/               config.py, security.py          → 01, 08
   utils/              normalization, table_presence    → 03
-  alembic/versions/   64 migrations                   → 02
+backend/alembic/versions/ 10 migrations (0067 squashed baseline + 0068-0076) → 02
 agent/paperracks_agent/  14 modules (local agent)     → 06
 frontend/src/         Svelte app, ~120 files           → 07
 ```

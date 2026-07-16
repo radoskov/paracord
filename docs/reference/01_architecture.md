@@ -82,15 +82,15 @@ extracts it. See [05 — Pipelines & workers](05_pipelines_workers.md) for the s
 ```mermaid
 flowchart TB
     subgraph L1["HTTP layer — app/api/v1/endpoints/*"]
-        EP["26 routers<br/>request validation · response schemas · 202/429/413"]
+        EP["27 routers<br/>request validation · response schemas · 202/429/413"]
     end
     subgraph L2["Dependency layer — app/api/deps.py"]
         DEP["require_authenticated_user · require_min_role<br/>require_agent_token · get_db"]
     end
-    subgraph L3["Service layer — app/services/* (65 modules)"]
+    subgraph L3["Service layer — app/services/* (70 modules)"]
         SVC["access · extraction · reference_matching · citation_graph<br/>embeddings · export_service · web_find · agent_files …"]
     end
-    subgraph L4["Model layer — app/models/* (27 models)"]
+    subgraph L4["Model layer — app/models/* (26 models)"]
         MOD["SQLAlchemy ORM (Base.metadata)"]
     end
     subgraph L5["Persistence"]
@@ -118,7 +118,9 @@ two important refinements:
 
 ## 1.4 Persistence & the dual-schema strategy
 
-- **Production** runs the Alembic migrations (64 revisions) on PostgreSQL. Optional **pgvector**
+- **Production** runs the Alembic migrations (10 revisions: a 2026-07-13 squashed baseline
+  `0067_squashed_baseline`, replacing the old `0001`…`0067` chain, plus `0068`–`0076`) on
+  PostgreSQL. Optional **pgvector**
   columns (`embeddings.vector_pg`, `work_chunks.vec_*`) are added by best-effort, Postgres-only
   migrations and are kept **off the ORM** — read/written via raw, injection-guarded SQL.
 - **Unit tests** build the schema from `Base.metadata` on **SQLite**. Postgres-only features
@@ -165,7 +167,7 @@ whitelist is parsed by `_server_settings_from_yaml`. See
 | Auth | bcrypt password hashes, opaque bearer session tokens (SHA-256-stored) |
 | HTTP client (egress) | `httpx2` (pinned) |
 | Frontend | Svelte 5 (`mount()`, Svelte-4 dialect), Vite 8, TypeScript 6 |
-| Frontend viz | Cytoscape.js + fcose (graphs), ECharts (charts), PDF.js (reader) — all lazy-loaded |
+| Frontend viz | ECharts (citation/topic graphs and charts, force + circular layouts), PDF.js (reader) — both lazy-loaded |
 | Frontend tests | Vitest 4 + @testing-library/svelte + jsdom |
 | Citation styling | `citeproc-py` (CSL) for APA/IEEE/Chicago/MLA/Harvard/Vancouver/Nature |
 

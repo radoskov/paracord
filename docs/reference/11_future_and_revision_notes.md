@@ -19,9 +19,23 @@ Legend: 🔴 high · 🟠 medium · 🟡 low. Categories: **Sec**urity · **Alg*
 > **F2** job retries + downstream recovery (bounded transient-extraction retries, chunk/embed
 > derive-from-state recovery sweep, per-paper failure indicator + jobs-tab retry surfacing).
 > **Update 2026-07-13:** the F3b caches are now bounded (S10 — `utils/bounded_cache.BoundedTTLCache`
-> in citation_summary / visualization / external_preview). The line below is kept for history.
-> **Still open from those:** the three unbounded in-process caches (the F3b half of the "read paths
-> that leak" item). Everything else below stands.
+> in citation_summary / visualization / external_preview — confirmed in code: LRU eviction beyond
+> `maxsize` + a `ttl_seconds` expiry, `backend/app/utils/bounded_cache.py:23`). The item below is kept
+> for history but is fully resolved; nothing is still open from F3b. Everything else below stands.
+>
+> **Update — 2026-07-16 (re-verification pass).** Re-checked every factual claim in this register
+> against the current code. Several more items had landed since 2026-07-12 and are now annotated
+> **✅ RESOLVED** inline: the arXiv-parser duplication (S3, one canonical parser); the
+> `saved_filters`/`shelf_membership` layering issues and the missing generic exception handler (S4,
+> `DomainError` + one handler); the reference-dedup consolidation job (S13/S14, now wired to a
+> startup hook + admin button); and `summarize_scope_job`/`topic_model_job`, which are real pipelines
+> now (S15), not stubs. Two corrections went the other way: `actOnReference`'s double-`JSON.stringify`
+> is now **confirmed** (not just suspected) as a live bug, and `CitationGraph`'s old `{@html}`/
+> `escapeHtml` note is stale — the component moved to ECharts and now builds an **unescaped** HTML
+> tooltip string instead, which is a new (if lower-severity, given this deployment's scale) finding
+> in the same spot the old note flagged. Migration numbers cited by number (`0057`/`0058`/`0066`)
+> no longer resolve to individual files — the chain was squashed into `0067_squashed_baseline.py`
+> afterwards; the associated features/columns are unaffected, only the file-name citations moved.
 
 ---
 
@@ -63,20 +77,31 @@ them (this `docs/reference/` set is the new source of truth):
   (Postgres) partial FKs per `entity_type`.
 - 🟡 **Tech** — `created_by/updated_by/owner/added_by_user_id` almost never FK to `users.id`;
   deleting a user leaves stale attribution ids. Lower severity at this scale.
-- 🟠 **Alg** — **`Reference.dedup_key` is intentionally non-unique**; duplicates coexist until an
-  out-of-band consolidation job runs — but that job is not yet wired into the auto-pipeline. Any code
-  reading references must tolerate dupes. *Direction:* schedule/implement the consolidation job.
+- ✅ **RESOLVED (S13/S14)** — **`Reference.dedup_key` is still intentionally non-unique** (a future
+  unique index is the eventual goal, per `reference_consolidation.py`'s own docstring), but the
+  consolidation job is now wired in: `consolidate_references_job`
+  (`backend/app/workers/jobs.py:610`) runs from a startup hook (`backend/app/main.py:78-80`) and an
+  admin-triggered button (`backend/app/api/v1/endpoints/admin.py:771-773`), both funnelled through
+  the deterministic-id `enqueue_reference_consolidation` (`backend/app/workers/queue.py:285`).
+  Compatible-state groups auto-fold; genuine contradictions (conflicting user confirmations) get a
+  `|conflict:<id8>` dedup-key suffix and wait for admin review instead of being silently merged. Any
+  code reading references must still tolerate dupes until that unique index lands.
 - 🟡 **Tech** — `Work.topics`/`keywords` (JSONB) duplicate what `TopicAssignment` models relationally
   (drift risk). `ImportStagingItem.duplicates` / `DuplicateCandidate.signals` are opaque blobs
   (not queryable).
-- 🟡 **Perf** — `Work.citation_count`/`citation_count_fetched_at` are not indexed although recent
-  commits added sortable citation columns — verify the sort path is indexed. `TopicAssignment` lacks
-  a composite index on its common `(topic_model_id, scope_type, scope_id, work_id)` access pattern.
+- 🟡 **Perf** — **Confirmed:** `Work.citation_count`/`citation_count_fetched_at` have no DB index
+  (`0067_squashed_baseline.py`), yet `citation_count` is a live Library sort key
+  (`backend/app/api/v1/endpoints/works.py:391`, NULLs ordered last) — every citation-count sort is a
+  full table scan/sort. `TopicAssignment` still lacks a composite index on its common
+  `(topic_model_id, scope_type, scope_id, work_id)` access pattern (only single-column indexes exist
+  on each of those four columns).
 - 🟡 **Stab** — Python-side timestamp defaults (not `server_default`) make ordering by `created_at`
   slightly non-monotonic under concurrent multi-client writes; also inconsistent with the columns
   that *do* use `server_default`.
-- 🟡 **Tech** — external-citations migration churn (`0057` denormalized → `0058` normalized);
-  `references` uses a reserved SQL keyword (quoted everywhere — a footgun for hand-written SQL);
+- 🟡 **Tech** — external-citations migration churn (`0057` denormalized → `0058` normalized) — this
+  history is now baked into the squashed `0067_squashed_baseline.py` (the 68-migration chain was
+  squashed into one baseline afterwards), so the individual `0057`/`0058` files no longer exist to
+  inspect; `references` uses a reserved SQL keyword (quoted everywhere — a footgun for hand-written SQL);
   singleton id-by-convention mixes `int(1)`/`int(2)`.
 - 🟡 **Tech** — confirm `WorkVersion` is still actively populated (it's referenced only via
   `FileWorkLink.version_id` and `Annotation.version_id`) and not vestigial.
@@ -92,8 +117,12 @@ them (this `docs/reference/` set is the new source of truth):
   readers and is the one list endpoint with no cap.
 - 🟡 **Tech** — Dead optional-auth branches in `files.stream_file`/`file_text` (`actor: User | None`
   that can never be `None`) — a trap if the router dep is ever loosened.
-- 🟡 **Rob** — No generic exception handler (only `BatchTooLargeError → 413`); `ValueError → 400` is
-  repeated per-endpoint. Centralize.
+- ✅ **RESOLVED (S4)** — a generic `DomainError` exception handler now exists
+  (`backend/app/main.py:131`, alongside the `BatchTooLargeError → 413` one) mapping
+  `NotFoundError`/`ConflictError`/`PermissionDeniedError`/etc. (`backend/app/errors.py`) to their
+  `status_code` in one place. Services raise these instead of `fastapi.HTTPException`, so they stay
+  callable from workers/CLI too; there is no more `except ValueError` in `app/api/*.py` — adoption is
+  incremental as services are touched, but the centralizing mechanism itself is in place.
 - 🟡 **Tech** — Untyped `dict` responses (`/auth/me`, `/admin/audit-events`, all `ai_admin`) are
   absent from the OpenAPI schema; duplicated `MergePreview`/graph-node schemas across modules.
 - 🟠 **Sec** — CORS `allow_credentials=True` + `*` methods/headers is safe **only** because origins
@@ -121,8 +150,11 @@ them (this `docs/reference/` set is the new source of truth):
   reference extract simultaneously (no explicit locking).
 - 🟡 **UX/Rob** — `rq_worker_count` is read once at supervisor startup; a change needs a container
   restart (documented, but a SIGHUP reload would be friendlier).
-- 🟡 **Tech** — `summarize_scope_job` / `topic_model_job` are no-op stubs; per-paper topics exist but
-  aren't in the auto chain.
+- ✅ **RESOLVED (S15)** — `summarize_scope_job` / `topic_model_job`
+  (`backend/app/workers/jobs.py:840`/`:897`) are no longer stubs: they run the real
+  `summarization.summarize_scope` / `topic_modeling.model_topics` pipelines off the request path,
+  recomputing the requesting user's visibility and reporting progress/cancellation. Enqueued once a
+  scope exceeds `ai_scope_job_threshold` (S16).
 
 ## Services (algorithmic & correctness)
 
@@ -130,22 +162,24 @@ them (this `docs/reference/` set is the new source of truth):
   structural breakout characters are neutralised while Unicode letters and real key punctuation
   (`. : + / _ -`) are **preserved** (so DBLP/DOI-style and accented keys survive), then de-duplicated.
   *(Still open, lower severity: markdown/pandoc field **values** — titles/authors — aren't escaped.)*
-- ⚠️ **PARTIALLY RESOLVED — F3a done, F3b open.** ✅ The read-path write is gone:
-  `citation_graph.build_citation_graph` is now read-only (the matcher owns `resolution_status`; a
-  work delete re-resolves affected references). ✅ **F3b resolved 2026-07-13 (S10):** the three
-  formerly-unbounded
-  in-process caches — `citation_summary._SUMMARY_CACHE`, `visualization._LAYOUT_CACHE`,
-  `external_preview._PREVIEW_CACHE` — are not yet LRU/TTL-bounded (memory creep on a long-lived
-  process). This was deferred; discuss before implementing.
+- ✅ **RESOLVED — F3a and F3b both done.** The read-path write is gone:
+  `citation_graph.build_citation_graph` (`backend/app/services/citation_graph.py:105`) is now
+  read-only (the matcher owns `resolution_status`; a work delete re-resolves affected references).
+  **F3b resolved 2026-07-13 (S10):** the three formerly-unbounded in-process caches —
+  `citation_summary._SUMMARY_CACHE`, `visualization._LAYOUT_CACHE`, `external_preview._PREVIEW_CACHE`
+  — are now backed by `BoundedTTLCache` (`backend/app/utils/bounded_cache.py`), which evicts LRU-style
+  beyond `maxsize` and expires entries after `ttl_seconds`; verified in code, not just the docstring.
 - 🟠 **Sec** — **`topic_graph` visibility depends on the caller passing `visible_ids`.** With
   `work_ids` set and `visible_ids=None`, only shadow-filtering applies → IDOR risk if an endpoint
   forgets it. Audit every caller; consider requiring `visible_ids`.
 - ✅ **Rob** — ~~`citing_papers.store_citing_papers` wipes links when called with an empty list~~
   **Resolved 2026-07-13 (S12):** the fetch now distinguishes three outcomes — a provider that
   listed citers (replace), an *authoritative zero* answer (replace with empty + stamp
-  `works.citing_fetched_at/_source`, migration 0066), and no answer at all (cache kept, failure
-  surfaced). A failed fetch can no longer wipe good data, and a genuinely-zero answer no longer
-  leaves a stale list forever.
+  `works.citing_fetched_at/_source`), and no answer at all (cache kept, failure surfaced). A failed
+  fetch can no longer wipe good data, and a genuinely-zero answer no longer leaves a stale list
+  forever. (The `citing_fetched_at/_source` columns now live in the squashed
+  `0067_squashed_baseline.py` — the migration chain was squashed from 68 files into one baseline
+  afterwards, so the original per-feature migration number no longer exists as a separate file.)
 - 🟠 **Alg** — **`agent_protocol.validate_agent_file_id` always returns `False`** (dead stub) — a
   caller relying on it rejects every file. Wire up or delete.
 - 🟠 **Sec** — **`model_management` performs no integrity verification of downloaded weights**
@@ -154,15 +188,29 @@ them (this `docs/reference/` set is the new source of truth):
   feasible.
 - 🟠 **Alg** — **Naming overreach**: `topic_modeling backend="bertopic"` does **not** run BERTopic
   (it reuses embedding k-means); "hierarchy" is a single nearest-neighbor pass. Rename or implement.
-- 🟡 **Alg** — Two parallel arXiv parsers (`identifiers.arxiv_base_id` vs
-  `duplicate_detection.split_arxiv_id`) can disagree; unify. `author_matching` over-matches common
-  surnames (missing-initial = agreement); `normalize_title` drops non-ASCII instead of folding
-  (inconsistent with `author_matching._fold`). Magic dedup thresholds (0.92/0.78/0.68) are uncited.
+- ✅ **RESOLVED (S3)** — the arXiv parser is now one canonical implementation:
+  `app/utils/normalization.split_arxiv_id`/`arxiv_base_id` (`backend/app/utils/normalization.py:50`),
+  which `identifiers.py` and `duplicate_detection.py` both import and re-export rather than
+  reimplementing. *(Still open, lower severity)* `author_matching` over-matches common surnames
+  (missing-initial = agreement); `normalize_title` still drops non-ASCII instead of folding
+  (`backend/app/utils/normalization.py:16`, `[^a-z0-9 ]` strip), inconsistent with
+  `author_matching._fold`'s NFKD diacritic-fold. Magic dedup thresholds (0.92/0.78/0.68,
+  `backend/app/services/duplicate_detection.py:26,204,211`) remain uncited.
 - 🟡 **Alg** — `chunking` uses a whitespace-token proxy that can overflow a 512-*token* embedding
   model; `bibtex._clean_value` strips all braces (destroys `{DNA}` casing / `{\LaTeX}`).
-- 🟡 **Tech** — `saved_filters` imports `build_works_query` **from the endpoint layer** (layering
-  inversion / cycle risk); `shelf_membership` raises `fastapi.HTTPException` from a service (breaks
-  worker/CLI callers); `venue_author_summary` depends on a **private** `export_service` helper.
+- ✅ **RESOLVED (S4)** — `build_works_query` now lives in `app/services/works_query.py` (moved out of
+  the works *endpoint* module, per that module's own docstring: "It lived in the works endpoint
+  module, which forced services (`saved_filters`) to import from the HTTP layer — an inverted
+  dependency."); `saved_filters` imports it as a normal service. `shelf_membership`
+  (`backend/app/services/shelf_membership.py:50`) now raises `NotFoundError`/`PermissionDeniedError`
+  (framework-free domain errors, mapped by the `DomainError` handler above) instead of
+  `fastapi.HTTPException`, so worker/CLI callers work too.
+  `venue_author_summary` does still reach into another service's private name, but it's
+  `citation_graph._scope_works` (`backend/app/services/venue_author_summary.py:25`), not
+  `export_service` — the `export_service.authors_by_work` it also imports
+  (`backend/app/services/venue_author_summary.py:27`) has no leading underscore and is public
+  (`backend/app/services/export_service.py:252`). The underlying "reaches into another service's
+  internals" concern still holds, just against a different module than named.
 - 🟡 **Sec** — `audit.py` is **not** cryptographically tamper-evident despite the docstring; the file
   sink has no rotation. If tamper-evidence is a goal, add hash-chaining.
 
@@ -197,8 +245,14 @@ whole-corpus jobs in one transaction, **M4** unbounded library-scope extractive 
 
 ## Frontend
 
-- 🟠 **Rob** — **`actOnReference` likely double-stringifies** its body (`JSON.stringify({action})`
-  where `request()` also stringifies). Probable functional bug — verify against the backend + tests.
+- 🟠 **Rob** — **`actOnReference` double-stringifies its body — CONFIRMED, not just probable.**
+  `client.ts:1961` passes `body: JSON.stringify({ action })`, and the shared `request()` helper
+  (`client.ts:3506`) does `JSON.stringify(options.body)` again on top — so the PATCH body becomes a
+  JSON string literal, not a JSON object. The endpoint (`PATCH /works/{id}/references/{reference_id}`,
+  `backend/app/api/v1/endpoints/works.py:1603`) expects a `ReferenceActionRequest` object
+  (`{"action": "link"|"reject"|"import"}`); a double-encoded body fails that schema. No frontend or
+  backend test exercises this call, so the "Link"/"Reject"/"Import" reference-action buttons in
+  `WorkDetail.svelte` are likely broken end-to-end. Fix: don't pre-stringify in `actOnReference`.
 - 🟡 **Rob** — Raw-fetch upload/stream helpers (`uploadPdf*`, `streamFindOnWeb`) don't surface
   `onQueueFull` — a "queue full" during upload/streaming won't raise the app-wide toast.
 - 🟡 **Perf** — PdfReader fully buffers the PDF (`.arrayBuffer()`); large scans load entirely into
@@ -206,8 +260,15 @@ whole-corpus jobs in one transaction, **M4** unbounded library-scope extractive 
   results in a large library — surface the cap.
 - 🟡 **UX** — `window.prompt`/`window.confirm` used for saved-filter naming + destructive confirms
   (not theme-aware; inconsistent with the app's own `Modal`).
-- 🟡 **Sec** — token in `localStorage` (XSS-exfiltratable); `CitationGraph` uses `{@html}` (currently
-  `escapeHtml`-sanitized — keep it that way).
+- 🟡 **Sec** — token in `localStorage` (XSS-exfiltratable). **Updated:** `CitationGraph` no longer
+  uses `{@html}`/`escapeHtml` at all — the graph moved to one ECharts-based renderer (2026-07-13
+  decision, replacing the old Cytoscape surface); but its tooltip `formatter`
+  (`CitationGraph.svelte:301`) now builds an HTML string with node `label`/`venue`/`doi` interpolated
+  **unescaped** (`` `<strong>${m.label}</strong>` ``), and ECharts renders a tooltip formatter's
+  returned string as HTML. Node labels come from paper titles (library + external/imported metadata),
+  so an attacker-influenced title could inject markup into the hover tooltip — the same class of risk
+  the old `{@html}` note flagged, now unguarded. Escape `label`/`venue`/`doi` before interpolating, or
+  switch the tooltip to ECharts' rich-text (non-HTML) formatter mode.
 
 ---
 
@@ -221,10 +282,11 @@ in `ROADMAP.md`/`SPECIFICATION.md`.
   seam — the extraction service is already provider-shaped.
 - **GROBID horizontal scale** — run multiple GROBID instances behind a balancer; the worker fan-out
   is already there, GROBID is the ceiling ([09 §3](09_efficiency.md#3-the-dominant-cost-at-scale-is-extraction-not-queries)).
-- **Retryable vs terminal job classification** + an owed-enrichment/embedding recovery sweep
-  (closes the two 🔴 pipeline gaps).
-- **Reference dedup consolidation job** wired into the pipeline (uses the existing non-unique
-  `dedup_key`).
+- ~~Retryable vs terminal job classification + an owed-enrichment/embedding recovery sweep~~ —
+  **done (F2)**, see Pipeline & workers above.
+- ~~Reference dedup consolidation job wired into the pipeline~~ — **done (S13/S14)**: startup hook +
+  admin button. Remaining idea: a unique index on `dedup_key` once the contested-group backlog is
+  clear.
 
 **Search & analysis**
 - **pgvector as the default** with a real embedding model (the JSON `vector` source-of-truth already
@@ -251,11 +313,13 @@ in `ROADMAP.md`/`SPECIFICATION.md`.
 **Platform**
 - **Regenerate `FILE_TREE.md` in CI** and add a doc-freshness check so this reference set and the
   OpenAPI schema can't silently drift (there is already `make openapi-check`).
-- **Bound the in-process caches** (`_SUMMARY_CACHE`/`_LAYOUT_CACHE`/`_PREVIEW_CACHE`) with an LRU and
-  a metric.
+- ~~Bound the in-process caches (`_SUMMARY_CACHE`/`_LAYOUT_CACHE`/`_PREVIEW_CACHE`) with an LRU~~ —
+  **done (S10)**, `BoundedTTLCache`. Still no hit/miss/eviction **metric** on them — that part of the
+  idea stands.
 
 ---
 
-*This register was produced by reading the current code (2026-07-12). Treat each `⚠️`/severity item
-as a candidate for `docs/AUDIT.md` and the `docs/WORKPLAN.md` backlog; nothing here has been changed
-in the code — it is documentation only.*
+*This register was produced by reading the current code (2026-07-12; re-verified against the code
+2026-07-16 — see the update note near the top). Treat each `⚠️`/severity item as a candidate for
+`docs/AUDIT.md` and the `docs/WORKPLAN.md` backlog; nothing here has been changed in the code — it is
+documentation only.*

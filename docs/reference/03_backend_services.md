@@ -2,7 +2,7 @@
 
 [← Data model](02_data_model.md) · [API surface →](04_api_surface.md)
 
-The service layer (`backend/app/services/`, 65 modules + `app/utils/`) holds all business logic.
+The service layer (`backend/app/services/`, 70 modules + `app/utils/`) holds all business logic.
 Endpoints are thin; workers call the same services. This document groups the modules into 9
 functional clusters, describes each module's responsibility, key functions, and core algorithm, and
 ends with the cross-service collaboration map.
@@ -19,7 +19,7 @@ ends with the cross-service collaboration map.
 flowchart LR
     subgraph C1["1 · Auth / Access / Config"]
         auth; users; audit; access; groups
-        login_throttle; rate_limit; queue_capacity; preferences
+        login_throttle; rate_limit; queue_capacity; preferences; backup
     end
     subgraph C2["2 · Extraction pipeline"]
         storage; extraction; grobid_client; tei_parser; ocr; file_paths; chunking
@@ -30,21 +30,21 @@ flowchart LR
     end
     subgraph C4["4 · Citation / Reference"]
         citation_graph; reference_graph; reference_links; reference_matching
-        citing_papers; citation_summary; citation_worklist
+        citing_papers; citation_summary; citation_worklist; reference_consolidation
     end
     subgraph C5["5 · Embeddings / Search"]
         embeddings; chunk_embeddings; embedding_registry
-        semantic_search; chunk_search; bm25_index; hybrid_search; search_query
+        semantic_search; chunk_search; bm25_index; hybrid_search; search_query; vector_math
     end
     subgraph C6["6 · NLP analysis"]
-        summarization; topic_modeling; topic_graph; keyword_extraction
+        summarization; topic_modeling; topic_graph; keyword_extraction; scope_resolution
     end
     subgraph C7["7 · Export / Viz / Biblio"]
         export_service; csl; visualization; bibtex; venue_author_summary
     end
     subgraph C8["8 · Import / Shelf"]
         batch_import; bibliography_import; import_staging
-        import_roots; default_shelf; shelf_membership; saved_filters
+        import_roots; default_shelf; shelf_membership; saved_filters; works_query
     end
     subgraph C9["9 · Agent / Web-find / Runtime cfg"]
         agent_files; agents; ai_config; app_config
@@ -66,8 +66,9 @@ flowchart LR
 | **login_throttle.py** | Per-username failed-login lockout via a Redis sorted-set sliding window (in-process fallback). |
 | **rate_limit.py** | ASGI middleware; per-client (hashed token else IP) + global fixed-1-minute Redis windows; ceilings from `AppConfig` (5 s cache). **Fails open** unless `production_require_redis`. |
 | **queue_capacity.py** | `assert_queue_has_capacity(db)` → 429 when pending depth ≥ `max_queue_len`; 503 when unmeasurable + require-redis; else fail-open. Called at the top of every job-creating endpoint. |
-| **preferences.py** | Per-user UI prefs in a single flat YAML (`read`/`write`, atomic replace). ⚠️ No file lock → concurrent multi-user writes can clobber. |
+| **preferences.py** | Per-user UI prefs, one YAML file per user under `preferences.d/<uuid>.yaml` (S11; `read_preferences`/`write_preferences`, atomic replace). The legacy single shared file is still read as a fallback until a user's first post-split write. Two users saving at once now touch different files (the old cross-user clobber is gone by construction); same-user concurrent writes (e.g. two tabs) remain last-writer-wins. |
 | **access_settings.py** | Global default access level (singleton). ⚠️ Setter writes **no** audit event. |
+| **backup.py** | Owner-only version-tolerant logical export/restore (batch 2026-07-13). Exports one JSONL file per table + a `manifest.json` (format version, alembic revision, hash algo, row counts), plus content-addressed `pdfs/<sha256>.pdf`. Restore maps rows by **column-name intersection** against the current schema (new columns backfilled, deleted columns dropped, renamed columns translated via `_RENAMES`); `merge` (insert-only) or `replace` (wipe-then-restore, re-inserting the current owner if the backup lacked one) modes; per-row SAVEPOINTs so one bad row never poisons the batch. |
 
 ## Cluster 2 — Extraction pipeline
 
@@ -81,14 +82,14 @@ Detailed data flow in [05 — Pipelines & workers](05_pipelines_workers.md); the
 | **tei_parser.py** | `lxml` parse of GROBID TEI → `ParsedPaper` (title/abstract/doi/venue/year/authors/references/mentions with context + PDF coords). Also `extract_body_text`/`extract_sections`. ⚠️ Uses the **default lxml parser** — safe only because TEI comes from trusted local GROBID (see [08 XXE](08_security.md#85-xxe--xml-bomb-protection)). |
 | **ocr.py** | OCR seam: `ocrmypdf --skip-text` (idempotent) or PyMuPDF+Tesseract rasterize@300dpi. `maybe_ocr` **never raises** — OCR must never fail extraction. `needs_ocr(quality)` gates it. |
 | **file_paths.py** | The shared root-validated PDF resolver (AUDIT A1). `resolve_backend_readable_pdf_path`, `resolve_streamable_pdf_path` (validates the **original** before preferring a derived OCR copy — closes a bypass), `save_derived_ocr_pdf`. `_validated_path` uses `resolve().relative_to(root)` (defeats `../`, absolute, and symlink escapes). |
-| **chunking.py** | Section-aware passage chunking. Greedy sentence-pack to ~400 tokens (hard cap 512, 60-token overlap); skips reference/bibliography sections; deterministic ⇒ idempotent. ⚠️ whitespace-token proxy can overflow a 512-*token* model. |
+| **chunking.py** | Section-aware passage chunking. Greedy sentence-pack to ~400 tokens (hard cap 512, 60-token overlap); skips reference/bibliography sections plus (2026-07-16) funding/acknowledgements/conflicts/author-contributions/data-availability/ethics/ORCID/supplementary-material boilerplate so none of it feeds a summary; deterministic ⇒ idempotent. ⚠️ whitespace-token proxy can overflow a 512-*token* model. |
 
 ## Cluster 3 — Metadata / Dedup / Identifiers
 
 | Module | Responsibility & algorithm |
 |--------|---------------------------|
 | **utils/normalization.py** | `normalize_title`, `normalize_doi`, `arxiv_base_from_doi` (10.48550 arXiv-DOI ⇔ arXiv-id bridge), `similarity_pct` (generic fields), `title_similarity_pct` (matcher-tuned: normalize_title'd inputs, ratio+token_sort, containment only when the shorter title has ≥5 tokens). rapidfuzz is a **required** dep (the difflib fallback has no token scoring). ⚠️ `normalize_title` drops non-ASCII rather than folding. |
-| **identifiers.py** | `arxiv_base_id`, `backfill_identifiers` (fills only empty, non-locked fields). ⚠️ a *second* arXiv parser distinct from `duplicate_detection.split_arxiv_id`. |
+| **identifiers.py** | `backfill_identifiers` (fills only empty, non-locked fields); re-exports `arxiv_base_id`/`normalize_doi` from `utils/normalization.py`, the ONE canonical arXiv parser (S3) — `duplicate_detection.split_arxiv_id` now imports from the same place, so the two-parser split is resolved. |
 | **author_matching.py** | `parse_author_name` (NFKD-fold surname + initial), `names_match`, `author_overlap_ratio`. ⚠️ missing-initial treated as agreement → over-matches common surnames. |
 | **metadata_enrichment.py** | External enrichment. Parsers + fetchers for **arXiv / Crossref / OpenAlex / Semantic Scholar**; `enrich_work` queries a source only when the matching identifier exists (exact, no fuzzy), stores each value as a `MetadataAssertion`, promotes to canonical only for `PROMOTABLE_FIELDS` when not user-locked (`confidence=0.9`). SSRF-hardened `_get` refuses cross-host redirects. Citation-count priority openalex→s2→crossref. |
 | **duplicate_detection.py** | Candidate scoring: same_doi/same_arxiv/shared_file = 1.0, fuzzy_title ≥ 0.92 (title-blocked + year guard), exact_file(SHA)=1.0, text_fingerprint=0.98, multiwork_file 0.78/0.68. `_upsert_candidate` canonicalizes the pair, keeps max score. |
@@ -99,13 +100,14 @@ Detailed data flow in [05 — Pipelines & workers](05_pipelines_workers.md); the
 
 | Module | Responsibility |
 |--------|---------------|
-| **citation_graph.py** | The cluster hub. `build_citation_graph(scope, node_mode, collapse_versions, color_by, visible_ids)` and `build_citation_neighborhood(work_id, hops≤3)`. Resolves 7 scope types, clamps shadows + `visible_ids`; references resolved via persisted `resolved_work_id`; pure-Python PageRank (0.85) + exact Brandes betweenness; node caps (500). Read-only (F2 fix): the matcher owns `resolution_status`; the graph no longer writes it, and a work delete re-resolves affected references. |
+| **citation_graph.py** | The cluster hub. `build_citation_graph(scope, node_mode, collapse_versions, color_by, visible_ids)` and `build_citation_neighborhood(work_id, hops≤3)`. Scope→works resolution now delegates to the shared `scope_resolution.resolve_scope_works` (S1/S2, see below) covering the same 7 scope types; clamps shadows + `visible_ids`; references resolved via persisted `resolved_work_id`; pure-Python PageRank (0.85) + exact Brandes betweenness; node caps (500). Read-only (F2 fix): the matcher owns `resolution_status`; the graph no longer writes it, and a work delete re-resolves affected references. |
 | **reference_graph.py** | Per-paper reference "star": classifies each ref local / likely_local / external / citing, per-section weighted mention counts, per-local metrics (citation count, degree, topic Jaccard). |
 | **reference_links.py** | Canonical-reference helpers (batch 12): `reference_dedup_key` (DOI→arXiv→`title:...|year`, capped at 512), `find_or_create_reference`, `references_for_work`. |
 | **reference_matching.py** | Reference→library "likely local" matcher, shared by BOTH directions via the `MatchFields` adapter (references and external citing papers). Stage A identifier match (score 100, arXiv-DOI bridged); Stage B fuzzy `title_similarity_pct` + ±`year_tolerance` year gate + author gate, with stopword-tolerant first-content-token blocking. D2 gate treats an arXiv DOI as an arXiv id (preprint-vs-journal DOI pairs stay fuzzy-eligible). Honors `confirmed_match`/`rejected_match` and the `use_fuzzy_match_as_confirmed` toggle. Reverse-rescan (`rescan_references_for_new_work`) matches by DOI/arXiv/title-block and runs from create/import AND extraction/enrichment. ⚠️ callers must pass `visible_ids` if results are user-facing. |
-| **citing_papers.py** | Incoming-citation fetcher: OpenAlex `filter=cites:` primary, S2 fallback; caps 100; caches `ExternalPaper`/`ExternalCitationLink`; returns the provider's full `total` and refreshes `work.citation_count/_source/_fetched_at` on store (list and snapshot can't drift). Each stored paper is run through the local matcher (`resolve_external_paper` → `resolved_work_id`; self-match guarded); `rescan_external_papers_for_new_work` is the incoming-direction reverse-rescan. ⚠️ empty-list call **wipes** existing links (destructive replace). |
-| **citation_summary.py** | Scoped analytics (SEE-clamped): most-cited local/external, bridge (betweenness), isolated, frequently-cited-missing + coverage, chronological. ⚠️ `_SUMMARY_CACHE` is an **unbounded** in-process dict. |
+| **citing_papers.py** | Incoming-citation fetcher: OpenAlex `filter=cites:` primary, S2 fallback; caps at `app_config.citing_papers_fetch_cap` (admin-configurable, S20; defaults to 1000, paged); caches `ExternalPaper`/`ExternalCitationLink`; returns the provider's full `total` and refreshes `work.citation_count/_source/_fetched_at` on store (list and snapshot can't drift). Each stored paper is run through the local matcher (`resolve_external_paper` → `resolved_work_id`; self-match guarded); `rescan_external_papers_for_new_work` is the incoming-direction reverse-rescan. ⚠️ empty-list call **wipes** existing links (destructive replace). |
+| **citation_summary.py** | Scoped analytics (SEE-clamped): most-cited local/external, bridge (betweenness), isolated, frequently-cited-missing + coverage, chronological. `_SUMMARY_CACHE` is a `BoundedTTLCache` (maxsize 128, 15 min TTL) — the former unbounded dict was replaced (S10). |
 | **citation_worklist.py** | Per-(user, missing_key) `import`/`ignore` decisions on cited-but-missing works. |
+| **reference_consolidation.py** | Canonical-reference dedup (batch-12 "Phase 1b", S13/S14): groups `Reference` rows sharing a `dedup_key` left by pre-batch-12 data, the unlocked find-then-insert race, or legacy arXiv-DOI key shapes. A group with only compatible resolution states auto-folds into the oldest row (links/mentions repointed, metadata merged non-null-first); a real contradiction (two different confirmed targets) is never auto-folded — it gets a `|conflict:<id8>` dedup-key suffix for the Admin → Reference-dupes review tab. Idempotent; audited. |
 
 ## Cluster 5 — Embeddings / Search
 
@@ -132,7 +134,8 @@ flowchart LR
 | **chunk_search.py** | Chunk-level semantic with selectivity-adaptive pgvector scanning; access filter pushed into SQL; best-passage rollup per paper. |
 | **bm25_index.py** | In-house **BM25F+** over a precomputed scipy CSR matrix, mmap-persisted and shared read-only across workers; body tokens from materialized `work_chunks` (no TEI re-parse); serves a stale index while a rebuild is enqueued. |
 | **hybrid_search.py** | **RRF fusion** (`k=60`) of lexical + semantic rankings (rank-based, ignores score magnitude by design). Multimode fuses one ranking per active model. |
-| **search_query.py** | Structured query grammar (`shlex`-split, allowlist keys → bound ORM params). `author:`/`year:>=2020`/`tag:`/`cites:`/`has:pdf` etc. The SQLi guarantee lives downstream in `list_works`. |
+| **search_query.py** | Structured query grammar (`shlex`-split, allowlist keys → bound ORM params). `author:`/`year:>=2020`/`tag:`/`cites:`/`keyword:`/`topic:`/`has:pdf` etc. The SQLi guarantee lives downstream in `list_works`. |
+| **vector_math.py** | Shared cosine-similarity primitives (Insights audit C4, 2026-07-14) — `dense_cosine`, `sparse_cosine`, `cosine_matrix` — replacing the duplicate implementations topic_modeling/topic_graph/visualization/embeddings used to carry separately. All degrade to 0.0 on degenerate (empty/zero/mismatched-length) inputs rather than raising. |
 
 ## Cluster 6 — NLP analysis
 
@@ -141,18 +144,19 @@ dependency-free and deterministic._
 
 | Module | Responsibility |
 |--------|---------------|
-| **summarization.py** | Three tiers: `extractive` (length-damped salience sentence ranking, default), `abstract`, `local_llm`. Per-paper `detail`: **short** (one paragraph) or **detailed** (one paragraph PER GROBID section, headed by the section name, + a synthesized intro; whole body, no clip), stored as separate rows (`{type}_detailed`) so both coexist. Detailed local-LLM summaries run on the worker (`summarize_work_job(work_id, detail)`; `POST /works/{id}/summaries` returns 202 + job id) since their many LLM calls can take minutes. SCOPE summaries are **map-reduce**: per-paper digests (`paper_detail` short/detailed, reused unless `regenerate_papers`; persisted so they show in the paper view; one LLM outage stops further attempts), packed into `LLM_INPUT_CHAR_BUDGET` (11k-char) chunks, condensed, synthesized with a collection-framed prompt (never "this paper"; overview + problems/methods/datasets/findings). `summarize_scope` takes `progress_cb`/`cancel_cb` (Jobs-tab progress + cooperative stop). `params` records `scope_label`/`method`/`chunks`/`paper_detail`; prompt version `local-llm-v2-map-reduce`. Degrades to extractive with `fallback_reason`. Idempotent (delete-then-insert), `content_hash`. ⚠️ untrusted paper text enters the LLM prompt (prompt-injection surface; blast radius = a misleading summary). |
+| **summarization.py** | Three tiers: `extractive` (length-damped salience sentence ranking, default), `abstract`, `local_llm`. Per-paper `detail` (UX batch 4, 2026-07-16) is now **four** levels, not two: **short** (one paragraph), **detailed_fast** (one paragraph per coarse bucket — Background/Methods/Results/Other, keyword-classified), **detailed_section** (one paragraph PER GROBID section, headed by the section name — the old "detailed" behavior), **detailed_deep** (same but over leaf sub-sections; whole body, no clip) + a synthesized intro; the legacy `detail="detailed"` value is a back-compat alias for `detailed_deep`. Each `(summary_type × detail × model)` is stored as its own row (`{type}` for short, `{type}_detailed_fast`/`_detailed_section`/`_detailed_deep` otherwise) via `stored_summary_type`; up to `SUMMARY_MODEL_CACHE` (5) models are kept per (entity, detail) with LRU eviction (`_evict_stale_models`) so switching the AI model and back is instant. Detailed local-LLM summaries run on the worker (`summarize_work_job(work_id, detail)`; `POST /works/{id}/summaries` returns 202 + job id) since their many LLM calls can take minutes. SCOPE summaries are **map-reduce**: per-paper digests (`paper_detail`, any of the four levels, reused unless `regenerate_papers`; persisted so they show in the paper view; one LLM outage stops further attempts), packed into `LLM_INPUT_CHAR_BUDGET` (11k-char) chunks, condensed, synthesized with a collection-framed prompt (never "this paper"; overview + problems/methods/datasets/findings). `summarize_scope` takes `progress_cb`/`cancel_cb` (Jobs-tab progress + cooperative stop). `params` records `scope_label`/`method`/`chunks`/`paper_detail`; prompt version `local-llm-v2-map-reduce`. Degrades to extractive with `fallback_reason`. Idempotent (delete-then-insert), `content_hash`. Scope→works resolution now goes through `scope_resolution.resolve_scope_works` (see below). ⚠️ untrusted paper text enters the LLM prompt (prompt-injection surface; blast radius = a misleading summary). |
 | **topic_modeling.py** | Default TF-IDF + deterministic k-means (labels = top centroid terms). Embedding backend clusters dense vectors (mean-pooled chunk vectors via SQL `avg()`). Topic dicts carry `work_ids` (best-fit first on the embedding backend) so the UI lists each topic's papers; `GET /ai/topics/latest` reconstructs a stored model from `TopicAssignment` rows (keywords recomputed deterministically) — the async-completion read path that made whole-library topic jobs visible. ⚠️ `backend="bertopic"` does **not** run BERTopic — it reuses embedding k-means. |
 | **topic_graph.py** | Embedding-similarity kNN graph (numpy, `k=6`, `min_similarity=0.30`, `MAX_NODES=400`). ⚠️ **visibility depends on the caller passing `visible_ids`** — IDOR risk if an endpoint forgets it. |
 | **keyword_extraction.py** | YAKE + RAKE fused via RRF, title/abstract boost, optional IDF rerank, stem-dedup. Deterministic; RAKE-only fallback if `yake` absent. |
+| **scope_resolution.py** | Shared scope→works resolver (S1/S2, batch 2026-07-13) — the ONE place translating a scope into works, replacing per-feature copies (citation_graph, summarization, topic_modeling now delegate to it) whose merged-shadow/visibility handling had drifted apart. Covers all 7 scope kinds (`library`/`shelf`/`rack`/`search_result`/`selected_papers`/`saved_filter`/`import_batch`); `scope_works_query` is query-returning (count/paginate without materializing); merged shadows always excluded; `visible_ids` is a **required** kwarg — omitting it is a `TypeError`, not a silent IDOR (topic_graph.py still has its own un-migrated resolver and the older optional-kwarg risk below). |
 
 ## Cluster 7 — Export / Visualization / Bibliography
 
 | Module | Responsibility |
 |--------|---------------|
-| **export_service.py** | Bibliography export in ~11 formats (bibtex/biblatex/ris/csl-json/markdown/html/text/styled/latex/pandoc). Batched author/meta queries; citation keys = surname+year with collision suffixes; visibility clamp on every scope. User `citation_keys` are sanitised (F1 fix): structural chars neutralised, Unicode/`. : + / _ -` preserved, then de-duplicated. |
+| **export_service.py** | Bibliography export in 10 formats (bibtex/biblatex/ris/csl-json/markdown/html/text/styled/latex/pandoc). Batched author/meta queries; citation keys = surname+year with collision suffixes; visibility clamp on every scope. User `citation_keys` are sanitised (F1 fix): structural chars neutralised, Unicode/`. : + / _ -` preserved, then de-duplicated. |
 | **csl/engine.py** | Real CSL rendering via `citeproc-py` for APA/IEEE/Chicago/MLA/Harvard/Vancouver/Nature; layered fallback on failure. |
-| **visualization.py** | Viz provider registry (5 views: temporal_map, embedding_cluster [PCA/UMAP + k-means], co_citation, topic_river, similarity_heatmap). `MAX_NODES=500`; clamps `visible_work_ids` before scope resolution. ⚠️ `_LAYOUT_CACHE` unbounded. |
+| **visualization.py** | Viz provider registry (5 views: temporal_map, embedding_cluster [PCA/UMAP + k-means], co_citation, topic_river, similarity_heatmap). `MAX_NODES=500`; clamps `visible_work_ids` before scope resolution. `_LAYOUT_CACHE` is a `BoundedTTLCache` (maxsize 32, 30 min TTL) — the former unbounded dict was replaced (S10). |
 | **bibtex.py** | Dependency-free BibTeX **import** (balanced-brace scanner). ⚠️ `_clean_value` strips all braces (destroys `{DNA}` casing protection). |
 | **venue_author_summary.py** | Venue/author aggregation over a scope (SEE-clamped). ⚠️ author key over-merges distinct people. |
 
@@ -165,8 +169,9 @@ dependency-free and deterministic._
 | **import_staging.py** | Multi-PDF "extract before storing records": stage content-addressed → record-free GROBID → mint Work only for accepted items using the stored TEI. Magic-byte + 200 MB + openability validation; `BLOCKING_SIGNALS=(same_pdf, same_doi)`. |
 | **import_roots.py** | Owner-managed server import roots (YAML immutable + DB rows; YAML wins clashes). |
 | **default_shelf.py** | The ephemeral "Inbox" default shelf — invariant #1 keeps every work on ≥1 shelf. `place_on_default_if_loose`, `backfill_loose_papers_onto_default`. |
-| **shelf_membership.py** | `add_work_to_shelf_checked` — the **single choke point** for shelf membership: 404/403 via `access.can_modify_shelf`, idempotent upsert, strips default membership. ⚠️ raises `fastapi.HTTPException` (framework coupling for non-HTTP callers). |
-| **saved_filters.py** | Saved-filter resolution: feeds the stored query through `build_works_query` floored on `visible_works_query` so it can never widen beyond the actor's visible set. ⚠️ **imports a query builder from the endpoint layer** (layering inversion). |
+| **shelf_membership.py** | `add_work_to_shelf_checked` — the **single choke point** for shelf membership: idempotent upsert via `access.can_modify_shelf`, strips default membership. Raises framework-free domain errors (`app.errors.NotFoundError`/`PermissionDeniedError`, S4 fix) that an app-level handler maps to 404/403 for HTTP callers — worker/CLI callers get meaningful exceptions instead of the old `fastapi.HTTPException` coupling. |
+| **works_query.py** | `build_works_query` — the ONE query producing "the papers this user sees under these filters" (S4: moved out of the works *endpoint* module into this service module, fixing the layering inversion where `saved_filters` had to import from the HTTP layer). Backs the Library page, saved filters, and graph/export/viz scope resolution; the endpoint now imports it like any other service helper. |
+| **saved_filters.py** | Saved-filter resolution: feeds the stored query through `build_works_query` (now `services/works_query.py`, see above) floored on `visible_works_query` so it can never widen beyond the actor's visible set. |
 
 ## Cluster 9 — Agent / Web-find / Runtime config
 
@@ -214,7 +219,8 @@ flowchart TB
     venue_author_summary --> access & citation_graph & export_service
     batch_import --> web_find & grobid_client & bibliography_import & default_shelf & shelf_membership
     import_staging --> storage & file_paths & extraction & shelf_membership
-    saved_filters -.->|layering inversion| endpoints_works["api/v1/endpoints/works"]
+    saved_filters --> works_query
+    citation_graph & summarization & topic_modeling --> scope_resolution
     agent_files --> storage & default_shelf & file_paths
     users --> audit & groups & auth
 ```
