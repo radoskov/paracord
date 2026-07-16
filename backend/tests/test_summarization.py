@@ -178,16 +178,15 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
         seen.append(prompt)
         if prompt.startswith(summ._DETAIL_INTRO_PROMPT[:30]):
             return "HIGH-LEVEL INTRO."
-        if prompt.startswith(summ._DETAIL_CHUNK_PROMPT[:30]):
-            return f"SECTION SUMMARY {len([p for p in seen if 'section of an academic' in p])}."
+        if prompt.startswith("Summarize the"):  # section chunk prompt (carries the section name)
+            return "Content summary of the section."
         return "SHORT SUMMARY."
 
     monkeypatch.setattr(summ, "_ollama_generate", fake_generate)
-    monkeypatch.setattr(summ, "LLM_INPUT_CHAR_BUDGET", 400)  # force multi-chunk detailed
 
     divs = "".join(
         f"<div><head>Section {i}</head><p>{('Sentence number ' + str(i) + ' with several words. ') * 6}</p></div>"
-        for i in range(6)
+        for i in range(3)
     )
     tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
     work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence.")
@@ -213,10 +212,13 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
         ).all()
     }
     assert rows == {"local_llm", "local_llm_detailed"}
-    # Detailed = intro + several section paragraphs.
+    # Detailed = intro + one paragraph PER SECTION, each headed by the section name.
     assert detailed.text.startswith("HIGH-LEVEL INTRO.")
-    assert detailed.text.count("SECTION SUMMARY") >= 2
+    assert "Section 0:" in detailed.text
+    assert "Section 2:" in detailed.text
     assert detailed.params["detail"] == "detailed"
+    # The section name is passed into the chunk prompt (so the model knows which section).
+    assert any('"Section 1" section' in p for p in seen)
 
 
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
@@ -333,6 +335,30 @@ def test_summary_api_auto_uses_configured_provider(client, auth_headers, db) -> 
     body = created.json()
     assert body["summary_type"] == "extractive"  # resolved from 'auto'
     assert body["text"]
+
+
+def test_detailed_summary_api_runs_as_a_job(client, auth_headers, db, monkeypatch) -> None:
+    """UX batch 4b: a detailed local_llm summary is enqueued (202 + job id) instead of blocking
+    the request, since its section-by-section passes can take minutes."""
+    from app.services.ai_config import update_ai_config
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+
+    work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three.")
+    db.add(work)
+    db.commit()
+    r = client.post(
+        f"/api/v1/works/{work.id}/summaries",
+        headers=auth_headers("editor"),
+        json={"summary_type": "auto", "detail": "detailed"},
+    )
+    assert r.status_code == 202
+    body = r.json()
+    assert body["queued"] is True
+    # A real detailed summary job was enqueued (coalescing key names the work + the detailed variant).
+    assert body["job_id"].startswith("summarize-") and "detailed" in body["job_id"]
+    assert body["summary_type"] == "local_llm_detailed"
 
 
 def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:

@@ -747,12 +747,14 @@ def fetch_citing_work_job(work_id: str) -> None:
             db.commit()
 
 
-def summarize_work_job(work_id: str) -> None:
+def summarize_work_job(work_id: str, detail: str = "short") -> None:
     """Generate a per-paper summary in the background (batch action, 2026-07-15).
 
     Mirrors the create-summary endpoint's "auto" resolution: the local-LLM provider when the AI
-    config selects it, else the deterministic extractive engine. A work with no summarizable text
-    raises ValueError — deterministic, so it is swallowed rather than retried.
+    config selects it, else the deterministic extractive engine. ``detail`` picks short vs the
+    detailed (section-by-section) summary — the detailed one runs here because its many LLM calls
+    can take minutes. A work with no summarizable text raises ValueError — deterministic, so it is
+    swallowed rather than retried.
     """
     import uuid
 
@@ -768,7 +770,7 @@ def summarize_work_job(work_id: str) -> None:
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
         try:
-            summarize_work(db, work, summary_type=summary_type)
+            summarize_work(db, work, summary_type=summary_type, detail=detail)
         except ValueError:
             return
         db.commit()

@@ -195,7 +195,9 @@ def enqueue_staging_extraction(item_id) -> str | None:
         return None
 
 
-def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
+def _enqueue_work_job(
+    job_func: str, prefix: str, work_id, *extra_args, key_suffix: str = ""
+) -> str | None:
     """Best-effort enqueue of a per-work job under the coalescing key ``{prefix}-{work_id}``.
 
     Like extraction (D7), the key makes a re-enqueue of an already in-flight job for the same
@@ -203,9 +205,11 @@ def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
     enrich → chunk → embed) can't spawn two concurrent jobs whose interleaved writes make results
     vary run-to-run (issue 1c). A terminal prior job (finished/failed) does not block a fresh run,
     and that fresh run gets its own unique job id (a new Jobs-tab entry, keeping history).
+    ``key_suffix`` distinguishes variants of the same work job (e.g. short vs detailed summary) so
+    they don't coalesce onto each other; ``extra_args`` are passed to the job after ``work_id``.
     Never raises: a missing/unreachable Redis must not break the caller.
     """
-    key = f"{prefix}-{work_id}"
+    key = f"{prefix}-{work_id}{key_suffix}"
     try:
         from rq import Retry
 
@@ -220,6 +224,7 @@ def _enqueue_work_job(job_func: str, prefix: str, work_id) -> str | None:
         job = queue.enqueue(
             job_func,
             str(work_id),
+            *extra_args,
             job_id=_fresh_job_id(key),
             retry=Retry(max=2, interval=[30, 120]),
         )
@@ -255,9 +260,13 @@ def enqueue_citing_fetch(work_id) -> str | None:
     return _enqueue_work_job(CITING_FETCH_JOB, "citing", work_id)
 
 
-def enqueue_work_summary(work_id) -> str | None:
-    """Best-effort enqueue of a per-paper summary (batch action). None if the queue is down."""
-    return _enqueue_work_job(SUMMARIZE_WORK_JOB, "summarize", work_id)
+def enqueue_work_summary(work_id, detail: str = "short") -> str | None:
+    """Best-effort enqueue of a per-paper summary (batch action / detailed summary). None if the
+    queue is down. Short and detailed are distinct jobs (they store separate rows)."""
+    suffix = "" if detail == "short" else f"-{detail}"
+    return _enqueue_work_job(
+        SUMMARIZE_WORK_JOB, "summarize", work_id, detail, key_suffix=suffix
+    )
 
 
 def enqueue_keywords(work_id) -> str | None:

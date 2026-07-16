@@ -193,11 +193,15 @@ def _ollama_summarize(text: str, *, model: str, base_url: str) -> str:
     return _ollama_generate(prompt, model=model, base_url=base_url)
 
 
-_DETAIL_CHUNK_PROMPT = (
-    "This is one section of an academic paper. Summarize it into a single focused paragraph "
-    "covering what it establishes (problem, method, data, or result). Respond with the paragraph "
-    "only.\n\n"
-)
+def _detail_chunk_prompt(label: str | None) -> str:
+    named = f'the "{label}" section' if label else "this section"
+    return (
+        f"Summarize {named} of an academic paper into a single focused paragraph covering what it "
+        "establishes (problem, method, data, or result). Start directly with the content — do NOT "
+        'begin with "This section". Respond with the paragraph only.\n\n'
+    )
+
+
 _DETAIL_INTRO_PROMPT = (
     "The paragraphs below are section-by-section summaries of ONE academic paper. Write a 2-3 "
     "sentence high-level overview of the whole paper (problem, approach, key result). Respond "
@@ -233,27 +237,39 @@ def _paragraphs(text: str, budget: int) -> list[str]:
     return out
 
 
-def _detailed_llm_summary(text: str, *, model: str, base_url: str) -> str:
-    """Per-PAPER DETAILED summary (UX batch 4): the WHOLE body — no 12k clip — packed into
-    context-window chunks, each condensed into its own paragraph, with a high-level intro
-    synthesized from those paragraphs when there is more than one chunk. Raises on any failure.
+def _detailed_llm_summary(
+    sections: list[tuple[str | None, str]], *, model: str, base_url: str
+) -> str:
+    """Per-PAPER DETAILED summary (UX batch 4): one paragraph PER SECTION, each headed by the
+    section's name (from GROBID) so the reader sees which part of the paper it covers, plus a
+    high-level intro synthesized from the section paragraphs. The whole body is used (no 12k clip);
+    an over-long section is split to the context budget and its pieces are joined. Sections are
+    rendered as ``"Label: <paragraph>"``. Raises on any LLM failure.
     """
-    chunks = _pack_blocks(_paragraphs(text, LLM_INPUT_CHAR_BUDGET), LLM_INPUT_CHAR_BUDGET)
-    if not chunks:
+    out: list[str] = []
+    for label, text in sections:
+        text = (text or "").strip()
+        if not text:
+            continue
+        pieces = _split_to_budget(text, LLM_INPUT_CHAR_BUDGET)
+        parts = [
+            _ollama_generate(_detail_chunk_prompt(label) + piece, model=model, base_url=base_url)
+            for piece in pieces
+        ]
+        para = " ".join(p.strip() for p in parts if p.strip()).strip()
+        if not para:
+            continue
+        out.append(f"{label}: {para}" if label else para)
+    if not out:
         return ""
-    section_summaries = [
-        _ollama_generate(_DETAIL_CHUNK_PROMPT + chunk, model=model, base_url=base_url)
-        for chunk in chunks
-    ]
-    section_summaries = [s for s in section_summaries if s.strip()]
-    if not section_summaries:
-        return ""
-    body = "\n\n".join(section_summaries)
-    if len(section_summaries) == 1:
-        return body
+    if len(out) == 1:
+        return out[0]
     intro = _ollama_generate(
-        _DETAIL_INTRO_PROMPT + body[:LLM_INPUT_CHAR_BUDGET], model=model, base_url=base_url
+        _DETAIL_INTRO_PROMPT + "\n\n".join(out)[:LLM_INPUT_CHAR_BUDGET],
+        model=model,
+        base_url=base_url,
     )
+    body = "\n\n".join(out)
     return f"{intro}\n\n{body}" if intro.strip() else body
 
 
@@ -377,15 +393,23 @@ def summarize_work(
         # straight to the deterministic fallback, so disabled/CI installs never hit the network.
         if ai_cfg.summary_provider == "local_llm" and source_text:
             try:
-                text = (
-                    _detailed_llm_summary(
+                if detailed:
+                    # Section-by-section over the GROBID sections so each paragraph is headed by
+                    # its section name (falls back to title+abstract when no TEI).
+                    from app.services.chunking import iter_work_sections  # noqa: PLC0415 (cycle)
+
+                    sections = [
+                        (label, sec_text)
+                        for label, sec_text in iter_work_sections(db, work)
+                        if label != "title"
+                    ]
+                    text = _detailed_llm_summary(
+                        sections, model=stored_model, base_url=ai_cfg.ollama_url
+                    )
+                else:
+                    text = _ollama_summarize(
                         source_text, model=stored_model, base_url=ai_cfg.ollama_url
                     )
-                    if detailed
-                    else _ollama_summarize(
-                        source_text, model=stored_model, base_url=ai_cfg.ollama_url
-                    )
-                )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"

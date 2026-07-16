@@ -188,6 +188,10 @@ export interface Summary {
   fallback?: boolean;
   fallback_reason?: string | null;
   created_at: string;
+  // UX batch 4b: a detailed summary runs on the worker — the create response is a queued marker
+  // (poll the Jobs list, then re-list summaries).
+  queued?: boolean;
+  job_id?: string | null;
 }
 
 export interface Topic {

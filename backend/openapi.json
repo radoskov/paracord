@@ -6959,9 +6959,16 @@
             "title": "Content Hash"
           },
           "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "created_by_user_id": {
             "anyOf": [
@@ -6976,13 +6983,27 @@
             "title": "Created By User Id"
           },
           "entity_id": {
-            "format": "uuid",
-            "title": "Entity Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
           },
           "entity_type": {
-            "title": "Entity Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Type"
           },
           "fallback": {
             "default": false,
@@ -7001,9 +7022,27 @@
             "title": "Fallback Reason"
           },
           "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
           },
           "model_name": {
             "anyOf": [
@@ -7061,6 +7100,11 @@
             ],
             "title": "Provider Used"
           },
+          "queued": {
+            "default": false,
+            "title": "Queued",
+            "type": "boolean"
+          },
           "source_sections": {
             "default": [],
             "items": {
@@ -7070,22 +7114,28 @@
             "type": "array"
           },
           "summary_type": {
-            "title": "Summary Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Type"
           },
           "text": {
-            "title": "Text",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
           }
         },
-        "required": [
-          "id",
-          "entity_type",
-          "entity_id",
-          "summary_type",
-          "text",
-          "created_at"
-        ],
         "title": "SummaryRead",
         "type": "object"
       },
@@ -23825,7 +23875,7 @@
         ]
       },
       "post": {
-        "description": "Generate a local (no-LLM) summary for a work and store it with provenance.",
+        "description": "Generate a summary for a work and store it with provenance.\n\nDetailed local-LLM summaries run on the worker (their section-by-section passes can take\nminutes) and return a queued marker; short/extractive summaries run inline (UX batch 4b).",
         "operationId": "create_summary_api_v1_works__work_id__summaries_post",
         "parameters": [
           {

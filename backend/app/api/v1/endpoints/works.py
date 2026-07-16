@@ -1457,11 +1457,16 @@ class SummaryCreate(BaseModel):
 
 
 class SummaryRead(BaseModel):
-    id: uuid.UUID
-    entity_type: str
-    entity_id: uuid.UUID
-    summary_type: str
-    text: str
+    # Fields default so the queued variant (detailed local_llm runs as a background job; no summary
+    # row yet, just a job id) validates. The inline path and the list endpoint always fill them.
+    id: uuid.UUID | None = None
+    entity_type: str | None = None
+    entity_id: uuid.UUID | None = None
+    summary_type: str | None = None
+    text: str | None = None
+    # UX batch 4b: detailed summaries run on the worker — poll the Jobs list, then re-list summaries.
+    queued: bool = False
+    job_id: str | None = None
     model_name: str | None = None
     prompt_version: str | None = None
     source_sections: list[str] = []
@@ -1475,7 +1480,7 @@ class SummaryRead(BaseModel):
     content_hash: str | None = None
     created_by_user_id: uuid.UUID | None = None
     params: dict | None = None
-    created_at: datetime
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -2338,10 +2343,15 @@ def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_
 def create_summary(
     work_id: uuid.UUID,
     payload: SummaryCreate,
+    response: Response,
     db: Session = DB_DEP,
     actor: User = CONTRIBUTOR_DEP,
 ) -> object:
-    """Generate a local (no-LLM) summary for a work and store it with provenance."""
+    """Generate a summary for a work and store it with provenance.
+
+    Detailed local-LLM summaries run on the worker (their section-by-section passes can take
+    minutes) and return a queued marker; short/extractive summaries run inline (UX batch 4b).
+    """
     work = db.get(Work, work_id)
     if work is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
@@ -2355,6 +2365,19 @@ def create_summary(
 
         ai_cfg = get_ai_config(db)
         summary_type = "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
+    # A detailed local-LLM summary can fire many LLM calls — run it as a background job so the
+    # request doesn't hang. Short/extractive stay inline (fast). Queue down → fall through inline.
+    if payload.detail == "detailed" and summary_type == "local_llm":
+        job_id = enqueue_work_summary(work_id, detail="detailed")
+        if job_id is not None:
+            response.status_code = status.HTTP_202_ACCEPTED
+            return SummaryRead(
+                queued=True,
+                job_id=job_id,
+                entity_type="work",
+                entity_id=work_id,
+                summary_type="local_llm_detailed",
+            )
     try:
         summary = summarize_work(
             db,

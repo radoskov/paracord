@@ -323,11 +323,42 @@
 
   async function summariseDetail(detail: 'short' | 'detailed'): Promise<void> {
     summarisingDetail = detail;
+    let backgrounded = false;
     await run(async () => {
-      await client.createSummary(work.id, 'auto', detail);
+      const res = await client.createSummary(work.id, 'auto', detail);
+      if (res.queued && res.job_id) {
+        // Detailed summaries run on the worker — poll the Jobs list, then reload (UX batch 4b).
+        backgrounded = true;
+        message = 'Generating the detailed summary in the background…';
+        void pollSummaryJob(res.job_id).finally(() => (summarisingDetail = null));
+        return;
+      }
       summaries = await client.listSummaries(work.id);
     }, detail === 'detailed' ? 'Detailed summary generated' : 'Summary generated');
-    summarisingDetail = null;
+    if (!backgrounded) summarisingDetail = null;
+  }
+
+  async function pollSummaryJob(jobId: string): Promise<void> {
+    const active = new Set(['queued', 'started', 'deferred', 'scheduled']);
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const status = await client.getJobs(100);
+        const job = status.jobs.find((j) => j.id === jobId);
+        if (job && job.status === 'failed') {
+          message = `Summary job failed: ${job.error ?? 'see the Jobs tab'}`;
+          return;
+        }
+        if (!job || !active.has(job.status)) {
+          summaries = await client.listSummaries(work.id);
+          message = 'Detailed summary ready.';
+          return;
+        }
+      } catch {
+        /* transient poll error — keep trying */
+      }
+    }
+    message = 'Still generating — check the Jobs tab.';
   }
 
   // Citing papers (batch10 #8): external papers that cite this one, fetched on demand from
