@@ -9,6 +9,33 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reader "Read works once then dead" — real root cause (2026-07-16)
+
+The recurring bug (Read opens the reader once, then does nothing until you switch papers and back)
+was finally reproduced and fixed. Root cause: `PdfReader.onDestroy` threw `pdfDoc.destroy is not a
+function` inside Svelte 5's `destroy_effect` **only after a background job-poll refresh
+(`refreshOpenWork → loadDetail`) had reassigned the reader's props mid-view**. A throw in effect
+teardown corrupts the effect tree, so the parent's `{#key readerUrl}` block can never re-mount — a
+paper switch "fixes" it because `{#key selected.id}` rebuilds the whole `WorkDetail` tree. A job-less
+e2e paper never triggers the poll, which is why every earlier render-gate fix (and Journey 33)
+passed while the bug survived manually.
+
+- **Fix**: `PdfReader.onDestroy` (and the mid-life destroy in `loadPdf`) now guard every pdf.js
+  teardown call (`renderTask.cancel` / `currentTextLayer.cancel` / `pdfDoc.destroy`) so one bad
+  object can never abort teardown and escape into the effect tree.
+- **Regression test**: Journey 34 (`e2e/tests/34-reader-reopen-after-refresh.spec.ts`) enqueues a
+  real background job, holds the reader open across two 4s poll ticks so a refresh fires mid-view,
+  then closes + re-opens — asserting the reader returns AND no page error escaped teardown. This is
+  the only test that reproduces it.
+- **Zen citation fix**: clicking an in-text citation in zen switched to the (hidden-nav) References
+  tab, stranding the user on an un-styled "black" pane; it now leaves zen first so the nav returns
+  and the pane paints normally.
+- **Known separate bug (not fixed)**: extraction jobs intermittently fail with
+  `StaleDataError: UPDATE ... works expected to update 1 row(s); 0 were matched` at
+  `store_parsed_extraction`'s flush. `Work` has no optimistic-lock column, so the row is being
+  deleted during the minutes-long extraction window — needs its own investigation (concurrent
+  deleter: dedup/merge, recovery-sweep double-enqueue, or a citing/summarize job).
+
 ## UX batch 5 polish: summaries, reference graph, PDF reader (2026-07-16)
 
 Follow-up polish after testing batch 5 (migrations 0075/0076 already on the live DB):
