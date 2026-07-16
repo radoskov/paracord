@@ -37,11 +37,18 @@ inline). Shipped so far, each with tests + `make ready-full`/`frontend-check` gr
   button shows building/done/failed state.
 - **Insights pan/zoom freeze fix** (`095fb3b`): restyle repaints use a merge `setOption` so the force
   sim isn't restarted and roam is preserved; only Build/Refresh does a full rebuild.
+- **LaTeX plain/fancy rendering** (`<this commit>`): `lib/renderMath.ts` renders `$…$`/`$$…$$` spans
+  with bundled offline KaTeX (non-math text HTML-escaped); a conservative heuristic wraps only
+  egregious non-delimited math (backslash-commands, braced `D^{-1/2}`) and leaves `N_i`/`O(n)` alone.
+  Summary prompts now ask the model to delimit maths. WorkDetail + Insights scope summary get a
+  fancy/plain toggle (fancy default). `katex` + `@types/katex` added; CSS imported globally.
 
-**Remaining in this batch (not yet started):** LaTeX plain/fancy rendering (bundled KaTeX +
-egregious-case heuristic); Insights citing-paper inclusion + external-node styling (degree/citation
-count/colour, keep diamond); per-shelf/rack tag scoping (new `tag_shelves`/`tag_racks` tables,
-assignable-tags resolver, Tag-tab + WorkDetail UI). See the workplan's decisions section.
+**Remaining in this batch (not yet started):** Insights citing-paper inclusion + external-node
+styling (degree/citation-count/colour, keep diamond); per-shelf/rack tag scoping (new
+`tag_shelves`/`tag_racks` tables, assignable-tags resolver, Tag-tab + WorkDetail UI). See the
+workplan's decisions section and the handoff note. NOTE on citing papers: they are edge *sources*
+(citer → scope work), so the even-distribution external cap — which keys on external edge *targets* —
+must be extended to bound citing externals too; do this carefully in `_distribute_external_keep`.
 
 ## UX batch 4c: citation-count sizing, detailed-summary job, section names (2026-07-16)
 

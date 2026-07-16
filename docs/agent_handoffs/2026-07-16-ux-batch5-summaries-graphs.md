@@ -14,6 +14,7 @@ This batch is **partially complete** — 5 of the planned groups shipped and are
 | Even-distribution external limit | `85dbc2f` | `_distribute_external_keep` (absolute A + relative R_i, largest-remainder) |
 | Ref-graph polish + Build state | `4802c90` | 3 typed edge colours, title in header, scrollable tooltip + ctrl/middle-click append, build state |
 | Insights pan/zoom freeze | `095fb3b` | restyle = merge setOption (no sim restart / roam reset) |
+| LaTeX plain/fancy rendering | (batch 5) | `lib/renderMath.ts` + bundled KaTeX + heuristic; prompt-delimiting; fancy/plain toggle in WorkDetail + Insights; `katex` dependency added |
 
 Migration **0074** (renames legacy `*_detailed` → `*_detailed_deep`) was applied to the live DB
 (`docker compose exec api alembic -c backend/alembic.ini upgrade head`). Worker restart is needed for
@@ -21,20 +22,21 @@ the new job code to run on the live stack (not done in this session — do befor
 
 ## Remaining (not started)
 
-1. **LaTeX plain/fancy rendering (§1.4).** DECIDED: prompt the LLM to delimit maths in `$…$`/`$$…$$`,
-   bundle **offline KaTeX** (CSP-safe — inline, no CDN), render fancy by default with a plain
-   fallback toggle, plus a light heuristic that only wraps *egregious* non-delimited cases (`\frac`,
-   braced `^{}`/`_{}`, backslash commands) and leaves easy tokens (`N_i`) alone. Touch the summary
-   prompts in `summarization.py` and the render spots in `WorkDetail.svelte` / `InsightsPage.svelte`.
-   Adding KaTeX needs `make frontend-install` (npm in-container) + a package-lock update.
+1. **Insights citing papers + external styling (§4.5–4.6).** DECIDED: include citing papers from the
+   *already-fetched* citation data only (source: `ExternalCitationLink` + `ExternalPaper` in
+   `app.models.external_citation`; mirror `reference_graph.py:250-289`), flagging coverage so an empty
+   citing half reads as "not fetched". Add a distinct edge type/colour for citing vs reference — add a
+   `relation` field to `GraphEdge`/`GraphEdgeRead` + the client type, and colour it in
+   `CitationGraph.svelte`. **Important:** citing papers are edge *sources* (citer → scope work),
+   whereas `_distribute_external_keep` bounds external edge *targets*; extend the cap to also bound
+   citing externals (e.g. treat both directions, or a separate citing budget), or they can flood.
+   Externals should participate in degree + citation-count + colour (populate `citation_count` on the
+   external node in `citation_graph.py` from the reference/ExternalPaper metadata), **keeping the
+   diamond shape**; pagerank/betweenness stay local-only. Frontend: `metric()` already reads
+   `citationCount`; extend the color/category logic so externals with a value aren't forced into the
+   fixed "external" colour while keeping the diamond `symbol`.
 
-2. **Insights citing papers + external styling (§4.5–4.6).** DECIDED: include citing papers from the
-   *already-fetched* citation data only (flag coverage so an empty citing half reads as "not
-   fetched"); add a distinct edge type/colour for citing vs reference. Externals should participate in
-   degree + citation-count + colour (backend must populate `citation_count` on external nodes in
-   `citation_graph.py`), **keeping the diamond shape**; pagerank/betweenness stay local-only.
-
-3. **Per-shelf/rack tags (§3).** DECIDED: new `tag_shelves`/`tag_racks` join tables (zero rows =
+2. **Per-shelf/rack tags (§3).** DECIDED: new `tag_shelves`/`tag_racks` join tables (zero rows =
    global), a `GET /works/{id}/assignable-tags` union resolver (global OR shelf-scoped OR
    rack-scoped via any-shelf-in-rack), scope-management endpoints on `tags.py`, a scope multi-select
    in `TagsPage.svelte`, and filtering the add-tag dropdown in `WorkDetail.svelte`. The Library-view
