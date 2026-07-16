@@ -17,4 +17,11 @@ export default defineConfig({
   optimizeDeps: {
     include: ['echarts', 'pdfjs-dist', 'katex'],
   },
+  build: {
+    // The chunks over Vite's default 500 kB threshold are echarts (~1.13 MB) and the pdf.js
+    // worker (~1.25 MB) — third-party libs already split into their own lazily-imported chunks
+    // that can't be usefully subdivided — plus the main bundle (~0.85 MB). Raise the limit past
+    // the largest of them so the build output stays warning-free.
+    chunkSizeWarningLimit: 1300,
+  },
 });
