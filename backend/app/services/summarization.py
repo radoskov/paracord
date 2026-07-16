@@ -786,7 +786,19 @@ def _work_digest(
                 )
                 .order_by(Summary.created_at.desc())
             ).first()
-            if existing is not None and existing.provider_used == "local_llm" and existing.text:
+            # Don't reuse a STALE summary: if the paper has since gained full text but the stored
+            # summary was made from the abstract only, regenerate it (2026-07-16 — "new PDFs").
+            stale = (
+                existing is not None
+                and "abstract-only" in (existing.source_sections or [])
+                and _source_tier(_work_source(db, work)[1]) == "full_text"
+            )
+            if (
+                existing is not None
+                and not stale
+                and existing.provider_used == "local_llm"
+                and existing.text
+            ):
                 return existing.text, None
         try:
             s = summarize_work(

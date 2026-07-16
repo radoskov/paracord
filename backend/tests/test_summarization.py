@@ -429,6 +429,61 @@ def test_summary_cache_keeps_multiple_models_and_evicts_lru(db, monkeypatch) -> 
     assert set(models) == {"mB", "mC", "mD"}  # mA evicted; a different detail level is unaffected
 
 
+def test_scope_reuse_refreshes_a_paper_that_gained_a_pdf(db, monkeypatch) -> None:
+    """2026-07-16: a scope re-run WITHOUT regenerate_papers reuses existing per-paper summaries, but
+    a paper that has since gained full text (was abstract-only) is re-summarized (not left stale)."""
+    import app.services.summarization as summ
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.ai_config import update_ai_config
+    from app.services.summarization import summarize_scope, summarize_work
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    monkeypatch.setattr(summ, "_ollama_generate", lambda *a, **k: "digest.")
+
+    shelf = Shelf(name="grow")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="P", normalized_title="p", abstract="An abstract only.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    # The paper was summarized in its own view while abstract-only (marked abstract-only).
+    summarize_work(db, work, summary_type="local_llm", detail="short", model_name="m1")
+    db.commit()
+    first = db.scalars(
+        select(Summary).where(
+            Summary.entity_type == "work",
+            Summary.entity_id == work.id,
+            Summary.summary_type == "local_llm",
+        )
+    ).first()
+    assert first is not None and "abstract-only" in (first.source_sections or [])
+
+    # The paper gains a PDF (GROBID body); re-run the scope WITHOUT regenerate_papers.
+    tei = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
+        "<div><head>Intro</head><p>Now there is full body text here.</p></div>"
+        "</body></text></TEI>"
+    )
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db.commit()
+    summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    db.commit()
+
+    refreshed = db.scalars(
+        select(Summary).where(
+            Summary.entity_type == "work",
+            Summary.entity_id == work.id,
+            Summary.summary_type == "local_llm",
+        )
+    ).first()
+    # The stale abstract-only summary was replaced by a full-text one.
+    assert refreshed is not None and "abstract-only" not in (refreshed.source_sections or [])
+
+
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
     work = Work(canonical_title="t", normalized_title="t", abstract="x")
     db_session.add(work)

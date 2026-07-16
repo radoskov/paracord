@@ -342,14 +342,18 @@
   async function summarise(): Promise<void> {
     summaryBusy = true;
     let backgrounded = false;
-    // "regen_*" forces a fresh scope synthesis (and regenerates the per-paper digests); "use_*"
-    // returns the cached (scope, effort, model) summary when one exists.
-    const force = summarySource.startsWith('regen');
+    // 2026-07-16: clicking the button ALWAYS re-synthesizes the scope summary (force=true) — even
+    // "Use/create short → Regenerate" now recomputes, picking up new papers/PDFs (their per-paper
+    // summaries are created on the fly) while REUSING existing per-paper summaries. Only the
+    // "Regenerate short/detailed" options set regeneratePapers, which additionally re-does the
+    // existing per-paper summaries. (The cached summary is shown read-only via loadCachedSummary;
+    // this button is the explicit recompute.)
+    const regeneratePapers = summarySource.startsWith('regen');
     await run(async () => {
       const response = await client.createScopeScope(scope.scopeType, scope.scopeId, {
         paperDetail: summaryDetail,
-        regeneratePapers: force,
-        force,
+        regeneratePapers,
+        force: true,
       });
       if (response.queued && response.job_id) {
         backgrounded = true;
@@ -493,12 +497,12 @@
     <div class="card">
       <div class="head">
         <h2>Scope summary</h2>
-        <label class="summary-source" title="Which per-paper summary feeds the collection synthesis, and whether to reuse or regenerate them">
+        <label class="summary-source" title="Which per-paper summaries feed the collection synthesis. Summarize/Regenerate always rebuilds the scope summary; 'Reuse' keeps existing per-paper summaries (only new/changed papers are summarized), 'Regenerate' redoes every per-paper summary too.">
           <select bind:value={summarySource} disabled={summaryBusy}>
-            <option value="use_short">Use/create short</option>
-            <option value="use_detailed">Use/create detailed</option>
-            <option value="regen_short">Regenerate short</option>
-            <option value="regen_detailed">Regenerate detailed</option>
+            <option value="use_short">Reuse short (fill new)</option>
+            <option value="use_detailed">Reuse detailed (fill new)</option>
+            <option value="regen_short">Regenerate all short</option>
+            <option value="regen_detailed">Regenerate all detailed</option>
           </select>
         </label>
         {#if summarySource.endsWith('detailed')}
@@ -513,7 +517,7 @@
         {/if}
         <button type="button" class:busy={summaryBusy} on:click={summarise}
           disabled={loading || summaryBusy || !scopeReady || !isClassicScope}
-          title={isClassicScope ? (scopeReady ? 'Summarize the scope (uses the configured AI model when set, else extractive)' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}
+          title={isClassicScope ? (scopeReady ? 'Rebuild the scope summary now — new/changed papers get summarized, existing per-paper summaries are reused unless a "Regenerate all" source is chosen' : `Pick a ${scopeType} first`) : 'Summaries work on a library, shelf or rack scope'}
           >{summaryBusy ? 'Summarizing…' : summary ? 'Regenerate' : 'Summarize'}</button>
       </div>
       {#if !summary}
