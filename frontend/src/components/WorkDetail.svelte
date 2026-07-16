@@ -69,6 +69,10 @@
   let summaries: Summary[] = [];
   let appliedTags: AppliedTag[] = [];
   let applyTagId = '';
+  // 2026-07-16: tags offered for THIS paper (global + those scoped to its shelves/racks). null =
+  // not loaded (or the client lacks the method) → fall back to all tags; [] = genuinely none offered.
+  let assignableTags: Tag[] | null = null;
+  $: tagOptions = assignableTags ?? $tags;
   // Inline "create tag" (make + apply without leaving the paper). Gated on canEdit (contributor).
   let creatingTag = false;
   let newTagName = '';
@@ -287,6 +291,10 @@
             .catch(() => null),
           ensureTags(client),
         ]);
+      // Best-effort: which tags are offered for this paper's shelves/racks (2026-07-16).
+      assignableTags = client.listAssignableTags
+        ? await client.listAssignableTags(w.id).catch(() => [])
+        : null;
       citingLoaded = citing != null;
     });
     // Seed the editable Authors field from the loaded 'authors' assertion (no Work column exists).
@@ -1487,9 +1495,9 @@
       {/if}
     </div>
     <div class="tags">
-      <select bind:value={applyTagId} aria-label="Tag" title="Choose a tag to apply to this paper">
+      <select bind:value={applyTagId} aria-label="Tag" title="Tags offered for this paper's shelves/racks (plus global tags)">
         <option value="">Choose a tag…</option>
-        {#each $tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
+        {#each tagOptions as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
       </select>
       <button type="button" class="secondary" on:click={applyTag} disabled={!applyTagId || loading || !canModify}
         title={!canModify ? INSUFFICIENT_ROLE : applyTagId ? 'Apply the chosen tag to this paper' : 'Choose a tag first'}>Apply</button>

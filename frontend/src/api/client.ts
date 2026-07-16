@@ -602,6 +602,9 @@ export interface Tag {
   color: string | null;
   description: string | null;
   created_at: string;
+  // 2026-07-16: shelves/racks this tag is OFFERED for. Both empty = global (offered everywhere).
+  shelf_ids?: string[];
+  rack_ids?: string[];
 }
 
 // A tag applied to a paper (from GET /works/{id}/tags): just what the chip needs to render.
@@ -2210,8 +2213,28 @@ export class ApiClient {
     });
   }
 
-  async listTags(): Promise<Tag[]> {
-    return this.request<Tag[]>("/api/v1/tags");
+  async listTags(filter?: { shelfId?: string | null; rackId?: string | null }): Promise<Tag[]> {
+    const q = new URLSearchParams();
+    if (filter?.shelfId) q.set("shelf_id", filter.shelfId);
+    if (filter?.rackId) q.set("rack_id", filter.rackId);
+    const qs = q.toString();
+    return this.request<Tag[]>(`/api/v1/tags${qs ? `?${qs}` : ""}`);
+  }
+
+  /** Tags offered for a paper: global + those scoped to its shelves/racks (2026-07-16). */
+  async listAssignableTags(workId: string): Promise<Tag[]> {
+    return this.request<Tag[]>(`/api/v1/tags/assignable?work_id=${workId}`);
+  }
+
+  /** Replace a tag's shelf/rack scope (empty arrays → global). */
+  async setTagScope(
+    tagId: string,
+    scope: { shelfIds: string[]; rackIds: string[] },
+  ): Promise<Tag> {
+    return this.request<Tag>(`/api/v1/tags/${tagId}/scope`, {
+      method: "PUT",
+      body: { shelf_ids: scope.shelfIds, rack_ids: scope.rackIds },
+    });
   }
 
   async createTag(payload: {
