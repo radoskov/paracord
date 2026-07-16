@@ -12,6 +12,7 @@
   import ExportDialog from '../components/ExportDialog.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
   import { resolveScopeRequest } from '../lib/scope';
+  import { renderSummaryMath } from '../lib/renderMath';
   import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
@@ -280,6 +281,8 @@
     { value: 'detailed_deep', label: 'Deep', hint: 'One pass per subsection (most detail, slowest)' },
   ];
   let scopeEffort: SummaryDetail = 'detailed_section';
+  // 2026-07-16: render summary maths with KaTeX ("fancy") or raw text ("plain" fallback).
+  let mathMode: 'fancy' | 'plain' = 'fancy';
   $: summaryDetail = (summarySource.endsWith('detailed') ? scopeEffort : 'short') as SummaryDetail;
 
   async function summarise(): Promise<void> {
@@ -467,11 +470,19 @@
             Summary of <strong>{summary.scope_label}</strong>
           </p>
         {/if}
+        <div class="summary-toolbar">
+          <button type="button" class="linkish" class:active={mathMode === 'fancy'}
+            on:click={() => (mathMode = mathMode === 'fancy' ? 'plain' : 'fancy')}
+            title="Toggle LaTeX math rendering (switch to plain if equations look garbled)"
+            >{mathMode === 'fancy' ? '𝑓𝑥 fancy' : 'plain text'}</button>
+        </div>
         <div class="summary-body">
           {#each formatSummary(summary.text) as sec}
             {#if sec.heading}<p class="summary-heading">{sec.heading}</p>{/if}
             {#if sec.bullets}
-              <ul class="summary-bullets">{#each sec.bullets as b}<li>{b}</li>{/each}</ul>
+              <ul class="summary-bullets">{#each sec.bullets as b}<li>{#if mathMode === 'fancy'}{@html renderSummaryMath(b)}{:else}{b}{/if}</li>{/each}</ul>
+            {:else if mathMode === 'fancy'}
+              <p class="summary-text">{@html renderSummaryMath(sec.body ?? '')}</p>
             {:else}
               <p class="summary-text">{sec.body}</p>
             {/if}
@@ -551,6 +562,15 @@
 
   .summary-source select {
     font-size: 0.85rem;
+  }
+
+  .summary-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.2rem;
+  }
+  .summary-toolbar .active {
+    font-weight: 700;
   }
 
   /* 2026-07-16 detailed-summary effort selector */

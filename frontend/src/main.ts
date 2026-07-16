@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 
+import 'katex/dist/katex.min.css'; // 2026-07-16: bundled offline for summary math rendering
 import App from './App.svelte';
 import { initTheme } from './lib/theme/store';
 
