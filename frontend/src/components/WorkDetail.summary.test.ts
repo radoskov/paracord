@@ -122,9 +122,11 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
   });
 
   it("generates a detailed summary separately from the short one", async () => {
+    // The detailed button now sends the selected effort level (default "Section"); the stored row
+    // is typed accordingly (2026-07-16).
     const detailed = makeSummary({
       id: "s2",
-      summary_type: "local_llm_detailed",
+      summary_type: "local_llm_detailed_section",
       text: "Intro paragraph.\n\nSection one.\n\nSection two.",
     });
     const createSummary = vi.fn().mockResolvedValue(detailed);
@@ -133,7 +135,7 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     render(WorkDetail, { client: client as never, work: makeWork() });
 
     await fireEvent.click(await screen.findByRole("button", { name: /generate detailed/i }));
-    expect(createSummary).toHaveBeenCalledWith("w1", "auto", "detailed");
+    expect(createSummary).toHaveBeenCalledWith("w1", "auto", "detailed_section");
     await waitFor(() => expect(screen.getByText("Intro paragraph.")).toBeTruthy());
     expect(screen.getByText("Section two.")).toBeTruthy();
   });
