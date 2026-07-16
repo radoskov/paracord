@@ -156,8 +156,12 @@ def test_tag_scope_and_assignable_tags(client, auth_headers, db) -> None:
     owner = auth_headers("owner")
     contributor = auth_headers("contributor")
 
-    shelf_id = client.post("/api/v1/shelves", headers=owner, json={"name": "Scoped shelf"}).json()["id"]
-    other_shelf = client.post("/api/v1/shelves", headers=owner, json={"name": "Other shelf"}).json()["id"]
+    shelf_id = client.post("/api/v1/shelves", headers=owner, json={"name": "Scoped shelf"}).json()[
+        "id"
+    ]
+    other_shelf = client.post(
+        "/api/v1/shelves", headers=owner, json={"name": "Other shelf"}
+    ).json()["id"]
     rack_id = client.post("/api/v1/racks", headers=owner, json={"name": "Rack"}).json()["id"]
     client.post(f"/api/v1/racks/{rack_id}/shelves", headers=owner, json={"shelf_id": shelf_id})
 
@@ -166,16 +170,28 @@ def test_tag_scope_and_assignable_tags(client, auth_headers, db) -> None:
     ).json()["id"]
     client.post(f"/api/v1/shelves/{shelf_id}/works", headers=owner, json={"work_id": work_id})
 
-    global_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "global"}).json()["id"]
-    shelf_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "shelfscoped"}).json()["id"]
-    rack_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "rackscoped"}).json()["id"]
-    off_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "offscope"}).json()["id"]
+    global_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "global"}).json()[
+        "id"
+    ]
+    shelf_tag = client.post(
+        "/api/v1/tags", headers=contributor, json={"name": "shelfscoped"}
+    ).json()["id"]
+    rack_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "rackscoped"}).json()[
+        "id"
+    ]
+    off_tag = client.post("/api/v1/tags", headers=contributor, json={"name": "offscope"}).json()[
+        "id"
+    ]
 
-    client.put(f"/api/v1/tags/{shelf_tag}/scope", headers=contributor, json={"shelf_ids": [shelf_id]})
+    client.put(
+        f"/api/v1/tags/{shelf_tag}/scope", headers=contributor, json={"shelf_ids": [shelf_id]}
+    )
     # rack-scoped: the paper qualifies via its shelf being in the rack.
     client.put(f"/api/v1/tags/{rack_tag}/scope", headers=contributor, json={"rack_ids": [rack_id]})
     # scoped to a shelf the paper is NOT on → must be excluded.
-    client.put(f"/api/v1/tags/{off_tag}/scope", headers=contributor, json={"shelf_ids": [other_shelf]})
+    client.put(
+        f"/api/v1/tags/{off_tag}/scope", headers=contributor, json={"shelf_ids": [other_shelf]}
+    )
 
     res = client.get(f"/api/v1/tags/assignable?work_id={work_id}", headers=contributor)
     assert res.status_code == 200
@@ -190,5 +206,7 @@ def test_tag_scope_and_assignable_tags(client, auth_headers, db) -> None:
     assert listed[shelf_tag]["shelf_ids"] == [shelf_id]
     assert listed[rack_tag]["rack_ids"] == [rack_id]
     # Filtering the tag list by shelf returns the shelf tag + globals, not the off-scope one.
-    by_shelf = {t["id"] for t in client.get(f"/api/v1/tags?shelf_id={shelf_id}", headers=contributor).json()}
+    by_shelf = {
+        t["id"] for t in client.get(f"/api/v1/tags?shelf_id={shelf_id}", headers=contributor).json()
+    }
     assert shelf_tag in by_shelf and global_tag in by_shelf and off_tag not in by_shelf

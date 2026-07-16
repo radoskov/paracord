@@ -94,7 +94,9 @@ def test_citing_papers_add_typed_edges_into_scope(db_session) -> None:
     db_session.add(ExternalCitationLink(external_paper_id=ext.id, work_id=cited.id))
     db_session.commit()
 
-    g = build_citation_graph(db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external")
+    g = build_citation_graph(
+        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external"
+    )
     citing_edges = [e for e in g.edges if e.relation == "citing"]
     assert len(citing_edges) == 1
     assert citing_edges[0].target == str(cited.id)  # edge points INTO the scope work
@@ -102,7 +104,9 @@ def test_citing_papers_add_typed_edges_into_scope(db_session) -> None:
     assert any(n.id.startswith("citing:") and n.type == "external" for n in g.nodes)
 
     # local_only drops the external citer entirely.
-    g2 = build_citation_graph(db_session, scope_type="shelf", scope_id=shelf.id, node_mode="local_only")
+    g2 = build_citation_graph(
+        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="local_only"
+    )
     assert not [e for e in g2.edges if e.relation == "citing"]
 
 
@@ -114,15 +118,21 @@ def test_separate_caps_for_references_and_citing(db_session, make_reference) -> 
     for i in range(5):  # 5 external references
         make_reference(db_session, citing_work_id=work.id, doi=f"10.9/ref{i}", title=f"Ref {i}")
     for i in range(5):  # 5 external citing papers
-        ext = ExternalPaper(dedup_key=f"10.8/cit{i}", source="openalex", doi=f"10.8/cit{i}", title=f"Cit {i}")
+        ext = ExternalPaper(
+            dedup_key=f"10.8/cit{i}", source="openalex", doi=f"10.8/cit{i}", title=f"Cit {i}"
+        )
         db_session.add(ext)
         db_session.flush()
         db_session.add(ExternalCitationLink(external_paper_id=ext.id, work_id=work.id))
     db_session.commit()
 
     g = build_citation_graph(
-        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external",
-        max_external=5, max_external_citing=1,
+        db_session,
+        scope_type="shelf",
+        scope_id=shelf.id,
+        node_mode="include_external",
+        max_external=5,
+        max_external_citing=1,
     )
     ref_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("ext:")]
     cit_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("citing:")]

@@ -271,9 +271,7 @@ def set_tag_scope(
     tag = db.get(Tag, tag_id)
     if tag is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
-    valid_shelves = set(
-        db.scalars(select(Shelf.id).where(Shelf.id.in_(payload.shelf_ids))).all()
-    )
+    valid_shelves = set(db.scalars(select(Shelf.id).where(Shelf.id.in_(payload.shelf_ids))).all())
     valid_racks = set(db.scalars(select(Rack.id).where(Rack.id.in_(payload.rack_ids))).all())
     db.execute(delete(TagShelf).where(TagShelf.tag_id == tag_id))
     db.execute(delete(TagRack).where(TagRack.tag_id == tag_id))

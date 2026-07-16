@@ -115,9 +115,7 @@ _WORD = re.compile(r"[A-Za-z][A-Za-z'-]+")
 
 # 2026-07-16: ask the model to delimit maths so the UI can render it with KaTeX (fancy mode). Kept
 # terse and appended to the end of prompts so existing prompt-prefix assertions still hold.
-_MATH_HINT = (
-    " Write any mathematical expression in LaTeX between $…$ (inline) or $$…$$ (display)."
-)
+_MATH_HINT = " Write any mathematical expression in LaTeX between $…$ (inline) or $$…$$ (display)."
 
 
 def summarize_extractive(text: str, *, max_sentences: int = 5) -> str:
@@ -225,7 +223,9 @@ def _ollama_summarize(text: str, *, model: str, base_url: str, abstract_only: bo
     else:
         prompt = (
             "Summarize the following academic paper text in 3-4 sentences, focusing on the problem, "
-            "method, and key result. Respond with the summary only." + _MATH_HINT + "\n\n"
+            "method, and key result. Respond with the summary only."
+            + _MATH_HINT
+            + "\n\n"
             + text[:LLM_INPUT_CHAR_BUDGET]
         )
     return _ollama_generate(prompt, model=model, base_url=base_url)
