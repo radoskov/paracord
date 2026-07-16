@@ -1,7 +1,11 @@
 # Handoff — UX batch 5 (summaries / jobs / graphs), 2026-07-16
 
 Workplan: `docs/WORKPLAN_2026-07-16_summary-effort-tags-graphs.md` (all 12 design Qs answered inline).
-This batch is **partially complete** — 5 of the planned groups shipped and are tested; 3 remain.
+This batch is **complete** — all planned groups shipped and tested. ONE explicit lower-priority
+follow-up remains: making the **Library-view tag filter** scope-aware when a shelf/rack is
+co-selected (the WorkDetail add-tag dropdown + Tag-tab scope management already shipped). The
+backend supports it already: `GET /tags?shelf_id=&rack_id=` returns the scoped+global set — wire
+`LibraryPage.svelte`'s tag filter to call it when `shelfFilter`/`rackFilter` narrow.
 
 ## Done (committed, tested, gate-green)
 
@@ -22,25 +26,12 @@ the new job code to run on the live stack (not done in this session — do befor
 
 ## Remaining (not started)
 
-1. **Insights citing papers + external styling (§4.5–4.6).** DECIDED: include citing papers from the
-   *already-fetched* citation data only (source: `ExternalCitationLink` + `ExternalPaper` in
-   `app.models.external_citation`; mirror `reference_graph.py:250-289`), flagging coverage so an empty
-   citing half reads as "not fetched". Add a distinct edge type/colour for citing vs reference — add a
-   `relation` field to `GraphEdge`/`GraphEdgeRead` + the client type, and colour it in
-   `CitationGraph.svelte`. **Important:** citing papers are edge *sources* (citer → scope work),
-   whereas `_distribute_external_keep` bounds external edge *targets*; extend the cap to also bound
-   citing externals (e.g. treat both directions, or a separate citing budget), or they can flood.
-   Externals should participate in degree + citation-count + colour (populate `citation_count` on the
-   external node in `citation_graph.py` from the reference/ExternalPaper metadata), **keeping the
-   diamond shape**; pagerank/betweenness stay local-only. Frontend: `metric()` already reads
-   `citationCount`; extend the color/category logic so externals with a value aren't forced into the
-   fixed "external" colour while keeping the diamond `symbol`.
-
-2. **Per-shelf/rack tags (§3).** DECIDED: new `tag_shelves`/`tag_racks` join tables (zero rows =
-   global), a `GET /works/{id}/assignable-tags` union resolver (global OR shelf-scoped OR
-   rack-scoped via any-shelf-in-rack), scope-management endpoints on `tags.py`, a scope multi-select
-   in `TagsPage.svelte`, and filtering the add-tag dropdown in `WorkDetail.svelte`. The Library-view
-   scope-aware tag filter is an explicit lower-priority follow-up. Needs an Alembic migration.
+1. **Library-view scope-aware tag filter (§3 Q7, lower-priority).** The backend already returns the
+   right set via `GET /tags?shelf_id=&rack_id=` (globals + scoped). Wire `LibraryPage.svelte`'s tag
+   filter dropdown to call `client.listTags({shelfId, rackId})` when `shelfFilter`/`rackFilter` are
+   narrowed (they're at LibraryPage.svelte ~72-74), so the tag options match the chosen shelf/rack.
+   Everything else in the tag feature (Tag-tab scope editor + filter, WorkDetail assignable dropdown)
+   already shipped.
 
 ## Gotchas confirmed this session
 - Backend tests run in-container: `docker compose run --rm --no-deps api python -m pytest …`. The

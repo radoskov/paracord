@@ -43,12 +43,22 @@ inline). Shipped so far, each with tests + `make ready-full`/`frontend-check` gr
   Summary prompts now ask the model to delimit maths. WorkDetail + Insights scope summary get a
   fancy/plain toggle (fancy default). `katex` + `@types/katex` added; CSS imported globally.
 
-**Remaining in this batch (not yet started):** Insights citing-paper inclusion + external-node
-styling (degree/citation-count/colour, keep diamond); per-shelf/rack tag scoping (new
-`tag_shelves`/`tag_racks` tables, assignable-tags resolver, Tag-tab + WorkDetail UI). See the
-workplan's decisions section and the handoff note. NOTE on citing papers: they are edge *sources*
-(citer → scope work), so the even-distribution external cap — which keys on external edge *targets* —
-must be extended to bound citing externals too; do this carefully in `_distribute_external_keep`.
+- **Insights citing papers + typed edges + external styling** (`<graph commit>`): the citation graph
+  now includes citing papers (from fetched `ExternalCitationLink`/`ExternalPaper`) as nodes with
+  edges pointing INTO the scope (new `GraphEdge.relation` reference/citing, coloured distinctly);
+  references and citing papers get **separate caps** (`max_external` / `max_external_citing`), each
+  distributed across the scope papers so one half never starves the other. External nodes conform to
+  the colour scheme where they have the value (year), keeping the diamond shape; a "Citing papers"
+  toggle + coverage note ("none fetched yet").
+- **Per-shelf/rack tags** (`<tag commits>`, migration `0075`): new `tag_shelves`/`tag_racks` tables
+  (zero rows = global). `PUT /tags/{id}/scope` sets a tag's scope; `GET /tags/assignable?work_id=…`
+  returns global + shelf/rack-scoped tags for a paper (rack via any-shelf-in-rack); `GET /tags?
+  shelf_id/rack_id` filters. Tag tab gets a per-tag scope editor + a shelf/rack filter; the paper
+  view's add-tag dropdown is filtered to the assignable set. Migration 0075 applied to the live DB.
+
+**Follow-up (explicitly lower-priority, not done):** the Library-view tag *filter* dropdown is not
+yet scope-aware when a shelf/rack is co-selected (§3 Q7) — the WorkDetail dropdown and Tag-tab
+management shipped; the Library filter is the remaining slice.
 
 ## UX batch 4c: citation-count sizing, detailed-summary job, section names (2026-07-16)
 
