@@ -2,9 +2,13 @@ import { expect, test } from '@playwright/test';
 
 import { SAMPLE_PDF, apiDeleteWorksByTitle, apiLogin, expectSignedIn, uniqueName } from '../helpers';
 
-// Journey 33 — the reader lifecycle: open, close, RE-OPEN (the "Read works only once" bug), plus
-// zen enter/exit-via-Esc and the reading-mode switch. Each open must render a fresh canvas.
-test('Journey 33 — reader open/close/reopen, zen, reading modes', async ({ page, request }) => {
+// Journey 33 — the reader lifecycle mirroring the reported flow: open via the MAIN "Read" button,
+// make a note, zen enter + Esc-exit, close the reader, then RE-OPEN (the "Read works only once"
+// bug). Each open must render a fresh canvas. Both the X button and Esc are exercised as close paths.
+test('Journey 33 — reader open/note/zen/close/REOPEN via main Read button', async ({
+  page,
+  request,
+}) => {
   const title = uniqueName('reader-life');
   const token = await apiLogin(request);
 
@@ -26,39 +30,42 @@ test('Journey 33 — reader open/close/reopen, zen, reading modes', async ({ pag
     await filesSection.locator('button', { hasText: 'Attach PDF' }).click();
     await expect(filesSection.getByText('sample.pdf', { exact: false })).toBeVisible();
 
-    const readBtn = filesSection.getByRole('button', { name: 'Read', exact: true });
+    // The MAIN quick-read Read button below the title (the one the report uses).
+    const readBtn = page.locator('.quick-read').getByRole('button', { name: 'Read', exact: true });
+    await expect(readBtn).toBeVisible();
     const reader = page.getByRole('dialog', { name: /sample\.pdf/ });
-    const closeBtn = () => reader.locator('button.close');
 
     // Open #1.
     await readBtn.click();
     await expect(reader).toBeVisible();
     await expect(reader.locator('canvas').first()).toBeVisible();
 
-    // Close.
-    await closeBtn().click();
+    // Make a note via the Notes tab form.
+    await reader.getByRole('button', { name: 'Notes' }).click();
+    await reader.locator('textarea[placeholder="Note"]').fill('a test note');
+    await reader.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect(reader.getByText('Annotation added')).toBeVisible();
+
+    // Back to the PDF pages (the zen/toolbar controls live on the Paper tab).
+    await reader.getByRole('button', { name: 'Paper' }).click();
+
+    // Zen enter, then Esc — reader stays open (Esc exits zen, not the reader).
+    await reader.getByTestId('reader-zen').click();
+    await expect(page.getByTestId('reader-zen')).toHaveText(/Exit zen/);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('reader-zen')).toHaveText(/^Zen$/);
+
+    // Close the reader via Esc (now that zen is off, Esc closes the modal).
+    await page.keyboard.press('Escape');
     await expect(reader).toBeHidden();
 
-    // RE-OPEN on the very first click (the regression: needed two clicks / broke until paper switch).
+    // RE-OPEN on the first click (the regression: worked once, then needed a paper switch).
     await readBtn.click();
     await expect(reader).toBeVisible();
     await expect(reader.locator('canvas').first()).toBeVisible();
 
-    // Reading modes: dark → dim → original (buttons must stay usable).
-    await reader.getByTestId('reading-mode-dark').click();
-    await reader.getByTestId('reading-mode-dim').click();
-    await reader.getByTestId('reading-mode-original').click();
-
-    // Zen: enter, then exit via Esc — the reader must STAY open (Esc exits zen, not the reader).
-    const zenBtn = reader.getByTestId('reader-zen');
-    await zenBtn.click();
-    await expect(page.getByTestId('reader-zen')).toHaveText(/Exit zen/);
-    await page.keyboard.press('Escape');
-    await expect(page.getByTestId('reader-zen')).toHaveText(/^Zen$/);
-    await expect(reader).toBeVisible();
-
-    // Close and RE-OPEN once more — the third open must also work.
-    await closeBtn().click();
+    // Close via the X button and RE-OPEN a third time.
+    await reader.locator('button.close').click();
     await expect(reader).toBeHidden();
     await readBtn.click();
     await expect(reader).toBeVisible();

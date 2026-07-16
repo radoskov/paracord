@@ -259,9 +259,12 @@
   }
 
   async function loadDetail(w: Work, watchJobs = true): Promise<void> {
-    if (w.id !== loadedId) stopJobPolling();
+    const switching = w.id !== loadedId;
+    if (switching) stopJobPolling();
     loadedId = w.id;
-    clearReader();
+    // Only tear the reader down on a genuine paper SWITCH. A same-paper background refresh (a
+    // job-poll's refreshOpenWork) must NOT close the reader the user has open (2026-07-16).
+    if (switching) clearReader();
     citing = null;
     citingLoaded = false;
     form = {
@@ -1029,19 +1032,26 @@
     onClose();
   }
 
+  // The reader open has its OWN busy flag — NOT the shared `loading`. Gating the Read button on the
+  // global `loading` meant an unrelated in-flight op (notably the background job-poll's
+  // refreshOpenWork→loadDetail→run) left the button disabled, so clicks did nothing until a paper
+  // switch reset it ("Read works only once"). This flag is set only by openInReader (2026-07-16).
+  let readerBusy = false;
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
-    // Fetch the blob, then set the props and finally readerUrl (the mount gate) LAST, so the reader
-    // mounts with everything ready. A fresh object URL every time guarantees a real change → the
-    // {#if readerUrl} block mounts (from closed) or PdfReader reloads (from open) — reliably on the
-    // first click (2026-07-16).
-    await run(async () => {
+    if (readerBusy) return;
+    readerBusy = true;
+    try {
       const blob = await client.getFileBlob(file.id);
       const previous = readerUrl;
       readerFile = file;
       readerJumpReferenceId = jumpReferenceId;
-      readerUrl = URL.createObjectURL(blob);
+      readerUrl = URL.createObjectURL(blob); // set LAST → mounts a fresh reader ({#key readerUrl})
       if (previous) URL.revokeObjectURL(previous);
-    });
+    } catch (error) {
+      message = errorMessage(error);
+    } finally {
+      readerBusy = false;
+    }
   }
 
   // Reference "Find in text" → open the reader and jump to the reference's first in-text mention.
@@ -1205,7 +1215,7 @@
     <!-- #16: quick-read the paper's main file right below the title (+ open in a new tab). -->
     <div class="quick-read">
       <button type="button" class="secondary small" on:click={() => mainFile && openInReader(mainFile)}
-        disabled={loading || !mainFile.content_available}
+        disabled={readerBusy || !mainFile.content_available}
         title={mainFile.content_available ? 'Read the main file in the in-app reader' : 'The main file’s PDF is not on the server.'}>Read</button>
       <button type="button" class="secondary small" on:click={() => mainFile && openInNewTab(mainFile)}
         disabled={loading || !mainFile.content_available}
@@ -1404,7 +1414,7 @@
               </div>
               <span class="file-actions">
                 <button type="button" class="secondary small" on:click={() => openInReader(file)}
-                  disabled={loading || !file.content_available}
+                  disabled={readerBusy || !file.content_available}
                   title={file.content_available
                     ? 'Open in the in-app reader (annotations + citation overlay)'
                     : 'PDF not available on the server — it was extracted-only or its source was removed.'}>Read</button>
