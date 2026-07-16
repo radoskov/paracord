@@ -41,9 +41,14 @@
   let hideSingletons = true;
   let hideExternalLeaves = false;
   let revision = 0;
+  // 2026-07-16: surface build state (a large graph can take a while, and failures were silent).
+  let buildState: 'idle' | 'building' | 'done' | 'failed' = 'idle';
+  let buildError = '';
 
   async function build(): Promise<void> {
     busy = true;
+    buildState = 'building';
+    buildError = '';
     try {
       if (graphType === 'topic' && loadTopic) {
         topicGraph = await loadTopic();
@@ -60,6 +65,10 @@
       focusLabel = '';
       revision += 1;
       scheduleForceFit();
+      buildState = 'done';
+    } catch (err) {
+      buildState = 'failed';
+      buildError = err instanceof Error ? err.message : String(err);
     } finally {
       busy = false;
     }
@@ -565,7 +574,15 @@
         </label>
       {/if}
       <button type="button" on:click={build} disabled={disabled || busy}
-        title={graphType === 'topic' ? 'Build the topic graph for the chosen scope' : 'Build the citation graph for the chosen scope'}>Build graph</button>
+        title={graphType === 'topic' ? 'Build the topic graph for the chosen scope' : 'Build the citation graph for the chosen scope'}
+        >{buildState === 'building' ? 'Building…' : 'Build graph'}</button>
+      {#if buildState === 'building'}
+        <small class="build-state muted" role="status">Building the graph…</small>
+      {:else if buildState === 'failed'}
+        <small class="build-state failed" role="alert">Build failed: {buildError || 'see the console / Jobs tab'}</small>
+      {:else if buildState === 'done' && !hasGraph}
+        <small class="build-state muted" role="status">Built — no nodes for this scope.</small>
+      {/if}
       {#if hasGraph}
         <button type="button" class="secondary" on:click={showAll} disabled={busy}
           title="Fit the view so the whole graph is visible again (keeps filters)">Show all</button>
@@ -732,6 +749,15 @@
     font-size: 0.85rem;
     font-weight: 700;
     gap: 0.35rem;
+  }
+
+  .build-state {
+    align-self: center;
+    font-size: 0.82rem;
+  }
+  .build-state.failed {
+    color: var(--status-error, #c0392b);
+    font-weight: 600;
   }
 
   .seg button {

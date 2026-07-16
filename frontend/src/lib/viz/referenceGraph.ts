@@ -129,7 +129,7 @@ const ACTION_LABEL: Record<ActionKind, string> = {
 const OVERLAP_DX = 0.18;
 
 // How many overlapping members a cluster tooltip lists before summarizing the rest ("…and N more").
-const TOOLTIP_MEMBER_LIMIT = 10;
+const TOOLTIP_MEMBER_LIMIT = 25;
 
 export interface YAxisOption {
   key: string;
@@ -391,24 +391,38 @@ export function buildReferenceGraphOption(
   const coordById = new Map<string, [number, number]>();
   for (const n of graph.nodes) coordById.set(n.id, [xPlot(n), yFor(n)]);
   if (graph.edges.length) {
-    series.push({
-      type: "lines",
-      name: "Citations",
-      coordinateSystem: "cartesian2d",
-      data: graph.edges
-        .map((e) => ({
-          coords: [coordById.get(e.source), coordById.get(e.target)],
-        }))
-        .filter((l) => l.coords[0] && l.coords[1]),
-      lineStyle: {
-        color: theme.axisLine,
-        opacity: 0.25,
-        width: 1,
-        curveness: 0.1,
-      },
-      silent: true,
-      z: 0,
-    });
+    // 2026-07-16: three distinct, more-visible edge colours by relation to the base paper —
+    // reference (base → cited work), citing (a paper → base), and ref↔ref (between references).
+    const baseId = graph.nodes.find((n) => n.kind === "base")?.id;
+    const refRefColor = (theme.categorical ?? [])[2] ?? theme.axisLine;
+    const refColor = (theme.categorical ?? [])[0] ?? theme.text;
+    const edgeClasses = [
+      { name: "Reference edges", color: refColor, test: (e: { source: string }) => e.source === baseId },
+      { name: "Citing edges", color: citingColor, test: (e: { target: string }) => e.target === baseId },
+      { name: "Ref↔ref edges", color: refRefColor, test: () => true },
+    ];
+    const seen = new Set<string>();
+    for (const cls of edgeClasses) {
+      const data = graph.edges
+        .filter((e) => {
+          const key = `${e.source}|${e.target}`;
+          if (seen.has(key) || !cls.test(e)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map((e) => ({ coords: [coordById.get(e.source), coordById.get(e.target)] }))
+        .filter((l) => l.coords[0] && l.coords[1]);
+      if (!data.length) continue;
+      series.push({
+        type: "lines",
+        name: cls.name,
+        coordinateSystem: "cartesian2d",
+        data,
+        lineStyle: { color: cls.color, opacity: 0.45, width: 1.8, curveness: 0.1 },
+        silent: true,
+        z: 0,
+      });
+    }
   }
 
   return {
@@ -433,13 +447,20 @@ export function buildReferenceGraphOption(
           // affordance over the not-in-library members. The host delegates clicks on the links.
           const link =
             "color:inherit;text-decoration:underline;cursor:pointer;display:block;margin-top:2px";
+          // 2026-07-16: show more members (up to a generous cap) in a SCROLLABLE box so "N more" is
+          // revealed by scrolling within the enterable tooltip, not truncated away. External members
+          // hint that ctrl/middle-click appends to the import box without switching tabs.
           const shown = members.slice(0, TOOLTIP_MEMBER_LIMIT);
           const rows = shown
-            .map(
-              (m) =>
-                `<a data-viz-open="${escapeHtml(m.id)}" style="${link}" title="Open / import this reference">${escapeHtml(m.label)}${m.year != null ? ` (${m.year})` : ""}</a>`,
-            )
+            .map((m) => {
+              const external = !m.resolved_work_id && m.kind !== "base";
+              const title = external
+                ? "Click to import (opens Import); ctrl/middle-click to add to the import box without switching"
+                : "Open this reference";
+              return `<a data-viz-open="${escapeHtml(m.id)}" style="${link}" title="${title}">${escapeHtml(m.label)}${m.year != null ? ` (${m.year})` : ""}</a>`;
+            })
             .join("");
+          const rowsBox = `<div style="max-height:220px;overflow-y:auto">${rows}</div>`;
           const more =
             members.length > shown.length
               ? `<div style="margin-top:2px;opacity:0.8">…and ${members.length - shown.length} more</div>`
@@ -451,7 +472,7 @@ export function buildReferenceGraphOption(
             ? `<a data-viz-import-all="${escapeHtml(importable.join(","))}" style="${link};margin-top:6px;font-weight:bold" title="Prefill the import box with the papers here that aren't in your library">Import all ${importable.length} →</a>`
             : "";
           // Groups are split by action kind, so one label describes the whole cluster.
-          return `<strong>${members.length} papers here · ${ACTION_LABEL[actionKindOf(members[0])]}</strong>${rows}${more}${importAll}`;
+          return `<strong>${members.length} papers here · ${ACTION_LABEL[actionKindOf(members[0])]}</strong>${rowsBox}${more}${importAll}`;
         }
         const n = params.data?.node ?? members?.[0];
         if (!n) return "";

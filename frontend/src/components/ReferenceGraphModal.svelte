@@ -63,14 +63,39 @@
     }
   }
 
+  // 2026-07-16: append an external reference to the Batch-import box WITHOUT leaving the graph, so
+  // several can be queued by ctrl/middle-clicking. The Import tab prefills from this store later.
+  let appendedCount = 0;
+  // The base paper's title for the modal header (from the graph payload, once loaded).
+  $: baseTitle = graph?.nodes.find((n) => n.kind === 'base')?.label ?? '';
+  function isExternalNode(node: ReferenceGraphNode): boolean {
+    const openId =
+      node.resolved_work_id ??
+      (node.kind === 'likely_local' ? (node.suggested_work_id ?? null) : null);
+    return node.kind !== 'base' && !openId;
+  }
+  function appendImport(node: ReferenceGraphNode): void {
+    const line = citationLine(node);
+    pendingImportText.update((cur) => (cur ? `${cur}\n${line}` : line));
+    appendedCount += 1;
+    message = `Added ${appendedCount} paper${appendedCount === 1 ? '' : 's'} to the import box — open the Import tab when ready.`;
+  }
+
   // Delegate clicks on the enterable tooltip's links (an overlap-cluster lists its members): open a
   // single member, or prefill the Import box with every not-in-library member of the cluster.
+  // ctrl / middle-click on an external member appends it to the import box without switching tabs.
   function onContainerClick(ev: MouseEvent): void {
     const target = ev.target as HTMLElement | null;
     const openEl = target?.closest('[data-viz-open]');
     if (openEl) {
       const node = graph?.nodes.find((n) => n.id === openEl.getAttribute('data-viz-open'));
-      if (node) openOrImportNode(node);
+      if (!node) return;
+      if ((ev.ctrlKey || ev.metaKey || ev.button === 1) && isExternalNode(node)) {
+        ev.preventDefault();
+        appendImport(node);
+      } else {
+        openOrImportNode(node);
+      }
       return;
     }
     const importEl = target?.closest('[data-viz-import-all]');
@@ -277,7 +302,9 @@
       focusOnLegendSeries(chart, params.name);
     });
     // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
+    // 'auxclick' catches middle-click (button 1); 'click' also fires with ctrl/meta held.
     chart.getDom()?.addEventListener('click', onContainerClick);
+    chart.getDom()?.addEventListener('auxclick', onContainerClick);
     // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
     enableLegendSolo(chart);
     wireEdgeSnapZoom(chart);
@@ -321,7 +348,7 @@
   });
 </script>
 
-<Modal title="Reference graph" wide {onClose}>
+<Modal title={baseTitle ? `Reference graph — ${baseTitle}` : 'Reference graph'} wide {onClose}>
   <div class="rg-controls">
     <label title="What the vertical axis plots for each reference">
       Y axis

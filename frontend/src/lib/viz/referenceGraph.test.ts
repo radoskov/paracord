@@ -88,7 +88,7 @@ describe("buildReferenceGraphOption", () => {
     ],
   };
 
-  it("builds one scatter series per kind + a citations lines series", () => {
+  it("builds one scatter series per kind + typed edge lines series", () => {
     const option = buildReferenceGraphOption(
       graph,
       DEFAULT_SECTION_WEIGHTS,
@@ -103,7 +103,10 @@ describe("buildReferenceGraphOption", () => {
     expect(names).toContain("This paper");
     expect(names).toContain("In library");
     expect(names).toContain("External");
-    expect(series.find((s) => s.type === "lines")?.name).toBe("Citations");
+    // base→reference edges render as the "Reference edges" lines series (2026-07-16: edges are now
+    // split by relation to the base paper — reference / citing / ref↔ref).
+    const lineNames = series.filter((s) => s.type === "lines").map((s) => s.name);
+    expect(lineNames).toContain("Reference edges");
   });
 
   it("gives the base paper and external refs distinct colours", () => {
