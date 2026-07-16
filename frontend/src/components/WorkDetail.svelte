@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
 
   import {
     ApiClient,
@@ -1027,13 +1027,15 @@
   }
 
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
-    // Open directly — set the new object URL and flip showReader ONCE (2026-07-16). The old code
-    // called closeReader() first (showReader=false) then set it true again after an async await,
-    // so a re-open after close toggled false→true across a tick and the modal didn't remount
-    // cleanly on the first click (needed a second click). Revoke the prior URL here instead.
+    // Reset to a clean closed state, then AWAIT A TICK so Svelte commits the unmount before we
+    // re-open (2026-07-16). Without the tick, closing + re-opening toggled showReader false→true
+    // within one flush → Svelte coalesced it to no change → the reader didn't remount (the "click
+    // Read does nothing / needs two clicks / stops working until you switch papers" bug). The tick
+    // makes the close land first, so setting showReader=true below is a real change → clean remount.
+    closeReader();
+    await tick();
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
-      if (readerUrl) URL.revokeObjectURL(readerUrl);
       readerUrl = URL.createObjectURL(blob);
       readerFile = file;
       readerJumpReferenceId = jumpReferenceId;

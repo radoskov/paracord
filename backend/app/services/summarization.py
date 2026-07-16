@@ -493,25 +493,77 @@ def _fast_bucket_sections(db: Session, work: Work, *, model: str, base_url: str)
     return [(b, " ".join(grouped[b])) for b in _FAST_BUCKETS if grouped[b]]
 
 
-_SUBSECTION_LABEL = re.compile(r"^\s*\d+\.\d+")  # "1.1", "2.3.1", … — a numbered SUBsection head
+_ROMAN_RE = re.compile(r"^[IVXLCDM]+$")
+_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+# Leading section marker: roman ("II"), a single capital letter ("A"), or arabic dotted ("2.1"),
+# optionally followed by a '.'/')' then a space + the title. Section labels carry the number either
+# inline (GROBID inline heads) or prefixed from the head @n (see tei_parser._section_label).
+_MARKER_RE = re.compile(r"^\s*([IVXLCDM]+|[A-Z]|\d+(?:\.\d+)*)[.)]?\s+\S")
+
+
+def _roman_to_int(s: str) -> int | None:
+    total = prev = 0
+    for ch in reversed(s):
+        v = _ROMAN_VALUES.get(ch)
+        if v is None:
+            return None
+        total += -v if v < prev else v
+        prev = max(prev, v)
+    return total or None
+
+
+def _section_marker(label: str | None) -> str | None:
+    m = _MARKER_RE.match(label or "")
+    return m.group(1) if m else None
 
 
 def _coalesce_main_sections(sections):
-    """Merge numbered subsections into their MAIN section (2026-07-16).
+    """Group flat GROBID sections into MAIN sections (2026-07-16), folding subsections into their
+    parent so the "section" level summarizes the main sections (e.g. 13, not 33).
 
-    GROBID often emits every heading as a flat sibling ("1 Intro", "1.1 …", "2 Methods", …). The
-    "section" effort level should summarize the ~13 MAIN sections, not the ~20 main+sub ones — so a
-    head matching ``N.M`` is folded into the preceding main section's text. Unnumbered heads (or a
-    subsection with no preceding main) start their own group, so an unnumbered paper is unchanged.
-    """
+    Robust to numbering scheme: arabic ("1", "1.1"), roman-with-letter-subs ("I"…/"A"…), inline
+    numbers, or @n-prefixed labels. The scheme is taken from the FIRST section with a recognizable
+    number (usually the Introduction). A MAIN section advances the running sequence by one (a single
+    skip tolerated); anything else — a subsection ("1.1", "A"), an unnumbered running header, or a
+    far-off value like roman "C"=100 — folds into the current main. A paper with no recognizable
+    section numbers is returned unchanged."""
+    markers = [(_section_marker(lbl), lbl, txt) for lbl, txt in sections]
+    scheme: str | None = None
+    for tok, _, _ in markers:
+        if tok is None:
+            continue
+        if tok.isdigit():
+            scheme = "arabic"
+            break
+        if _ROMAN_RE.match(tok) and _roman_to_int(tok):
+            scheme = "roman"
+            break
+        # a leading single letter ("A") as the very first marker is ambiguous — keep looking
+    if scheme is None:
+        return sections
     out: list[tuple[str | None, str]] = []
-    for label, text in sections:
-        if out and _SUBSECTION_LABEL.match((label or "").strip()):
-            prev_label, prev_text = out[-1]
-            out[-1] = (prev_label, f"{prev_text} {text}".strip())
+    current = 0
+    lead = ""  # un-numbered lead-in before the first main section (folded into it)
+    for tok, lbl, txt in markers:
+        value: int | None = None
+        if tok is not None:
+            if scheme == "arabic" and tok.isdigit():
+                value = int(tok)
+            elif scheme == "roman" and _ROMAN_RE.match(tok):
+                value = _roman_to_int(tok)
+        is_main = value is not None and current < value <= current + 2
+        if is_main:
+            current = value
+            if not out and lead:
+                txt = f"{lead} {txt}".strip()
+                lead = ""
+            out.append((lbl, txt))
+        elif out:
+            out[-1] = (out[-1][0], f"{out[-1][1]} {txt}".strip())
         else:
-            out.append((label, text))
-    return out
+            lead = f"{lead} {txt}".strip()
+    # No main ever matched (numbering detected but sequence never advanced) → leave untouched.
+    return out or sections
 
 
 def _section_level_sections(db: Session, work: Work):

@@ -503,6 +503,55 @@ def test_coalesce_main_sections_folds_numbered_subsections() -> None:
     assert "meth." in methods_text and "setup." in methods_text and "data." in methods_text
 
 
+def test_coalesce_main_sections_roman_scheme_with_letter_subsections() -> None:
+    """Roman-numeral main sections (I/II/III…) with capital-letter subsections (A/B/C…), incl. the
+    C/D letters that are ALSO valid roman numerals — the sequence check keeps them as subsections.
+    A pre-first-main lead-in folds into the first main (so the count matches the real paper)."""
+    from app.services.summarization import _coalesce_main_sections
+
+    secs = [
+        ("Abstract lead-in with no head", "lead."),
+        ("I. INTRODUCTION", "intro."),
+        ("II. ROLE", "role."),
+        ("A. Bridging", "a."),
+        ("B. Prior", "b."),
+        ("C. Representing", "c."),  # C is roman 100 — must NOT be seen as a main
+        ("III. MINING", "mining."),
+        ("D. Clustering", "d."),  # D is roman 500 — must NOT be seen as a main
+        ("IV. EVALUATION", "eval."),
+        ("V. OTHERS", "others."),
+        ("VI. CONCLUSION", "concl."),
+    ]
+    mains = _coalesce_main_sections(secs)
+    assert [lbl for lbl, _ in mains] == [
+        "I. INTRODUCTION",
+        "II. ROLE",
+        "III. MINING",
+        "IV. EVALUATION",
+        "V. OTHERS",
+        "VI. CONCLUSION",
+    ]
+    # Subsection text folds into its parent main; the lead-in folds into the first main.
+    assert "lead." in dict(mains)["I. INTRODUCTION"]
+    assert "a." in dict(mains)["II. ROLE"] and "c." in dict(mains)["II. ROLE"]
+
+
+def test_extract_sections_prefixes_the_head_number_attribute() -> None:
+    """GROBID often carries the section number in ``head @n`` with a bare title; extract_sections
+    prefixes it so main/sub detection sees "1. Introduction" / "2.1. Design" (2026-07-16)."""
+    from app.services.tei_parser import extract_sections
+
+    tei = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
+        '<div><head n="1.">Introduction</head><p>intro body.</p></div>'
+        '<div><head n="2.">Methods</head><p>methods body.</p></div>'
+        '<div><head n="2.1.">Design</head><p>design body.</p></div>'
+        "</body></text></TEI>"
+    )
+    labels = [lbl for lbl, _ in extract_sections(tei)]
+    assert labels == ["1. Introduction", "2. Methods", "2.1. Design"]
+
+
 def test_summaries_exclude_funding_and_acknowledgements(db) -> None:
     """Funding / Acknowledgements never feed the summary source (2026-07-16)."""
     from app.services.summarization import _work_source

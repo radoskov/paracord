@@ -828,6 +828,10 @@
     }
     scrollObserver?.disconnect();
     if (pdfDoc) void pdfDoc.destroy().catch(() => undefined);
+    // If the reader is closed while still in zen (portaled to <body>), remove the orphaned node so
+    // it can't linger over the app / block a clean re-open (2026-07-16).
+    if (typeof document !== 'undefined' && readerEl?.parentNode === document.body) readerEl.remove();
+    zenAnchor?.remove();
   });
 </script>
 

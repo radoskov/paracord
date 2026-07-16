@@ -90,11 +90,27 @@ def extract_sections(tei_xml: str) -> list[tuple[str | None, str]]:
         return []
     sections: list[tuple[str | None, str]] = []
     for div in root.findall(".//t:text/t:body/t:div", TEI_NS):
-        label = _text(div.find("t:head", TEI_NS)) or div.get("type")
+        label = _numbered_head_label(div)
         text = " ".join(t for p in div.findall(".//t:p", TEI_NS) if (t := _text(p)))
         if text:
             sections.append((label, text))
     return sections
+
+
+def _numbered_head_label(div) -> str | None:
+    """Section label including its number. GROBID puts the section number either inline in the head
+    ("I. Introduction") or in a ``head @n`` attribute ("1.", "2.1.") with a bare-title head. Prefix
+    the ``@n`` when present and not already in the head so downstream main/sub detection has a
+    uniform "<number> <title>" form (2026-07-16). (Distinct from the citation-mapping
+    ``_section_label(element)`` below, which walks to an element's ancestor div.)"""
+    head = div.find("t:head", TEI_NS)
+    text = _text(head) if head is not None else None
+    text = text or div.get("type")
+    n = (head.get("n") if head is not None else None) or ""
+    n = n.strip()
+    if n and (not text or not text.lstrip().startswith(n.rstrip("."))):
+        return f"{n} {text}".strip() if text else n
+    return text
 
 
 def extract_leaf_sections(tei_xml: str) -> list[tuple[str | None, str]]:
@@ -113,7 +129,7 @@ def extract_leaf_sections(tei_xml: str) -> list[tuple[str | None, str]]:
         return []
     out: list[tuple[str | None, str]] = []
     for div in root.findall(".//t:text/t:body/t:div", TEI_NS):
-        head = _text(div.find("t:head", TEI_NS)) or div.get("type")
+        head = _numbered_head_label(div)
         child_divs = div.findall("t:div", TEI_NS)
         if not child_divs:
             text = " ".join(t for p in div.findall(".//t:p", TEI_NS) if (t := _text(p)))
@@ -125,7 +141,7 @@ def extract_leaf_sections(tei_xml: str) -> list[tuple[str | None, str]]:
         if lead:
             out.append((head, lead))
         for sub in child_divs:
-            sub_head = _text(sub.find("t:head", TEI_NS)) or sub.get("type")
+            sub_head = _numbered_head_label(sub)
             label = f"{head} › {sub_head}" if head and sub_head else (sub_head or head)
             text = " ".join(t for p in sub.findall(".//t:p", TEI_NS) if (t := _text(p)))
             if text:
