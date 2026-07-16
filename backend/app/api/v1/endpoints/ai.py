@@ -253,9 +253,7 @@ class TopicModelResponse(BaseModel):
 def read_latest_scope_summary(
     scope_type: Literal["library", "shelf", "rack"],
     scope_id: uuid.UUID | None = None,
-    detail: Literal[
-        "short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"
-    ]
+    detail: Literal["short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"]
     | None = None,
     summary_type: Literal["extractive", "local_llm"] | None = None,
     db: Session = DB_DEP,

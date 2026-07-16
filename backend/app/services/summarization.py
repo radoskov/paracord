@@ -202,9 +202,7 @@ def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
         return (response.json().get("response") or "").strip()
 
 
-def _ollama_summarize(
-    text: str, *, model: str, base_url: str, abstract_only: bool = False
-) -> str:
+def _ollama_summarize(text: str, *, model: str, base_url: str, abstract_only: bool = False) -> str:
     """Per-PAPER SHORT abstractive summary (single-paragraph prompt). Raises on any failure.
 
     ``abstract_only`` (2026-07-16): the source is the paper's abstract, not its full text — tell the
@@ -393,12 +391,42 @@ def _evict_stale_models(
 
 _FAST_BUCKETS = ("Background", "Methods", "Results", "Other")
 _FAST_KEYWORDS = {
-    "Background": ["title", "abstract", "introduction", "intro", "related", "background",
-                   "motivation", "preliminar", "overview"],
-    "Methods": ["method", "approach", "model", "architecture", "implementation", "experiment",
-                "setup", "dataset", "data", "algorithm", "design", "framework"],
-    "Results": ["result", "discussion", "conclusion", "evaluation", "analysis", "finding",
-                "appendix", "future", "limitation"],
+    "Background": [
+        "title",
+        "abstract",
+        "introduction",
+        "intro",
+        "related",
+        "background",
+        "motivation",
+        "preliminar",
+        "overview",
+    ],
+    "Methods": [
+        "method",
+        "approach",
+        "model",
+        "architecture",
+        "implementation",
+        "experiment",
+        "setup",
+        "dataset",
+        "data",
+        "algorithm",
+        "design",
+        "framework",
+    ],
+    "Results": [
+        "result",
+        "discussion",
+        "conclusion",
+        "evaluation",
+        "analysis",
+        "finding",
+        "appendix",
+        "future",
+        "limitation",
+    ],
 }
 
 
@@ -821,9 +849,7 @@ def _work_ref(work: Work) -> str:
     return f"{title} ({work.year})" if work.year else title
 
 
-def _abstract_only_paragraph(
-    works: list[Work], *, use_llm: bool, model: str, base_url: str
-) -> str:
+def _abstract_only_paragraph(works: list[Work], *, use_llm: bool, model: str, base_url: str) -> str:
     """2026-07-16: ONE grouped paragraph for papers available only as an abstract (no full text)."""
     entries = [f"{_work_ref(w)}: {(w.abstract or '').strip()}" for w in works]
     lead = (
@@ -894,7 +920,9 @@ def summarize_scope(
     # 2026-07-16 cache matrix: the scope summary's effort level (paper_detail) is folded into its
     # stored_type so short/fast/section/deep coexist per scope; extractive scopes have no effort.
     scope_detail = _normalize_detail(paper_detail)
-    stored_type = summary_type + (_DETAIL_SUFFIX[scope_detail] if summary_type == "local_llm" else "")
+    stored_type = summary_type + (
+        _DETAIL_SUFFIX[scope_detail] if summary_type == "local_llm" else ""
+    )
 
     abstracts = [w.abstract for w in works if w.abstract]
     if not abstracts and summary_type != "local_llm":

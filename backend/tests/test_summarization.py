@@ -233,9 +233,7 @@ def test_detailed_summary_reports_progress_and_honors_cancel(db, monkeypatch) ->
     db.commit()
     monkeypatch.setattr(summ, "_ollama_generate", lambda *a, **k: "para.")
 
-    divs = "".join(
-        f"<div><head>Section {i}</head><p>{('word ' * 8)}</p></div>" for i in range(3)
-    )
+    divs = "".join(f"<div><head>Section {i}</head><p>{('word ' * 8)}</p></div>" for i in range(3))
     tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
     work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence.")
     db.add(work)
@@ -300,7 +298,9 @@ def test_abstract_only_work_is_framed_as_abstract(db, monkeypatch) -> None:
     update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
     db.commit()
     seen: list[str] = []
-    monkeypatch.setattr(summ, "_ollama_generate", lambda p, **k: seen.append(p) or "Framed summary.")
+    monkeypatch.setattr(
+        summ, "_ollama_generate", lambda p, **k: seen.append(p) or "Framed summary."
+    )
 
     work = Work(canonical_title="A", normalized_title="a", abstract="We study X and find Y.")
     db.add(work)
@@ -321,7 +321,9 @@ def test_scope_summary_groups_no_pdf_papers_and_reports_breakdown(db) -> None:
     db.flush()
 
     full = Work(canonical_title="Full", normalized_title="full", abstract="Full abstract sentence.")
-    abs_only = Work(canonical_title="AbsOnly", normalized_title="absonly", abstract="Only an abstract here.")
+    abs_only = Work(
+        canonical_title="AbsOnly", normalized_title="absonly", abstract="Only an abstract here."
+    )
     title_only = Work(canonical_title="TitleOnly", normalized_title="titleonly")
     for w in (full, abs_only, title_only):
         db.add(w)
@@ -335,9 +337,15 @@ def test_scope_summary_groups_no_pdf_papers_and_reports_breakdown(db) -> None:
     db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=full.id, source="grobid", tei_xml=tei))
     db.commit()
 
-    summary, count = summarize_scope(db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm")
+    summary, count = summarize_scope(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm"
+    )
     assert count == 3
-    assert summary.params["source_breakdown"] == {"full_text": 1, "abstract_only": 1, "title_only": 1}
+    assert summary.params["source_breakdown"] == {
+        "full_text": 1,
+        "abstract_only": 1,
+        "title_only": 1,
+    }
     # The title-only paper is named in a grouped paragraph, not silently dropped.
     assert "title only" in summary.text and "TitleOnly" in summary.text
     assert "only as abstracts" in summary.text
@@ -363,9 +371,7 @@ def test_detailed_effort_levels_coexist_and_fast_categorizes(db, monkeypatch) ->
         return "para."
 
     monkeypatch.setattr(summ, "_ollama_generate", fake_generate)
-    divs = "".join(
-        f"<div><head>Sec {i}</head><p>{'word ' * 8}</p></div>" for i in range(6)
-    )
+    divs = "".join(f"<div><head>Sec {i}</head><p>{'word ' * 8}</p></div>" for i in range(6))
     tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
     work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence here.")
     db.add(work)
@@ -383,7 +389,11 @@ def test_detailed_effort_levels_coexist_and_fast_categorizes(db, monkeypatch) ->
             select(Summary).where(Summary.entity_type == "work", Summary.entity_id == work.id)
         ).all()
     }
-    assert {"local_llm_detailed_fast", "local_llm_detailed_section", "local_llm_detailed_deep"} <= rows
+    assert {
+        "local_llm_detailed_fast",
+        "local_llm_detailed_section",
+        "local_llm_detailed_deep",
+    } <= rows
     # Fast asked the categorizer exactly once.
     assert sum(1 for c in calls if c.startswith("Classify each academic-paper section")) == 1
 
@@ -918,7 +928,9 @@ def _mk_works(db, n: int) -> None:
     db.commit()
 
 
-def test_scope_summary_is_queued_when_queue_available(client, auth_headers, db, monkeypatch) -> None:
+def test_scope_summary_is_queued_when_queue_available(
+    client, auth_headers, db, monkeypatch
+) -> None:
     """As of 2026-07-16 every scope summary enqueues a job (so it shows in the Jobs tab), not just
     library-sized scopes — even a 3-paper scope returns 202 when the queue is reachable."""
     from app.workers import queue as queue_mod

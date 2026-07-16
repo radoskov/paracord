@@ -5940,6 +5940,11 @@
       },
       "ScopeSummaryRequest": {
         "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
           "max_sentences": {
             "default": 8,
             "title": "Max Sentences",
@@ -5960,7 +5965,10 @@
             "default": "short",
             "enum": [
               "short",
-              "detailed"
+              "detailed",
+              "detailed_fast",
+              "detailed_section",
+              "detailed_deep"
             ],
             "title": "Paper Detail",
             "type": "string"
@@ -6053,6 +6061,17 @@
             ],
             "title": "Fallback Reason"
           },
+          "generated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
           "job_id": {
             "anyOf": [
               {
@@ -6134,6 +6153,20 @@
               }
             ],
             "title": "Scope Label"
+          },
+          "source_breakdown": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Breakdown"
           },
           "summary_type": {
             "anyOf": [
@@ -6915,7 +6948,10 @@
             "default": "short",
             "enum": [
               "short",
-              "detailed"
+              "detailed",
+              "detailed_fast",
+              "detailed_section",
+              "detailed_deep"
             ],
             "title": "Detail",
             "type": "string"
@@ -14460,7 +14496,7 @@
     },
     "/api/v1/ai/summaries/latest": {
       "get": {
-        "description": "Return the most recent stored summary for a scope (the S15 async-completion read path).",
+        "description": "Return the most recent stored summary for a scope (the S15 async-completion read path).\n\nWhen ``detail`` is given, the lookup targets that specific cache-matrix cell — the effort level\nfor the current model/provider (2026-07-16). Without it, the newest summary of any kind is\nreturned (back-compat).",
         "operationId": "read_latest_scope_summary_api_v1_ai_summaries_latest_get",
         "parameters": [
           {
@@ -14492,6 +14528,49 @@
                 }
               ],
               "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "detail",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "short",
+                    "detailed",
+                    "detailed_fast",
+                    "detailed_section",
+                    "detailed_deep"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Detail"
+            }
+          },
+          {
+            "in": "query",
+            "name": "summary_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "extractive",
+                    "local_llm"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Summary Type"
             }
           },
           {
