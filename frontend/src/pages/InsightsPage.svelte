@@ -4,6 +4,7 @@
     type CitationGraphResponse,
     type GraphNodeMode,
     type GraphScopeType,
+    type ScopeNote,
     type ScopeSummaryResponse,
     type SummaryDetail,
     type Topic,
@@ -43,6 +44,59 @@
   // scopes only apply to the citation graph.
   $: isClassicScope =
     scopeType === 'library' || scopeType === 'shelf' || scopeType === 'rack';
+
+  // 2026-07-16 scope notes: a free-form note for the selected scope, plus a folded panel of all
+  // scope notes. Loaded on scope change; saved on demand.
+  let scopeNote = '';
+  let scopeNoteSaving = false;
+  let scopeNoteSavedAt = '';
+  let allNotes: ScopeNote[] = [];
+  let notesExpanded = false;
+
+  async function loadScopeNote(): Promise<void> {
+    if (!scopeReady || !isClassicScope) {
+      scopeNote = '';
+      return;
+    }
+    try {
+      const n = await client.getScopeNote(
+        scope.scopeType as 'library' | 'shelf' | 'rack',
+        scope.scopeId,
+      );
+      scopeNote = n.text ?? '';
+      scopeNoteSavedAt = n.updated_at ? new Date(n.updated_at).toLocaleString() : '';
+    } catch {
+      scopeNote = '';
+      scopeNoteSavedAt = '';
+    }
+  }
+  // Reload the note whenever the selected scope changes.
+  $: void (scope.scopeType, scope.scopeId, scopeReady, isClassicScope, loadScopeNote());
+
+  async function saveScopeNote(): Promise<void> {
+    if (!isClassicScope) return;
+    scopeNoteSaving = true;
+    await run(async () => {
+      const n = await client.upsertScopeNote(
+        scope.scopeType as 'library' | 'shelf' | 'rack',
+        scope.scopeId,
+        scopeNote,
+      );
+      scopeNoteSavedAt = n.updated_at ? new Date(n.updated_at).toLocaleString() : '';
+      if (notesExpanded) allNotes = await client.listScopeNotes();
+    }, 'Note saved');
+    scopeNoteSaving = false;
+  }
+
+  async function onNotesToggle(): Promise<void> {
+    if (notesExpanded) {
+      try {
+        allNotes = await client.listScopeNotes();
+      } catch {
+        allNotes = [];
+      }
+    }
+  }
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     loading = true;
@@ -502,6 +556,23 @@
     </div>
   </div>
 
+  <!-- 2026-07-16: a free-form note for the selected scope, saved permanently. -->
+  {#if scopeReady && isClassicScope}
+    <div class="card">
+      <div class="head">
+        <h2>Notes</h2>
+        {#if scopeNoteSavedAt}<span class="muted">saved {scopeNoteSavedAt}</span>{/if}
+      </div>
+      <textarea class="scope-note" bind:value={scopeNote} rows="4"
+        placeholder={`Your notes for ${scope.scopeType === 'library' ? 'the whole library' : 'this ' + scope.scopeType} (saved with the scope)`}
+      ></textarea>
+      <div class="note-actions">
+        <button type="button" class:busy={scopeNoteSaving} on:click={saveScopeNote}
+          disabled={loading || scopeNoteSaving}>{scopeNoteSaving ? 'Saving…' : 'Save note'}</button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Export lives at the bottom, folded (UX batch 3): occasionally useful, shouldn't sit between
        the scope picker and the graph. -->
   {#if scopeReady && (isClassicScope || scopeType === 'saved_filter')}
@@ -534,6 +605,26 @@
       {/if}
     </details>
   {/if}
+
+  <!-- 2026-07-16: all scope notes, folded — each headed by its scope type/parameters. -->
+  <details class="card notes-block" bind:open={notesExpanded} on:toggle={onNotesToggle}>
+    <summary>All scope notes</summary>
+    {#if allNotes.length === 0}
+      <p class="empty">No scope notes yet.</p>
+    {:else}
+      <ul class="all-notes">
+        {#each allNotes as n (n.scope_type + ':' + (n.scope_id ?? 'library'))}
+          <li>
+            <p class="note-head">
+              <strong>{n.scope_type}</strong>{#if n.scope_label} · {n.scope_label}{/if}
+              {#if n.updated_at}<span class="muted"> · {new Date(n.updated_at).toLocaleString()}</span>{/if}
+            </p>
+            <p class="note-text">{n.text}</p>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </details>
 </section>
 
 <style>
@@ -562,6 +653,37 @@
 
   .summary-source select {
     font-size: 0.85rem;
+  }
+
+  .scope-note {
+    box-sizing: border-box;
+    resize: vertical;
+    width: 100%;
+  }
+  .note-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.4rem;
+  }
+  .notes-block summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .all-notes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+  }
+  .all-notes .note-head {
+    margin: 0 0 0.15rem;
+    text-transform: capitalize;
+  }
+  .all-notes .note-text {
+    margin: 0;
+    white-space: pre-wrap;
   }
 
   .summary-toolbar {

@@ -26,6 +26,8 @@ export interface Work {
   id: string;
   canonical_title: string | null;
   abstract: string | null;
+  // 2026-07-16: free-form user notes shown below the abstract in the paper view.
+  notes?: string | null;
   doi: string | null;
   arxiv_id: string | null;
   venue: string | null;
@@ -1164,6 +1166,15 @@ export interface BatchCommitDraft {
   // BibTeX-engine passthrough (not editable in the review UI).
   arxiv_id?: string | null;
   work_type?: string | null;
+}
+
+// 2026-07-16: a free-form note attached to an Insights scope.
+export interface ScopeNote {
+  scope_type: string;
+  scope_id: string | null;
+  scope_label?: string | null;
+  text: string;
+  updated_at?: string | null;
 }
 
 export interface ScopeSummaryResponse {
@@ -2571,6 +2582,33 @@ export class ApiClient {
     if (scopeId) params.set("scope_id", scopeId);
     if (detail) params.set("detail", detail);
     return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/latest?${params}`);
+  }
+
+  /** The note for an Insights scope (empty text when none exists yet; 2026-07-16). */
+  async getScopeNote(
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+  ): Promise<ScopeNote> {
+    const params = new URLSearchParams({ scope_type: scopeType });
+    if (scopeId) params.set("scope_id", scopeId);
+    return this.request<ScopeNote>(`/api/v1/ai/scope-notes/latest?${params}`);
+  }
+
+  /** Create/replace an Insights scope note (empty text clears it). */
+  async upsertScopeNote(
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+    text: string,
+  ): Promise<ScopeNote> {
+    return this.request<ScopeNote>("/api/v1/ai/scope-notes", {
+      method: "PUT",
+      body: { scope_type: scopeType, scope_id: scopeId ?? null, text },
+    });
+  }
+
+  /** Every scope note the caller may see (for the folded all-notes panel). */
+  async listScopeNotes(): Promise<ScopeNote[]> {
+    return this.request<ScopeNote[]>("/api/v1/ai/scope-notes");
   }
 
   /** Reconstructed topics for a scope (the async-completion read path; UX batch 4). */

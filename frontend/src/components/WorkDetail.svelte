@@ -59,7 +59,7 @@
   let message = '';
 
   // editable fields
-  let form = { canonical_title: '', year: '', venue: '', doi: '', arxiv_id: '', abstract: '', authors: '', reading_status: 'unread' };
+  let form = { canonical_title: '', year: '', venue: '', doi: '', arxiv_id: '', abstract: '', notes: '', authors: '', reading_status: 'unread' };
 
   let fields: FieldReview[] = [];
   let files: WorkFile[] = [];
@@ -268,6 +268,7 @@
       doi: w.doi ?? '',
       arxiv_id: w.arxiv_id ?? '',
       abstract: w.abstract ?? '',
+      notes: w.notes ?? '',
       authors: '',
       reading_status: w.reading_status,
     };
@@ -312,6 +313,7 @@
         doi: form.doi || null,
         arxiv_id: form.arxiv_id || null,
         abstract: form.abstract || null,
+        notes: form.notes || null,
         reading_status: form.reading_status as Work['reading_status'],
       });
       onUpdated(updated);
@@ -1256,6 +1258,8 @@
         <label>arXiv id<input bind:value={form.arxiv_id} placeholder="1706.03762" /></label>
       </div>
       <label>Abstract<textarea bind:value={form.abstract} rows="4"></textarea></label>
+      <label>Notes<textarea bind:value={form.notes} rows="3"
+        placeholder="Your notes on this paper (saved with the paper)"></textarea></label>
       <div class="actions actions-top">
         <button type="submit" disabled={loading || !canModify}
           title={canModify ? 'Save edits to this paper’s details' : INSUFFICIENT_ROLE}>Save changes</button>

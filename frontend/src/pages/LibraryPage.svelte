@@ -73,6 +73,25 @@
   let rackFilter = '';
   let tagFilter = '';
   let pdfFilter = ''; // '' | 'yes' | 'no'
+
+  // 2026-07-16: when a shelf/rack is chosen, the tag filter offers only tags scoped to it (+ global
+  // tags). Uses the scope fields already on each Tag; no extra request.
+  $: tagFilterOptions =
+    !shelfFilter && !rackFilter
+      ? $tags
+      : $tags.filter((t) => {
+          const isGlobal = !(t.shelf_ids?.length || t.rack_ids?.length);
+          const matches =
+            (!!shelfFilter && !!t.shelf_ids?.includes(shelfFilter)) ||
+            (!!rackFilter && !!t.rack_ids?.includes(rackFilter));
+          return isGlobal || matches;
+        });
+
+  // Changing the shelf/rack filter clears a now-invalid tag selection, then reloads.
+  function onScopeFilterChange(): void {
+    if (tagFilter && !tagFilterOptions.some((t) => t.id === tagFilter)) tagFilter = '';
+    reload();
+  }
   let refsFilter = ''; // '' | 'yes' | 'no'
   const MISSING_FIELDS = ['title', 'abstract', 'year', 'venue', 'doi', 'arxiv_id'];
   let missing: string[] = [];
@@ -753,20 +772,20 @@
               <option value={s}>{s}</option>
             {/each}
           </select>
-          <select bind:value={shelfFilter} on:change={reload} aria-label="Shelf"
+          <select bind:value={shelfFilter} on:change={onScopeFilterChange} aria-label="Shelf"
             title="Filter the list by shelf">
             <option value="">Any shelf</option>
             {#each $shelves as shelf (shelf.id)}<option value={shelf.id}>{shelf.name}</option>{/each}
           </select>
-          <select bind:value={rackFilter} on:change={reload} aria-label="Rack"
+          <select bind:value={rackFilter} on:change={onScopeFilterChange} aria-label="Rack"
             title="Filter the list by rack">
             <option value="">Any rack</option>
             {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
           <select bind:value={tagFilter} on:change={reload} aria-label="Tag"
-            title="Filter the list by tag">
+            title={shelfFilter || rackFilter ? 'Tags offered for the chosen shelf/rack (plus global)' : 'Filter the list by tag'}>
             <option value="">Any tag</option>
-            {#each $tags as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
+            {#each tagFilterOptions as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
           </select>
           <button type="button" class="secondary" on:click={() => (showMoreFilters = !showMoreFilters)}
             title="Filter by extraction / metadata completeness">
