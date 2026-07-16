@@ -296,6 +296,112 @@ def read_latest_scope_summary(
     return _scope_summary_response(summary)
 
 
+# --- Scope notes (2026-07-16) --------------------------------------------------------------------
+
+_LIBRARY_SCOPE_ID = uuid.UUID(int=0)  # sentinel scope_id for the whole-library scope
+
+
+class ScopeNoteRead(BaseModel):
+    scope_type: str
+    scope_id: str | None = None
+    scope_label: str | None = None
+    text: str = ""
+    updated_at: str | None = None
+
+
+class ScopeNoteUpsert(BaseModel):
+    scope_type: Literal["library", "shelf", "rack"]
+    scope_id: uuid.UUID | None = None
+    text: str = ""
+
+
+def _scope_note_read(db: Session, note) -> ScopeNoteRead:
+    from app.services.summarization import _scope_label
+
+    sid = None if note.scope_id == _LIBRARY_SCOPE_ID else note.scope_id
+    return ScopeNoteRead(
+        scope_type=note.scope_type,
+        scope_id=str(sid) if sid else None,
+        scope_label=_scope_label(db, note.scope_type, sid),
+        text=note.text or "",
+        updated_at=note.updated_at.isoformat() if note.updated_at else None,
+    )
+
+
+@router.get("/scope-notes/latest", response_model=ScopeNoteRead)
+def read_scope_note(
+    scope_type: Literal["library", "shelf", "rack"],
+    scope_id: uuid.UUID | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ScopeNoteRead:
+    """The note for a scope (empty text when none exists yet)."""
+    from app.models.ai import ScopeNote
+
+    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    note = db.scalar(
+        select(ScopeNote).where(
+            ScopeNote.scope_type == scope_type, ScopeNote.scope_id == entity_id
+        )
+    )
+    if note is None:
+        return ScopeNoteRead(
+            scope_type=scope_type,
+            scope_id=str(scope_id) if scope_id else None,
+            scope_label=None,
+            text="",
+        )
+    return _scope_note_read(db, note)
+
+
+@router.put("/scope-notes", response_model=ScopeNoteRead)
+def upsert_scope_note(
+    payload: ScopeNoteUpsert,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ScopeNoteRead:
+    """Create/replace the note for a scope (empty text clears it)."""
+    from app.models.ai import ScopeNote
+
+    if not access.can_see_scope_container(
+        db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    entity_id = payload.scope_id if payload.scope_id is not None else _LIBRARY_SCOPE_ID
+    note = db.scalar(
+        select(ScopeNote).where(
+            ScopeNote.scope_type == payload.scope_type, ScopeNote.scope_id == entity_id
+        )
+    )
+    if note is None:
+        note = ScopeNote(scope_type=payload.scope_type, scope_id=entity_id)
+        db.add(note)
+    note.text = payload.text
+    note.updated_by_user_id = actor.id
+    db.commit()
+    db.refresh(note)
+    return _scope_note_read(db, note)
+
+
+@router.get("/scope-notes", response_model=list[ScopeNoteRead])
+def list_scope_notes(db: Session = DB_DEP, actor: User = EDITOR_DEP) -> list[ScopeNoteRead]:
+    """Every scope note the caller may see (for the folded all-notes panel), newest first."""
+    from app.models.ai import ScopeNote
+
+    notes = db.scalars(select(ScopeNote).order_by(ScopeNote.updated_at.desc())).all()
+    out: list[ScopeNoteRead] = []
+    for note in notes:
+        if not (note.text or "").strip():
+            continue
+        sid = None if note.scope_id == _LIBRARY_SCOPE_ID else note.scope_id
+        if not access.can_see_scope_container(db, actor, scope_type=note.scope_type, scope_id=sid):
+            continue
+        out.append(_scope_note_read(db, note))
+    return out
+
+
 @router.post("/topics", response_model=TopicModelResponse)
 def create_topic_model(
     payload: TopicRequest,

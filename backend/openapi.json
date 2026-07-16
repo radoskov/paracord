@@ -5955,6 +5955,92 @@
         "title": "SavedFilterUpdate",
         "type": "object"
       },
+      "ScopeNoteRead": {
+        "properties": {
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Label"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "scope_type"
+        ],
+        "title": "ScopeNoteRead",
+        "type": "object"
+      },
+      "ScopeNoteUpsert": {
+        "properties": {
+          "scope_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_type": {
+            "enum": [
+              "library",
+              "shelf",
+              "rack"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type"
+        ],
+        "title": "ScopeNoteUpsert",
+        "type": "object"
+      },
       "ScopeSummaryRequest": {
         "properties": {
           "force": {
@@ -9330,6 +9416,17 @@
             ],
             "title": "Merged Into Id"
           },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
           "processing_error": {
             "anyOf": [
               {
@@ -9604,6 +9701,17 @@
               }
             ],
             "title": "Doi"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
           },
           "reading_status": {
             "anyOf": [
@@ -14491,6 +14599,199 @@
         "summary": "Unblock Teleport",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/v1/ai/scope-notes": {
+      "get": {
+        "description": "Every scope note the caller may see (for the folded all-notes panel), newest first.",
+        "operationId": "list_scope_notes_api_v1_ai_scope_notes_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScopeNoteRead"
+                  },
+                  "title": "Response List Scope Notes Api V1 Ai Scope Notes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Scope Notes",
+        "tags": [
+          "ai"
+        ]
+      },
+      "put": {
+        "description": "Create/replace the note for a scope (empty text clears it).",
+        "operationId": "upsert_scope_note_api_v1_ai_scope_notes_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopeNoteUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeNoteRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Scope Note",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/scope-notes/latest": {
+      "get": {
+        "description": "The note for a scope (empty text when none exists yet).",
+        "operationId": "read_scope_note_api_v1_ai_scope_notes_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "library",
+                "shelf",
+                "rack"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeNoteRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Scope Note",
+        "tags": [
+          "ai"
         ]
       }
     },

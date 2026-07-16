@@ -180,6 +180,8 @@ class WorkCreate(BaseModel):
 class WorkUpdate(BaseModel):
     canonical_title: str | None = None
     abstract: str | None = None
+    # 2026-07-16: free-form user notes (not canonical metadata — no field lock / enrichment guard).
+    notes: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
     venue: str | None = None
@@ -219,6 +221,8 @@ class WorkRead(BaseModel):
     id: uuid.UUID
     canonical_title: str | None = None
     abstract: str | None = None
+    # 2026-07-16: free-form user notes on the paper (shown below the abstract).
+    notes: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
     venue: str | None = None

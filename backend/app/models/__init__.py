@@ -2,7 +2,7 @@
 
 from app.models.access_settings import AccessSettings
 from app.models.agent import Agent, AgentEnrollmentToken, AgentFile
-from app.models.ai import AIConfig, Embedding, Summary, TopicAssignment
+from app.models.ai import AIConfig, Embedding, ScopeNote, Summary, TopicAssignment
 from app.models.annotation import Annotation
 from app.models.app_config import AppConfig
 from app.models.audit import AuditEvent
@@ -71,6 +71,7 @@ __all__ = [
     "RawTeiDocument",
     "Reference",
     "SavedFilter",
+    "ScopeNote",
     "Shelf",
     "ShelfWork",
     "Source",

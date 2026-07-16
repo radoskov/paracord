@@ -34,6 +34,8 @@ class Work(Base):
     canonical_title: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     normalized_title: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 2026-07-16: free-form user notes on the paper (shown below the abstract in the paper view).
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     arxiv_base_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

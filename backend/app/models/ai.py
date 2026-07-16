@@ -122,3 +122,26 @@ class TopicAssignment(Base):
     work_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     topic_id: Mapped[int] = mapped_column(index=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class ScopeNote(Base):
+    """2026-07-16: free-form user notes attached to an Insights scope (library/shelf/rack/…).
+
+    Keyed by (scope_type, scope_id); the library scope uses the all-zero sentinel id (mirrors the
+    Summary convention). One note per scope — upserted in place.
+    """
+
+    __tablename__ = "scope_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope_type: Mapped[str] = mapped_column(String(64), index=True)
+    scope_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("scope_type", "scope_id", name="uq_scope_note"),)
