@@ -215,10 +215,11 @@ export function buildReferenceGraphOption(
   graph: ReferenceGraph,
   weights: Record<string, number>,
   theme: VizTheme,
-  opts: { yAxis?: string; colorBy?: string } = {},
+  opts: { yAxis?: string; colorBy?: string; showRefEdges?: boolean } = {},
 ): EChartsOptionLike {
   const yAxisKey = opts.yAxis ?? "weighted";
   const colorBy = opts.colorBy ?? "kind";
+  const showRefEdges = opts.showRefEdges ?? false;
   const axisName =
     REFERENCE_Y_AXES.find((o) => o.key === yAxisKey)?.axisName ??
     "Weighted citations";
@@ -391,15 +392,26 @@ export function buildReferenceGraphOption(
   const coordById = new Map<string, [number, number]>();
   for (const n of graph.nodes) coordById.set(n.id, [xPlot(n), yFor(n)]);
   if (graph.edges.length) {
-    // 2026-07-16: three distinct, more-visible edge colours by relation to the base paper —
-    // reference (base → cited work), citing (a paper → base), and ref↔ref (between references).
+    // 2026-07-16: three distinct, fixed edge colours by relation to the base paper — reference
+    // (base → cited work) in BLUE, citing (a paper → base) in GOLD, and ref↔ref (between local
+    // references) in GREEN. Fixed hexes (not the categorical palette) so reference vs citing never
+    // clash. Ref↔ref is shown only when the toggle is on (client-side — no refetch).
     const baseId = graph.nodes.find((n) => n.kind === "base")?.id;
-    const refRefColor = (theme.categorical ?? [])[2] ?? theme.axisLine;
-    const refColor = (theme.categorical ?? [])[0] ?? theme.text;
+    const REF_COLOR = "#3b82f6"; // blue
+    const CITING_COLOR = "#d4a017"; // gold
+    const REFREF_COLOR = "#2a9d8f"; // green/teal
     const edgeClasses = [
-      { name: "Reference edges", color: refColor, test: (e: { source: string }) => e.source === baseId },
-      { name: "Citing edges", color: citingColor, test: (e: { target: string }) => e.target === baseId },
-      { name: "Ref↔ref edges", color: refRefColor, test: () => true },
+      {
+        name: "Reference edges",
+        color: REF_COLOR,
+        test: (e: { source: string }) => e.source === baseId,
+      },
+      {
+        name: "Citing edges",
+        color: CITING_COLOR,
+        test: (e: { target: string }) => e.target === baseId,
+      },
+      { name: "Ref↔ref edges", color: REFREF_COLOR, test: () => showRefEdges },
     ];
     const seen = new Set<string>();
     for (const cls of edgeClasses) {
@@ -418,7 +430,7 @@ export function buildReferenceGraphOption(
         name: cls.name,
         coordinateSystem: "cartesian2d",
         data,
-        lineStyle: { color: cls.color, opacity: 0.45, width: 1.8, curveness: 0.1 },
+        lineStyle: { color: cls.color, opacity: 0.5, width: 2, curveness: 0.1 },
         silent: true,
         z: 0,
       });

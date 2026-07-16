@@ -146,7 +146,13 @@
     loading = true;
     message = '';
     try {
-      graph = await client.referenceGraph(workId, { includeRefEdges, includeCiting, maxExternal });
+      // Always fetch the local ref→ref edges so the checkbox can toggle them CLIENT-SIDE (no
+      // refetch / view reset); the toggle only controls their visibility (2026-07-16).
+      graph = await client.referenceGraph(workId, {
+        includeRefEdges: true,
+        includeCiting,
+        maxExternal,
+      });
       // Fresh data → stale focus ids would hide everything.
       focusIds = null;
       focusLabel = '';
@@ -227,7 +233,14 @@
           edges: graph.edges.filter((e) => focusIds?.has(e.source) && focusIds?.has(e.target)),
         }
       : graph;
-    chart.setOption(buildReferenceGraphOption(g, weights, $activeVizTheme, { yAxis, colorBy }), true);
+    chart.setOption(
+      buildReferenceGraphOption(g, weights, $activeVizTheme, {
+        yAxis,
+        colorBy,
+        showRefEdges: includeRefEdges,
+      }),
+      true,
+    );
   }
 
   // Edge-snapped cursor zoom (UX batch 3): when a wheel-zoom happens with the cursor in the
@@ -310,10 +323,12 @@
     wireEdgeSnapZoom(chart);
   }
 
-  // Y-axis / colour changes are pure client-side restyles — bump the revision, no refetch.
+  // Y-axis / colour / ref-edge-visibility changes are pure client-side restyles — bump the
+  // revision, no refetch (2026-07-16).
   $: {
     yAxis;
     colorBy;
+    includeRefEdges;
     revision += 1;
   }
 
@@ -333,8 +348,9 @@
   }
 
   function toggleRefEdges(): void {
+    // Client-side only: the ref→ref edges are already in the payload (always fetched), so this just
+    // flips their visibility via the revision reactive — no refetch, no view reset.
     includeRefEdges = !includeRefEdges;
-    void loadGraph();
   }
 
   function toggleCiting(): void {
