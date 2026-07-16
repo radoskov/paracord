@@ -1027,11 +1027,13 @@
   }
 
   async function openInReader(file: WorkFile, jumpReferenceId: string | null = null): Promise<void> {
-    // Always start from a clean reader state so a re-open after close works every time — never
-    // early-return on stale `showReader`/`readerUrl`/`readerFile` left over from a prior session.
-    closeReader();
+    // Open directly — set the new object URL and flip showReader ONCE (2026-07-16). The old code
+    // called closeReader() first (showReader=false) then set it true again after an async await,
+    // so a re-open after close toggled false→true across a tick and the modal didn't remount
+    // cleanly on the first click (needed a second click). Revoke the prior URL here instead.
     await run(async () => {
       const blob = await client.getFileBlob(file.id);
+      if (readerUrl) URL.revokeObjectURL(readerUrl);
       readerUrl = URL.createObjectURL(blob);
       readerFile = file;
       readerJumpReferenceId = jumpReferenceId;
@@ -1127,21 +1129,22 @@
     }
   }
 
+  // 2026-07-16: annotation add/delete happen INSIDE the reader overlay, so they must NOT write the
+  // paper-view `message` (it rendered under the title, appearing only after the reader closed —
+  // "Annotation deleted" leaking into the paper view). Errors propagate to the caller (PdfReader),
+  // which surfaces them in its own status line; success is silent (the highlight appearing/vanishing
+  // is the feedback).
   async function createAnnotation(payload: AnnotationCreate): Promise<void> {
-    await run(async () => {
-      await client.createAnnotation(work.id, {
-        ...payload,
-        file_id: readerFile?.id ?? files[0]?.id ?? null,
-      });
-      annotations = await client.listAnnotations(work.id);
-    }, 'Annotation added');
+    await client.createAnnotation(work.id, {
+      ...payload,
+      file_id: readerFile?.id ?? files[0]?.id ?? null,
+    });
+    annotations = await client.listAnnotations(work.id);
   }
 
   async function deleteAnnotation(annotationId: string): Promise<void> {
-    await run(async () => {
-      await client.deleteAnnotation(work.id, annotationId);
-      annotations = await client.listAnnotations(work.id);
-    }, 'Annotation deleted');
+    await client.deleteAnnotation(work.id, annotationId);
+    annotations = await client.listAnnotations(work.id);
   }
 
   function clearReader(): void {

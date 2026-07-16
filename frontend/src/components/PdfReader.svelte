@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { get } from 'svelte/store';
 
   import type { Annotation, CitationContext, PdfCoordinateBox } from '../api/client';
@@ -141,12 +141,19 @@
   function onZenKeydown(ev: KeyboardEvent): void {
     if (zen && ev.key === 'Escape') {
       ev.preventDefault();
-      // The paper-view modal also closes on window Escape — swallow the event so leaving zen
-      // doesn't take the whole modal down with it (best-effort: listener order dependent).
+      // Swallow the event so the paper-view modal's own Escape handler doesn't ALSO fire and close
+      // the whole reader. This is registered in the CAPTURE phase (see onMount) so it runs BEFORE
+      // the Modal's bubble-phase window listener — the previous bubble-phase registration was
+      // listener-order dependent and let the modal close first, leaving zen orphaned (2026-07-16).
       ev.stopImmediatePropagation();
       exitZen();
     }
   }
+
+  onMount(() => {
+    window.addEventListener('keydown', onZenKeydown, true); // capture: before the Modal's handler
+    return () => window.removeEventListener('keydown', onZenKeydown, true);
+  });
 
   // --- search -------------------------------------------------------------
   // Separator joining adjacent text items when building a page's full-text string. A single
@@ -185,6 +192,38 @@
     }, 2000);
   }
 
+  // In-reader status line (2026-07-16) — reader actions (annotation add/delete) report HERE, not via
+  // the host paper-view message that used to leak "Annotation deleted" under the paper title.
+  let readerStatus = '';
+  let readerStatusError = false;
+  function setReaderStatus(msg: string, isError = false): void {
+    readerStatus = msg;
+    readerStatusError = isError;
+    window.setTimeout(() => {
+      if (readerStatus === msg) readerStatus = '';
+    }, 2500);
+  }
+
+  // Scroll the page container so a box (unscaled, top-left origin) is in view — used by jump-to
+  // for annotations / citations / references, so they land ON the anchor, not just the page top
+  // (works in both paged and scroll modes; 2026-07-16).
+  async function scrollToBox(box: PdfCoordinateBox | undefined): Promise<void> {
+    if (!box || !pageWrapEl) return;
+    await tick();
+    const canvas = viewMode === 'scroll' ? scrollCanvases.get(box.page) : canvasEl;
+    const stage = canvas?.parentElement as HTMLElement | null;
+    if (!stage) return;
+    const wrapRect = pageWrapEl.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const top = stageRect.top - wrapRect.top + pageWrapEl.scrollTop + box.y * scale;
+    const left = stageRect.left - wrapRect.left + pageWrapEl.scrollLeft + box.x * scale;
+    pageWrapEl.scrollTo({
+      top: Math.max(0, top - 80),
+      left: Math.max(0, left - 40),
+      behavior: 'smooth',
+    });
+  }
+
   // --- annotation form ----------------------------------------------------
   let annotationType = 'note';
   let annotationPage = '';
@@ -196,8 +235,11 @@
   // scale the page canvas is rendered at (see lib/reader/overlayBoxes), so they track the text
   // across zoom, resize and re-render. The paged view shows one page; the scroll view builds the
   // same overlays per page (each scroll page owns its own canvas + overlay layer at `scale`).
-  function boxToStyle(box: PdfCoordinateBox): string {
-    return overlayBoxStyle(box, scale);
+  // Takes `scale` explicitly so the template attribute re-evaluates on zoom (Svelte only tracks
+  // deps referenced in the expression — reading `scale` inside the fn was NOT tracked, so overlays
+  // drifted off their marks after +/- until a page/mode change; 2026-07-16).
+  function boxToStyle(box: PdfCoordinateBox, s: number): string {
+    return overlayBoxStyle(box, s);
   }
 
   async function ensurePdfjs(): Promise<PdfModule> {
@@ -320,7 +362,9 @@
   }
 
   function goTo(n: number): void {
-    void renderPage(n);
+    // Mode-aware: in scroll mode renderPage no-ops (no bound canvas), so route through the
+    // scroll-aware jump — the page buttons/pager now work in both modes (2026-07-16).
+    void goToPageOnPaperTab(n);
   }
 
   // Switch to the Paper tab and navigate to a page, awaiting the canvas mount + render so a
@@ -529,6 +573,7 @@
     const page = box?.page ?? context.page;
     if (!page) return;
     await goToPageOnPaperTab(page);
+    await scrollToBox(box);
     flash(`ctx:${context.id}`);
   }
 
@@ -562,6 +607,7 @@
     const box = context.pdf_coordinates?.[0];
     if (box) {
       await goToPageOnPaperTab(box.page);
+      await scrollToBox(box);
       flash(`ctx:${context.id}`);
     }
   }
@@ -570,7 +616,13 @@
   function captureSelection(): void {
     if (!canAnnotate) return;
     const selection = window.getSelection();
-    const text = selection?.toString().trim() ?? '';
+    // De-hyphenate line-break splits ("sum-\nmarize" → "summarize") and collapse whitespace, so the
+    // stored highlight text is a clean, matchable string (2026-07-16). Only a letter-hyphen-
+    // whitespace-letter run is joined, so real hyphens ("state-of-the-art") are preserved.
+    const text = (selection?.toString() ?? '')
+      .replace(/(\p{L})-\s+(\p{L})/gu, '$1$2')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!text) return;
     selectedText = text;
     annotationPage = String(currentPage);
@@ -599,21 +651,31 @@
 
   async function createAnnotation(): Promise<void> {
     if (!onCreateAnnotation) return;
-    await onCreateAnnotation({
-      annotation_type: annotationType,
-      page: annotationPage ? Number(annotationPage) : null,
-      selected_text: selectedText || null,
-      content_markdown: annotationContent || null,
-      coordinates: selectionBoxes ? { boxes: selectionBoxes } : null,
-    });
-    selectedText = '';
-    annotationContent = '';
-    selectionBoxes = null;
+    try {
+      await onCreateAnnotation({
+        annotation_type: annotationType,
+        page: annotationPage ? Number(annotationPage) : null,
+        selected_text: selectedText || null,
+        content_markdown: annotationContent || null,
+        coordinates: selectionBoxes ? { boxes: selectionBoxes } : null,
+      });
+      selectedText = '';
+      annotationContent = '';
+      selectionBoxes = null;
+      setReaderStatus('Annotation added');
+    } catch {
+      setReaderStatus('Could not add the annotation', true);
+    }
   }
 
   async function removeAnnotation(annotationId: string): Promise<void> {
     if (!onDeleteAnnotation) return;
-    await onDeleteAnnotation(annotationId);
+    try {
+      await onDeleteAnnotation(annotationId);
+      setReaderStatus('Annotation deleted');
+    } catch {
+      setReaderStatus('Could not delete the annotation', true);
+    }
   }
 
   // Click a note → jump to its page/anchor and flash the highlight box. Sequence the tab switch
@@ -623,6 +685,7 @@
     const target = boxes[0]?.page ?? annotation.page;
     if (!target) return;
     await goToPageOnPaperTab(target);
+    await scrollToBox(boxes[0]);
     flash(`ann:${annotation.id}`);
   }
 
@@ -632,16 +695,22 @@
   let panStart = { x: 0, y: 0, left: 0, top: 0 };
   let pageWrapEl: HTMLDivElement | null = null;
   function onPanKeyDown(e: KeyboardEvent): void {
-    if (e.code === 'Space' && !spaceHeld && e.target === pageWrapEl) {
-      spaceHeld = true;
-      e.preventDefault();
-    }
+    // 2026-07-16: the old guard required the page-wrap to be the keydown target, but it's rarely
+    // focused, so Space went to <body> → hold-space just scrolled and never enabled pan. Now enable
+    // pan whenever the page area exists and focus isn't in a text field (so search typing is safe),
+    // and preventDefault so Space doesn't scroll the page.
+    if (e.code !== 'Space' || spaceHeld || !pageWrapEl) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    spaceHeld = true;
+    e.preventDefault();
   }
   function onPanKeyUp(e: KeyboardEvent): void {
     if (e.code === 'Space') spaceHeld = false;
   }
   function onPanPointerDown(e: PointerEvent): void {
-    // Pan only via middle mouse or while Space is held, so text selection still works.
+    // Pan via middle mouse OR while Space is held (works with a touchpad — no middle button needed),
+    // so ordinary text selection still works when Space isn't held.
     if (!pageWrapEl) return;
     if (e.button !== 1 && !spaceHeld) return;
     panning = true;
@@ -762,9 +831,15 @@
   });
 </script>
 
-<svelte:window on:keydown={onPanKeyDown} on:keydown={onZenKeydown} on:keyup={onPanKeyUp} />
+<svelte:window on:keydown={onPanKeyDown} on:keyup={onPanKeyUp} />
 
-<section class="reader" class:zen bind:this={readerEl}>
+<section
+  class="reader"
+  class:zen
+  class:mode-dim={readingMode === 'dim'}
+  class:mode-dark={readingMode === 'dark'}
+  bind:this={readerEl}
+>
   <header>
     <div>
       <h3>{fileName}</h3>
@@ -787,6 +862,10 @@
       </button>
     </nav>
   </header>
+
+  {#if readerStatus}
+    <p class="reader-status" class:error={readerStatusError} role="status">{readerStatus}</p>
+  {/if}
 
   {#if tab === 'pdf'}
     {#if !fileUrl}
@@ -952,17 +1031,15 @@
                     item.context.marker_text ??
                     'citation'}
                   on:click={() => onOverlayClick(item.context)}
-                  style={boxToStyle(item.box)}
+                  style={boxToStyle(item.box, scale)}
                 ></button>
               {/each}
               {#each annotationBoxesForPage(annotations, currentPage) as item (item.annotation.id + ':' + item.box.x + ',' + item.box.y)}
                 <div
                   class="annotation-overlay"
                   class:flash={flashKey === `ann:${item.annotation.id}`}
-                  title={item.annotation.selected_text ??
-                    item.annotation.content_markdown ??
-                    'annotation'}
-                  style={boxToStyle(item.box)}
+                  title={item.annotation.content_markdown ?? item.annotation.selected_text ?? "annotation"}
+                  style={boxToStyle(item.box, scale)}
                 ></div>
               {/each}
             </div>
@@ -983,17 +1060,15 @@
                       class:flash={flashKey === `ctx:${item.context.id}`}
                       title={item.context.reference_title ?? item.context.marker_text ?? 'citation'}
                       on:click={() => onOverlayClick(item.context)}
-                      style={boxToStyle(item.box)}
+                      style={boxToStyle(item.box, scale)}
                     ></button>
                   {/each}
                   {#each annotationBoxesForPage(annotations, i + 1) as item (item.annotation.id + ':' + item.box.x + ',' + item.box.y)}
                     <div
                       class="annotation-overlay"
                       class:flash={flashKey === `ann:${item.annotation.id}`}
-                      title={item.annotation.selected_text ??
-                        item.annotation.content_markdown ??
-                        'annotation'}
-                      style={boxToStyle(item.box)}
+                      title={item.annotation.content_markdown ?? item.annotation.selected_text ?? "annotation"}
+                      style={boxToStyle(item.box, scale)}
                     ></div>
                   {/each}
                 </div>
@@ -1113,12 +1188,68 @@
     gap: 0.7rem;
   }
 
+  /* 2026-07-16: Dim/Dark also ease the reader CHROME (toolbar, panels, page-wrap), not just the page
+     canvas. Dark gives dark-on-light reader UI; Dim warms it (cream/amber). Scoped to the reader —
+     the rest of the app keeps its own theme. On an already-dark app theme these just deepen slightly,
+     which reads fine. */
+  .reader.mode-dark {
+    --reader-chrome-bg: #14161a;
+    --reader-chrome-fg: #cdd3dc;
+    --reader-chrome-border: #2a2f37;
+    background: #0f1114;
+    color: var(--reader-chrome-fg);
+    border-radius: 6px;
+    padding: 0.4rem;
+  }
+  .reader.mode-dim {
+    --reader-chrome-bg: #f6efdd;
+    --reader-chrome-fg: #4a3f2a;
+    --reader-chrome-border: #e4d9bd;
+    background: #fbf6e9;
+    color: var(--reader-chrome-fg);
+    border-radius: 6px;
+    padding: 0.4rem;
+  }
+  .reader.mode-dark .pdf-toolbar,
+  .reader.mode-dim .pdf-toolbar,
+  .reader.mode-dark header,
+  .reader.mode-dim header {
+    color: var(--reader-chrome-fg);
+  }
+  .reader.mode-dark .page-wrap,
+  .reader.mode-dark .thumbs,
+  .reader.mode-dim .page-wrap,
+  .reader.mode-dim .thumbs {
+    background: var(--reader-chrome-bg);
+    border-color: var(--reader-chrome-border);
+  }
+  .reader.mode-dark .reader-status,
+  .reader.mode-dim .reader-status {
+    color: var(--reader-chrome-fg);
+  }
+
+  .reader-status {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--ink-muted);
+  }
+  .reader-status.error {
+    color: var(--status-error, #c0392b);
+    font-weight: 600;
+  }
+
   /* Zen mode (UX batch 3): fill the viewport over a dark backdrop — the app never shows through.
      Only the paging/zoom/view-mode/reading-mode controls (and Exit zen) remain visible. */
   .reader.zen {
     align-content: start;
     background: #101216;
     inset: 0;
+    /* Force full-viewport coverage: without an explicit width/max-width, an inherited max-width on
+       .reader left the fixed overlay narrower than the screen, so the paper-view behind it peeked at
+       the left/right edges (2026-07-16). */
+    width: 100vw;
+    max-width: none;
+    margin: 0;
     overflow: auto;
     padding: 0.7rem 1rem 1rem;
     position: fixed;
@@ -1296,7 +1427,10 @@
     border: 1px solid var(--border-strong);
     border-radius: 6px;
     display: flex;
-    justify-content: center;
+    /* `safe center`: centre the page while it fits, but when zoomed wider than the viewport fall
+       back to start-alignment so the LEFT edge stays reachable by scrolling (plain `center` clips
+       the overflow on the start side — you could only ever scroll to reveal the right; 2026-07-16). */
+    justify-content: safe center;
     max-height: min(72vh, 48rem);
     outline: none;
     overflow: auto;
@@ -1315,6 +1449,8 @@
   .scroll-stack {
     display: flex;
     flex-direction: column;
+    /* Same safe-centering as .page-wrap for the horizontal (cross) axis when zoomed pages overflow. */
+    align-items: safe center;
     gap: 0.6rem;
   }
 
