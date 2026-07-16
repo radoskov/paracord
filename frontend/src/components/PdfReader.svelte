@@ -265,7 +265,8 @@
       const lib = await ensurePdfjs();
       const buffer = await (await fetch(url)).arrayBuffer();
       const doc = await lib.getDocument({ data: buffer }).promise;
-      if (pdfDoc) await pdfDoc.destroy().catch(() => undefined);
+      if (pdfDoc && typeof pdfDoc.destroy === 'function')
+        await pdfDoc.destroy().catch(() => undefined);
       pdfDoc = doc;
       loadedUrl = url;
       numPages = doc.numPages;
@@ -847,21 +848,33 @@
     setupScrollObserver();
   }
 
-  onDestroy(() => {
-    if (renderTask) renderTask.cancel();
-    if (currentTextLayer) {
-      try {
-        currentTextLayer.cancel();
-      } catch {
-        // ignore
-      }
+  // Teardown MUST be exception-safe. Svelte 5 runs onDestroy inside destroy_effect; a throw here
+  // escapes into the effect-tree teardown and corrupts it, after which the parent's {#key readerUrl}
+  // block can never re-mount — the reader "opens once, then the Read button does nothing until you
+  // switch papers" (a paper switch rebuilds the whole tree). The trigger only appears once a
+  // background job-poll refresh has reassigned props mid-view, which is why a job-less e2e paper
+  // never reproduced it. Guard every pdf.js call individually so one bad object can't abort the rest
+  // or the teardown (2026-07-16).
+  function safely(fn: () => void): void {
+    try {
+      fn();
+    } catch {
+      // A pdf.js object in an unexpected state must not break teardown.
     }
-    scrollObserver?.disconnect();
-    if (pdfDoc) void pdfDoc.destroy().catch(() => undefined);
+  }
+  onDestroy(() => {
+    safely(() => renderTask && typeof renderTask.cancel === 'function' && renderTask.cancel());
+    safely(() => currentTextLayer && typeof currentTextLayer.cancel === 'function' && currentTextLayer.cancel());
+    safely(() => scrollObserver?.disconnect());
+    safely(() => {
+      if (pdfDoc && typeof pdfDoc.destroy === 'function') void pdfDoc.destroy().catch(() => undefined);
+    });
     // If the reader is closed while still in zen (portaled to <body>), remove the orphaned node so
     // it can't linger over the app / block a clean re-open (2026-07-16).
-    if (typeof document !== 'undefined' && readerEl?.parentNode === document.body) readerEl.remove();
-    zenAnchor?.remove();
+    safely(() => {
+      if (typeof document !== 'undefined' && readerEl?.parentNode === document.body) readerEl.remove();
+    });
+    safely(() => zenAnchor?.remove());
   });
 </script>
 
