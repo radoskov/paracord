@@ -56,9 +56,16 @@ inline). Shipped so far, each with tests + `make ready-full`/`frontend-check` gr
   shelf_id/rack_id` filters. Tag tab gets a per-tag scope editor + a shelf/rack filter; the paper
   view's add-tag dropdown is filtered to the assignable set. Migration 0075 applied to the live DB.
 
-**Follow-up (explicitly lower-priority, not done):** the Library-view tag *filter* dropdown is not
-yet scope-aware when a shelf/rack is co-selected (§3 Q7) — the WorkDetail dropdown and Tag-tab
-management shipped; the Library filter is the remaining slice.
+### Follow-ups shipped after the main batch (2026-07-16)
+
+- **Library-view scope-aware tag filter** (`<commit>`): narrowing the shelf/rack filter now shows
+  only tags offered there (+ globals) and clears a now-invalid tag selection. Closes §3 Q7.
+- **Per-paper Notes** (`<commit>`, migration `0076`): `Work.notes` (Text) editable via
+  `PATCH /works/{id}`; a Notes textarea below the abstract in the paper view, saved with the paper.
+- **Per-scope Insights Notes** (same migration): new `ScopeNote` model keyed (scope_type, scope_id)
+  + `GET/PUT /ai/scope-notes` + `GET /ai/scope-notes` (list). Insights gains a per-scope Notes card
+  (loads on scope change, Save button) and a folded "All scope notes" panel headed by each scope's
+  type/label. Migrations 0075 + 0076 applied to the live DB.
 
 ## UX batch 4c: citation-count sizing, detailed-summary job, section names (2026-07-16)
 

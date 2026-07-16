@@ -1,11 +1,9 @@
 # Handoff — UX batch 5 (summaries / jobs / graphs), 2026-07-16
 
 Workplan: `docs/WORKPLAN_2026-07-16_summary-effort-tags-graphs.md` (all 12 design Qs answered inline).
-This batch is **complete** — all planned groups shipped and tested. ONE explicit lower-priority
-follow-up remains: making the **Library-view tag filter** scope-aware when a shelf/rack is
-co-selected (the WorkDetail add-tag dropdown + Tag-tab scope management already shipped). The
-backend supports it already: `GET /tags?shelf_id=&rack_id=` returns the scoped+global set — wire
-`LibraryPage.svelte`'s tag filter to call it when `shelfFilter`/`rackFilter` narrow.
+This batch is **complete** — all planned groups shipped and tested. The post-batch follow-ups are
+also done: the **Library-view scope-aware tag filter**, **per-paper Notes** (`Work.notes`), and
+**per-scope Insights Notes** (`ScopeNote`, migration 0076). Nothing outstanding.
 
 ## Done (committed, tested, gate-green)
 
