@@ -109,7 +109,7 @@ def build_citation_graph(
     visible_ids: set[uuid.UUID] | None = None,
     max_external: int = DEFAULT_MAX_EXTERNAL,
     max_external_citing: int | None = None,
-    include_citing: bool = True,
+    include_citing: bool = False,
     max_nodes: int | None = None,
 ) -> CitationGraph:
     """Build the citation graph for a scope.

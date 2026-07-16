@@ -95,7 +95,11 @@ def test_citing_papers_add_typed_edges_into_scope(db_session) -> None:
     db_session.commit()
 
     g = build_citation_graph(
-        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="include_external"
+        db_session,
+        scope_type="shelf",
+        scope_id=shelf.id,
+        node_mode="include_external",
+        include_citing=True,
     )
     citing_edges = [e for e in g.edges if e.relation == "citing"]
     assert len(citing_edges) == 1
@@ -105,7 +109,11 @@ def test_citing_papers_add_typed_edges_into_scope(db_session) -> None:
 
     # local_only drops the external citer entirely.
     g2 = build_citation_graph(
-        db_session, scope_type="shelf", scope_id=shelf.id, node_mode="local_only"
+        db_session,
+        scope_type="shelf",
+        scope_id=shelf.id,
+        node_mode="local_only",
+        include_citing=True,
     )
     assert not [e for e in g2.edges if e.relation == "citing"]
 
@@ -133,6 +141,7 @@ def test_separate_caps_for_references_and_citing(db_session, make_reference) -> 
         node_mode="include_external",
         max_external=5,
         max_external_citing=1,
+        include_citing=True,
     )
     ref_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("ext:")]
     cit_ext = [n for n in g.nodes if n.type == "external" and n.id.startswith("citing:")]
