@@ -16,7 +16,7 @@ import math
 import re
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -329,6 +329,164 @@ def _detailed_llm_summary(
     return f"{intro}\n\n{body}" if intro.strip() else body
 
 
+# --- Detailed effort levels (2026-07-16) -----------------------------------------------------
+# A detailed summary can be expensive on a small GPU (one LLM call per section). Three effort
+# levels trade granularity for cost, stored as separate rows so the cache holds all of them:
+#   detailed_fast    — group sections into ≤4 buckets, one call per bucket (cheapest).
+#   detailed_section — one call per top-level section (medium).
+#   detailed_deep    — one call per subsection (finest; the historical "detailed").
+_DETAIL_SUFFIX = {
+    "short": "",
+    "detailed_fast": "_detailed_fast",
+    "detailed_section": "_detailed_section",
+    "detailed_deep": "_detailed_deep",
+}
+DETAIL_LEVELS = tuple(_DETAIL_SUFFIX)
+
+
+def _normalize_detail(detail: str) -> str:
+    """Validate a detail level; map the legacy ``"detailed"`` to ``"detailed_deep"``."""
+    if detail == "detailed":  # back-compat: the pre-2026-07-16 single detailed level == deep
+        return "detailed_deep"
+    if detail not in _DETAIL_SUFFIX:
+        raise ValueError(f"Unsupported detail level: {detail}")
+    return detail
+
+
+def stored_summary_type(base: str, detail: str) -> str:
+    """The DB ``summary_type`` for a base provider + detail level (public: used by the API to key
+    the cache matrix, e.g. ``("local_llm", "detailed_deep") -> "local_llm_detailed_deep"``)."""
+    return base + _DETAIL_SUFFIX[_normalize_detail(detail)]
+
+
+# 2026-07-16 cache matrix: keep up to N models' summaries per (entity, detail level) so switching
+# the AI model and back is instant; evict the least-recently-generated model beyond that.
+SUMMARY_MODEL_CACHE = 5
+
+
+def _evict_stale_models(
+    db: Session, entity_type: str, entity_id, stored_type: str, *, keep: int | None = None
+) -> None:
+    """Trim the (entity, summary_type) cache to the ``keep`` most-recent distinct models (LRU)."""
+    keep = keep if keep is not None else SUMMARY_MODEL_CACHE  # read at call time (monkeypatchable)
+    rows = db.execute(
+        select(Summary.model_name)
+        .where(
+            Summary.entity_type == entity_type,
+            Summary.entity_id == entity_id,
+            Summary.summary_type == stored_type,
+        )
+        .group_by(Summary.model_name)
+        .order_by(func.max(Summary.created_at).desc())
+    ).all()
+    stale = [r[0] for r in rows[keep:]]
+    if stale:
+        db.execute(
+            delete(Summary).where(
+                Summary.entity_type == entity_type,
+                Summary.entity_id == entity_id,
+                Summary.summary_type == stored_type,
+                Summary.model_name.in_(stale),
+            )
+        )
+
+
+_FAST_BUCKETS = ("Background", "Methods", "Results", "Other")
+_FAST_KEYWORDS = {
+    "Background": ["title", "abstract", "introduction", "intro", "related", "background",
+                   "motivation", "preliminar", "overview"],
+    "Methods": ["method", "approach", "model", "architecture", "implementation", "experiment",
+                "setup", "dataset", "data", "algorithm", "design", "framework"],
+    "Results": ["result", "discussion", "conclusion", "evaluation", "analysis", "finding",
+                "appendix", "future", "limitation"],
+}
+
+
+def _heuristic_bucket(label: str | None) -> str:
+    low = (label or "").lower()
+    for bucket in ("Background", "Methods", "Results"):
+        if any(kw in low for kw in _FAST_KEYWORDS[bucket]):
+            return bucket
+    return "Other"
+
+
+def _categorize_sections(labels: list[str], *, model: str, base_url: str) -> dict[str, str]:
+    """Ask the LLM to map each section label to one of the 4 fast buckets; heuristic on failure.
+
+    Returns a partial ``{label: bucket}``; callers fall back to :func:`_heuristic_bucket` for any
+    label the LLM didn't classify, so a bad/absent LLM answer degrades gracefully.
+    """
+    labels = [lbl for lbl in labels if lbl]
+    if not labels:
+        return {}
+    listing = "\n".join(f"{i + 1}. {lbl}" for i, lbl in enumerate(labels))
+    prompt = (
+        "Classify each academic-paper section title into exactly ONE category: Background, "
+        "Methods, Results, or Other.\n"
+        "- Background: title, abstract, introduction, related work, motivation.\n"
+        "- Methods: methods, implementation, experiments, datasets, model/architecture.\n"
+        "- Results: results, discussion, conclusion, appendix.\n"
+        "- Other: anything else.\n"
+        "Respond with one line per section as 'N: Category'.\n\n" + listing
+    )
+    try:
+        raw = _ollama_generate(prompt, model=model, base_url=base_url)
+    except Exception as exc:  # noqa: BLE001 - heuristic fallback, never fail the summary
+        logger.warning("section categorizer LLM unavailable (%s); using heuristic", exc)
+        return {}
+    mapping: dict[str, str] = {}
+    for line in raw.splitlines():
+        m = re.match(r"\s*(\d+)\s*[:.)\-]\s*([A-Za-z]+)", line)
+        if not m:
+            continue
+        idx = int(m.group(1)) - 1
+        cat = m.group(2).capitalize()
+        if 0 <= idx < len(labels) and cat in _FAST_BUCKETS:
+            mapping[labels[idx]] = cat
+    return mapping
+
+
+def _fast_bucket_sections(db: Session, work: Work, *, model: str, base_url: str):
+    """detailed_fast: fold the work's sections into ≤4 buckets, each summarized as one paragraph."""
+    from app.services.chunking import iter_work_sections  # noqa: PLC0415 (cycle)
+
+    secs = iter_work_sections(db, work)
+    mapping = _categorize_sections([lbl for lbl, _ in secs if lbl], model=model, base_url=base_url)
+    grouped: dict[str, list[str]] = {b: [] for b in _FAST_BUCKETS}
+    for label, text in secs:
+        bucket = mapping.get(label) or _heuristic_bucket(label)
+        if text:
+            grouped[bucket].append(text)
+    return [(b, " ".join(grouped[b])) for b in _FAST_BUCKETS if grouped[b]]
+
+
+def _section_level_sections(db: Session, work: Work):
+    """detailed_section: top-level sections; if fewer than 3, drop one level to subsections
+    (iff that yields fewer than 10) so a coarsely-parsed paper still gets useful granularity."""
+    from app.services.chunking import (  # noqa: PLC0415 (cycle)
+        iter_work_leaf_sections,
+        iter_work_sections,
+    )
+
+    top = [(lbl, t) for lbl, t in iter_work_sections(db, work) if lbl != "title"]
+    if len(top) < 3:
+        leaf = [(lbl, t) for lbl, t in iter_work_leaf_sections(db, work) if lbl != "title"]
+        if len(leaf) < 10:
+            return leaf
+    return top
+
+
+def _detail_sections(db: Session, work: Work, detail: str, *, model: str, base_url: str):
+    """The (label, text) sections that feed the detailed summary for a given effort level."""
+    if detail == "detailed_fast":
+        return _fast_bucket_sections(db, work, model=model, base_url=base_url)
+    if detail == "detailed_section":
+        return _section_level_sections(db, work)
+    from app.services.chunking import iter_work_leaf_sections  # noqa: PLC0415 (cycle)
+
+    return [(lbl, t) for lbl, t in iter_work_leaf_sections(db, work) if lbl != "title"]
+
+
 # --- Scope (collection) prompts — UX batch 4 -------------------------------------------------
 # v1 fed the concatenated abstracts to the PAPER prompt, so the model opened with "This paper
 # addresses…" for a whole shelf. The scope prompts below make the collection framing explicit and
@@ -405,12 +563,13 @@ def summarize_work(
     progress_cb=None,
     cancel_cb=None,
 ) -> Summary:
-    """Create (replacing any prior summary of the same type+detail) a provenance-tagged summary.
+    """Create (replacing the prior summary of the same type+detail+model) a provenance-tagged summary.
 
-    ``detail`` (UX batch 4): ``"short"`` = one paragraph (the historical behavior); ``"detailed"``
-    = the whole body chunked section-by-section with a synthesized intro (LLM), or a longer
-    extractive summary as the fallback. Short and detailed are stored as SEPARATE rows (the
-    detailed one under ``{summary_type}_detailed``) so both coexist in the paper view.
+    ``detail`` (UX batch 4 / 2026-07-16): ``"short"`` = one paragraph (historical); the detailed
+    levels ``"detailed_fast"`` / ``"detailed_section"`` / ``"detailed_deep"`` trade cost for
+    granularity (``"detailed"`` is a back-compat alias for deep). Each (detail × model) is stored as
+    a SEPARATE row so the paper view can offer a cache of all of them; up to 5 models are kept per
+    detail level (LRU).
 
     For ``local_llm`` the returned Summary carries a transient ``source_sections`` attribute (the
     sources that fed it); the API surfaces it. When the LLM is disabled/unreachable the text is the
@@ -419,11 +578,10 @@ def summarize_work(
     """
     if summary_type not in SUPPORTED_SUMMARY_TYPES:
         raise ValueError(f"Unsupported summary type: {summary_type}")
-    if detail not in ("short", "detailed"):
-        raise ValueError(f"Unsupported detail level: {detail}")
-    # Detailed summaries are stored under a distinct type so they never clobber the short one.
-    stored_type = summary_type if detail == "short" else f"{summary_type}_detailed"
-    detailed = detail == "detailed"
+    detail = _normalize_detail(detail)
+    # Each detail level is stored under a distinct type so they never clobber each other.
+    stored_type = summary_type + _DETAIL_SUFFIX[detail]
+    detailed = detail != "short"
     # A longer extractive stands in for a detailed summary when the LLM isn't producing it.
     eff_sentences = max_sentences * 3 if detailed else max_sentences
 
@@ -462,16 +620,13 @@ def summarize_work(
         if ai_cfg.summary_provider == "local_llm" and source_text:
             try:
                 if detailed and not abstract_only:
-                    # Section-by-section over the GROBID sections so each paragraph is headed by
-                    # its section name. Abstract-only papers have no body to section, so they take
-                    # the abstract-framed short path below regardless of the requested detail.
-                    from app.services.chunking import iter_work_sections  # noqa: PLC0415 (cycle)
-
-                    sections = [
-                        (label, sec_text)
-                        for label, sec_text in iter_work_sections(db, work)
-                        if label != "title"
-                    ]
+                    # Section-by-section over the GROBID sections (granularity chosen by the effort
+                    # level) so each paragraph is headed by its section name. Abstract-only papers
+                    # have no body to section, so they take the abstract-framed short path below
+                    # regardless of the requested detail.
+                    sections = _detail_sections(
+                        db, work, detail, model=stored_model, base_url=ai_cfg.ollama_url
+                    )
                     text = _detailed_llm_summary(
                         sections,
                         model=stored_model,
@@ -507,12 +662,14 @@ def summarize_work(
     if not text:
         raise ValueError("No text available to summarize")
 
-    # One stored summary per (work, type+detail): replace the previous one so re-runs stay idempotent.
+    # One stored summary per (work, type+detail, MODEL): replace the same combo so re-runs stay
+    # idempotent, but a different model coexists (the cache matrix).
     db.execute(
         delete(Summary).where(
             Summary.entity_type == "work",
             Summary.entity_id == work.id,
             Summary.summary_type == stored_type,
+            Summary.model_name == stored_model,
         )
     )
     fallback = provider_used != provider_requested
@@ -538,6 +695,7 @@ def summarize_work(
     )
     db.add(summary)
     db.flush()
+    _evict_stale_models(db, "work", work.id, stored_type)
     # A ``fallback_reason`` is transient (not a column): the UI shows it only on a fresh degrade.
     summary.fallback_reason = fallback_reason if fallback else None
     return summary
@@ -579,15 +737,18 @@ def _work_digest(
     already summarized in their own view, and vice versa). ``degraded_reason`` is non-None when the
     LLM attempt fell back — the scope loop uses it to stop hammering an unavailable daemon.
     """
-    stored_type = "local_llm" if detail == "short" else "local_llm_detailed"
+    stored_type = "local_llm" + _DETAIL_SUFFIX[_normalize_detail(detail)]
     if use_llm:
         if not regenerate:
+            # Reuse an existing genuine summary for THIS model + detail (the cache matrix), so a
+            # scope run doesn't re-summarize papers already summarized under the same model.
             existing = db.scalars(
                 select(Summary)
                 .where(
                     Summary.entity_type == "work",
                     Summary.entity_id == work.id,
                     Summary.summary_type == stored_type,
+                    Summary.model_name == model_name,
                 )
                 .order_by(Summary.created_at.desc())
             ).first()
@@ -629,13 +790,26 @@ def _scope_label(db: Session, scope_type: str, scope_id: uuid.UUID | None) -> st
     return getattr(container, "name", None)
 
 
-def latest_scope_summary(db: Session, *, scope_type: str, scope_id: uuid.UUID | None):
-    """The most recent stored summary for a scope, or None (read path for the S15 async flow)."""
+def latest_scope_summary(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+    summary_type: str | None = None,
+    model_name: str | None = None,
+):
+    """The most recent stored summary for a scope, or None (read path for the S15 async flow).
+
+    ``summary_type`` (an effort-encoded type e.g. ``local_llm_detailed_deep``) and ``model_name``
+    narrow the lookup to a specific cache-matrix cell (2026-07-16)."""
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    conditions = [Summary.entity_type == scope_type, Summary.entity_id == entity_id]
+    if summary_type is not None:
+        conditions.append(Summary.summary_type == summary_type)
+    if model_name is not None:
+        conditions.append(Summary.model_name == model_name)
     return db.scalars(
-        select(Summary)
-        .where(Summary.entity_type == scope_type, Summary.entity_id == entity_id)
-        .order_by(Summary.created_at.desc())
+        select(Summary).where(*conditions).order_by(Summary.created_at.desc())
     ).first()
 
 
@@ -717,6 +891,10 @@ def summarize_scope(
     ai_cfg = get_ai_config(db, settings=settings)
     works = _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    # 2026-07-16 cache matrix: the scope summary's effort level (paper_detail) is folded into its
+    # stored_type so short/fast/section/deep coexist per scope; extractive scopes have no effort.
+    scope_detail = _normalize_detail(paper_detail)
+    stored_type = summary_type + (_DETAIL_SUFFIX[scope_detail] if summary_type == "local_llm" else "")
 
     abstracts = [w.abstract for w in works if w.abstract]
     if not abstracts and summary_type != "local_llm":
@@ -861,18 +1039,21 @@ def summarize_scope(
         text = "\n\n".join(p for p in parts if p and p.strip())
         stored_model = "tier1-extractive-frequency-scope"
 
+    # Replace the same (scope, effort, MODEL) combo; other efforts/models coexist (the cache
+    # matrix). LRU-evict models beyond the cap per (scope, effort).
     db.execute(
         delete(Summary).where(
             Summary.entity_type == scope_type,
             Summary.entity_id == entity_id,
-            Summary.summary_type == summary_type,
+            Summary.summary_type == stored_type,
+            Summary.model_name == stored_model,
         )
     )
     fallback = provider_used != provider_requested
     summary = Summary(
         entity_type=scope_type,
         entity_id=entity_id,
-        summary_type=summary_type,
+        summary_type=stored_type,
         text=text,
         model_name=stored_model,
         prompt_version=prompt_version,
@@ -893,7 +1074,7 @@ def summarize_scope(
             "scope_label": _scope_label(db, scope_type, scope_id),
             "method": method,
             "chunks": chunk_count,
-            "paper_detail": paper_detail,
+            "paper_detail": scope_detail,
             # 2026-07-16 no-PDF honesty: how the scope broke down by available source, so the
             # footer can show "N with PDFs, M abstract-only, K title-only".
             "source_breakdown": breakdown,
@@ -901,6 +1082,7 @@ def summarize_scope(
     )
     db.add(summary)
     db.flush()
+    _evict_stale_models(db, scope_type, entity_id, stored_type)
     # A ``fallback_reason`` is transient (not a column): shown only on a fresh degrade.
     summary.fallback_reason = fallback_reason if fallback else None
     return summary, len(works)

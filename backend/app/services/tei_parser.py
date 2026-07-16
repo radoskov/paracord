@@ -97,6 +97,42 @@ def extract_sections(tei_xml: str) -> list[tuple[str | None, str]]:
     return sections
 
 
+def extract_leaf_sections(tei_xml: str) -> list[tuple[str | None, str]]:
+    """Return ``(label, text)`` at SUBSECTION granularity (2026-07-16, for the 'deep' summary).
+
+    GROBID nests subsections as ``<div>`` inside a top-level body ``<div>``. For each top-level
+    section: if it has child ``<div>``s, emit one entry per child (label ``"Parent › Child"``, text =
+    that child's own paragraphs) plus the parent's own lead paragraphs when present; otherwise emit
+    the section as a whole. Falls back to :func:`extract_sections` granularity when nothing nests.
+    """
+    if not tei_xml or not tei_xml.strip():
+        return []
+    try:
+        root = etree.fromstring(tei_xml.encode("utf-8"))
+    except etree.XMLSyntaxError:
+        return []
+    out: list[tuple[str | None, str]] = []
+    for div in root.findall(".//t:text/t:body/t:div", TEI_NS):
+        head = _text(div.find("t:head", TEI_NS)) or div.get("type")
+        child_divs = div.findall("t:div", TEI_NS)
+        if not child_divs:
+            text = " ".join(t for p in div.findall(".//t:p", TEI_NS) if (t := _text(p)))
+            if text:
+                out.append((head, text))
+            continue
+        # Parent's own lead paragraphs (direct children, before the first subsection).
+        lead = " ".join(t for p in div.findall("t:p", TEI_NS) if (t := _text(p)))
+        if lead:
+            out.append((head, lead))
+        for sub in child_divs:
+            sub_head = _text(sub.find("t:head", TEI_NS)) or sub.get("type")
+            label = f"{head} › {sub_head}" if head and sub_head else (sub_head or head)
+            text = " ".join(t for p in sub.findall(".//t:p", TEI_NS) if (t := _text(p)))
+            if text:
+                out.append((label, text))
+    return out
+
+
 def _first(*elements):
     """Return the first element that is not None (avoids lxml truthiness pitfalls)."""
     for element in elements:

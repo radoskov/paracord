@@ -202,7 +202,8 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
     db_session.commit()
 
     assert short.summary_type == "local_llm"
-    assert detailed.summary_type == "local_llm_detailed"
+    # 'detailed' is the back-compat alias for the deep effort level (2026-07-16).
+    assert detailed.summary_type == "local_llm_detailed_deep"
     assert short.provider_used == "local_llm" and detailed.provider_used == "local_llm"
     # Both rows persist (coexist) — the paper view shows both.
     rows = {
@@ -211,12 +212,12 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
             select(Summary).where(Summary.entity_type == "work", Summary.entity_id == work.id)
         ).all()
     }
-    assert rows == {"local_llm", "local_llm_detailed"}
+    assert rows == {"local_llm", "local_llm_detailed_deep"}
     # Detailed = intro + one paragraph PER SECTION, each headed by the section name.
     assert detailed.text.startswith("HIGH-LEVEL INTRO.")
     assert "Section 0:" in detailed.text
     assert "Section 2:" in detailed.text
-    assert detailed.params["detail"] == "detailed"
+    assert detailed.params["detail"] == "detailed_deep"
     # The section name is passed into the chunk prompt (so the model knows which section).
     assert any('"Section 1" section' in p for p in seen)
 
@@ -340,6 +341,82 @@ def test_scope_summary_groups_no_pdf_papers_and_reports_breakdown(db) -> None:
     # The title-only paper is named in a grouped paragraph, not silently dropped.
     assert "title only" in summary.text and "TitleOnly" in summary.text
     assert "only as abstracts" in summary.text
+
+
+def test_detailed_effort_levels_coexist_and_fast_categorizes(db, monkeypatch) -> None:
+    """2026-07-16: fast/section/deep are stored as separate rows; fast folds sections into buckets
+    via the categorizer, so it makes far fewer chunk calls than deep."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    calls: list[str] = []
+
+    def fake_generate(prompt, *, model, base_url):
+        calls.append(prompt)
+        if prompt.startswith("Classify each academic-paper section"):
+            # Categorize: sections 1..N -> Background/Methods/Results round-robin-ish.
+            lines = [ln for ln in prompt.splitlines() if ln[:1].isdigit()]
+            cats = ["Background", "Methods", "Results", "Methods"]
+            return "\n".join(f"{i + 1}: {cats[i % len(cats)]}" for i in range(len(lines)))
+        return "para."
+
+    monkeypatch.setattr(summ, "_ollama_generate", fake_generate)
+    divs = "".join(
+        f"<div><head>Sec {i}</head><p>{'word ' * 8}</p></div>" for i in range(6)
+    )
+    tei = '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>' + divs + "</body></text></TEI>"
+    work = Work(canonical_title="t", normalized_title="t", abstract="Abstract sentence here.")
+    db.add(work)
+    db.flush()
+    db.add(RawTeiDocument(file_id=uuid.uuid4(), work_id=work.id, source="grobid", tei_xml=tei))
+    db.commit()
+
+    for detail in ("detailed_fast", "detailed_section", "detailed_deep"):
+        summarize_work(db, work, summary_type="local_llm", detail=detail)
+    db.commit()
+
+    rows = {
+        s.summary_type
+        for s in db.scalars(
+            select(Summary).where(Summary.entity_type == "work", Summary.entity_id == work.id)
+        ).all()
+    }
+    assert {"local_llm_detailed_fast", "local_llm_detailed_section", "local_llm_detailed_deep"} <= rows
+    # Fast asked the categorizer exactly once.
+    assert sum(1 for c in calls if c.startswith("Classify each academic-paper section")) == 1
+
+
+def test_summary_cache_keeps_multiple_models_and_evicts_lru(db, monkeypatch) -> None:
+    """The cache matrix keeps one row per (detail, model), up to SUMMARY_MODEL_CACHE models (LRU)."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+
+    update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db.commit()
+    monkeypatch.setattr(summ, "_ollama_generate", lambda *a, **k: "para.")
+    monkeypatch.setattr(summ, "SUMMARY_MODEL_CACHE", 3)
+
+    work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three.")
+    db.add(work)
+    db.commit()
+
+    for m in ("mA", "mB", "mC", "mD"):  # 4 models, cap 3 → oldest (mA) evicted
+        summarize_work(db, work, summary_type="local_llm", detail="short", model_name=m)
+    db.commit()
+
+    models = [
+        s.model_name
+        for s in db.scalars(
+            select(Summary).where(
+                Summary.entity_type == "work",
+                Summary.entity_id == work.id,
+                Summary.summary_type == "local_llm",
+            )
+        ).all()
+    ]
+    assert set(models) == {"mB", "mC", "mD"}  # mA evicted; a different detail level is unaffected
 
 
 def test_summarize_work_rejects_unknown_type(db_session) -> None:
@@ -479,7 +556,7 @@ def test_detailed_summary_api_runs_as_a_job(client, auth_headers, db, monkeypatc
     assert body["queued"] is True
     # A real detailed summary job was enqueued (coalescing key names the work + the detailed variant).
     assert body["job_id"].startswith("summarize-") and "detailed" in body["job_id"]
-    assert body["summary_type"] == "local_llm_detailed"
+    assert body["summary_type"] == "local_llm_detailed_deep"
 
 
 def test_summary_api_surfaces_extractive_fallback(client, auth_headers, db) -> None:

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.chunk import WorkChunk
 from app.models.citation import RawTeiDocument
 from app.models.work import Work
-from app.services.tei_parser import extract_sections
+from app.services.tei_parser import extract_leaf_sections, extract_sections
 
 # Target/cap/overlap in whitespace "tokens" (a cheap proxy for real tokens, fine for sizing).
 CHUNK_TARGET_TOKENS = 400
@@ -137,6 +137,28 @@ def iter_work_sections(db: Session, work: Work) -> list[tuple[str | None, str]]:
     )
     if tei is not None:
         for label, text in extract_sections(tei.tei_xml):
+            if _is_skippable(label):
+                continue
+            sections.append((label, text))
+    return sections
+
+
+def iter_work_leaf_sections(db: Session, work: Work) -> list[tuple[str | None, str]]:
+    """Like :func:`iter_work_sections` but at SUBSECTION granularity (2026-07-16 'deep' summary):
+    title, abstract, then TEI *leaf* sections (subsections when the body nests them). Falls back to
+    title+abstract when no TEI is stored."""
+    sections: list[tuple[str | None, str]] = []
+    if work.canonical_title:
+        sections.append(("title", work.canonical_title))
+    if work.abstract:
+        sections.append(("abstract", work.abstract))
+    tei = db.scalar(
+        select(RawTeiDocument)
+        .where(RawTeiDocument.work_id == work.id)
+        .order_by(RawTeiDocument.created_at.desc())
+    )
+    if tei is not None:
+        for label, text in extract_leaf_sections(tei.tei_xml):
             if _is_skippable(label):
                 continue
             sections.append((label, text))

@@ -1449,9 +1449,12 @@ class AnnotationRead(BaseModel):
 
 class SummaryCreate(BaseModel):
     summary_type: str = "extractive"
-    # UX batch 4: 'short' (one paragraph) or 'detailed' (section-by-section + intro); stored
-    # separately so a paper can carry both.
-    detail: Literal["short", "detailed"] = "short"
+    # UX batch 4 / 2026-07-16: 'short' (one paragraph), or a detailed effort level trading cost for
+    # granularity — 'detailed_fast' (≤4 buckets), 'detailed_section' (per section), 'detailed_deep'
+    # (per subsection). 'detailed' is a back-compat alias for deep. Each is stored separately.
+    detail: Literal["short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"] = (
+        "short"
+    )
     max_sentences: int = 5
     model_name: str | None = None  # for summary_type=local_llm (Ollama model id)
 
@@ -2375,10 +2378,13 @@ def create_summary(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This paper has only a title (no abstract or full text) and cannot be summarized.",
             )
-    # A detailed local-LLM summary can fire many LLM calls — run it as a background job so the
-    # request doesn't hang. Short/extractive stay inline (fast). Queue down → fall through inline.
-    if payload.detail == "detailed" and summary_type == "local_llm":
-        job_id = enqueue_work_summary(work_id, detail="detailed")
+    # A detailed local-LLM summary (any effort level) can fire many LLM calls — run it as a
+    # background job so the request doesn't hang. Short/extractive stay inline (fast). Queue down →
+    # fall through inline.
+    if payload.detail != "short" and summary_type == "local_llm":
+        from app.services.summarization import stored_summary_type
+
+        job_id = enqueue_work_summary(work_id, detail=payload.detail)
         if job_id is not None:
             response.status_code = status.HTTP_202_ACCEPTED
             return SummaryRead(
@@ -2386,7 +2392,7 @@ def create_summary(
                 job_id=job_id,
                 entity_type="work",
                 entity_id=work_id,
-                summary_type="local_llm_detailed",
+                summary_type=stored_summary_type("local_llm", payload.detail),
             )
     try:
         summary = summarize_work(

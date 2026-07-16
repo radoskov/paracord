@@ -45,8 +45,13 @@ class ScopeSummaryRequest(BaseModel):
     # those per-paper summaries to be (re)generated. Maps the Insights dropdown:
     #   use/create short → short + reuse ; use/create detailed → detailed + reuse
     #   regen short → short + regenerate ; regen detailed → detailed + regenerate
-    paper_detail: Literal["short", "detailed"] = "short"
+    paper_detail: Literal[
+        "short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"
+    ] = "short"
     regenerate_papers: bool = False
+    # 2026-07-16 cache matrix: when False (the default), an existing summary for this
+    # (scope, effort, current model) is returned as-is; the Insights "Regenerate" button sets it.
+    force: bool = False
 
 
 class ScopeSummaryResponse(BaseModel):
@@ -76,6 +81,28 @@ class ScopeSummaryResponse(BaseModel):
     # ({full_text, abstract_only, title_only}) + when this summary was generated, for the footer.
     source_breakdown: dict[str, int] | None = None
     generated_at: str | None = None
+
+
+def _scope_summary_response(summary, *, work_count: int | None = None) -> "ScopeSummaryResponse":
+    """Build the API response from a stored scope Summary row (shared by create/latest/cache-hit)."""
+    params = summary.params or {}
+    return ScopeSummaryResponse(
+        entity_type=summary.entity_type,
+        entity_id=str(summary.entity_id),
+        summary_type=summary.summary_type,
+        text=summary.text,
+        model_name=summary.model_name,
+        prompt_version=summary.prompt_version,
+        work_count=work_count if work_count is not None else params.get("work_count", 0),
+        provider_requested=getattr(summary, "provider_requested", None),
+        provider_used=getattr(summary, "provider_used", None),
+        fallback=getattr(summary, "fallback", False),
+        fallback_reason=getattr(summary, "fallback_reason", None),
+        scope_label=params.get("scope_label"),
+        method=params.get("method"),
+        source_breakdown=params.get("source_breakdown"),
+        generated_at=summary.created_at.isoformat() if summary.created_at else None,
+    )
 
 
 @router.post("/summaries", response_model=ScopeSummaryResponse, status_code=status.HTTP_201_CREATED)
@@ -112,6 +139,31 @@ def create_scope_summary(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # 2026-07-16 cache matrix: unless Regenerate was pressed, return the cached summary for this
+    # (scope, effort, current model) if it exists — no recompute.
+    if not payload.force:
+        from app.services.ai_config import get_ai_config
+        from app.services.summarization import stored_summary_type
+
+        cache_model = payload.model_name or (
+            get_ai_config(db).summary_model
+            if summary_type == "local_llm"
+            else "tier1-extractive-frequency-scope"
+        )
+        cache_type = (
+            stored_summary_type(summary_type, payload.paper_detail)
+            if summary_type == "local_llm"
+            else summary_type
+        )
+        cached = latest_scope_summary(
+            db,
+            scope_type=payload.scope_type,
+            scope_id=payload.scope_id,
+            summary_type=cache_type,
+            model_name=cache_model,
+        )
+        if cached is not None:
+            return _scope_summary_response(cached)
     # Every scope summary runs on the worker so it shows up in the Jobs tab with progress + a Stop
     # button (2026-07-16) — not just library-sized scopes above the old ai_scope_job_threshold.
     # If the queue is unavailable (job_id is None) we fall through and run inline rather than fail.
@@ -147,23 +199,7 @@ def create_scope_summary(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
-    return ScopeSummaryResponse(
-        entity_type=summary.entity_type,
-        entity_id=str(summary.entity_id),
-        summary_type=summary.summary_type,
-        text=summary.text,
-        model_name=summary.model_name,
-        prompt_version=summary.prompt_version,
-        work_count=work_count,
-        provider_requested=getattr(summary, "provider_requested", None),
-        provider_used=getattr(summary, "provider_used", None),
-        fallback=getattr(summary, "fallback", False),
-        fallback_reason=getattr(summary, "fallback_reason", None),
-        scope_label=(summary.params or {}).get("scope_label"),
-        method=(summary.params or {}).get("method"),
-        source_breakdown=(summary.params or {}).get("source_breakdown"),
-        generated_at=summary.created_at.isoformat() if summary.created_at else None,
-    )
+    return _scope_summary_response(summary, work_count=work_count)
 
 
 class TopicRequest(BaseModel):
@@ -217,33 +253,49 @@ class TopicModelResponse(BaseModel):
 def read_latest_scope_summary(
     scope_type: Literal["library", "shelf", "rack"],
     scope_id: uuid.UUID | None = None,
+    detail: Literal[
+        "short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"
+    ]
+    | None = None,
+    summary_type: Literal["extractive", "local_llm"] | None = None,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
 ) -> ScopeSummaryResponse:
-    """Return the most recent stored summary for a scope (the S15 async-completion read path)."""
+    """Return the most recent stored summary for a scope (the S15 async-completion read path).
+
+    When ``detail`` is given, the lookup targets that specific cache-matrix cell — the effort level
+    for the current model/provider (2026-07-16). Without it, the newest summary of any kind is
+    returned (back-compat)."""
     if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
-    summary = latest_scope_summary(db, scope_type=scope_type, scope_id=scope_id)
+    cache_type: str | None = None
+    cache_model: str | None = None
+    if detail is not None:
+        from app.services.ai_config import get_ai_config
+        from app.services.summarization import stored_summary_type
+
+        ai_cfg = get_ai_config(db)
+        resolved = summary_type or (
+            "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
+        )
+        if resolved == "local_llm":
+            cache_type = stored_summary_type(resolved, detail)
+            cache_model = ai_cfg.summary_model
+        else:
+            cache_type = resolved
+            cache_model = "tier1-extractive-frequency-scope"
+    summary = latest_scope_summary(
+        db,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        summary_type=cache_type,
+        model_name=cache_model,
+    )
     if summary is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No summary for this scope yet"
         )
-    return ScopeSummaryResponse(
-        entity_type=summary.entity_type,
-        entity_id=str(summary.entity_id),
-        summary_type=summary.summary_type,
-        text=summary.text,
-        model_name=summary.model_name,
-        prompt_version=summary.prompt_version,
-        work_count=(summary.params or {}).get("work_count", 0),
-        provider_requested=summary.provider_requested,
-        provider_used=summary.provider_used,
-        fallback=summary.fallback,
-        scope_label=(summary.params or {}).get("scope_label"),
-        method=(summary.params or {}).get("method"),
-        source_breakdown=(summary.params or {}).get("source_breakdown"),
-        generated_at=summary.created_at.isoformat() if summary.created_at else None,
-    )
+    return _scope_summary_response(summary)
 
 
 @router.post("/topics", response_model=TopicModelResponse)
