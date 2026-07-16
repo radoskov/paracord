@@ -1,5 +1,12 @@
 # Workplan — Summary effort levels, no-PDF honesty, jobs, tags, graphs (2026-07-16)
 
+> **Status (2026-07-16):** ✅ DONE — Jobs (§2), No-PDF honesty (§1.3), Effort levels + cache matrix
+> (§1.1–1.2), Graph quick wins (§4.1–4.4, §4.7), Insights pan/zoom fix (§4.8). ⏳ REMAINING —
+> LaTeX rendering (§1.4), Insights citing papers + external styling (§4.5–4.6), per-shelf/rack tags
+> (§3). All 12 design questions are resolved (see the decisions section). Each done item shipped with
+> tests + a green `make ready-full`/`frontend-check`; migration 0074 applied to the live DB.
+
+
 Scope: a large UX batch spanning summarization (effort levels + caching + no-PDF handling +
 LaTeX), the Jobs tab, per-shelf/rack tags, and both graph systems. This document sorts each
 item into **ALL CLEAR** (well-specified, implement as described, recommendation noted) vs

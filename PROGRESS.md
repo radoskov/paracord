@@ -9,6 +9,40 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch 5: summary effort levels, no-PDF honesty, jobs, graphs (2026-07-16)
+
+Workplan `docs/WORKPLAN_2026-07-16_summary-effort-tags-graphs.md` (all 12 design questions resolved
+inline). Shipped so far, each with tests + `make ready-full`/`frontend-check` green:
+
+- **Jobs** (`a4c64a9`): every scope summary now enqueues (drops the size gate) so all Insights
+  summaries show in the Jobs tab; detailed single-paper summaries report per-section progress and
+  honor Stop (`summarize_work_job` wires progress/cancel, `JobCancelled` propagates); the stuck
+  "stopping…" badge becomes a terminal "stopped" once the job ends.
+- **No-PDF honesty** (`11f9982`): works are classified full-text / abstract-only / title-only.
+  Title-only can't be summarized locally (clear 400, no doomed job); abstract-only uses an
+  abstract-framed prompt; scope summaries fold abstract-only and title-only papers into single
+  grouped paragraphs; the footer shows "N with PDFs, M abstract-only, K title-only · model · when".
+- **Effort levels + cache matrix** (`4db779b`, `2164df7`, migration `0074`): detailed summaries have
+  three effort levels — `detailed_fast` (LLM categorizes sections into ≤4 buckets), `detailed_section`
+  (per top-level section, drops a level if <3), `detailed_deep` (per subsection; new leaf-section
+  extractor). Each (effort × model) is a separate cached row, keyed `(entity, summary_type, model)`
+  with LRU eviction past 5 models; scope summaries cached the same way and returned unless Regenerate.
+  UI: Fast/Section/Deep radios (paper view + Insights) + a read-only history popup over cached
+  variants. Migration 0074 renamed legacy `*_detailed` rows to `*_detailed_deep` (applied to live DB).
+- **Graph quick wins** (`85dbc2f`, `4802c90`): the Insights external-node budget is distributed
+  evenly across scope papers (absolute `A=ceil((L/2)/N)` + relative `R_i=E·C_i/S`) instead of a
+  global top-N; the reference graph gets 3 colour-coded thicker edge series (reference / citing /
+  ref↔ref), the paper title in its header, a scrollable overlap tooltip whose external members can be
+  ctrl/middle-clicked to queue into the import box without switching tabs, and the Insights Build
+  button shows building/done/failed state.
+- **Insights pan/zoom freeze fix** (`095fb3b`): restyle repaints use a merge `setOption` so the force
+  sim isn't restarted and roam is preserved; only Build/Refresh does a full rebuild.
+
+**Remaining in this batch (not yet started):** LaTeX plain/fancy rendering (bundled KaTeX +
+egregious-case heuristic); Insights citing-paper inclusion + external-node styling (degree/citation
+count/colour, keep diamond); per-shelf/rack tag scoping (new `tag_shelves`/`tag_racks` tables,
+assignable-tags resolver, Tag-tab + WorkDetail UI). See the workplan's decisions section.
+
 ## UX batch 4c: citation-count sizing, detailed-summary job, section names (2026-07-16)
 
 - `f6a150c` — citation graph gains a **"citation count"** node-size option (external/global count
