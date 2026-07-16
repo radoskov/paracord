@@ -591,6 +591,13 @@
 
   // Scroll-to + flash a context entry inside the reader's own References (contexts) tab.
   async function revealContextInTab(contextId: string): Promise<void> {
+    // The References tab has no controls in zen (the tab nav is hidden), so switching to it there
+    // would strand the user on an unreachable, un-styled ("black") pane. Leave zen first so the tab
+    // nav returns and the pane paints under normal styling (2026-07-16).
+    if (zen) {
+      exitZen();
+      await tick();
+    }
     tab = 'contexts';
     await tick();
     const el = document.getElementById(`reader-ctx-${contextId}`);
