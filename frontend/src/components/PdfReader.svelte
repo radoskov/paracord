@@ -1550,7 +1550,11 @@
     background: rgba(120, 200, 120, 0.28);
     border: 1px solid rgba(40, 150, 60, 0.6);
     border-radius: 2px;
-    pointer-events: none;
+    /* 2026-07-16: hoverable so the native title tooltip (the stored note) shows over the highlight.
+       `pointer-events:none` previously suppressed it; making it interactive blocks text selection
+       only over the small highlighted region, which is fine (that text is already noted). */
+    pointer-events: auto;
+    cursor: help;
     position: absolute;
   }
 

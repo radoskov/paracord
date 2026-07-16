@@ -1120,6 +1120,14 @@
     try {
       const tag = await client.createTag({ name });
       await refreshTags(client);
+      // The dropdown lists `assignableTags` (loaded once on open), so a newly-created tag — always
+      // global, hence assignable here — must be added to it too, or the <select> would show a blank
+      // value that isn't among its options (2026-07-16 fix).
+      if (assignableTags) {
+        assignableTags = [...assignableTags.filter((t) => t.id !== tag.id), tag].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+      }
       applyTagId = tag.id;
       newTagName = '';
       creatingTag = false;
@@ -2071,21 +2079,26 @@
 {/if}
 
 {#if readerUrl}
-  <Modal title={readerFile?.original_filename ?? 'PDF reader'} wide onClose={closeReader}>
-    <PdfReader
-      fileId={readerFile?.id ?? ''}
-      fileName={readerFile?.original_filename ?? 'PDF'}
-      fileUrl={readerUrl}
-      canAnnotate={canModify}
-      {contexts}
-      {annotations}
-      onCreateAnnotation={createAnnotation}
-      onDeleteAnnotation={deleteAnnotation}
-      onNavigateToReference={navigateToReference}
-      initialJumpReferenceId={readerJumpReferenceId}
-      onFetchText={readerFile ? () => client.getFileText(readerFile.id) : null}
-    />
-  </Modal>
+  <!-- {#key readerUrl}: each open uses a fresh object URL, so this forces a brand-new Modal +
+       PdfReader instance every time — no stale internal state (a corrupted zen portal, a
+       hot-reload artifact, a half-torn-down pdf.js) can ever survive into a re-open (2026-07-16). -->
+  {#key readerUrl}
+    <Modal title={readerFile?.original_filename ?? 'PDF reader'} wide onClose={closeReader}>
+      <PdfReader
+        fileId={readerFile?.id ?? ''}
+        fileName={readerFile?.original_filename ?? 'PDF'}
+        fileUrl={readerUrl}
+        canAnnotate={canModify}
+        {contexts}
+        {annotations}
+        onCreateAnnotation={createAnnotation}
+        onDeleteAnnotation={deleteAnnotation}
+        onNavigateToReference={navigateToReference}
+        initialJumpReferenceId={readerJumpReferenceId}
+        onFetchText={readerFile ? () => client.getFileText(readerFile.id) : null}
+      />
+    </Modal>
+  {/key}
 {/if}
 
 <style>

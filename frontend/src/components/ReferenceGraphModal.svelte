@@ -89,13 +89,22 @@
       '[data-viz-search]',
     ) as HTMLInputElement | null;
     if (!input) return;
+    // Stop the event reaching ECharts, which otherwise re-ran the tooltip formatter on the typing
+    // and blew away the filtered list (the "only one paper shows" symptom) — 2026-07-16.
+    ev.stopPropagation();
     const box = input.parentElement?.querySelector('[data-viz-members]');
     if (!box) return;
     const q = input.value.trim().toLowerCase();
     box.querySelectorAll('a').forEach((a) => {
       const hit = !q || (a.textContent ?? '').toLowerCase().includes(q);
-      (a as HTMLElement).style.display = hit ? '' : 'none';
+      (a as HTMLElement).style.display = hit ? 'block' : 'none';
     });
+  }
+
+  // Keep keystrokes inside the tooltip's search box from reaching ECharts / the graph shortcuts
+  // (which would move the view or re-render the tooltip out from under the filter).
+  function onTooltipKey(ev: KeyboardEvent): void {
+    if ((ev.target as HTMLElement | null)?.closest?.('[data-viz-search]')) ev.stopPropagation();
   }
 
   // Delegate clicks on the enterable tooltip's links (an overlap-cluster lists its members): open a
@@ -337,6 +346,8 @@
     chart.getDom()?.addEventListener('auxclick', onContainerClick);
     // 2026-07-16: live-filter the grouped-node tooltip's paper list (delegated, CSP-safe).
     chart.getDom()?.addEventListener('input', onTooltipSearch);
+    chart.getDom()?.addEventListener('keydown', onTooltipKey);
+    chart.getDom()?.addEventListener('keyup', onTooltipKey);
     // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
     enableLegendSolo(chart);
     wireEdgeSnapZoom(chart);
