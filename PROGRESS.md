@@ -9,6 +9,38 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Skipped-test audit + journey 19 fix + e2e flake root-causes (2026-07-17)
+
+- **Journey 19 (arXiv import) fixed**: it failed because the Import page gained method tabs (the
+  identifier form only renders on the "Identifier" tab) and the button became "Import directly".
+  The spec now clicks the tab first. Verified live against arXiv (`E2E_ONLINE=1`), passing. It
+  stays gated behind `E2E_ONLINE` so offline CI remains deterministic.
+- **Future placeholder tests graduated**: `frontend/src/future/{FutureUserFlow,ExtFutureWorkflow}.test.ts`
+  and `e2e/tests/future/90-…` were deleted — every acceptance target they encoded has shipped and
+  is enforced by real tests (teleport: `test_agent_teleport_acceptance.py`; summary provenance/
+  fallback: `WorkDetail.summary.test.ts` + `InsightsPage.summary.test.ts` + `test_summarization.py`;
+  missing-references dashboard: e2e Journey 24b; the full literature-review flow: Journeys 03–33).
+  Mapping recorded in `docs/testing/EXT_TEST_BATTERY.md`; follows the policy in
+  `TEST_DESIGN_REVIEW.md` and the backend `tests/future` precedent. Frontend unit suite is now
+  0-skips (300/300), e2e is 0-skips online (36/36).
+- **Safety-suite skip resolved**: `frontend/nginx.conf` is now mounted read-only into the api
+  service, so the CSP/security-header test runs in `make test-safety` (161 passed, 0 skipped)
+  instead of skipping outside CI.
+- **e2e flake root cause — shared-account state races**: journeys 13+23 (papers_per_page) and
+  29–32 (server theme) mutate the same `e2e_admin` preferences from parallel workers; one test's
+  write/cleanup landed mid-assertion in another ("page 3 of 3" vanished, Save disabled with "No
+  changes to save", `/auth/me` theme came back null). Each family now lives in ONE spec file
+  under `test.describe.configure({ mode: 'serial' })` (`13-pagination.spec.ts`,
+  `29-themes.spec.ts`). Two consecutive online runs after: 36/36, zero flaky.
+- **Build-output warnings**: dead `.range` CSS dropped from `VisualizationsPage.svelte` (markup
+  went away in UX batch 3 — the build warned "Unused CSS selector" every run) and an explicit
+  default `frontend/svelte.config.js` added (silences "no Svelte config found" on every
+  vite/vitest run).
+- **Operational**: e2e must not run concurrently with `make ready-full`/`frontend-*` — the
+  container npm build rewrites bind-mounted files (`themes.generated.ts` via `prebuild`) and
+  invalidates the dev server's optimize-dep cache, which breaks app mount mid-suite (this
+  produced misleading sign-in/global-setup failures today, twice).
+
 ## Full-battery clean run + journey-17 flake root-caused (2026-07-16)
 
 - **Full battery green**: `make ready-full` (1227 + 73 + 4 backend, 300 frontend), `make test-safety`
