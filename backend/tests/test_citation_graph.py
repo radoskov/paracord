@@ -889,6 +889,67 @@ def test_color_by_rack_and_multi_membership_groups(db_session) -> None:
     assert node.color_group == "Rack One"
 
 
+def test_color_by_rack_owner_sees_private_rack(db_session) -> None:
+    """Regression: a paper on an open shelf that sits in a PRIVATE rack must colour by that rack for
+    the rack's owner/admin. Previously the blanket non-private filter collapsed every such paper to
+    "unracked" (shelf colouring worked, rack colouring silently didn't) regardless of the viewer.
+
+    A non-privileged viewer without a grant still doesn't see the private rack name, and the default
+    (no actor) stays conservative so a private name never leaks to an unknown viewer.
+    """
+    from app.core.security import Role
+    from app.models.user import User
+    from app.services.graph_color import membership_groups
+
+    work = Work(canonical_title="Paper", normalized_title="paper")
+    db_session.add(work)
+    shelf = Shelf(name="Open Shelf", access_level="open")
+    db_session.add(shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    private_rack = Rack(name="Private Rack", access_level="private")
+    db_session.add(private_rack)
+    db_session.flush()
+    db_session.add(RackShelf(rack_id=private_rack.id, shelf_id=shelf.id))
+    db_session.commit()
+
+    owner = User(username="owner", password_hash="x", role=Role.OWNER)
+    reader = User(username="reader", password_hash="x", role=Role.READER)
+
+    # Shelf colouring works for everyone (the shelf is open) — the asymmetry the user reported.
+    assert membership_groups(db_session, [work.id], "shelf", actor=reader)[work.id] == [
+        "Open Shelf"
+    ]
+
+    # Rack colouring: owner sees their own private rack; reader and the conservative default do not.
+    assert membership_groups(db_session, [work.id], "rack", actor=owner)[work.id] == [
+        "Private Rack"
+    ]
+    assert membership_groups(db_session, [work.id], "rack", actor=reader)[work.id] == ["unracked"]
+    assert membership_groups(db_session, [work.id], "rack")[work.id] == ["unracked"]
+
+    # End-to-end through the graph builder: the owner's node colours by the private rack.
+    by_rack_owner = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="rack",
+        actor=owner,
+    )
+    assert by_rack_owner.nodes[0].color_group == "Private Rack"
+
+    by_rack_reader = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="rack",
+        actor=reader,
+    )
+    assert by_rack_reader.nodes[0].color_group == "unracked"
+
+
 def test_membership_groups_defaults_and_tag_multi(db_session) -> None:
     from app.services.graph_color import membership_groups
 

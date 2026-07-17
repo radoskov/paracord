@@ -39,6 +39,54 @@ def test_topic_graph_links_similar_papers(client, auth_headers, db, monkeypatch)
     assert all(0.0 <= e["weight"] <= 1.0 for e in body["edges"])
 
 
+def test_topic_graph_rack_membership_respects_viewer(client, auth_headers, db, monkeypatch):
+    """Topic-graph nodes carry rack membership inferred from their shelves; the owner sees a paper's
+    PRIVATE rack (regression: private racks used to be dropped for everyone), a reader does not.
+    """
+    from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
+
+    _dense_provider(monkeypatch)
+    w1 = Work(
+        canonical_title="Neural translation",
+        normalized_title="neural translation",
+        abstract="Neural translation",
+    )
+    w2 = Work(
+        canonical_title="Statistical translation",
+        normalized_title="statistical translation",
+        abstract="Statistical translation",
+    )
+    db.add_all([w1, w2])
+    shelf = Shelf(name="Open Shelf", access_level="open")
+    db.add(shelf)
+    db.flush()
+    db.add_all(
+        [
+            ShelfWork(shelf_id=shelf.id, work_id=w1.id),
+            ShelfWork(shelf_id=shelf.id, work_id=w2.id),
+        ]
+    )
+    rack = Rack(name="Private Rack", access_level="private")
+    db.add(rack)
+    db.flush()
+    db.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    db.commit()
+
+    def racks_seen(role: str) -> set[str]:
+        r = client.post(
+            "/api/v1/graphs/topic",
+            headers=auth_headers(role),
+            json={"scope": {"type": "library"}, "min_similarity": 0.5},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["summary"]["used_embeddings"] is True
+        return {rk for n in body["nodes"] for rk in (n.get("memberships") or {}).get("rack", [])}
+
+    assert racks_seen("owner") == {"Private Rack"}  # owner sees their own private rack
+    assert "Private Rack" not in racks_seen("reader")  # reader never sees the private rack name
+
+
 def test_topic_graph_without_real_model_is_honest(client, auth_headers, db):
     """Default hash-BOW → no dense semantics → empty edges + a note, not a lexical graph."""
     db.add(Work(canonical_title="Solo", normalized_title="solo", abstract="text"))

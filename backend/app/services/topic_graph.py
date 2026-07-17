@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 from sqlalchemy import select
@@ -23,6 +24,9 @@ from sqlalchemy.orm import Session
 from app.models.work import Work
 from app.services.topic_modeling import _ordered_works, _paper_dense_vectors, _scope_works
 from app.services.vector_math import cosine_matrix
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 # Cap the node set: the pairwise similarity is O(n^2 · dim); a personal library is small, but bound
 # it so a huge scope can't stall the request. Dropped papers are reported in the summary.
@@ -94,6 +98,7 @@ def build_topic_graph(
     work_ids: list[uuid.UUID] | None = None,
     embedding_model: str | None = None,
     visible_ids: set[uuid.UUID] | None = None,
+    actor: User | None = None,
     k: int = DEFAULT_K,
     min_similarity: float = DEFAULT_MIN_SIMILARITY,
     max_nodes: int | None = None,
@@ -141,7 +146,7 @@ def build_topic_graph(
         )
         for w in works
     ]
-    _attach_memberships(db, nodes)
+    _attach_memberships(db, nodes, actor=actor)
     edges = _knn_edges(works, vectors, k=k, min_similarity=min_similarity)
     summary = {
         "node_count": len(nodes),
@@ -198,11 +203,13 @@ def _knn_edges(
     ]
 
 
-def _attach_memberships(db, nodes: list[TopicGraphNode]) -> None:
-    """Attach {shelf|rack|tag: [names]} to every node (shared, privacy-filtered resolution)."""
+def _attach_memberships(db, nodes: list[TopicGraphNode], actor: User | None = None) -> None:
+    """Attach {shelf|rack|tag: [names]} to every node (shared, access-filtered resolution)."""
     from app.services.graph_color import membership_groups
 
     ids = [n.work_id for n in nodes]
-    per_kind = {kind: membership_groups(db, ids, kind) for kind in ("shelf", "rack", "tag")}
+    per_kind = {
+        kind: membership_groups(db, ids, kind, actor=actor) for kind in ("shelf", "rack", "tag")
+    }
     for node in nodes:
         node.memberships = {kind: per_kind[kind][node.work_id] for kind in per_kind}

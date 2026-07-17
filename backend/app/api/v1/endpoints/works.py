@@ -1760,6 +1760,7 @@ def get_reference_graph(
         db,
         work,
         visible_ids=access.visible_work_ids(db, actor),
+        actor=actor,
         include_ref_edges=include_ref_edges,
         include_citing=include_citing,
         max_external=max_external,
@@ -3398,6 +3399,7 @@ def citation_neighborhood(
         node_mode=node_mode,
         color_by=color_by,
         visible_ids=access.visible_work_ids(db, actor),
+        actor=actor,
     )
     if graph is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")

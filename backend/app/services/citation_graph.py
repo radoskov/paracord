@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import FileWorkLink
+from app.models.user import User
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
 from app.services.graph_color import MEMBERSHIP_COLOR_KINDS, membership_groups
@@ -113,6 +114,7 @@ def build_citation_graph(
     compute_metrics: bool = False,
     color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
+    actor: User | None = None,
     max_external: int = DEFAULT_MAX_EXTERNAL,
     max_external_citing: int | None = None,
     include_citing: bool = False,
@@ -356,7 +358,7 @@ def build_citation_graph(
     if collapse_versions:
         graph = _collapse_versions(db, graph, visible_ids=visible_ids)
     if compute_metrics:
-        _attach_node_metrics(db, graph, color_by=color_by, visible_ids=visible_ids)
+        _attach_node_metrics(db, graph, color_by=color_by, visible_ids=visible_ids, actor=actor)
     return graph
 
 
@@ -713,7 +715,12 @@ def _pagerank(
 
 
 def _attach_node_metrics(
-    db: Session, graph: CitationGraph, *, color_by: ColorBy, visible_ids: set[uuid.UUID] | None
+    db: Session,
+    graph: CitationGraph,
+    *,
+    color_by: ColorBy,
+    visible_ids: set[uuid.UUID] | None,
+    actor: User | None = None,
 ) -> None:
     """Attach §8.9 depth encodings to ``graph.nodes`` in place (centrality, color group, warning).
 
@@ -738,9 +745,11 @@ def _attach_node_metrics(
 
     local_ids = [node.work_id for node in graph.nodes if node.work_id is not None]
     if color_by != "none":
-        groups = _color_groups(db, local_ids, color_by)
+        groups = _color_groups(db, local_ids, color_by, actor=actor)
         multi = (
-            membership_groups(db, local_ids, color_by) if color_by in MEMBERSHIP_COLOR_KINDS else {}
+            membership_groups(db, local_ids, color_by, actor=actor)
+            if color_by in MEMBERSHIP_COLOR_KINDS
+            else {}
         )
         for node in graph.nodes:
             if node.work_id is not None:
@@ -759,7 +768,7 @@ def _attach_node_metrics(
 
 
 def _color_groups(
-    db: Session, work_ids: list[uuid.UUID], color_by: ColorBy
+    db: Session, work_ids: list[uuid.UUID], color_by: ColorBy, *, actor: User | None = None
 ) -> dict[uuid.UUID, str]:
     """Map each local work id to a categorical color group for ``color_by``.
 
@@ -782,7 +791,7 @@ def _color_groups(
     if color_by in MEMBERSHIP_COLOR_KINDS:  # shelf / rack / tag — shared, privacy-filtered
         return {
             work_id: names[0]
-            for work_id, names in membership_groups(db, work_ids, color_by).items()
+            for work_id, names in membership_groups(db, work_ids, color_by, actor=actor).items()
         }
     return {}
 
@@ -836,6 +845,7 @@ def build_citation_neighborhood(
     node_mode: NodeMode = "local_only",
     color_by: ColorBy = "none",
     visible_ids: set[uuid.UUID] | None = None,
+    actor: User | None = None,
 ) -> CitationGraph | None:
     """Build the local citation neighborhood (``hops`` steps) around one focus work (§8.9).
 
@@ -872,6 +882,7 @@ def build_citation_neighborhood(
         compute_metrics=True,
         color_by=color_by,
         visible_ids=visible_ids,
+        actor=actor,
     )
     graph.summary["focus_work_id"] = str(work_id)
     graph.summary["hops"] = max(1, hops)

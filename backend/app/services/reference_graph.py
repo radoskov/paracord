@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
@@ -18,6 +19,9 @@ from sqlalchemy.orm import Session
 from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.work import Work
 from app.services.reference_links import references_for_work
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 # Free-text TEI section head → bucket. First matching rule wins (order matters: "related work"
 # must beat "...work method..."), else "other". The buckets line up with the Profile weights.
@@ -79,6 +83,7 @@ def build_reference_graph(
     work: Work,
     *,
     visible_ids: set[uuid.UUID] | None,
+    actor: User | None = None,
     include_ref_edges: bool = False,
     include_citing: bool = False,
     max_external: int = DEFAULT_MAX_EXTERNAL,
@@ -318,7 +323,7 @@ def build_reference_graph(
     membered_ids = [uuid.UUID(base_id), *work_to_ref_node.keys()]
     memberships: dict[str, dict[str, list[str]]] = {}
     for kind in ("shelf", "rack", "tag"):
-        for wid, names in membership_groups(db, membered_ids, kind).items():
+        for wid, names in membership_groups(db, membered_ids, kind, actor=actor).items():
             memberships.setdefault(str(wid), {})[kind] = names
     node_by_work = {
         str(uuid.UUID(base_id)): base_id,

@@ -95,6 +95,40 @@ def test_reference_graph_marks_likely_local_nodes(client, auth_headers, db, make
     assert node["authors"] == ["Tenorth, M."]
 
 
+def test_reference_graph_rack_membership_respects_viewer(client, auth_headers, db) -> None:
+    """A paper on an open shelf that sits in a PRIVATE rack shows that rack in its node memberships
+    to the owner (regression: private racks used to collapse to "unracked" for everyone, so rack
+    colouring silently failed even for the owner), but a reader never sees the private rack name.
+    """
+    from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
+
+    base = Work(canonical_title="Racked", normalized_title="racked", year=2021)
+    db.add(base)
+    shelf = Shelf(name="Open Shelf", access_level="open")
+    db.add(shelf)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=base.id))
+    rack = Rack(name="Private Rack", access_level="private")
+    db.add(rack)
+    db.flush()
+    db.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    db.commit()
+
+    def base_memberships(role: str) -> dict:
+        r = client.get(f"/api/v1/works/{base.id}/reference-graph", headers=auth_headers(role))
+        assert r.status_code == 200
+        base_node = next(n for n in r.json()["nodes"] if n["kind"] == "base")
+        return base_node.get("memberships", {})
+
+    owner_m = base_memberships("owner")
+    assert owner_m.get("shelf") == ["Open Shelf"]
+    assert owner_m.get("rack") == ["Private Rack"]  # owner sees their own private rack
+
+    reader_m = base_memberships("reader")
+    assert reader_m.get("shelf") == ["Open Shelf"]  # the open shelf is visible to everyone
+    assert "Private Rack" not in reader_m.get("rack", [])  # the private rack name is not leaked
+
+
 def test_reference_graph_selectable_y_metrics(client, auth_headers, db, make_reference) -> None:
     """B7 v2: local reference nodes carry citation_count, local_degree and topic_similarity to the
     base paper; external nodes leave them null (rendered on the 'n/a' lane)."""

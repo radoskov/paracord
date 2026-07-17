@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 # Mirrors ``access._OPEN_OR_VISIBLE`` (and citation_graph's shelf rule).
 NON_PRIVATE_LEVELS = ("open", "visible")
@@ -31,13 +35,48 @@ MEMBERSHIP_COLOR_KINDS = ("shelf", "rack", "tag")
 EMPTY_GROUP = {"shelf": "unshelved", "rack": "unracked", "tag": "untagged"}
 
 
+def _visibility_condition(
+    db: Session, model: type[Shelf] | type[Rack], target_type: str, actor: User | None
+) -> ColumnElement[bool] | None:
+    """Access filter limiting which shelves/racks may surface as a color-group NAME to ``actor``.
+
+    Mirrors ``access.visible_racks_query`` / ``visible_shelves_query`` so a paper is coloured by the
+    same shelves/racks the viewer could see anywhere else:
+
+    * ``actor is None`` → conservative fallback: only non-private names (a private shelf/rack name
+      never leaks to an unknown viewer). Trusted internal callers that want everything pass an
+      admin/owner ``actor``.
+    * admin/owner ``actor`` → no restriction (sees all, including their own **private** racks — the
+      bug this fixes: an owner's private rack used to collapse every paper to "unracked").
+    * other ``actor`` → non-private OR explicitly granted (group grant).
+    """
+    from app.services import access
+
+    if actor is not None and access.is_admin_or_owner(actor):
+        return None
+    cond: ColumnElement[bool] = model.access_level.in_(NON_PRIVATE_LEVELS)
+    if actor is not None:
+        granted = access.granted_target_ids(db, actor, target_type)
+        if granted:
+            cond = or_(cond, model.id.in_(granted))
+    return cond
+
+
 def membership_groups(
-    db: Session, work_ids: Iterable[uuid.UUID], color_by: str
+    db: Session,
+    work_ids: Iterable[uuid.UUID],
+    color_by: str,
+    actor: User | None = None,
 ) -> dict[uuid.UUID, list[str]]:
-    """ALL (privacy-filtered, sorted) membership names per work for a membership color-by kind.
+    """ALL (access-filtered, sorted) membership names per work for a membership color-by kind.
 
     Every work id in the input appears in the result — works without a visible membership map to
     ``[EMPTY_GROUP[color_by]]`` so they form their own legend group instead of vanishing.
+
+    ``actor`` scopes which shelf/rack NAMES may surface (see :func:`_visibility_condition`): an
+    admin/owner sees all of theirs (incl. private), so their own private racks colour normally;
+    ``None`` keeps the conservative non-private-only fallback so a missing viewer never leaks a
+    private name.
     """
     ids = list(dict.fromkeys(work_ids))
     if color_by not in MEMBERSHIP_COLOR_KINDS:
@@ -46,28 +85,32 @@ def membership_groups(
         return {}
 
     if color_by == "shelf":
-        rows = db.execute(
+        shelf_cond = _visibility_condition(db, Shelf, "shelf", actor)
+        stmt = (
             select(ShelfWork.work_id, Shelf.name)
             .join(Shelf, Shelf.id == ShelfWork.shelf_id)
-            .where(
-                ShelfWork.work_id.in_(ids),
-                Shelf.access_level.in_(NON_PRIVATE_LEVELS),
-            )
-        ).all()
+            .where(ShelfWork.work_id.in_(ids))
+        )
+        if shelf_cond is not None:
+            stmt = stmt.where(shelf_cond)
+        rows = db.execute(stmt).all()
     elif color_by == "rack":
-        # A paper's racks are the racks of its shelves; both the shelf and the rack must be
-        # non-private for the rack name to surface.
-        rows = db.execute(
+        # A paper's racks are the racks of its shelves; the rack name surfaces only if the viewer
+        # may see BOTH the shelf providing the path and the rack itself.
+        shelf_cond = _visibility_condition(db, Shelf, "shelf", actor)
+        rack_cond = _visibility_condition(db, Rack, "rack", actor)
+        stmt = (
             select(ShelfWork.work_id, Rack.name)
             .join(Shelf, Shelf.id == ShelfWork.shelf_id)
             .join(RackShelf, RackShelf.shelf_id == Shelf.id)
             .join(Rack, Rack.id == RackShelf.rack_id)
-            .where(
-                ShelfWork.work_id.in_(ids),
-                Shelf.access_level.in_(NON_PRIVATE_LEVELS),
-                Rack.access_level.in_(NON_PRIVATE_LEVELS),
-            )
-        ).all()
+            .where(ShelfWork.work_id.in_(ids))
+        )
+        if shelf_cond is not None:
+            stmt = stmt.where(shelf_cond)
+        if rack_cond is not None:
+            stmt = stmt.where(rack_cond)
+        rows = db.execute(stmt).all()
     else:  # tag
         rows = db.execute(
             select(TagLink.entity_id, Tag.name)

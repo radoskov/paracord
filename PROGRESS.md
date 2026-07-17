@@ -9,6 +9,28 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Fix: "color by rack" showed "unracked" for an owner's private racks (2026-07-17)
+
+- **Root cause**: graph node coloring by **rack** is inferred from a paper's shelves
+  (`shelf_works → rack_shelves → racks`; a paper is never directly on a rack). The shared resolver
+  `graph_color.membership_groups` applied a blanket "non-private only" filter to BOTH the shelf and
+  the rack, **ignoring the viewer**. So an owner's own **private** rack (or a private shelf on the
+  path to the rack) was dropped → every affected paper collapsed to "unracked", even though shelf
+  coloring still worked (its shelf was open). Open/visible racks were never affected — verified end
+  to end that they color correctly in every graph — which is why this only bit private racks.
+- **Fix**: `membership_groups(..., actor)` is now access-aware, mirroring
+  `access.visible_racks_query`/`visible_shelves_query`: admin/owner sees all of theirs (incl.
+  private); a non-privileged viewer sees non-private OR granted; `actor=None` stays conservative
+  (non-private only) so a missing viewer never leaks a private name. Every graph builder
+  (`citation_graph`, `reference_graph`, `topic_graph`, `visualization`) + the neighborhood builder
+  now thread their request `actor` through to it; the citation/topic endpoints, the reference-graph
+  and neighborhood endpoints, and the RQ analysis job all pass their actor. No frontend change (the
+  server drives the color groups). This covers ALL graphs/visualizations that offer "rack" coloring.
+- **Tests**: +4 (owner sees private rack, reader/`None` do not) across the citation graph (service +
+  builder), reference-graph HTTP endpoint, topic-graph HTTP endpoint, and the temporal-map viz
+  provider. Full graph/viz/access suites green (173 tests). See
+  `docs/agent_handoffs/2026-07-17-rack-coloring-access-aware.md`.
+
 ## UX polish: library selected-row color + identifier import layout (2026-07-17)
 
 - **Library selected-row color** (`7fc681c`): the selected paper and the hover row shared

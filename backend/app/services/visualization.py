@@ -375,11 +375,14 @@ def _color_group(work: Work, color_by: str) -> str | None:
     return work.reading_status or "unread"  # status default
 
 
-def _membership_map(db: Session, works: list[Work], color_by: str) -> dict[str, list[str]]:
+def _membership_map(
+    db: Session, works: list[Work], color_by: str, actor: User | None = None
+) -> dict[str, list[str]]:
     """work-id(str) → ALL membership groups when ``color_by`` is shelf/rack/tag, else empty.
 
-    Shared, privacy-filtered resolution (see graph_color); the caller attaches the list as
-    ``color_groups`` and its first entry as the single ``color_group``.
+    Shared, access-filtered resolution (see graph_color); the caller attaches the list as
+    ``color_groups`` and its first entry as the single ``color_group``. ``actor`` scopes which
+    shelf/rack names may surface (an admin/owner sees their own private racks).
     """
     from app.services.graph_color import MEMBERSHIP_COLOR_KINDS, membership_groups
 
@@ -387,7 +390,9 @@ def _membership_map(db: Session, works: list[Work], color_by: str) -> dict[str, 
         return {}
     return {
         str(wid): names
-        for wid, names in membership_groups(db, [w.id for w in works], color_by).items()
+        for wid, names in membership_groups(
+            db, [w.id for w in works], color_by, actor=actor
+        ).items()
     }
 
 
@@ -483,7 +488,7 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
         if note:
             notes.append(note)
 
-    membership = _membership_map(db, works, color_by)
+    membership = _membership_map(db, works, color_by, actor=actor)
     nodes: list[VizNode] = []
     for work in works:
         node_id = str(work.id)
@@ -1015,7 +1020,7 @@ def co_citation(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
         degree[edge.source] += 1
         degree[edge.target] += 1
 
-    membership = _membership_map(db, works, color_by)
+    membership = _membership_map(db, works, color_by, actor=actor)
     nodes: list[VizNode] = []
     for work in works:
         node_id = str(work.id)

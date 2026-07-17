@@ -532,6 +532,7 @@ def analysis_graph_job(kind: str, params: dict, actor_user_id: str | None = None
                 compute_metrics=True,
                 color_by=params.get("color_by", "none"),
                 visible_ids=visible,
+                actor=actor,
                 max_external=params.get("max_external", 50),
                 max_external_citing=params.get("max_external_citing", 50),
                 include_citing=params.get("include_citing", True),
@@ -552,6 +553,7 @@ def analysis_graph_job(kind: str, params: dict, actor_user_id: str | None = None
                 scope_id=scope_id,
                 work_ids=work_ids,
                 visible_ids=visible,
+                actor=actor,
                 max_nodes=effective_topic_graph_node_cap(db),
             )
             return {

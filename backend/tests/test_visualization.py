@@ -101,6 +101,39 @@ def test_temporal_map_axes_map_correctly(db_session, make_reference) -> None:
     assert citing_node.shape == "in_library"
 
 
+def test_temporal_map_color_by_rack_respects_viewer(db_session) -> None:
+    """color_by=rack colours each paper by the racks of its shelves. The owner sees a paper's
+    PRIVATE rack (regression: private racks used to collapse to "unracked" for everyone); a reader
+    without a grant does not, so a private rack name is never leaked as a colour.
+    """
+    owner = _owner(db_session)
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    work = Work(canonical_title="P", normalized_title="p", year=2020)
+    db_session.add(work)
+    shelf = Shelf(name="Open Shelf", access_level="open")
+    db_session.add(shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    rack = Rack(name="Private Rack", access_level="private")
+    db_session.add(rack)
+    db_session.flush()
+    db_session.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    db_session.commit()
+
+    def node(actor: User) -> dict:
+        payload = get_viz(
+            db_session, actor, "temporal_map", VizScope(type="library"), {"color_by": "rack"}
+        )
+        return _node_by_id(payload, work.id)
+
+    owner_node = node(owner)
+    assert owner_node.color_group == "Private Rack"  # owner sees their own private rack
+    assert owner_node.color_groups == ["Private Rack"]
+
+    assert node(reader).color_group == "unracked"  # reader never sees the private rack name
+
+
 def test_local_degree_axis_counts_incoming_citations(db_session, make_reference) -> None:
     actor = _owner(db_session)
     a = Work(canonical_title="A", normalized_title="a", doi="10.1/a", year=2019)
