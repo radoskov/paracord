@@ -126,3 +126,19 @@ def test_publisher_rewrites() -> None:
     ]
     # No rewrite for an unknown host.
     assert publisher_pdf_urls("https://random.example/paper") == []
+
+
+def test_publisher_rewrites_neurips_landing_pages() -> None:
+    """NeurIPS landing URLs (both hosts, as DBLP lists them) rewrite to their direct PDFs."""
+    assert publisher_pdf_urls(
+        "http://papers.nips.cc/paper/5071-translating-embeddings-for-modeling-multi-relational-data"
+    ) == [
+        "http://papers.nips.cc/paper/5071-translating-embeddings-for-modeling-multi-relational-data.pdf"
+    ]
+    assert publisher_pdf_urls(
+        "https://proceedings.neurips.cc/paper/2013/hash/1cecc7a77928ca8133fa24680a88d2f9-Abstract.html"
+    ) == [
+        "https://proceedings.neurips.cc/paper/2013/file/1cecc7a77928ca8133fa24680a88d2f9-Paper.pdf"
+    ]
+    # Already a PDF → no rewrite.
+    assert publisher_pdf_urls("http://papers.nips.cc/paper/5071-x.pdf") == []

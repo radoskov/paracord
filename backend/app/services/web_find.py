@@ -69,6 +69,7 @@ from app.services.metadata_enrichment import (
     _idseg,
 )
 from app.services.storage import attach_uploaded_pdf_to_work
+from app.utils.bounded_cache import BoundedTTLCache
 from app.utils.normalization import normalize_doi, normalize_title
 from app.workers.queue import enqueue_extraction
 
@@ -651,6 +652,97 @@ def search_unpaywall(doi: str, *, email: str | None = None) -> dict | None:
         "landing_url": best.get("url_for_landing_page"),
         "is_oa": bool(payload.get("is_oa")),
     }
+
+
+# --- API-backed PDF discovery for bot-walled landing pages -------------------
+
+# semanticscholar.org/paper/<slug>/<40-hex id> (the slug is optional).
+_S2_PAPER_PAGE_RE = re.compile(r"semanticscholar\.org/paper/(?:[^/]+/)?([0-9a-f]{40})")
+
+
+# Discovery results per candidate URL: the S2 Graph API's shared unauthenticated pool 429s
+# often, so a retry-click must reuse a successful discovery instead of gambling again.
+_API_DISCOVERY_CACHE = BoundedTTLCache(maxsize=128, ttl_seconds=3600)
+
+
+def api_pdf_candidates(candidate_url: str, doi: str | None, *, settings=None) -> list[str]:
+    """PDF-URL candidates from official APIs when the landing page can't be scraped.
+
+    semanticscholar.org serves an empty 202 to non-browser clients (2026-07-17 user report), so
+    the page-anchor discovery finds nothing even though the page visibly lists PDF links. The S2
+    Graph API exposes the same data for the paper id embedded in the URL: its open-access PDF and
+    external ids (an arXiv id becomes an arxiv.org/pdf URL; a DOI feeds Unpaywall's best OA
+    location). Best-effort — every failure returns what was found so far; every returned URL
+    still passes the full deny/SSRF/policy gates in the download loop.
+    """
+    cache_key = f"{candidate_url}|{doi or ''}"
+    cached = _API_DISCOVERY_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    urls: list[str] = []
+    resolved_doi = normalize_doi(doi) if doi else None
+
+    match = _S2_PAPER_PAGE_RE.search(candidate_url or "")
+    if match:
+        try:
+            # The unauthenticated S2 Graph API rate-limits a SHARED pool aggressively and its
+            # 429s carry no Retry-After (so _get's polite retry never fires) — retry explicitly
+            # with a short backoff; a download attempt is worth a few seconds of patience.
+            response = None
+            for delay in (0.0, 2.0, 5.0, 10.0):
+                if delay:
+                    time.sleep(delay)
+                response = _get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/{match.group(1)}",
+                    params={"fields": "openAccessPdf,externalIds"},
+                )
+                if response.status_code != 429:
+                    break
+            response.raise_for_status()
+            payload = response.json() or {}
+            oa = (payload.get("openAccessPdf") or {}).get("url")
+            if oa:
+                urls.append(oa)
+            external = payload.get("externalIds") or {}
+            arxiv = external.get("ArXiv")
+            if arxiv:
+                urls.append(f"https://arxiv.org/pdf/{arxiv}")
+            resolved_doi = resolved_doi or normalize_doi(external.get("DOI") or "") or None
+            # DBLP hop: many older ML papers (e.g. pre-2017 NeurIPS) carry NO DOI/arXiv id and an
+            # EMPTY openAccessPdf in the S2 API — but their DBLP record lists the open-access
+            # electronic editions. Each <ee> URL is offered both through the publisher PDF
+            # rewrites (papers.nips.cc landing → .pdf) and as-is.
+            dblp_key = external.get("DBLP")
+            if dblp_key and not urls:
+                from app.services.pdf_link_finder import publisher_pdf_urls
+
+                ee_response = _get(f"https://dblp.org/rec/{dblp_key}.xml")
+                ee_response.raise_for_status()
+                for ee_url in re.findall(r"<ee[^>]*>([^<]+)</ee>", ee_response.text):
+                    ee_url = ee_url.strip()
+                    for candidate in [*publisher_pdf_urls(ee_url), ee_url]:
+                        if candidate not in urls:
+                            urls.append(candidate)
+        except Exception as exc:  # noqa: BLE001 - discovery must never abort the download
+            logger.warning("semantic scholar API discovery failed: %s", exc)
+
+    if resolved_doi:
+        email = (
+            getattr(settings, "web_find_unpaywall_email", None)
+            or getattr(settings, "crossref_mailto", None)
+            if settings is not None
+            else None
+        )
+        upw = search_unpaywall(resolved_doi, email=email)
+        for key in ("pdf_url", "landing_url"):
+            url = (upw or {}).get(key)
+            if url and url not in urls:
+                urls.append(url)
+    if urls:
+        # Cache only non-empty discoveries: an empty result may just be a 429-starved attempt.
+        _API_DISCOVERY_CACHE.set(cache_key, list(urls))
+    return urls
 
 
 # --- dedup + ranking --------------------------------------------------------
@@ -1358,6 +1450,13 @@ def download_and_attach(
             from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
 
             fallback_urls = publisher_pdf_urls(candidate_url)
+            # API-backed discovery first (bot-walled pages serve no scrapeable HTML at all):
+            # S2 Graph API for semanticscholar.org paper pages + Unpaywall for a known DOI.
+            fallback_urls += [
+                u
+                for u in api_pdf_candidates(candidate_url, doi, settings=settings)
+                if u not in fallback_urls
+            ]
             page: tuple[str, str] | None = None
             fetch_html = html_fetcher or _fetch_landing_html
             try:
@@ -1377,7 +1476,7 @@ def download_and_attach(
                 fallback_urls += [
                     u for u in find_pdf_links(html, final_url) if u not in fallback_urls
                 ]
-            for url_try in fallback_urls[:5]:
+            for url_try in fallback_urls[:8]:
                 tried_urls.append(url_try)
                 try:
                     # Browsers send the landing page as Referer for its links; some publishers

@@ -87,6 +87,10 @@ def publisher_pdf_urls(url: str) -> list[str]:
         _add(url.split("?")[0].rstrip("/") + ".pdf")
     if host.endswith("openreview.net") and "/forum" in path:
         _add(url.replace("/forum", "/pdf", 1))
+    if host.endswith("papers.nips.cc") and "/paper" in path and not path.endswith(".pdf"):
+        _add(url.split("?")[0].rstrip("/") + ".pdf")
+    if host.endswith("proceedings.neurips.cc") and path.endswith("-Abstract.html"):
+        _add(url.replace("/hash/", "/file/", 1).replace("-Abstract.html", "-Paper.pdf", 1))
     if (
         (host.endswith("biorxiv.org") or host.endswith("medrxiv.org"))
         and "/content/" in path

@@ -386,3 +386,76 @@ def test_find_on_web_stream_reader_forbidden(client, auth_headers, work_id):
     h = auth_headers("reader")
     resp = client.post(f"/api/v1/works/{work_id}/find-on-web/stream", headers=h, json={})
     assert resp.status_code == 403
+
+
+def test_api_pdf_candidates_via_s2_and_dblp(monkeypatch) -> None:
+    """A semanticscholar.org paper URL (bot-walled: no scrapeable HTML) resolves PDF candidates
+    through the S2 Graph API, hopping to DBLP when S2 has no OA PDF / DOI / arXiv id — the
+    pre-2017 NeurIPS case (2026-07-17 user report)."""
+
+    from app.services import web_find
+
+    web_find._API_DISCOVERY_CACHE.clear()
+
+    class _Resp:
+        def __init__(self, payload, text=""):
+            self.status_code = 200
+            self._payload = payload
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, params=None, headers=None):
+        if "api.semanticscholar.org" in url:
+            return _Resp(
+                {
+                    "openAccessPdf": {"url": ""},
+                    "externalIds": {"DBLP": "conf/nips/BordesUGWY13"},
+                }
+            )
+        if "dblp.org/rec/conf/nips/BordesUGWY13.xml" in url:
+            return _Resp(
+                None,
+                text=(
+                    '<dblp><ee type="oa">http://papers.nips.cc/paper/5071-translating</ee></dblp>'
+                ),
+            )
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(web_find, "_get", fake_get)
+    urls = web_find.api_pdf_candidates(
+        "https://www.semanticscholar.org/paper/Slug-Title/2582ab7c70c9e7fcb84545944eba8f3a7f253248",
+        None,
+    )
+    # The publisher rewrite (direct PDF) comes first, the raw electronic-edition URL after it.
+    assert urls == [
+        "http://papers.nips.cc/paper/5071-translating.pdf",
+        "http://papers.nips.cc/paper/5071-translating",
+    ]
+
+    # Second call hits the discovery cache (fake_get would raise on an unexpected re-fetch —
+    # replace it with a tripwire to prove no network is touched).
+    monkeypatch.setattr(
+        web_find, "_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network hit"))
+    )
+    assert (
+        web_find.api_pdf_candidates(
+            "https://www.semanticscholar.org/paper/Slug-Title/2582ab7c70c9e7fcb84545944eba8f3a7f253248",
+            None,
+        )
+        == urls
+    )
+
+
+def test_api_pdf_candidates_ignores_non_s2_urls_without_doi(monkeypatch) -> None:
+    from app.services import web_find
+
+    web_find._API_DISCOVERY_CACHE.clear()
+    monkeypatch.setattr(
+        web_find, "_get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network hit"))
+    )
+    assert web_find.api_pdf_candidates("https://example.org/some-paper", None) == []
