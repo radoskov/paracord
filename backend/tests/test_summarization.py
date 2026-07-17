@@ -1243,3 +1243,38 @@ def test_scope_jobs_run_with_the_requesting_users_visibility(db, monkeypatch) ->
     result = jobs.summarize_scope_job("library", None, actor_user_id=str(actor.id))
     assert result is not None and result["work_count"] == 2
     assert db.scalar(select(Summary).where(Summary.entity_type == "library")) is not None
+
+
+def test_rq_timeout_aborts_summary_instead_of_degrading(db, monkeypatch) -> None:
+    """An RQ job timeout mid-LLM-call must ABORT the job with the real reason, not be swallowed
+    by the degrade-to-extractive handler (the 'Work-horse terminated unexpectedly' failure: the
+    monitor hard-killed the horse because the loop kept running past the deadline)."""
+    import app.services.summarization as summ
+    from app.services.ai_config import update_ai_config
+    from rq.timeouts import JobTimeoutException
+
+    db_session = db
+    update_ai_config(db_session, changes={"summary_provider": "local_llm", "summary_model": "m1"})
+    db_session.commit()
+
+    def timing_out(*_a, **_k):
+        raise JobTimeoutException("Task exceeded maximum timeout value (21600 seconds)")
+
+    monkeypatch.setattr(summ, "_ollama_summarize", timing_out)
+    monkeypatch.setattr(summ, "_ollama_generate", timing_out)
+
+    work = Work(canonical_title="t2", normalized_title="t2", abstract="Abstract sentence.")
+    db_session.add(work)
+    db_session.commit()
+
+    with pytest.raises(JobTimeoutException):
+        summarize_work(db_session, work, summary_type="local_llm", detail="short")
+
+
+def test_is_abort_exception_covers_cancel_and_timeout() -> None:
+    from app.workers.queue import JobCancelled, is_abort_exception
+    from rq.timeouts import JobTimeoutException
+
+    assert is_abort_exception(JobCancelled("stop"))
+    assert is_abort_exception(JobTimeoutException("timeout"))
+    assert not is_abort_exception(ValueError("boom"))

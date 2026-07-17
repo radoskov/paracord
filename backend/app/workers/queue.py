@@ -477,6 +477,11 @@ def _enqueue_scope_job(
             args=(scope_type, str(scope_id) if scope_id else None),
             kwargs=kwargs,
             job_id=_fresh_job_id(key),
+            # Scope AI jobs are per-paper map/reduce over the WHOLE scope: a full-library
+            # local-LLM summary legitimately runs for hours (~2-3 min/paper on CPU). The queue's
+            # 900s default killed such runs mid-flight ("Work-horse terminated unexpectedly").
+            # Coalescing (above) means a long timeout can't stack duplicate runs.
+            job_timeout=6 * 3600,
         )
         _remember_latest_job(queue.connection, key, job.id)
         return job.id
@@ -610,6 +615,24 @@ def job_cancel_requested() -> bool:
 
 class JobCancelled(Exception):
     """Raised inside a job when a cooperative stop was requested."""
+
+
+def is_abort_exception(exc: BaseException) -> bool:
+    """True for exceptions a job must ABORT on — never swallowed by degrade-and-continue handlers.
+
+    Covers the user's cooperative Stop (:class:`JobCancelled`) and RQ's job timeout. Swallowing
+    the timeout is what produced the useless "Work-horse terminated unexpectedly; waitpid
+    returned None" failure: a broad ``except Exception`` around an LLM call caught
+    ``JobTimeoutException``, the loop carried on, and RQ's monitor hard-killed the work-horse
+    with no traceback. Re-raising instead lets the job fail cleanly with the real reason.
+    """
+    if isinstance(exc, JobCancelled):
+        return True
+    try:
+        from rq.timeouts import BaseTimeoutException  # noqa: PLC0415 (optional at import time)
+    except ImportError:  # pragma: no cover - rq is always present in the worker
+        return False
+    return isinstance(exc, BaseTimeoutException)
 
 
 def clear_jobs(which: str = "finished_failed") -> dict:

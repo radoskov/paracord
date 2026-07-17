@@ -465,6 +465,10 @@ def _categorize_sections(labels: list[str], *, model: str, base_url: str) -> dic
     try:
         raw = _ollama_generate(prompt, model=model, base_url=base_url)
     except Exception as exc:  # noqa: BLE001 - heuristic fallback, never fail the summary
+        from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
+
+        if is_abort_exception(exc):
+            raise  # user Stop / RQ timeout must abort the job, not degrade
         logger.warning("section categorizer LLM unavailable (%s); using heuristic", exc)
         return {}
     mapping: dict[str, str] = {}
@@ -751,10 +755,10 @@ def summarize_work(
                         abstract_only=abstract_only,
                     )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
-                from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+                from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
 
-                if isinstance(exc, JobCancelled):
-                    raise  # a user Stop must abort the job, not silently fall back to extractive
+                if is_abort_exception(exc):
+                    raise  # user Stop / RQ timeout must abort the job, not silently degrade
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"
         else:
@@ -962,6 +966,10 @@ def _abstract_only_paragraph(works: list[Work], *, use_llm: bool, model: str, ba
             if body.strip():
                 return f"{lead}. {body.strip()}"
         except Exception as exc:  # noqa: BLE001 - fall back to extractive over the abstracts
+            from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
+
+            if is_abort_exception(exc):
+                raise  # user Stop / RQ timeout must abort the job, not silently degrade
             logger.warning("abstract-only paragraph LLM unavailable (%s); extractive fallback", exc)
     ex = summarize_extractive(" ".join((w.abstract or "") for w in works), max_sentences=5)
     return f"{lead}. {ex}".strip()
@@ -1087,6 +1095,12 @@ def summarize_scope(
             if degraded_reason and fallback_reason is None and llm_ok:
                 fallback_reason = degraded_reason
             digests.append(f"- {_work_ref(work)}: {digest_text}")
+            if progress_cb is not None:
+                # Running as a background job (the inline path passes no progress_cb): checkpoint
+                # after every paper so already-generated per-paper summaries survive a timeout,
+                # crash, or Stop — the next run reuses them instead of starting over (the 7-of-85
+                # work-horse kill lost all seven to the rolled-back session).
+                db.commit()
 
         # Reduce step: pack the full-text digests into context-window-sized chunks; condense each
         # chunk, then synthesize the collection summary (single chunk skips the middle pass).
@@ -1122,6 +1136,10 @@ def summarize_scope(
                     )
                 method = "map_reduce"
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
+                from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
+
+                if is_abort_exception(exc):
+                    raise  # user Stop / RQ timeout must abort the job, not silently degrade
                 logger.warning("local_llm scope summary unavailable (%s); extractive fallback", exc)
                 fallback_reason = str(exc) or "the local LLM is unavailable"
         if digests and not main:
