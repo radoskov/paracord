@@ -392,6 +392,20 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# C0 control characters (except \t \n \r) + DEL. Old PDFs with custom font encodings extract
+# glyphs as raw control codes — including NUL, which PostgreSQL TEXT columns reject outright
+# ("text fields cannot contain NUL (0x00) bytes", the sqlalche.me/e/20/9h9h upload failure).
+# Shared with the chunking service, which hit the same failure through GROBID section text.
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def sanitize_extracted_text(text: str | None) -> str | None:
+    """Strip Postgres-hostile control characters from PDF-extracted text (keeps \\t \\n \\r)."""
+    if not text:
+        return None
+    return CONTROL_CHARS.sub(" ", text)
+
+
 def _extract_pdf_preview(path: Path) -> dict[str, Any]:
     """Best-effort first-page preview text + page count via PyMuPDF; fails OPEN to "unknown"/None
     on any error (missing dependency, corrupt PDF) rather than raising — contrast with the
@@ -406,7 +420,11 @@ def _extract_pdf_preview(path: Path) -> dict[str, Any]:
             page_count = document.page_count
             preview_text = ""
             if page_count:
-                preview_text = document.load_page(0).get_text("text").strip()
+                # Sanitize BEFORE persisting: 1990s PDFs with custom font encodings extract
+                # control codes (incl. NUL) that Postgres TEXT columns refuse.
+                preview_text = (
+                    sanitize_extracted_text(document.load_page(0).get_text("text")) or ""
+                ).strip()
             quality = "good" if preview_text else "none"
             return {
                 "page_count": page_count,

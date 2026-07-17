@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.chunk import WorkChunk
 from app.models.citation import RawTeiDocument
 from app.models.work import Work
+from app.services.storage import CONTROL_CHARS
 from app.services.tei_parser import extract_leaf_sections, extract_sections
 
 # Target/cap/overlap in whitespace "tokens" (a cheap proxy for real tokens, fine for sizing).
@@ -42,19 +43,19 @@ _SKIP_SECTION = re.compile(
 # Postgres rejects NUL (0x00) in text values with a DataError, and the ``section`` column is capped
 # at 255 chars while GROBID ``<head>`` labels are unbounded — a mis-parsed PDF can yield a whole
 # paragraph as the "label" and control characters in the body. Sanitize both before they reach the
-# INSERT (the sqlalche.me/e/20/9h9h chunk-job failure).
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# INSERT (the sqlalche.me/e/20/9h9h chunk-job failure). CONTROL_CHARS is shared with the upload
+# preview extractor in :mod:`app.services.storage`, which hit the same failure.
 _SECTION_MAX_CHARS = 255
 
 
 def _sanitize_text(text: str) -> str:
-    return _CONTROL_CHARS.sub(" ", text or "")
+    return CONTROL_CHARS.sub(" ", text or "")
 
 
 def _sanitize_label(label: str | None) -> str | None:
     if not label:
         return None
-    cleaned = " ".join(_CONTROL_CHARS.sub(" ", label).split())
+    cleaned = " ".join(CONTROL_CHARS.sub(" ", label).split())
     return cleaned[:_SECTION_MAX_CHARS] or None
 
 
