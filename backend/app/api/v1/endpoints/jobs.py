@@ -21,7 +21,7 @@ ADMIN_DEP = Depends(require_admin)
 
 
 @router.get("")
-def get_job_status(limit: int = Query(default=25, ge=1, le=100)) -> dict:
+def get_job_status(limit: int = Query(default=25, ge=1, le=500)) -> dict:
     """Return queue counts, worker count, and recent jobs (or availability=False)."""
     return queue_status(limit)
 

@@ -114,7 +114,19 @@ def _worker_command() -> list[str]:
     # parked in the scheduled registry, and only a worker's scheduler thread moves it back to the
     # queue when due. Without it, "scheduled" retries sit forever (user-visible as a pending job
     # that never re-runs). Multiple workers race for the scheduler lock safely; one wins.
-    return ["rq", "worker", "--with-scheduler", "--url", get_settings().redis_url, QUEUE_NAME]
+    # --results-ttl: keep finished jobs visible in the Jobs tab for a day. RQ's 500s default made
+    # them silently vanish from the list mid-session (user report, 2026-07-17); per-enqueue
+    # result_ttl values (e.g. analysis payloads) still override this default.
+    return [
+        "rq",
+        "worker",
+        "--with-scheduler",
+        "--results-ttl",
+        "86400",
+        "--url",
+        get_settings().redis_url,
+        QUEUE_NAME,
+    ]
 
 
 def _spawn() -> subprocess.Popen:

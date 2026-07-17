@@ -166,7 +166,7 @@
     if (loading) return; // don't stack overlapping polls behind an in-flight request
     loading = true;
     try {
-      status = normalize(await client.getJobs(40));
+      status = normalize(await client.getJobs(200));
       message = '';
     } catch (error) {
       // Keep the last-good `status` so the tab stays interactive and shows the error line, rather
