@@ -19,11 +19,18 @@ test('Journey 19 — import a paper by arXiv identifier', async ({ page, request
     await page.goto('/#import');
     await expectSignedIn(page);
 
+    // The Import page groups its ingest paths behind method tabs (UX batch); the identifier
+    // form only renders on the "Identifier" tab.
+    await page
+      .getByRole('navigation', { name: 'Import methods' })
+      .getByRole('button', { name: 'Identifier' })
+      .click();
+
     await page.getByLabel('arXiv id or DOI').fill(ARXIV_ID);
     await page
       .locator('form')
       .filter({ has: page.getByLabel('arXiv id or DOI') })
-      .getByRole('button', { name: 'Import' })
+      .getByRole('button', { name: 'Import directly' })
       .click();
 
     // Either freshly created (with enrichment) or already present and re-enriched.
