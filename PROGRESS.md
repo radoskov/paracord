@@ -31,6 +31,21 @@
 - **Graph overlap fan-out** (`c75c35e`): co-located markers from different color-group series
   stacked exactly (pies hiding under circles). Temporal map: per-group x-offset ~1.2% of the
   axis range; reference graph: group-level fan-out nested on the existing action-kind fan-out.
+- **"Find on web" → "missing download url" fix**: the SS-page fix above worked via the direct
+  URL path, but the user's actual click through "Find on web" failed with *"missing download
+  url"*. Two root causes, neither a login issue on their side: (1) Semantic Scholar returns
+  `openAccessPdf: {"url": ""}` — an *empty string*, not null — so the candidate looked directly
+  downloadable but carried a blank URL that slipped through the frontend's `??` chain and the
+  backend rejected. Fixed at the source: `WebCandidate.__post_init__` normalizes blank
+  `pdf_url`/`landing_url`/`resolved_url` to `None`, the S2 adapter maps `""`→absent, and the
+  frontend `fetchUrl` uses `||` (not `??`) so `""` can't win. (2) When the chosen candidate URL
+  is a landing page the policy refuses, `download_and_attach` used to return that refusal
+  immediately — but discovery (S2/DBLP/Unpaywall, all metadata lookups) can surface the same PDF
+  on an *allowed* host. It now skips the direct fetch on a refused landing host yet still runs
+  discovery; a discovered PDF on an allowed host attaches, and if nothing allowed turns up the
+  refusal now names the *PDF* host worth allowing. 6 new backend tests; live-verified the exact
+  SS URL now returns the actionable "allow proceedings.neurips.cc / switch to careful" block
+  under the default `restricted` policy.
 
 ## UX batch: jobs visibility, per-item shelves, descriptions, title tags (2026-07-17)
 

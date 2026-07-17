@@ -34,6 +34,38 @@ near-miss "Is Attention All You Need?" (different paper).
 - Unauthenticated S2 API remains flaky under load; an S2 API key setting would remove the 429s
   entirely (not added — needs an owner decision on configuring keys).
 
+## Follow-up (same day): "Find on web" → "missing download url"
+
+The SS fix above worked via the direct-URL path, but the user's real click through the "Find on
+web" UI still failed with "missing download url". Two independent causes, both now fixed in
+`web_find.py` + `WorkDetail.svelte` (+ 6 tests in `test_web_find.py`):
+
+1. **Empty-string URLs.** Semantic Scholar returns `openAccessPdf: {"url": ""}` (empty, not null)
+   when it has no PDF. The candidate looked directly downloadable but carried `pdf_url == ""`,
+   which the frontend `fetchUrl` `??`-chain treated as present and sent to the backend, which
+   rejected it. Fix at the source: `WebCandidate.__post_init__` blanks → `None`; the S2 adapter's
+   `oa_pdf.get("url")` and Unpaywall's `pdf_url` map `""`→`None`; frontend `fetchUrl` switched
+   `??`→`||`.
+2. **Refused landing host dead-ended discovery.** `download_and_attach` returned the mode-gate
+   refusal for the chosen candidate URL *before* running fallbacks. But S2/DBLP/Unpaywall
+   discovery (metadata lookups, not downloads) can surface the same paper's PDF on an allowed
+   host. Now: a refused landing host skips the *direct* fetch but still runs discovery; a
+   discovered PDF on an allowed host attaches; if every discovered URL is also refused, the block
+   message names the *PDF* host (what to allow); if discovery finds nothing, the original
+   landing-host refusal + policy hint stands. `use_fallbacks`/`landing_refusal` flags added near
+   the top of the function.
+
+Note: `semanticscholar.org` is a *built-in* allow-listed host, so the empty 202 it serves to
+non-browsers passes the gate but yields no scrapeable links — which is exactly why the API-backed
+discovery (not HTML scraping) is what rescues it.
+
+Verified: full battery green (backend, ready-full, safety 161, e2e 37/37); live run of the user's
+exact SS URL under the default `restricted` policy returns the actionable "allow
+proceedings.neurips.cc / switch to careful" block.
+
+NOT committed here: a stray pre-existing `PaperTable.svelte` selected-row styling tweak in the
+working tree — unrelated to this work, left for its author to commit.
+
 ## Next recommended task
 
 - Optional `semantic_scholar_api_key` setting threaded into `_get` headers for the S2 calls.
