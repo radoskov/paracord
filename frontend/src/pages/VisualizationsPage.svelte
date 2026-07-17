@@ -85,8 +85,15 @@
     ['work_type', 'Work type'],
     ['year', 'Publication year'], // 5h (one colour per distinct year)
     ['venue', 'Venue'], // 5d
+    ['shelf', 'Shelf'], // membership kinds: multi-membership papers render as a color wheel
+    ['rack', 'Rack'],
+    ['tag', 'Tag'],
     ['none', 'None'],
   ];
+  // Membership colors are resolved server-side (privacy-filtered, ALL memberships) — meta has no
+  // membership data, so unlike the other encodings they need a rebuild, not a client restyle.
+  const MEMBERSHIP_COLOR_KINDS = new Set(['shelf', 'rack', 'tag']);
+  let lastColorBy = colorBy;
 
   // Axis choices come from the server payload (view-specific); before the first Build, fall back
   // to the full static list so the axis selects aren't empty.
@@ -233,7 +240,11 @@
   // (their size/color changes the server-side computation).
   function restyleIfLoaded(): void {
     if (!payload) return;
-    if (payload.view_type !== 'temporal_map') {
+    // Entering OR leaving a membership color needs the server (it attaches/clears the groups).
+    const crossesMembership =
+      MEMBERSHIP_COLOR_KINDS.has(colorBy) || MEMBERSHIP_COLOR_KINDS.has(lastColorBy);
+    lastColorBy = colorBy;
+    if (payload.view_type !== 'temporal_map' || crossesMembership) {
       void load();
       return;
     }

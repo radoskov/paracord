@@ -415,6 +415,9 @@
       <select bind:value={colorBy} data-testid="rg-color-by">
         <option value="kind">Kind (this paper / in library / external)</option>
         <option value="venue">Venue</option>
+        <option value="shelf">Shelf</option>
+        <option value="rack">Rack</option>
+        <option value="tag">Tag</option>
       </select>
     </label>
     <label title="Also draw citation links between the in-library references that cite each other">

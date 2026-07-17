@@ -24,6 +24,7 @@
   import { categoricalPalette } from '../lib/viz/theme';
   import ChartHost from './ChartHost.svelte';
   import Modal from './Modal.svelte';
+  import { pieSymbol } from '../lib/graphPie';
 
   export let label = '';
   export let disabled = false;
@@ -99,13 +100,15 @@
     betweenness: number;
     citationCount: number | null;
     colorGroup: string | null;
+    // ALL membership groups (shelf/rack/tag color-by): 2+ renders the node as a color wheel.
+    colorGroups: string[] | null;
     warning: boolean;
   };
 
   // Topic-graph encodings (UX batch 4): its own selects — the citation metrics (pagerank etc.)
   // don't exist on similarity nodes, but citation count and year do.
   let topicSizeBy: 'degree' | 'citations' = 'degree';
-  let topicColorBy: 'none' | 'year' = 'none';
+  let topicColorBy: 'none' | 'year' | 'shelf' | 'rack' | 'tag' = 'none';
   type REdge = { source: string; target: string; weight: number; resolution?: string; relation?: string };
 
   $: rNodes = (() => {
@@ -114,7 +117,15 @@
         id: n.id, label: n.label, kind: 'local', workId: n.work_id, year: n.year,
         venue: n.venue ?? null, doi: n.doi ?? null, degree: 0, pagerank: 0, betweenness: 0,
         citationCount: n.citation_count ?? null,
-        colorGroup: topicColorBy === 'year' ? String(n.year ?? 'unknown') : null,
+        colorGroup:
+          topicColorBy === 'year'
+            ? String(n.year ?? 'unknown')
+            : topicColorBy !== 'none'
+              ? (n.memberships?.[topicColorBy]?.[0] ?? null)
+              : null,
+        colorGroups: topicColorBy !== 'none' && topicColorBy !== 'year'
+          ? (n.memberships?.[topicColorBy] ?? null)
+          : null,
         warning: false,
       }));
     }
@@ -124,6 +135,7 @@
         venue: n.venue ?? null, doi: n.doi, degree: n.degree ?? 0, pagerank: n.pagerank ?? 0,
         betweenness: n.betweenness ?? 0, citationCount: n.citation_count ?? null,
         colorGroup: n.color_group ?? null,
+        colorGroups: n.color_groups ?? null,
         warning: n.warning ?? false,
       }));
     }
@@ -144,7 +156,11 @@
     const activeColorBy = graphType === 'topic' ? topicColorBy : colorBy;
     if (activeColorBy === 'none') return [] as string[];
     const seen: string[] = [];
-    for (const n of rNodes) if (n.colorGroup && !seen.includes(n.colorGroup)) seen.push(n.colorGroup);
+    for (const n of rNodes) {
+      for (const g of n.colorGroups ?? (n.colorGroup ? [n.colorGroup] : [])) {
+        if (!seen.includes(g)) seen.push(g);
+      }
+    }
     if (activeColorBy === 'year') {
       return seen.sort(
         (a, b) =>
@@ -194,7 +210,10 @@
     if (!showCiting) for (const n of rNodes) if (n.id.startsWith('citing:')) hiddenIds.add(n.id);
     // Legend-chip filtering: groups the user toggled off (click) or excluded via solo (shift-click).
     if (hiddenGroups.size) {
-      for (const n of rNodes) if (n.colorGroup && hiddenGroups.has(n.colorGroup)) hiddenIds.add(n.id);
+      for (const n of rNodes) {
+        const groups = n.colorGroups ?? (n.colorGroup ? [n.colorGroup] : []);
+        if (groups.length && groups.every((g) => hiddenGroups.has(g))) hiddenIds.add(n.id);
+      }
     }
     // Ctrl-click neighborhood focus (UX batch 3): only the focused node/category + direct
     // neighbors stay visible.
@@ -257,10 +276,11 @@
     // Plotted-order indices per group, for the chips' hover highlight dispatch.
     groupDataIndices = new Map();
     nodes.forEach((n, i) => {
-      if (!n.colorGroup) return;
-      const arr = groupDataIndices.get(n.colorGroup) ?? [];
-      arr.push(i);
-      groupDataIndices.set(n.colorGroup, arr);
+      for (const g of n.colorGroups ?? (n.colorGroup ? [n.colorGroup] : [])) {
+        const arr = groupDataIndices.get(g) ?? [];
+        arr.push(i);
+        groupDataIndices.set(g, arr);
+      }
     });
     return {
       tooltip: {
@@ -293,9 +313,10 @@
                 : Number(d.sizeValue).toFixed(4)
               : '—';
           const activeColorBy = graphType === 'topic' ? topicColorBy : colorBy;
+          const groupList = m.colorGroups?.length ? m.colorGroups.join(', ') : m.colorGroup;
           const colorDesc =
-            m.colorGroup && activeColorBy !== 'none'
-              ? `color = ${activeColorBy}: ${m.colorGroup}`
+            groupList && activeColorBy !== 'none'
+              ? `color = ${activeColorBy}: ${groupList}`
               : `color = ${m.kind === 'external' ? 'external (not in library)' : 'in library'}`;
           const bits = [
             `<strong>${m.label}</strong>`,
@@ -333,7 +354,18 @@
             id: n.id,
             name: n.label,
             category: categoryIndex(n),
-            symbol: n.kind === 'external' ? 'diamond' : 'circle',
+            // Multi-membership local nodes render as a color wheel (one segment per group);
+            // externals keep their diamond, single-group nodes the plain (cheaper) circle.
+            symbol:
+              n.kind === 'external'
+                ? 'diamond'
+                : (n.colorGroups?.length ?? 0) > 1
+                  ? pieSymbol(
+                      (n.colorGroups as string[]).map(
+                        (g) => groupColors[Math.max(0, colorGroups.indexOf(g))],
+                      ),
+                    )
+                  : 'circle',
             symbolSize: max === min ? 22 : 12 + ((metric(n) - min) / (max - min)) * 30,
             itemStyle: n.warning
               ? { borderColor: viz.warningRing, borderWidth: 3 }
@@ -588,6 +620,7 @@
           <option value="none">Color: none</option>
           <option value="status">Color: reading status</option>
           <option value="shelf">Color: shelf</option>
+          <option value="rack">Color: rack</option>
           <option value="tag">Color: tag</option>
           <option value="topic">Color: topic</option>
           <option value="year">Color: year</option>
@@ -603,6 +636,9 @@
           title="Group node colors by an attribute">
           <option value="none">Color: none</option>
           <option value="year">Color: year</option>
+          <option value="shelf">Color: shelf</option>
+          <option value="rack">Color: rack</option>
+          <option value="tag">Color: tag</option>
         </select>
       {/if}
       <label class="toggle" title="Hide nodes that have no edges">

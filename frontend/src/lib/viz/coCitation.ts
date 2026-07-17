@@ -7,6 +7,7 @@
 // (the page reads the node's `name` = work id, exactly like the scatter views).
 
 import type { VizPayload } from '../../api/client';
+import { pieSymbol } from '../graphPie';
 import { registerRenderer, type EChartsOptionLike, type VizRenderer } from './registry';
 import { colorForGroup, type VizTheme } from './theme';
 
@@ -81,15 +82,22 @@ export const coCitationRenderer: VizRenderer = {
     const sizeFor = symbolSizer(payload);
     const widthFor = edgeWidther(payload);
 
-    const data = payload.nodes.map((n) => ({
-      id: n.id,
-      // `name` is the work id so the page's click handler opens the paper (as in the scatter views).
-      name: n.id,
-      symbolSize: sizeFor(n.size),
-      category:
-        groups.length && n.color_group ? Math.max(0, groups.indexOf(n.color_group)) : 0,
-      node: n,
-    }));
+    const data = payload.nodes.map((n) => {
+      // Multi-membership (shelf/rack/tag) nodes render as a color wheel, one segment per group.
+      const nodeGroups = n.color_groups ?? [];
+      return {
+        id: n.id,
+        // `name` is the work id so the page's click handler opens the paper (as in the scatter views).
+        name: n.id,
+        symbolSize: sizeFor(n.size),
+        category:
+          groups.length && n.color_group ? Math.max(0, groups.indexOf(n.color_group)) : 0,
+        ...(nodeGroups.length > 1
+          ? { symbol: pieSymbol(nodeGroups.map((g) => colorForGroup(theme, g, groups))) }
+          : {}),
+        node: n,
+      };
+    });
     const links = (payload.edges ?? []).map((e) => ({
       source: e.source,
       target: e.target,

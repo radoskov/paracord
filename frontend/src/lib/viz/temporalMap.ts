@@ -5,6 +5,7 @@
 // (payload.edges) is drawn as a lines series between node coordinates.
 
 import type { VizPayload } from "../../api/client";
+import { pieSymbol } from "../graphPie";
 import {
   registerRenderer,
   type EChartsOptionLike,
@@ -146,6 +147,12 @@ export function restyleTemporalMap(
     else if (sizeBy === "citation_count") size = num(m.citation_count);
     else if (sizeBy === "year") size = num(m.year);
     else size = num(m.local_degree) ?? 0; // local_degree default
+    // Membership kinds (shelf/rack/tag) are SERVER-computed (meta has no membership data):
+    // preserve the node's existing groups so a size-only restyle can't wipe them. Switching the
+    // color-by TO a membership kind goes through a server rebuild, not this restyle.
+    if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+      return { ...n, size };
+    }
     let colorGroup: string | null;
     if (colorBy === "none") colorGroup = null;
     else if (colorBy === "work_type") colorGroup = str(m.work_type) ?? "unknown";
@@ -153,7 +160,7 @@ export function restyleTemporalMap(
       colorGroup = m.year != null ? String(m.year) : "unknown";
     else if (colorBy === "venue") colorGroup = str(m.venue) ?? "unknown";
     else colorGroup = str(m.reading_status) ?? "unread"; // status default
-    return { ...n, size, color_group: colorGroup };
+    return { ...n, size, color_group: colorGroup, color_groups: null };
   });
   const legend =
     colorBy === "none"
@@ -162,9 +169,7 @@ export function restyleTemporalMap(
           color_by: colorBy,
           groups: [
             ...new Set(
-              nodes
-                .map((n) => n.color_group)
-                .filter((g): g is string => g !== null),
+              nodes.flatMap((n) => n.color_groups ?? (n.color_group ? [n.color_group] : [])),
             ),
           ].sort(),
         };
@@ -192,7 +197,7 @@ export const temporalMapRenderer: VizRenderer = {
 
     const series: Record<string, unknown>[] = seriesGroups.map((group) => {
       const groupNodes = colored
-        ? nodes.filter((n) => n.color_group === group)
+        ? nodes.filter((n) => (n.color_groups?.[0] ?? n.color_group) === group)
         : nodes;
       return {
         type: "scatter",
@@ -203,11 +208,17 @@ export const temporalMapRenderer: VizRenderer = {
         // a paper; the tooltip's [open] links reach the others.
         data: groupByCoord(groupNodes).map((members) => {
           const rep = members[0];
+          // Multi-membership (shelf/rack/tag) markers render as a color wheel, one segment per
+          // group, instead of the series' single colour.
+          const repGroups = rep.color_groups ?? [];
           return {
             value: [rep.x, rep.y],
             name: rep.id,
             node: rep,
             members,
+            ...(repGroups.length > 1
+              ? { symbol: pieSymbol(repGroups.map((g) => colorForGroup(theme, g, groups))) }
+              : {}),
             symbolSize: Math.max(...members.map((m) => sizeFor(m.size))),
             label:
               members.length > 1

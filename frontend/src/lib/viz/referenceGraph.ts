@@ -1,5 +1,6 @@
 // Pure builder for the per-paper reference graph (B7): turns the /reference-graph payload + the
 // user's section weights into an ECharts scatter option. Kept free of an echarts import so it is
+import { pieSymbol } from "../graphPie";
 // unit-testable in jsdom (the modal lazy-loads echarts and calls setOption with this).
 import type { ReferenceGraph, ReferenceGraphNode } from "../../api/client";
 import type { EChartsOptionLike } from "./registry";
@@ -352,6 +353,43 @@ export function buildReferenceGraphOption(
       emphasis: { focus: "series" },
       z: 2,
     }));
+  } else if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+    // Membership coloring: one series (legend entry) per shelf/rack/tag name. Only the base +
+    // in-library nodes carry memberships; everything else groups under "external / no data".
+    // A node with SEVERAL memberships plots once (in its first group's series) but renders as a
+    // color wheel with one segment per membership.
+    const groupsOf = (n: ReferenceGraphNode) => n.memberships?.[colorBy] ?? [];
+    const groups = [...new Set(graph.nodes.flatMap(groupsOf))].sort((a, b) => a.localeCompare(b));
+    const colorOf = new Map(
+      groups.map((g, i) => [g, palette[i % Math.max(1, palette.length)] ?? theme.text]),
+    );
+    const withPies = (points: Record<string, unknown>[]) =>
+      points.map((point) => {
+        const rep = point.node as ReferenceGraphNode;
+        const repGroups = groupsOf(rep);
+        return repGroups.length > 1
+          ? { ...point, symbol: pieSymbol(repGroups.map((g) => colorOf.get(g) ?? theme.text)) }
+          : point;
+      });
+    series = groups.map((g) => ({
+      type: "scatter",
+      name: g,
+      color: colorOf.get(g),
+      data: withPies(grouped(graph.nodes.filter((n) => groupsOf(n)[0] === g))),
+      emphasis: { focus: "series" },
+      z: 2,
+    }));
+    const unmembered = graph.nodes.filter((n) => groupsOf(n).length === 0);
+    if (unmembered.length) {
+      series.push({
+        type: "scatter",
+        name: "external / no data",
+        color: theme.splitLine,
+        data: grouped(unmembered),
+        emphasis: { focus: "series" },
+        z: 1,
+      });
+    }
   } else {
     // Default: one series per node kind so the legend reads local / likely / external / this paper.
     // Explicit palette indices per kind (was position-based, which made "base" and "external"

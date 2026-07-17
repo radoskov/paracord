@@ -244,6 +244,7 @@ export type GraphSizeBy = "degree" | "pagerank" | "betweenness" | "citations";
 export type GraphColorBy =
   | "none"
   | "shelf"
+  | "rack"
   | "tag"
   | "topic"
   | "status"
@@ -265,6 +266,8 @@ export interface GraphNode {
   // External/global citation count (local nodes only); a selectable size channel (UX batch 4b).
   citation_count?: number | null;
   color_group?: string | null;
+  // ALL membership groups for shelf/rack/tag color-by (2+ → color-wheel node).
+  color_groups?: string[] | null;
   warning?: boolean;
 }
 
@@ -296,6 +299,8 @@ export interface TopicGraphNode {
   doi?: string | null;
   // UX batch 4: enables citation-count sizing / year coloring in the topic graph.
   citation_count?: number | null;
+  // ALL privacy-filtered membership names per kind — shelf/rack/tag coloring client-side.
+  memberships?: Record<string, string[]> | null;
 }
 
 export interface TopicGraphEdge {
@@ -329,6 +334,8 @@ export interface VizNode {
   y: number | null;
   size: number | null;
   color_group: string | null;
+  // ALL membership groups for shelf/rack/tag color-by (2+ → color-wheel marker).
+  color_groups?: string[] | null;
   shape: string;
   label: string;
   meta: Record<string, unknown>;
@@ -1089,6 +1096,9 @@ export interface ReferenceGraphNode {
   citation_count?: number | null;
   local_degree?: number | null;
   topic_similarity?: number | null;
+  // ALL privacy-filtered membership names per kind ({shelf|rack|tag: [names]}); base + local
+  // nodes only — drives client-side membership coloring incl. multi-color wheel nodes.
+  memberships?: Record<string, string[]> | null;
   // 5d colour-by-venue (local: resolved work's venue) + 5g click-to-import prefill data.
   venue?: string | null;
   doi?: string | null;
