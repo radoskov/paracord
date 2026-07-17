@@ -48,3 +48,88 @@ def test_sync_extraction_maps_timeout_to_unavailable(tmp_path, monkeypatch) -> N
 
     with pytest.raises(gc.GrobidUnavailableError):
         gc.GrobidClient("http://grobid:8070").process_fulltext_document_sync(pdf)
+
+
+# ------------------------------------------------ degraded header+references fallback (500s)
+
+HEADER_TEI = (
+    '<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader>H</teiHeader>'
+    '<text xml:lang="en"></text></TEI>'
+)
+REFS_TEI = (
+    '<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><back>'
+    "<listBibl><biblStruct>R1</biblStruct></listBibl>"
+    "</back></text></TEI>"
+)
+
+
+def test_merge_splices_listbibl_into_header_text() -> None:
+    merged = gc.merge_header_and_references(HEADER_TEI, REFS_TEI)
+    assert "<listBibl><biblStruct>R1</biblStruct></listBibl>" in merged
+    assert merged.index("<listBibl>") < merged.index("</text>")
+
+
+def test_merge_without_references_returns_header_unchanged() -> None:
+    assert gc.merge_header_and_references(HEADER_TEI, None) == HEADER_TEI
+    assert gc.merge_header_and_references(HEADER_TEI, "<TEI>no refs here</TEI>") == HEADER_TEI
+
+
+class _CrashyFulltextClient:
+    """Stub httpx.Client: full-text 500s (GROBID-internal bug); header + references succeed."""
+
+    calls: list[str] = []
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+    def post(self, url, **kwargs):
+        _CrashyFulltextClient.calls.append(url)
+        request = httpx.Request("POST", url)
+        if url.endswith("processFulltextDocument"):
+            return httpx.Response(500, text="[GENERAL] An exception occurred", request=request)
+        if url.endswith("processHeaderDocument"):
+            return httpx.Response(200, text=HEADER_TEI, request=request)
+        if url.endswith("processReferences"):
+            return httpx.Response(200, text=REFS_TEI, request=request)
+        raise AssertionError(f"unexpected URL {url}")
+
+
+class _EverythingCrashesClient(_CrashyFulltextClient):
+    """Stub httpx.Client where the header fallback fails too — the original error surfaces."""
+
+    def post(self, url, **kwargs):
+        request = httpx.Request("POST", url)
+        return httpx.Response(500, text="[GENERAL] An exception occurred", request=request)
+
+
+def test_fulltext_500_degrades_to_header_plus_references(tmp_path, monkeypatch) -> None:
+    """The open_ease.pdf case: GROBID's body formatter crashes but header/references parse."""
+    _CrashyFulltextClient.calls = []
+    monkeypatch.setattr(gc.httpx, "Client", _CrashyFulltextClient)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    tei = gc.GrobidClient("http://grobid:8070").process_fulltext_document_sync(pdf)
+    assert "<listBibl>" in tei and "<teiHeader>H</teiHeader>" in tei
+    assert [u.rsplit("/", 1)[-1] for u in _CrashyFulltextClient.calls] == [
+        "processFulltextDocument",
+        "processHeaderDocument",
+        "processReferences",
+    ]
+
+
+def test_degraded_path_raises_original_error_when_header_also_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gc.httpx, "Client", _EverythingCrashesClient)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        gc.GrobidClient("http://grobid:8070").process_fulltext_document_sync(pdf)
+    assert excinfo.value.response.status_code == 500
+    assert "processFulltextDocument" in str(excinfo.value.request.url)

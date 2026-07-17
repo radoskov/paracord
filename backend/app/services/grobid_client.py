@@ -1,14 +1,46 @@
 """Client for the GROBID REST service."""
 
+import logging
+import re
 from pathlib import Path
 
 import httpx2 as httpx
 
 from app.core.config import Settings, get_settings
 
+logger = logging.getLogger(__name__)
+
 
 class GrobidUnavailableError(RuntimeError):
     """GROBID could not be reached — almost always because the service isn't running."""
+
+
+_LISTBIBL_RE = re.compile(r"<listBibl>.*</listBibl>", re.DOTALL)
+
+
+def merge_header_and_references(header_tei: str, references_tei: str | None) -> str:
+    """Build a degraded-but-useful TEI from the header + references endpoints' outputs.
+
+    Some PDFs crash GROBID's FULL-TEXT body formatter with an internal 500
+    (``TEIFormatter.toTEITextPiece: fromIndex > toIndex``) while its header and references
+    parsers handle the same file fine. Splice the references ``<listBibl>`` into the header TEI's
+    ``<text>`` so the standard ``parse_tei`` sees title/authors/abstract/DOI AND the bibliography
+    — only body sections (and their citation contexts) are lost. Both documents share the default
+    TEI namespace, so a string splice keeps the fragment well-formed.
+    """
+    listbibl = None
+    if references_tei:
+        match = _LISTBIBL_RE.search(references_tei)
+        if match:
+            listbibl = match.group(0)
+    if not listbibl:
+        return header_tei
+    fragment = f'<back><div type="references">{listbibl}</div></back>'
+    if "</text>" in header_tei:
+        return header_tei.replace("</text>", f"{fragment}</text>", 1)
+    if "</TEI>" in header_tei:
+        return header_tei.replace("</TEI>", f"<text>{fragment}</text></TEI>", 1)
+    return header_tei
 
 
 def _unavailable(base_url: str, exc: Exception) -> GrobidUnavailableError:
@@ -58,7 +90,7 @@ class GrobidClient:
         return data
 
     async def process_fulltext_document(self, pdf_path: Path) -> str:
-        """Extract TEI XML from a PDF."""
+        """Extract TEI XML from a PDF (degrading to header+references on a GROBID-internal 500)."""
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 with pdf_path.open("rb") as handle:
@@ -68,25 +100,94 @@ class GrobidClient:
                         files=files,
                         data=self._form_data(),
                     )
+                if response.status_code >= 500:
+                    return await self._degraded_fulltext(client, pdf_path, response)
                 response.raise_for_status()
                 return response.text
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc
 
+    async def _degraded_fulltext(
+        self, client: "httpx.AsyncClient", pdf_path: Path, fulltext_response: "httpx.Response"
+    ) -> str:
+        """Async twin of the sync degraded path (see ``process_fulltext_document_sync``)."""
+        logger.warning(
+            "GROBID full-text failed with %s for %s — degrading to header+references",
+            fulltext_response.status_code,
+            pdf_path.name,
+        )
+        with pdf_path.open("rb") as handle:
+            header = await client.post(
+                f"{self.base_url}/api/processHeaderDocument",
+                files={"input": (pdf_path.name, handle, "application/pdf")},
+                headers={"Accept": "application/xml"},
+                data={"consolidateHeader": self._form_data()["consolidateHeader"]},
+            )
+        if header.status_code != 200:
+            fulltext_response.raise_for_status()  # degraded path is unusable → original error
+        references_tei: str | None = None
+        with pdf_path.open("rb") as handle:
+            refs = await client.post(
+                f"{self.base_url}/api/processReferences",
+                files={"input": (pdf_path.name, handle, "application/pdf")},
+                data={"includeRawCitations": self._form_data()["includeRawCitations"]},
+            )
+        if refs.status_code == 200:
+            references_tei = refs.text
+        return merge_header_and_references(header.text, references_tei)
+
     def process_fulltext_document_sync(self, pdf_path: Path) -> str:
-        """Synchronous TEI extraction for use inside RQ workers."""
+        """Synchronous TEI extraction for use inside RQ workers.
+
+        Degrades on a GROBID-internal 5xx from the full-text endpoint: some PDFs crash GROBID's
+        body formatter while its header/references parsers handle them fine, so retry those two
+        endpoints and merge — the paper still gets metadata + its bibliography, only body
+        sections are lost. If even the header fails, the original full-text error is raised.
+        """
         try:
-            with httpx.Client(timeout=120) as client, pdf_path.open("rb") as handle:
-                files = {"input": (pdf_path.name, handle, "application/pdf")}
-                response = client.post(
-                    f"{self.base_url}/api/processFulltextDocument",
-                    files=files,
-                    data=self._form_data(),
-                )
-            response.raise_for_status()
-            return response.text
+            with httpx.Client(timeout=120) as client:
+                with pdf_path.open("rb") as handle:
+                    files = {"input": (pdf_path.name, handle, "application/pdf")}
+                    response = client.post(
+                        f"{self.base_url}/api/processFulltextDocument",
+                        files=files,
+                        data=self._form_data(),
+                    )
+                if response.status_code >= 500:
+                    return self._degraded_fulltext_sync(client, pdf_path, response)
+                response.raise_for_status()
+                return response.text
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             raise _unavailable(self.base_url, exc) from exc
+
+    def _degraded_fulltext_sync(
+        self, client: "httpx.Client", pdf_path: Path, fulltext_response: "httpx.Response"
+    ) -> str:
+        """Header+references fallback for PDFs whose full-text processing 500s inside GROBID."""
+        logger.warning(
+            "GROBID full-text failed with %s for %s — degrading to header+references",
+            fulltext_response.status_code,
+            pdf_path.name,
+        )
+        with pdf_path.open("rb") as handle:
+            header = client.post(
+                f"{self.base_url}/api/processHeaderDocument",
+                files={"input": (pdf_path.name, handle, "application/pdf")},
+                headers={"Accept": "application/xml"},
+                data={"consolidateHeader": self._form_data()["consolidateHeader"]},
+            )
+        if header.status_code != 200:
+            fulltext_response.raise_for_status()  # degraded path is unusable → original error
+        references_tei: str | None = None
+        with pdf_path.open("rb") as handle:
+            refs = client.post(
+                f"{self.base_url}/api/processReferences",
+                files={"input": (pdf_path.name, handle, "application/pdf")},
+                data={"includeRawCitations": self._form_data()["includeRawCitations"]},
+            )
+        if refs.status_code == 200:
+            references_tei = refs.text
+        return merge_header_and_references(header.text, references_tei)
 
     def _citation_form_data(self, citations: str | list[str]) -> dict[str, str | list[str]]:
         """Build the form fields for the citation-parse endpoints.
