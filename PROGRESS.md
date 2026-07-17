@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX polish: library selected-row color + identifier import layout (2026-07-17)
+
+- **Library selected-row color** (`7fc681c`): the selected paper and the hover row shared
+  `--status-success-bg`, so they were indistinguishable. `PaperTable.svelte` now gives the
+  selected row a slightly deeper tint (`color-mix` of the success bg with 22% success color)
+  while hover keeps the light tint; selected wins when a row is both.
+- **Identifier import preview layout** (`e53ebaa`): the Identifier sub-tab card used
+  `narrow-card` (44rem), which crammed the `DraftReview` preview's 5-column field grid (~40.5rem
+  min) — the title and fields collapsed to their minimums. Card switched to `wide` (matching the
+  BibTeX tab) with a new `.form-narrow` cap on just the intro + lookup form, so the form stays
+  compact but the found-paper preview gets full width. See
+  `docs/agent_handoffs/2026-07-17-lib-selected-color-import-layout.md`.
+
 ## Citation-summary polish + S2 downloads + graph overlap fan-out (2026-07-17)
 
 - **Citation summary** (`dd7f7ec`): Preview gains a title fallback (confident Crossref match ≥0.9

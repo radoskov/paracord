@@ -696,14 +696,16 @@
   {/if}
 
   {#if activeTab === 'identifier'}
-  <div class="card narrow-card">
+  <!-- Card spans full width so the preview table below breathes; the lone lookup form is capped
+       (form-narrow) so it doesn't stretch awkwardly across a wide viewport. -->
+  <div class="card wide">
     <h2>Import by identifier</h2>
-    <p class="muted">
+    <p class="muted form-narrow">
       Fetch metadata for an arXiv id or DOI. <strong>Preview &amp; choose</strong> shows what was
       found and lets you revise the record before creating the paper; <strong>Import
       directly</strong> creates it straight away (idempotent).
     </p>
-    <form on:submit|preventDefault={previewIdentifier} class="stack">
+    <form on:submit|preventDefault={previewIdentifier} class="stack form-narrow">
       <input bind:value={identifierValue} placeholder="e.g. 1706.03762 or 10.1145/3292500" aria-label="arXiv id or DOI" />
       <ShelfPicker {client} bind:value={identifierShelfId} label="Add to shelf on direct import (optional)" />
       <div class="row">
@@ -855,6 +857,11 @@
   /* Single-form tabs (identifier, folder): cap the card so a lone form doesn't stretch
      across the whole viewport. */
   .narrow-card {
+    max-width: 44rem;
+  }
+
+  /* Keep a lone lookup form compact inside a full-width card (the preview table needs the room). */
+  .form-narrow {
     max-width: 44rem;
   }
 
