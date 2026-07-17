@@ -45,6 +45,7 @@
   import { ensureTags, refreshTags, tags } from '../lib/catalog';
   import { pendingImportText, pendingLibrarySearch } from '../lib/selection';
   import { canEdit, canManageStructure, canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
+  import { tameTitle } from '../lib/titleCase';
   import { errorMessage, formatBytes } from '../lib/ui';
   import { renderSummaryMath } from '../lib/renderMath';
   import Modal from './Modal.svelte';
@@ -1269,7 +1270,9 @@
 
 <div class="detail">
   <div class="bar">
-    <h2>{form.canonical_title || 'Untitled paper'}
+    <!-- tameTitle: ALL-CAPS titles render in title case here; the edit form below shows the raw
+         stored title untouched. -->
+    <h2>{tameTitle(form.canonical_title) || 'Untitled paper'}
       {#if work.canonical_metadata_source === 'agent_index_only'}
         <span class="stub-badge" title="Indexed by the local agent but not yet extracted — attach/extract or teleport to fill in metadata and text">not extracted</span>
       {/if}
