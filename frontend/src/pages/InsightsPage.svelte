@@ -22,7 +22,7 @@
   import ScopePicker from '../components/ScopePicker.svelte';
   import { resolveScopeRequest } from '../lib/scope';
   import { renderSummaryMath } from '../lib/renderMath';
-  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds, pendingIdentifierImport } from '../lib/selection';
+  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds, pendingIdentifierImport, pendingImportText } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -175,6 +175,14 @@
   // lands on "import by DOI" (previously this jumped to a Library search, which can't import).
   function importExternal(doi: string): void {
     pendingIdentifierImport.set(doi);
+    if (typeof window !== 'undefined') window.location.hash = '#import';
+  }
+
+  // A DOI-less external/citing node has no identifier to import by → prefill the Import tab's
+  // Citations box with the metadata we do have (a free-text "Title (year)" line); the Import tab
+  // auto-switches to the Citations sub-tab when this store is set.
+  function importCitation(line: string): void {
+    pendingImportText.set(line);
     if (typeof window !== 'undefined') window.location.hash = '#import';
   }
 
@@ -427,6 +435,7 @@
       loadTopic={loadTopicGraph}
       onOpenWork={openPaper}
       onImportExternal={importExternal}
+      onImportCitation={importCitation}
       {visible}
     />
   </div>

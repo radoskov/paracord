@@ -37,6 +37,10 @@
   export let loadTopic: (() => Promise<TopicGraphResponse>) | null = null;
   export let onOpenWork: ((workId: string) => void) | null = null;
   export let onImportExternal: ((doi: string) => void) | null = null;
+  // Clicking a DOI-less external/citing node → prefill the batch-citations import box with a free
+  // text line (title + year), since there's no identifier to import by. Given a DOI, onImportExternal
+  // is used instead (import-by-identifier).
+  export let onImportCitation: ((line: string) => void) | null = null;
   export let visible = true;
 
   let graphType: 'citation' | 'topic' = 'citation';
@@ -508,9 +512,21 @@
           onOpenWork(node.workId);
           return;
         }
-        if (!node.workId && node.doi && onImportExternal) onImportExternal(node.doi);
+        if (node.workId) return; // in-library but no open handler
+        // External / citing node: with a DOI it can go straight to import-by-identifier; without one
+        // there's nothing to look up, so prefill the citations box with the metadata we do have
+        // (title + year) for a batch-citation import instead of doing nothing.
+        if (node.doi && onImportExternal) onImportExternal(node.doi);
+        else if (!node.doi && onImportCitation) onImportCitation(citationLine(node));
       },
     );
+  }
+
+  // A free-text citation line for the batch-citations box, from the data an external node carries
+  // (title + year; DOI-less by the time we reach here). Mirrors the reference graph's line format.
+  function citationLine(n: RNode): string {
+    const title = n.label?.trim() || 'Untitled';
+    return n.year != null ? `${title} (${n.year})` : title;
   }
 
   // --- Legend chips (our own legend; see the buildOption comment on why not ECharts') ---

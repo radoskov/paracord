@@ -9,6 +9,17 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Insights citation graph: DOI-less external nodes import via the citations box (2026-07-18)
+
+- Clicking an external reference / citing paper in the Insights citation graph did nothing when the
+  node had no DOI (with a DOI it correctly jumps to Import → Identifier). Now a DOI-less node jumps
+  to Import → **Citations** and prefills the batch-citations box with a free-text `Title (year)` line
+  (the only metadata a citation-graph node carries). New optional `onImportCitation` callback on
+  `CitationGraph.svelte`; `InsightsPage` wires it to `pendingImportText` (the same store the
+  reference graph and BatchImport already use — BatchImport appends the line and the Import tab
+  auto-switches to Citations). DOI-ful nodes keep the existing `onImportExternal` → Identifier path.
+  See `docs/agent_handoffs/2026-07-18-citation-graph-doiless-import.md`.
+
 ## Graphs: OR-aware color legend + encoding info row on reference & visualization graphs (2026-07-17)
 
 - **Problem**: the Insights citation/topic graphs already (a) show a per-node encoding row (`size =
