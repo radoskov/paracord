@@ -9,6 +9,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Degraded badge + scope-summary timeout fix + import preview links (2026-07-17)
+
+- **Degraded extraction is now visible AND summarizable** (follow-up to the GROBID fallback):
+  the fallback additionally extracts the PDF's plain text with PyMuPDF and injects it as a
+  single "Full text" body section (XML-escaped, control-chars stripped), so AI summaries,
+  chunking and semantic search process the whole document — verified live on open_ease.pdf
+  (chunks now carry "Full text" sections). Every degraded TEI carries a marker; migration
+  **0077** adds `files.extraction_degraded` (set/cleared by `store_parsed_extraction`), shown as
+  a warning badge in the Files panel and a `degraded` token in the library Badges column.
+  Applied to the live DB; open_ease re-extracted (badge visible, body chunked).
+- **Whole-library scope-summary crash root-caused** ("Work-horse terminated unexpectedly;
+  waitpid returned None" at 7/85 after EXACTLY 16 min): the queue's **900s default job timeout**
+  fired mid-LLM-call, the degrade-to-extractive `except Exception` swallowed
+  `JobTimeoutException`, the loop kept running, and RQ's monitor hard-killed the horse — no
+  traceback, and the end-of-job-commit design lost the 7 finished per-paper summaries to the
+  rollback. Fixes: scope jobs get `job_timeout=6h` (coalesced → no stacking); a shared
+  `is_abort_exception` guard makes ALL degrade-and-continue handlers re-raise user cancels and
+  RQ timeouts (clean failure with the real reason); and the map loop commits after every paper
+  when running as a job, so per-paper progress survives any crash and is reused on re-run.
+- **Import preview UX**: collision warnings link each matching paper's title (opens it in the
+  Library via `pendingLibraryOpen` to verify before choosing create/attach/skip), and every
+  staged row gets a "preview ↗" that streams the uploaded PDF into a new tab
+  (`StagingItemRead.file_id`; staged files are loose → see-able). Verified live end-to-end.
+
 ## GROBID full-text crash fallback + Files-panel button wrap (2026-07-17)
 
 - **`open_ease.pdf` extraction fixed**: GROBID's body formatter crashes on this PDF with an
