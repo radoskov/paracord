@@ -308,7 +308,10 @@ class StagingBatchRead(BaseModel):
 
 class StagingDecision(BaseModel):
     item_id: uuid.UUID
-    action: Literal["accept", "skip"]
+    # ``append`` attaches the staged PDF to an EXISTING paper (``target_work_id`` required) —
+    # the collision-resolution action for same-DOI / same-title matches.
+    action: Literal["accept", "skip", "append"]
+    target_work_id: uuid.UUID | None = None
 
 
 class StagingCommitRequest(BaseModel):
@@ -320,6 +323,8 @@ class StagingCommitRequest(BaseModel):
 class StagingCommitResponse(BaseModel):
     batch_id: uuid.UUID
     created: int
+    # PDFs attached to existing papers via the ``append`` action.
+    appended: int = 0
     skipped: int
     created_work_ids: list[uuid.UUID] = []
     warnings: list[str] = []
@@ -481,17 +486,60 @@ def commit_staging_batch(
     if payload.auto:
         decisions = import_staging.auto_decisions(_staging_items(db, batch.id))
     else:
-        decisions = [{"item_id": str(d.item_id), "action": d.action} for d in payload.decisions]
+        decisions = [
+            {
+                "item_id": str(d.item_id),
+                "action": d.action,
+                "target_work_id": d.target_work_id,
+            }
+            for d in payload.decisions
+        ]
     summary = import_staging.commit_staging(db, actor=actor, batch=batch, decisions=decisions)
     db.commit()
     import_staging.enqueue_post_commit_jobs(summary)
     return StagingCommitResponse(
         batch_id=batch.id,
         created=summary["created"],
+        appended=summary.get("appended", 0),
         skipped=summary["skipped"],
         created_work_ids=[uuid.UUID(w) for w in summary["created_work_ids"]],
         warnings=summary["warnings"],
     )
+
+
+class StagingItemDoiPatch(BaseModel):
+    """Preview-time DOI override for one staged item (the book-vs-chapter same-DOI case)."""
+
+    doi: str | None = None
+
+
+@router.patch("/staging/{batch_id}/items/{item_id}", response_model=StagingItemRead)
+def patch_staging_item(
+    batch_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload: StagingItemDoiPatch,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> StagingItemRead:
+    """Edit or clear a staged item's DOI before commit; collisions are re-detected.
+
+    The override is what gets stored on the created paper (and recorded in its metadata
+    assertions) — GROBID's original DOI in the stored TEI is superseded. Only extracted,
+    not-yet-committed items are editable.
+    """
+    batch = _require_own_staging_batch(db, batch_id, actor)
+    item = db.get(ImportStagingItem, item_id)
+    if item is None or item.batch_id != batch.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staged item not found")
+    if item.status not in ("extracted", "extract_failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only extracted, not-yet-imported items can be edited",
+        )
+    import_staging.set_item_doi(db, item=item, doi=payload.doi)
+    db.commit()
+    db.refresh(item)
+    return StagingItemRead.model_validate(item)
 
 
 class IdentifierImportCreate(BaseModel):

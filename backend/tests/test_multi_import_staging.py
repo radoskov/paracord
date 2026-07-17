@@ -286,3 +286,287 @@ def test_auto_commit_rejected_while_extracting(client, auth_headers, db, make_us
     )
     assert resp.status_code == 409
     assert "still extracting" in resp.json()["detail"]
+
+
+# --------------------------------------------------------------- collision append + DOI editing
+
+
+def _staged_extracted_item(db, actor, tei=TEI, filename="paper.pdf", text="hello"):
+    """Stage one PDF and run its preview extraction; returns (batch, item)."""
+    batch = import_staging.stage_pdfs(
+        db, actor=actor, uploads=[(filename, _pdf(text))], mode="preview"
+    )
+    db.commit()
+    item = db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).one()
+    import_staging.extract_staging_item(db, item=item, fetch_tei=lambda _p: tei)
+    import_staging.finalize_if_ready(db, batch)
+    db.commit()
+    return batch, item
+
+
+def test_append_attaches_pdf_and_applies_extraction_to_unextracted_work(
+    db, make_user, managed_root
+):
+    """Append to a PDF-less paper: file linked, stored TEI applied, no new Work minted."""
+    actor = make_user("appender", role="editor")
+    existing = Work(
+        canonical_title="Attention Is All You Need",
+        normalized_title="attention is all you need",
+        doi="10.5555/transformer",
+    )
+    db.add(existing)
+    db.commit()
+    batch, item = _staged_extracted_item(db, actor)
+    assert item.duplicates.get("same_doi")  # the collision the user resolves via append
+
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[
+            {"item_id": str(item.id), "action": "append", "target_work_id": str(existing.id)}
+        ],
+    )
+    db.commit()
+    assert summary["appended"] == 1 and summary["created"] == 0
+    assert summary["appended_work_ids"] == [str(existing.id)]
+    # No second Work with this DOI; the file is linked to the existing paper.
+    assert db.scalar(select(func.count(Work.id)).where(Work.doi == "10.5555/transformer")) == 1
+    link = db.scalar(select(FileWorkLink).where(FileWorkLink.work_id == existing.id))
+    assert link is not None and link.file_id == item.file_id
+    # The stored preview TEI was applied (extraction landed without a fresh GROBID run).
+    from app.models.citation import RawTeiDocument
+
+    assert db.scalar(select(RawTeiDocument.id).where(RawTeiDocument.work_id == existing.id))
+    assert item.status == "committed" and item.created_work_id == existing.id
+
+
+def test_append_keeps_existing_extraction_intact(db, make_user, managed_root):
+    """Appending to an already-extracted paper attaches the file but leaves its extraction alone."""
+    from app.models.citation import RawTeiDocument
+
+    actor = make_user("appender2", role="editor")
+    existing = Work(canonical_title="Extracted already", normalized_title="extracted already")
+    prior_file = File(sha256="e" * 64, size_bytes=10, status="extracted")
+    db.add_all([existing, prior_file])
+    db.flush()
+    db.add(
+        RawTeiDocument(
+            work_id=existing.id, file_id=prior_file.id, source="grobid", tei_xml="<TEI/>"
+        )
+    )
+    db.commit()
+
+    batch, item = _staged_extracted_item(db, actor, filename="alt.pdf", text="alt bytes")
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[
+            {"item_id": str(item.id), "action": "append", "target_work_id": str(existing.id)}
+        ],
+    )
+    db.commit()
+    assert summary["appended"] == 1
+    assert db.scalar(select(FileWorkLink).where(FileWorkLink.work_id == existing.id)) is not None
+    # Still exactly the one pre-existing TEI — the second PDF did not overwrite the extraction.
+    assert (
+        db.scalar(
+            select(func.count(RawTeiDocument.id)).where(RawTeiDocument.work_id == existing.id)
+        )
+        == 1
+    )
+
+
+def test_append_respects_modify_acl(db, make_user, managed_root):
+    """A contributor cannot append to somebody else's paper — warned, nothing attached."""
+    owner = make_user("owner-of-paper", role="editor")
+    actor = make_user("mere-contributor", role="contributor")
+    theirs = Work(
+        canonical_title="Not yours",
+        normalized_title="not yours",
+        created_by_user_id=owner.id,
+    )
+    db.add(theirs)
+    db.commit()
+
+    batch, item = _staged_extracted_item(db, actor)
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[{"item_id": str(item.id), "action": "append", "target_work_id": str(theirs.id)}],
+    )
+    db.commit()
+    assert summary["appended"] == 0
+    assert any("permission" in w for w in summary["warnings"])
+    assert db.scalar(select(FileWorkLink).where(FileWorkLink.work_id == theirs.id)) is None
+
+
+def test_same_doi_sibling_gets_precise_warning(db, make_user, managed_root):
+    """Two files in one batch with the same DOI (book vs. chapter): the second names the first."""
+    actor = make_user("sibling", role="editor")
+    batch = import_staging.stage_pdfs(
+        db,
+        actor=actor,
+        uploads=[("book.pdf", _pdf("book")), ("chapter.pdf", _pdf("chapter"))],
+        mode="preview",
+    )
+    db.commit()
+    items = list(
+        db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id))
+    )
+    for item in items:
+        import_staging.extract_staging_item(db, item=item, fetch_tei=lambda _p: TEI)
+    import_staging.finalize_if_ready(db, batch)
+
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[{"item_id": str(i.id), "action": "accept"} for i in items],
+    )
+    db.commit()
+    assert summary["created"] == 1
+    assert len(summary["warnings"]) == 1
+    warning = summary["warnings"][0]
+    assert "same DOI as" in warning and "in this batch" in warning
+    assert "edit/clear one DOI" in warning
+
+
+def test_accept_against_library_doi_owner_suggests_append(db, make_user, managed_root):
+    """Creating over an existing paper's DOI is refused with the actionable append hint."""
+    actor = make_user("hinted", role="editor")
+    existing = Work(
+        canonical_title="The Transformer Paper",
+        normalized_title="the transformer paper",
+        doi="10.5555/transformer",
+    )
+    db.add(existing)
+    db.commit()
+    batch, item = _staged_extracted_item(db, actor)
+
+    summary = import_staging.commit_staging(
+        db, actor=actor, batch=batch, decisions=[{"item_id": str(item.id), "action": "accept"}]
+    )
+    db.commit()
+    assert summary["created"] == 0
+    assert any(
+        "Attach PDF to it" in w and "The Transformer Paper" in w for w in summary["warnings"]
+    )
+
+
+def test_clearing_doi_in_preview_unblocks_create(db, make_user, managed_root):
+    """The book-vs-chapter fix: clear one item's DOI in preview, then create it normally."""
+    actor = make_user("doi-editor", role="editor")
+    existing = Work(
+        canonical_title="Owns the DOI", normalized_title="owns the doi", doi="10.5555/transformer"
+    )
+    db.add(existing)
+    db.commit()
+    batch, item = _staged_extracted_item(db, actor)
+    assert item.duplicates.get("same_doi")
+
+    import_staging.set_item_doi(db, item=item, doi=None)
+    db.commit()
+    assert not (item.duplicates or {}).get("same_doi")
+    assert item.parsed["doi"] is None
+
+    summary = import_staging.commit_staging(
+        db, actor=actor, batch=batch, decisions=[{"item_id": str(item.id), "action": "accept"}]
+    )
+    db.commit()
+    assert summary["created"] == 1
+    minted = db.get(Work, uuid.UUID(summary["created_work_ids"][0]))
+    # The cleared DOI stays cleared — GROBID's original in the stored TEI does not resurrect it.
+    assert minted.doi is None
+
+
+def test_append_does_not_steal_a_claimed_doi(db, make_user, managed_root):
+    """Applying TEI to a DOI-less paper never promotes a DOI another paper owns (no 500)."""
+    actor = make_user("no-steal", role="editor")
+    owner = Work(
+        canonical_title="DOI owner", normalized_title="doi owner", doi="10.5555/transformer"
+    )
+    target = Work(canonical_title="Same title match", normalized_title="same title match")
+    db.add_all([owner, target])
+    db.commit()
+
+    batch, item = _staged_extracted_item(db, actor)
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[{"item_id": str(item.id), "action": "append", "target_work_id": str(target.id)}],
+    )
+    db.commit()
+    assert summary["appended"] == 1, summary["warnings"]
+    db.refresh(target)
+    assert target.doi is None  # recorded as a reviewable assertion, not stolen
+    db.refresh(owner)
+    assert owner.doi == "10.5555/transformer"
+
+
+def test_patch_staging_item_doi_endpoint(client, auth_headers, managed_root, monkeypatch):
+    """HTTP flow: edit a staged item's DOI in preview; collisions re-detected in the response."""
+    _stub_grobid(monkeypatch, TEI)
+    h = auth_headers("editor")
+    existing = client.post(
+        "/api/v1/works",
+        headers=h,
+        json={"canonical_title": "Existing DOI owner", "doi": "10.5555/transformer"},
+    )
+    assert existing.status_code == 201, existing.text
+
+    batch = client.post(
+        "/api/v1/imports/upload-multi",
+        headers=h,
+        files=[("files", ("one.pdf", _pdf("one"), "application/pdf"))],
+        data={"mode": "preview"},
+    ).json()
+    item = batch["items"][0]
+    assert item["duplicates"].get("same_doi")
+
+    patched = client.patch(
+        f"/api/v1/imports/staging/{batch['id']}/items/{item['id']}",
+        headers=h,
+        json={"doi": None},
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["parsed"]["doi"] is None
+    assert not (body["duplicates"] or {}).get("same_doi")
+
+
+def test_commit_append_endpoint_roundtrip(client, auth_headers, db, managed_root, monkeypatch):
+    """HTTP flow: append decision through the commit endpoint attaches to the existing paper."""
+    _stub_grobid(monkeypatch, TEI)
+    h = auth_headers("editor")
+    existing = client.post(
+        "/api/v1/works",
+        headers=h,
+        json={"canonical_title": "Append target", "doi": "10.5555/transformer"},
+    ).json()
+
+    batch = client.post(
+        "/api/v1/imports/upload-multi",
+        headers=h,
+        files=[("files", ("two.pdf", _pdf("two"), "application/pdf"))],
+        data={"mode": "preview"},
+    ).json()
+    item = batch["items"][0]
+
+    result = client.post(
+        f"/api/v1/imports/staging/{batch['id']}/commit",
+        headers=h,
+        json={
+            "decisions": [
+                {"item_id": item["id"], "action": "append", "target_work_id": existing["id"]}
+            ]
+        },
+    )
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["appended"] == 1 and body["created"] == 0
+    files = client.get(f"/api/v1/works/{existing['id']}/files", headers=h).json()
+    assert len(files) == 1

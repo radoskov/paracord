@@ -13,6 +13,7 @@ The flow "extract before storing records":
 Nothing here fails the whole batch on a single bad PDF — a failure is recorded on its item.
 """
 
+import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ from app.models.file import File, FileWorkLink
 from app.models.import_staging import ImportStagingBatch, ImportStagingItem
 from app.models.user import User
 from app.models.work import Work
+from app.services import access
 from app.services.audit import record_event
 from app.services.extraction import store_parsed_extraction
 from app.services.file_paths import resolve_backend_readable_pdf_path
@@ -300,6 +302,72 @@ def _title_for_item(item: ImportStagingItem) -> str:
     return Path(item.filename).stem.strip() or "Untitled paper"
 
 
+def _item_parsed_paper(item: ImportStagingItem) -> ParsedPaper | None:
+    """Re-parse the item's stored TEI, honouring a preview-time DOI override.
+
+    The user can edit/clear a staged item's DOI in the preview (the book-vs-chapter same-DOI
+    case); ``item.parsed["doi"]`` is the edited truth while ``tei_xml`` still carries GROBID's
+    original, so the parsed paper is patched to match before anything is stored.
+    """
+    if not item.tei_xml:
+        return None
+    parsed = parse_tei(item.tei_xml)
+    parsed.doi = normalize_doi((item.parsed or {}).get("doi") or "") or None
+    return parsed
+
+
+def set_item_doi(db: Session, *, item: ImportStagingItem, doi: str | None) -> None:
+    """Preview-time DOI override for a staged item (edit or clear), with collisions re-detected."""
+    normalized = normalize_doi(doi or "") or None
+    parsed = dict(item.parsed or {})
+    parsed["doi"] = normalized
+    item.parsed = parsed
+    item.duplicates = detect_collisions(
+        db, sha256=item.sha256, doi=normalized, title=parsed.get("title")
+    )
+    item.updated_at = datetime.now(UTC)
+
+
+def append_item_to_work(
+    db: Session, *, item: ImportStagingItem, work: Work, actor: User
+) -> tuple[bool, str | None]:
+    """Attach a staged PDF to an EXISTING paper (the collision "append PDF" action).
+
+    Links the staged file to ``work`` (content-addressed → a re-attach is a no-op) and applies
+    the stored preview extraction ONLY when the paper has no extraction yet — a paper that was
+    already extracted from another PDF keeps its references/sections untouched (the second PDF
+    is just an alternate file). Returns ``(applied_extraction, error)``.
+    """
+    from app.models.citation import RawTeiDocument
+
+    if item.file_id is None:
+        return False, "staged file is missing"
+    existing_link = db.scalar(
+        select(FileWorkLink).where(
+            FileWorkLink.file_id == item.file_id, FileWorkLink.work_id == work.id
+        )
+    )
+    if existing_link is None:
+        db.add(FileWorkLink(file_id=item.file_id, work_id=work.id, user_confirmed=True))
+    file = db.get(File, item.file_id)
+
+    has_extraction = (
+        db.scalar(select(RawTeiDocument.id).where(RawTeiDocument.work_id == work.id)) is not None
+    )
+    parsed = _item_parsed_paper(item)
+    if has_extraction or parsed is None or file is None:
+        # Keep the paper's existing extraction (or there is nothing to apply): attach only. When
+        # the paper has no extraction AND this item has no TEI, owe a fresh extraction (D7).
+        if not has_extraction and file is not None:
+            mark_extraction_requested(file)
+        return False, None
+    store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=item.tei_xml)
+    file.status = "extracted"
+    # store_parsed_extraction only promotes into an empty, unclaimed DOI; nothing else to sync.
+    work.arxiv_base_id = arxiv_base_id(work.arxiv_id)
+    return True, None
+
+
 def _create_work_from_item(
     db: Session, *, item: ImportStagingItem, actor: User, settings: Settings
 ) -> tuple[Work, bool]:
@@ -322,9 +390,9 @@ def _create_work_from_item(
     file = db.get(File, item.file_id) if item.file_id else None
 
     needs_extraction = False
-    if item.tei_xml and file is not None:
+    parsed = _item_parsed_paper(item)  # honours a preview-time DOI edit/clear
+    if parsed is not None and file is not None:
         # Apply the extraction captured at preview time — no GROBID re-run.
-        parsed: ParsedPaper = parse_tei(item.tei_xml)
         store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=item.tei_xml)
         file.status = "extracted"
     elif file is not None:
@@ -365,21 +433,95 @@ def commit_staging(
         ).all()
     }
     created: list[str] = []
+    appended: list[str] = []
     enrich_ids: list[str] = []  # TEI already applied → just enrich
     extract_file_ids: list[str] = []  # preview extraction failed → (re)extract, which chains enrich
     skipped = 0
     warnings: list[str] = []
+    # DOIs minted earlier in THIS commit, so a same-DOI sibling (book vs. chapter) gets a precise
+    # message naming the first file instead of a savepoint unique-violation autopsy.
+    doi_minted_by: dict[str, str] = {}
+
+    def _doi_owner_hint(doi: str | None) -> str | None:
+        """A precise, actionable reason when ``doi`` is already taken, else None."""
+        if not doi:
+            return None
+        sibling = doi_minted_by.get(doi)
+        if sibling:
+            return (
+                f"same DOI as “{sibling}” in this batch — edit/clear one DOI in the preview, "
+                "or import only one"
+            )
+        owner = db.scalar(select(Work).where(Work.doi == doi, Work.merged_into_id.is_(None)))
+        if owner is not None:
+            return (
+                f"same DOI as “{owner.canonical_title or owner.id}” — choose “Attach PDF to it” "
+                "in the preview instead of creating a new paper"
+            )
+        return None
+
     for decision in decisions:
         item = by_id.get(str(decision.get("item_id")))
         if item is None or item.status in ("committed", "skipped"):
             continue
-        if decision.get("action") != "accept":
+        action = decision.get("action")
+
+        if action == "append":
+            # Attach this staged PDF to an existing paper (collision resolution). ACL-checked
+            # like any other modification of that paper.
+            try:
+                target_id = uuid.UUID(str(decision.get("target_work_id")))
+            except (ValueError, TypeError):
+                warnings.append(f"{item.filename}: no valid paper chosen to attach to")
+                continue
+            target = db.get(Work, target_id)
+            if target is None or target.merged_into_id is not None:
+                warnings.append(f"{item.filename}: the chosen paper no longer exists")
+                continue
+            if not access.can_modify_work(db, actor, target):
+                warnings.append(
+                    f"{item.filename}: you do not have permission to modify "
+                    f"“{target.canonical_title or target.id}”"
+                )
+                continue
+            try:
+                with db.begin_nested():
+                    applied, error = append_item_to_work(db, item=item, work=target, actor=actor)
+                    if error:
+                        raise ValueError(error)
+                    db.flush()
+            except Exception as exc:  # noqa: BLE001 - one bad item must not abort the commit
+                item.status = "extract_failed"
+                item.error = f"append failed: {exc}".strip()[:500]
+                warnings.append(f"{item.filename}: could not attach ({exc})")
+                item.updated_at = datetime.now(UTC)
+                continue
+            item.created_work_id = target.id
+            item.status = "committed"
+            item.updated_at = datetime.now(UTC)
+            appended.append(str(target.id))
+            if applied:
+                enrich_ids.append(str(target.id))
+            elif item.file_id is not None and item.tei_xml is None:
+                extract_file_ids.append(str(item.file_id))
+            continue
+
+        if action != "accept":
             item.status = "skipped"
             item.updated_at = datetime.now(UTC)
             skipped += 1
             continue
-        # Per-item SAVEPOINT so one bad item (e.g. a DOI that collides with a sibling in the same
-        # batch) rolls back only itself and the rest of the commit still proceeds.
+
+        item_doi = normalize_doi((item.parsed or {}).get("doi") or "") or None
+        hint = _doi_owner_hint(item_doi)
+        if hint:
+            item.status = "extract_failed"
+            item.error = f"commit refused: {hint}"[:500]
+            warnings.append(f"{item.filename}: {hint}")
+            item.updated_at = datetime.now(UTC)
+            continue
+        # Per-item SAVEPOINT so one bad item (e.g. a unique conflict this pre-check didn't cover)
+        # rolls back only itself and the rest of the commit still proceeds.
         try:
             with db.begin_nested():
                 work, needs_extraction = _create_work_from_item(
@@ -396,6 +538,8 @@ def commit_staging(
             warnings.append(f"{item.filename}: could not create paper (possible duplicate DOI)")
             item.updated_at = datetime.now(UTC)
             continue
+        if item_doi:
+            doi_minted_by[item_doi] = item.filename
         item.created_work_id = work.id
         item.status = "committed"
         item.updated_at = datetime.now(UTC)
@@ -415,12 +559,19 @@ def commit_staging(
         actor_user_id=actor.id,
         entity_type="import_staging_batch",
         entity_id=str(batch.id),
-        details={"created": len(created), "skipped": skipped, "warnings": warnings},
+        details={
+            "created": len(created),
+            "appended": len(appended),
+            "skipped": skipped,
+            "warnings": warnings,
+        },
     )
     return {
         "batch_id": str(batch.id),
         "created_work_ids": created,
         "created": len(created),
+        "appended_work_ids": appended,
+        "appended": len(appended),
         "skipped": skipped,
         "warnings": warnings,
         "_enrich_work_ids": enrich_ids,

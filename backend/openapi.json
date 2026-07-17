@@ -7003,6 +7003,11 @@
       },
       "StagingCommitResponse": {
         "properties": {
+          "appended": {
+            "default": 0,
+            "title": "Appended",
+            "type": "integer"
+          },
           "batch_id": {
             "format": "uuid",
             "title": "Batch Id",
@@ -7047,7 +7052,8 @@
           "action": {
             "enum": [
               "accept",
-              "skip"
+              "skip",
+              "append"
             ],
             "title": "Action",
             "type": "string"
@@ -7056,6 +7062,18 @@
             "format": "uuid",
             "title": "Item Id",
             "type": "string"
+          },
+          "target_work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Work Id"
           }
         },
         "required": [
@@ -7063,6 +7081,24 @@
           "action"
         ],
         "title": "StagingDecision",
+        "type": "object"
+      },
+      "StagingItemDoiPatch": {
+        "description": "Preview-time DOI override for one staged item (the book-vs-chapter same-DOI case).",
+        "properties": {
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          }
+        },
+        "title": "StagingItemDoiPatch",
         "type": "object"
       },
       "StagingItemRead": {
@@ -17821,6 +17857,86 @@
           }
         },
         "summary": "Commit Staging Batch",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/staging/{batch_id}/items/{item_id}": {
+      "patch": {
+        "description": "Edit or clear a staged item's DOI before commit; collisions are re-detected.\n\nThe override is what gets stored on the created paper (and recorded in its metadata\nassertions) — GROBID's original DOI in the stored TEI is superseded. Only extracted,\nnot-yet-committed items are editable.",
+        "operationId": "patch_staging_item_api_v1_imports_staging__batch_id__items__item_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagingItemDoiPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Staging Item",
         "tags": [
           "imports"
         ]

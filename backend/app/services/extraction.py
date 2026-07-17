@@ -129,8 +129,25 @@ def store_parsed_extraction(
 
     doi_canonical = bool(promotable and parsed.doi and not work.doi)
     if doi_canonical:
-        work.doi = normalize_doi(parsed.doi)  # S3: never store a decorated DOI on the work
-        promoted.append("doi")
+        # A DOI is UNIQUE across works: promoting one that another live paper already owns would
+        # blow up the whole transaction with a unique violation (e.g. attaching a same-title PDF
+        # whose DOI belongs to a different record). Keep it as a reviewable assertion instead.
+        normalized_doi = normalize_doi(parsed.doi)
+        claimed_elsewhere = (
+            db.scalar(
+                select(Work.id).where(
+                    Work.doi == normalized_doi,
+                    Work.id != work.id,
+                    Work.merged_into_id.is_(None),
+                )
+            )
+            is not None
+        )
+        if claimed_elsewhere:
+            doi_canonical = False
+        else:
+            work.doi = normalized_doi  # S3: never store a decorated DOI on the work
+            promoted.append("doi")
     assert_field("doi", parsed.doi, canonical=doi_canonical)
 
     # Issue 11: promote the paper's own venue/year mined from the TEI header when GROBID supplies
