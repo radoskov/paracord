@@ -19,7 +19,7 @@
   import BatchImport from '../components/BatchImport.svelte';
   import DraftReview from '../components/DraftReview.svelte';
   import ShelfPicker from '../components/ShelfPicker.svelte';
-  import { pendingImportText } from '../lib/selection';
+  import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
   import { isOwner } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -161,13 +161,33 @@
     for (const sig of BLOCKING) if (item.duplicates?.[sig]?.length) return sig;
     return null;
   }
-  function dupWarnings(item: StagingItem): string[] {
+  function dupWarnings(item: StagingItem): { text: string; refs: { work_id: string; title: string }[] }[] {
     const d = item.duplicates ?? {};
-    const out: string[] = [];
-    if (d.same_pdf?.length) out.push('same PDF already in library');
-    if (d.same_doi?.length) out.push('same DOI as an existing paper');
-    if (d.same_title?.length) out.push('same title as an existing paper');
+    const out: { text: string; refs: { work_id: string; title: string }[] }[] = [];
+    if (d.same_pdf?.length) out.push({ text: 'same PDF already on', refs: d.same_pdf });
+    if (d.same_doi?.length) out.push({ text: 'same DOI as', refs: d.same_doi });
+    if (d.same_title?.length) out.push({ text: 'same title as', refs: d.same_title });
     return out;
+  }
+
+  // Open a colliding paper in the Library tab so the user can verify the match before choosing
+  // create/attach/skip. LibraryPage consumes pendingLibraryOpen once and selects the paper.
+  function viewInLibrary(workId: string): void {
+    pendingLibraryOpen.set(workId);
+    window.location.hash = '#library';
+  }
+
+  // Open a staged PDF in a new tab (blob URL — the fetch carries the auth token; staged files are
+  // loose/unlinked, which the stream ACL treats as see-able).
+  async function previewStagedPdf(item: StagingItem): Promise<void> {
+    if (!item.file_id) return;
+    const fileId = item.file_id;
+    await run(async () => {
+      const blob = await client.getFileBlob(fileId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    });
   }
 
   // Existing papers this staged PDF could be attached to: DOI matches first, then title matches
@@ -235,7 +255,10 @@
       skipped,
       warnings: batch.items
         .filter((i) => i.status === 'skipped' || i.status === 'extract_failed')
-        .map((i) => `${i.filename}: ${i.error ?? dupWarnings(i).join(', ') ?? 'skipped'}`),
+        .map(
+          (i) =>
+            `${i.filename}: ${i.error ?? dupWarnings(i).map((w) => w.text).join(', ') ?? 'skipped'}`,
+        ),
     };
     message = `Imported ${created} paper(s)${skipped ? `; skipped ${skipped}` : ''}.`;
   }
@@ -536,7 +559,12 @@
             </span>
             <span role="cell">
               <strong>{item.parsed?.title || item.filename}</strong>
-              <span class="muted small">{item.filename}</span>
+              <span class="muted small">{item.filename}
+                {#if item.file_id}
+                  <button type="button" class="linklike" on:click={() => previewStagedPdf(item)}
+                    title="Open this uploaded PDF in a new browser tab to check it before importing">preview ↗</button>
+                {/if}
+              </span>
             </span>
             <span role="cell" class="small">
               {#if item.parsed?.authors?.length}<span>{item.parsed.authors.slice(0, 4).join('; ')}</span>{/if}
@@ -558,7 +586,15 @@
                     title="Edit or clear this file's DOI before importing (e.g. a chapter sharing the book's DOI)">edit</button>
                 {/if}
               {:else if item.parsed?.doi}<span> · doi:{item.parsed.doi}</span>{/if}
-              {#each warns as w}<span class="dup">⚠ {w}</span>{/each}
+              {#each warns as w}
+                <span class="dup">⚠ {w.text}
+                  {#each w.refs.slice(0, 3) as ref, ri (ref.work_id)}
+                    {#if ri > 0},{/if}
+                    <button type="button" class="linklike" on:click={() => viewInLibrary(ref.work_id)}
+                      title="Open “{ref.title}” in the Library to verify the match before deciding">“{ref.title}”</button>
+                  {/each}
+                </span>
+              {/each}
               {#if sibling}
                 <span class="dup">⚠ same DOI as “{sibling}” in this batch — only one can keep it;
                   edit/clear a DOI or import just one</span>

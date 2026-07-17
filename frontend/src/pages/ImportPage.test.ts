@@ -135,7 +135,9 @@ describe('ImportPage multi-PDF import (batch10 #1)', () => {
     // Create-new is refused for a same-DOI collision; attach-to-existing is offered.
     expect(options.find((o) => o.value === 'accept')?.disabled).toBe(true);
     expect(options.some((o) => o.value === 'append:w9')).toBe(true);
-    expect(screen.getByText(/same DOI as an existing paper/)).toBeTruthy();
+    // The collision warning links the matching paper for in-Library verification.
+    expect(screen.getByText(/same DOI as/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /“Existing”/ })).toBeTruthy();
   });
 
   it('allows create-new OR append for a title-only match', async () => {

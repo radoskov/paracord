@@ -7138,6 +7138,18 @@
             ],
             "title": "Error"
           },
+          "file_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
           "filename": {
             "title": "Filename",
             "type": "string"
@@ -9305,6 +9317,11 @@
           "content_available": {
             "default": true,
             "title": "Content Available",
+            "type": "boolean"
+          },
+          "extraction_degraded": {
+            "default": false,
+            "title": "Extraction Degraded",
             "type": "boolean"
           },
           "extraction_queued": {

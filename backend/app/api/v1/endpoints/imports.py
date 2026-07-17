@@ -281,6 +281,9 @@ class StagingItemRead(BaseModel):
     id: uuid.UUID
     filename: str
     sha256: str | None = None
+    # The staged (content-addressed, not-yet-linked) file — lets the preview UI stream the PDF
+    # (loose files are see-able) so the user can eyeball it before deciding create/attach/skip.
+    file_id: uuid.UUID | None = None
     status: str
     error: str | None = None
     # Preview metadata parsed from TEI ({title, authors, year, doi, venue, abstract}).

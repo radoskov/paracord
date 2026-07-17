@@ -683,6 +683,8 @@ export interface StagingItem {
   id: string;
   filename: string;
   sha256: string | null;
+  // The staged file id — streams the PDF for the preview affordance (null while staging failed).
+  file_id?: string | null;
   status: string; // pending | extracting | extracted | extract_failed | committed | skipped
   error: string | null;
   parsed: {
@@ -785,6 +787,10 @@ export interface WorkFile {
   extraction_queued?: boolean;
   // How many OTHER papers this exact PDF is also attached to (batch10) — drives the duplicate badge.
   also_in_count?: number;
+  // True when the stored extraction came from the degraded header+references fallback (GROBID's
+  // full-text parser crashed on the PDF): metadata + bibliography + plain body text, no real
+  // sections or citation contexts.
+  extraction_degraded?: boolean;
 }
 
 // What merging one paper into another would do (issue 4). Mirrors the backend MergePaperPreview.
