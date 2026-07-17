@@ -2703,8 +2703,13 @@
 
   .file-actions {
     display: flex;
-    flex-shrink: 0;
+    /* Wrap into extra rows instead of overflowing the paper-view column when it is narrow —
+       seven per-file buttons don't fit one line there (flex-shrink: 0 previously forced them
+       out of the page). */
+    flex-wrap: wrap;
     gap: 0.35rem;
+    justify-content: flex-end;
+    min-width: 0;
   }
 
   .bar-actions {
