@@ -2003,6 +2003,15 @@ export class ApiClient {
     return response.json() as Promise<WorkFile>;
   }
 
+  // Attach a PDF that already exists on the SERVER's filesystem (Files panel "From server path").
+  // The backend only accepts paths inside the allowed server import roots.
+  async attachWorkFileFromPath(workId: string, path: string): Promise<WorkFile> {
+    return this.request<WorkFile>(`/api/v1/works/${workId}/files/from-path`, {
+      method: "POST",
+      body: { path },
+    });
+  }
+
   async listCitationContexts(workId: string): Promise<CitationContext[]> {
     return this.request<CitationContext[]>(
       `/api/v1/works/${workId}/citation-contexts`,

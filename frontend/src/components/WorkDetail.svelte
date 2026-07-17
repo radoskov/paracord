@@ -957,6 +957,76 @@
     }, `Attached “${file.name}”; extraction queued — the paper refreshes when it finishes`);
   }
 
+  // --- Attach from URL / server path (Files panel): paste a PDF's web URL (the server fetches it
+  //     under the find-on-web download policy) or a path on the server machine (must be inside an
+  //     allowed import root). One small modal serves both modes.
+  let remoteAttachMode: 'url' | 'path' | null = null;
+  let remoteAttachValue = '';
+  let remoteAttachBusy = false;
+  let remoteAttachMsg = ''; // success line → the primary button becomes "OK"
+  let remoteAttachErr = '';
+  // needs_confirmation step (unrestricted policy, unknown host): the reason to show; Proceed re-sends confirmed.
+  let remoteAttachConfirm: string | null = null;
+
+  function openRemoteAttach(mode: 'url' | 'path'): void {
+    remoteAttachMode = mode;
+    remoteAttachValue = '';
+    remoteAttachMsg = '';
+    remoteAttachErr = '';
+    remoteAttachConfirm = null;
+  }
+
+  function closeRemoteAttach(): void {
+    remoteAttachMode = null;
+  }
+
+  async function submitRemoteAttach(confirmed = false): Promise<void> {
+    const value = remoteAttachValue.trim();
+    if (!value || remoteAttachBusy) return;
+    remoteAttachBusy = true;
+    remoteAttachErr = '';
+    remoteAttachMsg = '';
+    try {
+      if (remoteAttachMode === 'url') {
+        const response = await client.downloadWebCandidates(work.id, [
+          { candidate_id: 'manual-url', url: value, source: 'manual_url', confirmed },
+        ]);
+        const result = response.results[0];
+        if (!result) {
+          remoteAttachErr = 'No result returned.';
+        } else if (result.status === 'needs_confirmation') {
+          remoteAttachConfirm = result.reason ?? 'The host is not on the allowed-downloads list.';
+        } else if (result.status === 'attached' || result.status === 'deduped') {
+          remoteAttachConfirm = null;
+          remoteAttachMsg =
+            result.status === 'attached'
+              ? 'PDF fetched and attached; extraction queued.'
+              : 'That PDF is already in the library — linked it to this paper.';
+          // The download can backfill doi/arxiv and queues extraction — refresh like find-on-web.
+          const fresh = await client.getWork(work.id);
+          onUpdated(fresh);
+          await loadDetail(fresh);
+          watchWorkJobs();
+        } else {
+          // manual_upload_needed / error / blocked → show the backend's reason verbatim.
+          remoteAttachConfirm = null;
+          remoteAttachErr =
+            result.reason ??
+            'No PDF could be fetched from that URL (it may need a login or serve HTML only).';
+        }
+      } else {
+        const attached = await client.attachWorkFileFromPath(work.id, value);
+        remoteAttachMsg = `Attached “${attached.original_filename ?? 'file'}”; extraction queued.`;
+        files = await client.listWorkFiles(work.id);
+        watchWorkJobs();
+      }
+    } catch (error) {
+      remoteAttachErr = errorMessage(error);
+    } finally {
+      remoteAttachBusy = false;
+    }
+  }
+
   async function reextract(file: WorkFile): Promise<void> {
     await run(async () => {
       const result = await client.extractFile(file.id);
@@ -1395,6 +1465,10 @@
       <input id="attach-pdf-input" type="file" accept=".pdf,application/pdf" on:change={(e) => (attachFile = e.currentTarget.files?.[0] ?? null)} aria-label="Attach PDF" />
       <button type="button" on:click={upload} disabled={!attachFile || loading || !canModify}
         title={!canModify ? INSUFFICIENT_ROLE : attachFile ? 'Attach this PDF to the paper' : 'Choose a PDF to attach'}>Attach PDF</button>
+      <button type="button" class="secondary" on:click={() => openRemoteAttach('url')} disabled={loading || !canModify}
+        title={canModify ? 'Paste a PDF link — the server fetches and attaches it' : INSUFFICIENT_ROLE}>From URL…</button>
+      <button type="button" class="secondary" on:click={() => openRemoteAttach('path')} disabled={loading || !canModify}
+        title={canModify ? 'Attach a PDF already on the server machine by its file path (must be inside an allowed import folder)' : INSUFFICIENT_ROLE}>From server path…</button>
     </div>
     {#if files.length === 0}
       <p class="empty">No files attached. Attach a PDF above to read and extract it.</p>
@@ -1854,6 +1928,59 @@
     <WorkPicker {client} excludeId={work.id} onSelect={doMove} autofocusInput
       initialQuery={work.canonical_title ?? ''}
       placeholder="Search the destination paper by title, DOI, or identifier…" />
+  </Modal>
+{/if}
+
+{#if remoteAttachMode}
+  <Modal
+    title={remoteAttachMode === 'url' ? 'Attach a PDF from a URL' : 'Attach a PDF from a server path'}
+    onClose={closeRemoteAttach}>
+    <p class="modal-lead">
+      {#if remoteAttachMode === 'url'}
+        Paste the PDF's web address (e.g. the link behind a site's “Download PDF” button). The
+        server fetches it under the download policy and attaches it to this paper.
+      {:else}
+        Enter the file's absolute path <strong>on the server machine</strong>. Only paths inside an
+        allowed import folder are accepted (owner: <em>Admin → Server import folders</em>).
+      {/if}
+    </p>
+    <form class="remote-attach" on:submit|preventDefault={() => submitRemoteAttach(false)}>
+      <input
+        bind:value={remoteAttachValue}
+        placeholder={remoteAttachMode === 'url'
+          ? 'https://example.org/paper.pdf'
+          : '/shared/papers/paper.pdf'}
+        aria-label={remoteAttachMode === 'url' ? 'PDF URL' : 'Server file path'}
+        disabled={remoteAttachBusy || !!remoteAttachMsg}
+      />
+      {#if remoteAttachConfirm}
+        <p class="ra-warn" role="alert">⚠ {remoteAttachConfirm}</p>
+      {/if}
+      {#if remoteAttachMsg}<p class="ra-ok" role="status">{remoteAttachMsg}</p>{/if}
+      {#if remoteAttachErr}
+        <p class="ra-err" role="alert">
+          {#each linkifyReason(remoteAttachErr) as part}
+            {#if part.url}<a href={part.url} target="_blank" rel="noreferrer noopener">{part.url}</a>{:else}{part.text}{/if}
+          {/each}
+        </p>
+      {/if}
+      <div class="ra-actions">
+        {#if remoteAttachMsg}
+          <button type="button" on:click={closeRemoteAttach}>OK</button>
+        {:else if remoteAttachConfirm}
+          <button type="button" on:click={() => submitRemoteAttach(true)} disabled={remoteAttachBusy}
+            title="The host is not on the allowed list — download from it anyway">Download anyway</button>
+          <button type="button" class="secondary" on:click={closeRemoteAttach} disabled={remoteAttachBusy}>Cancel</button>
+        {:else}
+          <button type="submit" disabled={remoteAttachBusy || !remoteAttachValue.trim()}
+            title={remoteAttachValue.trim()
+              ? remoteAttachMode === 'url' ? 'Fetch the PDF and attach it' : 'Read the file and attach it'
+              : remoteAttachMode === 'url' ? 'Paste a URL first' : 'Enter a path first'}>
+            {remoteAttachBusy ? 'Working…' : 'Proceed'}</button>
+          <button type="button" class="secondary" on:click={closeRemoteAttach} disabled={remoteAttachBusy}>Cancel</button>
+        {/if}
+      </div>
+    </form>
   </Modal>
 {/if}
 
@@ -3154,5 +3281,36 @@
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;
+  }
+
+  /* Attach-from-URL / server-path modal form. */
+  .remote-attach {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .remote-attach input {
+    width: 100%;
+  }
+  .ra-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .ra-warn {
+    background: var(--status-warning-bg);
+    border: 1px solid var(--status-warning-border);
+    border-radius: var(--radius-sm);
+    color: var(--status-warning);
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+  }
+  .ra-ok {
+    color: var(--status-success);
+    margin: 0;
+  }
+  .ra-err {
+    color: var(--status-danger);
+    margin: 0;
+    overflow-wrap: anywhere;
   }
 </style>
