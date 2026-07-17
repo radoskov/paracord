@@ -111,7 +111,7 @@ describe('ImportPage multi-PDF import (batch10 #1)', () => {
     expect(client.commitStagingBatch).not.toHaveBeenCalled();
   });
 
-  it('marks a blocked (duplicate) item unchecked by default in preview', async () => {
+  it('offers append-to-existing for a DOI collision, with create-new refused', async () => {
     const blocked = stagingItem({
       id: 'dup',
       filename: 'dup.pdf',
@@ -125,9 +125,108 @@ describe('ImportPage multi-PDF import (batch10 #1)', () => {
     selectFiles(1);
     await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
 
-    const checkbox = (await screen.findByLabelText('Create paper from dup.pdf')) as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
+    // A colliding item renders the action select instead of a checkbox, defaulting to Skip.
+    const select = (await screen.findByLabelText('Action for dup.pdf')) as HTMLSelectElement;
+    expect(select.value).toBe('skip');
+    const options = Array.from(select.options).map((o) => ({
+      value: o.value,
+      disabled: o.disabled,
+    }));
+    // Create-new is refused for a same-DOI collision; attach-to-existing is offered.
+    expect(options.find((o) => o.value === 'accept')?.disabled).toBe(true);
+    expect(options.some((o) => o.value === 'append:w9')).toBe(true);
     expect(screen.getByText(/same DOI as an existing paper/)).toBeTruthy();
+  });
+
+  it('allows create-new OR append for a title-only match', async () => {
+    const titled = stagingItem({
+      id: 'tm',
+      filename: 'tm.pdf',
+      duplicates: { same_title: [{ work_id: 'w7', title: 'Workshop version' }] },
+    });
+    const client = makeClient({
+      uploadPdfsMulti: vi.fn().mockResolvedValue(readyBatch({ items: [titled] })),
+    });
+    render(ImportPage, { client: client as never });
+
+    selectFiles(1);
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
+
+    const select = (await screen.findByLabelText('Action for tm.pdf')) as HTMLSelectElement;
+    const options = Array.from(select.options);
+    // Title matches don't block creating a new paper (workshop vs. journal version).
+    expect(options.find((o) => o.value === 'accept')?.disabled).toBe(false);
+    expect(options.some((o) => o.value === 'append:w7')).toBe(true);
+  });
+
+  it('commits an append decision with the chosen target paper', async () => {
+    const blocked = stagingItem({
+      id: 'dup2',
+      filename: 'dup2.pdf',
+      duplicates: { same_doi: [{ work_id: 'w9', title: 'Existing' }] },
+    });
+    const commitStagingBatch = vi.fn().mockResolvedValue({
+      batch_id: 'batch1',
+      created: 0,
+      appended: 1,
+      skipped: 0,
+      created_work_ids: [],
+      warnings: [],
+    });
+    const client = makeClient({
+      uploadPdfsMulti: vi.fn().mockResolvedValue(readyBatch({ items: [blocked] })),
+      commitStagingBatch,
+      getStagingBatch: vi
+        .fn()
+        .mockResolvedValue(readyBatch({ status: 'committed', items: [blocked] })),
+    });
+    render(ImportPage, { client: client as never });
+
+    selectFiles(1);
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
+    const select = (await screen.findByLabelText('Action for dup2.pdf')) as HTMLSelectElement;
+    await fireEvent.change(select, { target: { value: 'append:w9' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Create selected papers' }));
+
+    await waitFor(() =>
+      expect(commitStagingBatch).toHaveBeenCalledWith('batch1', {
+        decisions: [{ item_id: 'dup2', action: 'append', target_work_id: 'w9' }],
+      }),
+    );
+    expect((await screen.findAllByText(/attached 1 PDF/)).length).toBeGreaterThan(0);
+  });
+
+  it('warns when two files in the batch parsed to the same DOI and lets one clear it', async () => {
+    const book = stagingItem({
+      id: 'bk',
+      filename: 'book.pdf',
+      parsed: { title: 'The Book', authors: [], year: 2020, doi: '10.1/shared' },
+    });
+    const chapter = stagingItem({
+      id: 'ch',
+      filename: 'chapter.pdf',
+      parsed: { title: 'A Chapter', authors: [], year: 2020, doi: '10.1/shared' },
+    });
+    const cleared = { ...chapter, parsed: { ...chapter.parsed, doi: null } };
+    const patchStagingItemDoi = vi.fn().mockResolvedValue(cleared);
+    const client = makeClient({
+      uploadPdfsMulti: vi.fn().mockResolvedValue(readyBatch({ items: [book, chapter] })),
+      patchStagingItemDoi,
+    });
+    render(ImportPage, { client: client as never });
+
+    selectFiles(2);
+    await fireEvent.click(screen.getByRole('button', { name: 'Preview & choose' }));
+
+    // Both rows carry the intra-batch warning before any edit.
+    expect((await screen.findAllByText(/same DOI as .* in this batch/)).length).toBe(2);
+
+    // Clear the chapter's DOI through the inline editor.
+    await fireEvent.click(screen.getAllByRole('button', { name: 'edit' })[1]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear DOI' }));
+    await waitFor(() => expect(patchStagingItemDoi).toHaveBeenCalledWith('batch1', 'ch', null));
+    // The clash warnings are gone once only one file keeps the DOI.
+    await waitFor(() => expect(screen.queryAllByText(/same DOI as .* in this batch/).length).toBe(0));
   });
 });
 

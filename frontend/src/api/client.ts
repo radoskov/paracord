@@ -711,9 +711,18 @@ export interface StagingBatch {
 export interface StagingCommitResult {
   batch_id: string;
   created: number;
+  // PDFs attached to existing papers via the "append" collision-resolution action.
+  appended: number;
   skipped: number;
   created_work_ids: string[];
   warnings: string[];
+}
+
+export interface StagingDecision {
+  item_id: string;
+  // "append" attaches the staged PDF to an existing paper (target_work_id required).
+  action: "accept" | "skip" | "append";
+  target_work_id?: string | null;
 }
 
 export interface CitationContext {
@@ -2515,12 +2524,27 @@ export class ApiClient {
 
   async commitStagingBatch(
     batchId: string,
-    payload: { auto?: boolean; decisions?: { item_id: string; action: "accept" | "skip" }[] },
+    payload: { auto?: boolean; decisions?: StagingDecision[] },
   ): Promise<StagingCommitResult> {
     return this.request<StagingCommitResult>(`/api/v1/imports/staging/${batchId}/commit`, {
       method: "POST",
       body: { auto: payload.auto ?? false, decisions: payload.decisions ?? [] },
     });
+  }
+
+  // Preview-time DOI override for one staged item (edit or clear); collisions are re-detected.
+  async patchStagingItemDoi(
+    batchId: string,
+    itemId: string,
+    doi: string | null,
+  ): Promise<StagingItem> {
+    return this.request<StagingItem>(
+      `/api/v1/imports/staging/${batchId}/items/${itemId}`,
+      {
+        method: "PATCH",
+        body: { doi },
+      },
+    );
   }
 
   async importByIdentifier(

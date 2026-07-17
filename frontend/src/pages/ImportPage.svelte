@@ -13,6 +13,7 @@
     type ServerImportRoot,
     type Source,
     type StagingBatch,
+    type StagingDecision,
     type StagingItem,
   } from '../api/client';
   import BatchImport from '../components/BatchImport.svelte';
@@ -145,8 +146,15 @@
   // ---- Multi-PDF import (batch10 #1): extract before storing, preview, then choose. ----
   let multiFiles: File[] = [];
   let staging: StagingBatch | null = null;
-  let accept: Record<string, boolean> = {};
-  let commitResult: { created: number; skipped: number; warnings: string[] } | null = null;
+  // Per-item decision: 'accept' (create a new paper), 'skip', or 'append:<workId>' (attach the
+  // PDF to that existing paper — the collision-resolution action).
+  let choices: Record<string, string> = {};
+  let commitResult: {
+    created: number;
+    appended?: number;
+    skipped: number;
+    warnings: string[];
+  } | null = null;
 
   const BLOCKING = ['same_pdf', 'same_doi'] as const;
   function itemBlocked(item: StagingItem): string | null {
@@ -162,30 +170,61 @@
     return out;
   }
 
+  // Existing papers this staged PDF could be attached to: DOI matches first, then title matches
+  // (deduped). same_pdf matches are excluded — that PDF is already on those papers.
+  function appendCandidates(item: StagingItem): { work_id: string; title: string }[] {
+    const d = item.duplicates ?? {};
+    const seen = new Set<string>();
+    const out: { work_id: string; title: string }[] = [];
+    for (const ref of [...(d.same_doi ?? []), ...(d.same_title ?? [])]) {
+      if (!seen.has(ref.work_id)) {
+        seen.add(ref.work_id);
+        out.push(ref);
+      }
+    }
+    return out;
+  }
+
+  // Another not-yet-decided file in this batch parsed to the same DOI (the book-vs-chapter trap):
+  // only one of them can keep it — surface the conflict before commit does.
+  function siblingDoiClash(item: StagingItem): string | null {
+    const doi = (item.parsed?.doi ?? '').trim().toLowerCase();
+    if (!doi || !staging) return null;
+    const other = staging.items.find(
+      (i) =>
+        i.id !== item.id &&
+        !['committed', 'skipped'].includes(i.status) &&
+        (i.parsed?.doi ?? '').trim().toLowerCase() === doi,
+    );
+    return other ? other.filename : null;
+  }
+
+  function defaultChoice(item: StagingItem): string {
+    return item.status === 'extracted' && !itemBlocked(item) ? 'accept' : 'skip';
+  }
+
   function resetMulti(): void {
     multiFiles = [];
     staging = null;
-    accept = {};
+    choices = {};
     commitResult = null;
   }
 
-  // Seed the accept map: check extracted, non-blocked items by default.
-  function seedAccept(batch: StagingBatch): void {
-    const next: Record<string, boolean> = {};
-    for (const item of batch.items) {
-      next[item.id] = item.status === 'extracted' && !itemBlocked(item);
-    }
-    accept = next;
+  // Seed the decision map: create extracted, non-blocked items by default.
+  function seedChoices(batch: StagingBatch): void {
+    const next: Record<string, string> = {};
+    for (const item of batch.items) next[item.id] = defaultChoice(item);
+    choices = next;
   }
 
-  // Add default checkbox states for items that just finished extracting, without clobbering
-  // the user's existing choices (the poll loop calls this on every tick).
-  function mergeAccept(batch: StagingBatch): void {
-    const next = { ...accept };
+  // Add default decisions for items that just finished extracting, without clobbering the
+  // user's existing choices (the poll loop calls this on every tick).
+  function mergeChoices(batch: StagingBatch): void {
+    const next = { ...choices };
     for (const item of batch.items) {
-      if (!(item.id in next)) next[item.id] = item.status === 'extracted' && !itemBlocked(item);
+      if (!(item.id in next)) next[item.id] = defaultChoice(item);
     }
-    accept = next;
+    choices = next;
   }
 
   function summarizeDirect(batch: StagingBatch): void {
@@ -199,6 +238,37 @@
         .map((i) => `${i.filename}: ${i.error ?? dupWarnings(i).join(', ') ?? 'skipped'}`),
     };
     message = `Imported ${created} paper(s)${skipped ? `; skipped ${skipped}` : ''}.`;
+  }
+
+  // ---- Preview-time DOI editing (book-vs-chapter same-DOI fix) ----
+  let doiEditItemId: string | null = null;
+  let doiEditValue = '';
+
+  function openDoiEdit(item: StagingItem): void {
+    doiEditItemId = item.id;
+    doiEditValue = item.parsed?.doi ?? '';
+  }
+
+  async function saveDoiEdit(clear: boolean): Promise<void> {
+    if (!staging || !doiEditItemId) return;
+    const batchId = staging.id;
+    const itemId = doiEditItemId;
+    await run(async () => {
+      const updated = await client.patchStagingItemDoi(
+        batchId,
+        itemId,
+        clear ? null : doiEditValue.trim() || null,
+      );
+      if (staging && staging.id === batchId) {
+        staging = {
+          ...staging,
+          items: staging.items.map((i) => (i.id === itemId ? updated : i)),
+        };
+        // Collisions changed → recompute this item's default unless the user already decided.
+        choices = { ...choices, [itemId]: defaultChoice(updated) };
+      }
+      doiEditItemId = null;
+    });
   }
 
   // Live-updating, unbounded poll (S-batch item 2): the preview refreshes while extraction runs,
@@ -219,7 +289,7 @@
         } catch {
           continue; // transient poll error — keep trying
         }
-        mergeAccept(batch);
+        mergeChoices(batch);
         staging = batch;
         if (batch.status !== 'extracting') break;
       }
@@ -243,7 +313,7 @@
         summarizeDirect(batch);
         return;
       }
-      seedAccept(batch);
+      seedChoices(batch);
       if (!batch.extraction_queued) warning = EXTRACTION_QUEUE_WARNING;
       if (batch.status === 'extracting') void pollLoop(batch.id, mode);
     });
@@ -252,24 +322,33 @@
   // partial=true: import ONLY the checked, already-extracted items and leave the rest undecided
   // (the batch stays open — usable repeatedly while extraction continues). partial=false: the
   // classic closing commit — accept checked, skip everything else.
+  // Translate a per-item choice string into the commit decision payload.
+  function toDecision(itemId: string): StagingDecision {
+    const choice = choices[itemId] ?? 'skip';
+    if (choice.startsWith('append:')) {
+      return { item_id: itemId, action: 'append', target_work_id: choice.slice('append:'.length) };
+    }
+    return { item_id: itemId, action: choice === 'accept' ? 'accept' : 'skip' };
+  }
+
   async function commitSelected(partial: boolean): Promise<void> {
     if (!staging) return;
     const batchId = staging.id;
     const decisions = partial
       ? staging.items
-          .filter((i) => i.status === 'extracted' && accept[i.id])
-          .map((i) => ({ item_id: i.id, action: 'accept' as const }))
+          .filter((i) => i.status === 'extracted' && choices[i.id] && choices[i.id] !== 'skip')
+          .map((i) => toDecision(i.id))
       : staging.items
           .filter((i) => !['committed', 'skipped'].includes(i.status))
-          .map((i) => ({
-            item_id: i.id,
-            action: (accept[i.id] ? 'accept' : 'skip') as 'accept' | 'skip',
-          }));
+          .map((i) => toDecision(i.id));
     if (!decisions.length) return;
     await run(async () => {
       const result = await client.commitStagingBatch(batchId, { decisions });
       commitResult = result;
-      message = `Created ${result.created} paper(s)${result.skipped ? `; skipped ${result.skipped}` : ''}.`;
+      const parts = [`Created ${result.created} paper(s)`];
+      if (result.appended) parts.push(`attached ${result.appended} PDF(s) to existing papers`);
+      if (result.skipped) parts.push(`skipped ${result.skipped}`);
+      message = `${parts.join('; ')}.`;
       staging = await client.getStagingBatch(batchId);
       if (staging.status === 'extracting') void pollLoop(batchId, 'preview');
     });
@@ -398,9 +477,11 @@
     <h2>Upload PDFs</h2>
     <p class="muted">
       Add one or more PDFs — each becomes its own paper. <strong>Preview &amp; choose</strong>
-      extracts every PDF first, shows the metadata and any collisions, and lets you pick which papers
-      to create. <strong>Import directly</strong> creates them straight away (a duplicate PDF/DOI or a
-      failed extraction is skipped with a note). GROBID extraction runs in the background.
+      extracts every PDF first, shows the metadata and any collisions, and lets you pick per file:
+      create a new paper, <em>attach the PDF to the matching existing paper</em> (same DOI or same
+      title), or skip. A file's DOI can be edited or cleared before importing.
+      <strong>Import directly</strong> creates them straight away (a duplicate PDF/DOI or a failed
+      extraction is skipped with a note). GROBID extraction runs in the background.
     </p>
     <input type="file" accept=".pdf,application/pdf" multiple
       on:change={(e) => (multiFiles = Array.from(e.currentTarget.files ?? []))}
@@ -426,10 +507,32 @@
         {#each staging.items.filter((i) => !['committed', 'skipped'].includes(i.status)) as item (item.id)}
           {@const blocked = itemBlocked(item)}
           {@const warns = dupWarnings(item)}
+          {@const candidates = appendCandidates(item)}
+          {@const sibling = siblingDoiClash(item)}
           <div class="preview-row" role="row">
             <span role="cell">
-              <input type="checkbox" bind:checked={accept[item.id]}
-                disabled={item.status !== 'extracted'} aria-label={`Create paper from ${item.filename}`} />
+              {#if item.status === 'extracted' && candidates.length}
+                <!-- Collision resolution: skip / create new (refused for same-DOI/same-PDF) /
+                     attach the PDF to one of the matching papers. -->
+                <select bind:value={choices[item.id]} class="choice"
+                  aria-label={`Action for ${item.filename}`}
+                  title={blocked
+                    ? 'This PDF collides with an existing paper — attach it there, or skip'
+                    : 'Create a new paper, attach the PDF to the matching paper, or skip'}>
+                  <option value="skip">Skip</option>
+                  <option value="accept" disabled={!!blocked}>
+                    Create new paper{blocked ? ` — blocked (${blocked.replace('_', ' ')})` : ''}
+                  </option>
+                  {#each candidates as cand (cand.work_id)}
+                    <option value={`append:${cand.work_id}`}>Attach PDF to: {cand.title}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input type="checkbox"
+                  checked={choices[item.id] === 'accept'}
+                  on:change={(e) => (choices = { ...choices, [item.id]: e.currentTarget.checked ? 'accept' : 'skip' })}
+                  disabled={item.status !== 'extracted'} aria-label={`Create paper from ${item.filename}`} />
+              {/if}
             </span>
             <span role="cell">
               <strong>{item.parsed?.title || item.filename}</strong>
@@ -438,12 +541,32 @@
             <span role="cell" class="small">
               {#if item.parsed?.authors?.length}<span>{item.parsed.authors.slice(0, 4).join('; ')}</span>{/if}
               {#if item.parsed?.year}<span> · {item.parsed.year}</span>{/if}
-              {#if item.parsed?.doi}<span> · doi:{item.parsed.doi}</span>{/if}
+              {#if item.status === 'extracted'}
+                {#if doiEditItemId === item.id}
+                  <span class="doi-edit">
+                    <input bind:value={doiEditValue} placeholder="10.xxxx/… (empty = no DOI)"
+                      aria-label={`DOI for ${item.filename}`} />
+                    <button type="button" class="secondary small-btn" on:click={() => saveDoiEdit(false)}
+                      title="Save this DOI for the imported paper">Save</button>
+                    <button type="button" class="secondary small-btn" on:click={() => saveDoiEdit(true)}
+                      title="Import without any DOI (keeps it off this record)">Clear DOI</button>
+                    <button type="button" class="secondary small-btn" on:click={() => (doiEditItemId = null)}>Cancel</button>
+                  </span>
+                {:else}
+                  <span> · doi:{item.parsed?.doi ?? '—'}</span>
+                  <button type="button" class="linklike" on:click={() => openDoiEdit(item)}
+                    title="Edit or clear this file's DOI before importing (e.g. a chapter sharing the book's DOI)">edit</button>
+                {/if}
+              {:else if item.parsed?.doi}<span> · doi:{item.parsed.doi}</span>{/if}
               {#each warns as w}<span class="dup">⚠ {w}</span>{/each}
+              {#if sibling}
+                <span class="dup">⚠ same DOI as “{sibling}” in this batch — only one can keep it;
+                  edit/clear a DOI or import just one</span>
+              {/if}
             </span>
             <span role="cell" class="small">
               {#if item.status === 'extract_failed'}<span class="dup">extraction failed{item.error ? `: ${item.error}` : ''}</span>
-              {:else if blocked}<span class="dup">blocked ({blocked.replace('_', ' ')})</span>
+              {:else if blocked}<span class="dup">collision ({blocked.replace('_', ' ')})</span>
               {:else}{item.status}{/if}
             </span>
           </div>
@@ -460,7 +583,10 @@
           extracted papers below — the rest keep processing.</p>
         <div class="row">
           <button type="button" on:click={() => commitSelected(true)}
-            disabled={loading || !staging.items.some((i) => i.status === 'extracted' && accept[i.id])}
+            disabled={loading ||
+              !staging.items.some(
+                (i) => i.status === 'extracted' && choices[i.id] && choices[i.id] !== 'skip',
+              )}
             title="Import the checked, already-extracted papers now; the rest keep processing"
             >Import selected now</button>
           <button type="button" class="secondary" on:click={resetMulti} disabled={loading}>Cancel</button>
@@ -476,7 +602,9 @@
 
     {#if commitResult}
       <div class="commit-result">
-        <p class="msg">Created {commitResult.created} paper(s){commitResult.skipped ? `; skipped ${commitResult.skipped}` : ''}.</p>
+        <p class="msg">Created {commitResult.created} paper(s){commitResult.appended
+            ? `; attached ${commitResult.appended} PDF(s) to existing papers`
+            : ''}{commitResult.skipped ? `; skipped ${commitResult.skipped}` : ''}.</p>
         {#if commitResult.warnings.length}
           <ul class="warn-list">
             {#each commitResult.warnings as w}<li>{w}</li>{/each}
@@ -725,8 +853,42 @@
     align-items: start;
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: 3.5rem minmax(0, 2fr) minmax(0, 3fr) 8rem;
+    /* The first column stretches for the collision-action select, stays narrow for checkboxes. */
+    grid-template-columns: minmax(3.5rem, max-content) minmax(0, 2fr) minmax(0, 3fr) 8rem;
     padding: 0.4rem 0.6rem;
+  }
+
+  .choice {
+    max-width: 15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .linklike {
+    background: none;
+    border: none;
+    color: var(--accent-link);
+    cursor: pointer;
+    font-size: 0.78rem;
+    min-height: auto;
+    padding: 0 0.15rem;
+    text-decoration: underline;
+  }
+
+  .doi-edit {
+    align-items: center;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .doi-edit input {
+    max-width: 16rem;
+  }
+
+  .small-btn {
+    min-height: 1.7rem;
+    padding: 0.1rem 0.5rem;
   }
 
   .preview-head {
