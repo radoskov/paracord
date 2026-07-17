@@ -132,11 +132,15 @@ describe("CitationSummaryPage enrichments (Track C)", () => {
       expect(screen.getByTestId("summary-preview-toggle")).toBeTruthy(),
     );
     await fireEvent.click(screen.getByTestId("summary-preview-toggle"));
-    expect(client.externalPreview).toHaveBeenCalledWith({
-      doi: "10.9/missing",
-      arxiv: "1706.03762",
-      referenceId: "ref-1",
-    });
+    expect(client.externalPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        doi: "10.9/missing",
+        arxiv: "1706.03762",
+        referenceId: "ref-1",
+        // Title fallback payload for identifier-less references.
+        title: expect.any(String),
+      }),
+    );
     await waitFor(() =>
       expect(screen.getByText(/dominant sequence transduction/)).toBeTruthy(),
     );

@@ -85,6 +85,8 @@ def external_preview(
     *,
     doi: str | None = None,
     arxiv_id: str | None = None,
+    title: str | None = None,
+    year: int | None = None,
     settings=None,
     arxiv_fetcher: Callable[..., ExternalMetadata | None] = fetch_arxiv,
     crossref_fetcher: Callable[..., ExternalMetadata | None] = fetch_crossref_by_doi,
@@ -99,11 +101,19 @@ def external_preview(
     """
     doi = normalize_doi(doi) if doi else None
     arxiv_id = arxiv_id.strip() if arxiv_id else None
-    if not doi and not arxiv_id:
-        return None
 
     if settings is not None and not getattr(settings, "enrichment_enabled", True):
         return None
+
+    if not doi and not arxiv_id:
+        # Title fallback (2026-07-17): most cited-but-missing references carry no identifier, so
+        # "no identifier -> no preview" made the button useless for them. A confident Crossref
+        # bibliographic match resolves a DOI, which then feeds the normal multi-source pipeline.
+        # NOTE this widens the egress from identifier-only to title (like find-on-web, and only
+        # on this explicit user action); a weak/ambiguous match yields None rather than a guess.
+        doi = _resolve_doi_by_title(title, year, settings=settings) if title else None
+        if not doi:
+            return None
 
     key = _cache_key(doi, arxiv_id)
     cached = _PREVIEW_CACHE.get(key, _CACHE_MISS)
@@ -140,3 +150,39 @@ def external_preview(
 
 
 __all__ = ["ExternalPreview", "PREVIEW_TTL_SECONDS", "external_preview"]
+
+
+# Title-match confidence floor for the no-identifier fallback: SequenceMatcher over normalized
+# titles. 0.9 tolerates minor punctuation/subtitle drift while rejecting different papers.
+_TITLE_MATCH_THRESHOLD = 0.9
+
+
+def _resolve_doi_by_title(title: str, year: int | None, *, settings=None) -> str | None:
+    """Resolve a DOI from a confident Crossref bibliographic title match, else None.
+
+    The top candidates are compared on NORMALIZED titles; a year, when both sides have one, may
+    differ by at most 1 (preprint vs. published). First confident hit wins.
+    """
+    from difflib import SequenceMatcher
+
+    from app.services.web_find import search_crossref
+    from app.utils.normalization import normalize_title
+
+    wanted = normalize_title(title or "")
+    if not wanted:
+        return None
+    mailto = getattr(settings, "crossref_mailto", None) if settings is not None else None
+    try:
+        candidates = search_crossref(title, [], year, mailto=mailto, rows=5)
+    except Exception:  # noqa: BLE001 - a flaky source must not break the preview
+        return None
+    for candidate in candidates:
+        if not candidate.doi or not candidate.title:
+            continue
+        got = normalize_title(candidate.title)
+        if SequenceMatcher(None, wanted, got).ratio() < _TITLE_MATCH_THRESHOLD:
+            continue
+        if year is not None and candidate.year is not None and abs(candidate.year - year) > 1:
+            continue
+        return candidate.doi
+    return None

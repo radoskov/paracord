@@ -15788,7 +15788,7 @@
     },
     "/api/v1/citations/external-preview": {
       "get": {
-        "description": "Fetch a metadata preview for a cited-but-missing reference by DOI / arXiv id.\n\nIdentifier-only egress (SPEC §7): only the identifier is sent to the enrichment connectors. When\n``reference_id`` is given, its citing work must be visible to the actor (404 otherwise) and the\nreference's DOI/arXiv id is used. With no identifier — or when no source returns anything — the\nresponse is ``available=false`` with a \"no preview available\" message rather than an error.",
+        "description": "Fetch a metadata preview for a cited-but-missing reference by DOI / arXiv id / title.\n\nIdentifier egress first (SPEC §7); with NO identifier, a ``title`` (+ optional ``year``) is\nsent to Crossref for a confident bibliographic match instead — the same title egress\nfind-on-web performs, and only on this explicit user action. When ``reference_id`` is given,\nits citing work must be visible to the actor (404 otherwise) and the reference's DOI/arXiv id\nis used. When nothing resolves the response is ``available=false`` with a message rather\nthan an error.",
         "operationId": "get_external_preview_api_v1_citations_external_preview_get",
         "parameters": [
           {
@@ -15838,6 +15838,39 @@
                 }
               ],
               "title": "Reference Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "title",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Title"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
             }
           },
           {

@@ -243,7 +243,7 @@ def test_external_preview_endpoint_by_reference(
     ref = make_reference(db, citing_work_id=citing.id, doi="10.9/wanted", title="Wanted")
     db.commit()
 
-    def _stub(*, doi=None, arxiv_id=None, settings=None):
+    def _stub(*, doi=None, arxiv_id=None, title=None, year=None, settings=None):
         return ExternalPreview(title="Wanted paper", authors=["Grace Hopper"], year=1999, doi=doi)
 
     monkeypatch.setattr(citations_ep, "external_preview", _stub)
@@ -312,3 +312,79 @@ def test_missing_export_endpoint_rejects_bad_format(client, auth_headers) -> Non
         headers=auth_headers("owner"),
     )
     assert response.status_code == 400
+
+
+def test_external_preview_title_fallback_resolves_confident_match(monkeypatch) -> None:
+    """No identifier + a title → a confident Crossref title match resolves a DOI and the normal
+    multi-source pipeline runs on it (2026-07-17: previews for identifier-less references)."""
+    from app.services import web_find
+
+    external_preview._PREVIEW_CACHE.clear()
+    monkeypatch.setattr(
+        web_find,
+        "search_crossref",
+        lambda title, authors, year, **kw: [
+            web_find.WebCandidate(
+                source="crossref",
+                title="Attention Is All You Need",
+                authors=["Vaswani"],
+                year=2017,
+                doi="10.5555/attention",
+            )
+        ],
+    )
+    preview = external_preview.external_preview(
+        title="Attention is all you need",
+        year=2017,
+        arxiv_fetcher=lambda *a, **k: None,
+        crossref_fetcher=lambda doi, **k: ExternalMetadata(
+            source="crossref",
+            title="Attention Is All You Need",
+            abstract="Transformers.",
+            authors=["Ashish Vaswani"],
+            year=2017,
+            venue="NeurIPS",
+        ),
+        openalex_fetcher=lambda *a, **k: None,
+        semantic_scholar_fetcher=lambda *a, **k: None,
+    )
+    assert preview is not None
+    assert preview.title == "Attention Is All You Need"
+    assert preview.abstract == "Transformers."
+
+
+def test_external_preview_title_fallback_rejects_weak_or_wrong_year(monkeypatch) -> None:
+    from app.services import web_find
+
+    external_preview._PREVIEW_CACHE.clear()
+    # A clearly different paper title → no confident match → None (never a wrong guess).
+    monkeypatch.setattr(
+        web_find,
+        "search_crossref",
+        lambda title, authors, year, **kw: [
+            web_find.WebCandidate(
+                source="crossref",
+                title="A Completely Different Paper About Fish",
+                authors=[],
+                year=2017,
+                doi="10.5555/fish",
+            )
+        ],
+    )
+    assert external_preview.external_preview(title="Attention is all you need") is None
+
+    # Same title, far-apart year → rejected too (preprint tolerance is ±1).
+    monkeypatch.setattr(
+        web_find,
+        "search_crossref",
+        lambda title, authors, year, **kw: [
+            web_find.WebCandidate(
+                source="crossref",
+                title="Attention Is All You Need",
+                authors=[],
+                year=2010,
+                doi="10.5555/wrong-era",
+            )
+        ],
+    )
+    assert external_preview.external_preview(title="Attention is all you need", year=2017) is None

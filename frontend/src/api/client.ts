@@ -3432,16 +3432,21 @@ export class ApiClient {
     );
   }
 
-  /** On-demand preview of an external cited-but-missing reference (Track C C1; identifier-only). */
+  /** On-demand preview of an external cited-but-missing reference (Track C C1). Identifier
+   * first; with no identifier the backend falls back to a confident Crossref title match. */
   async externalPreview(params: {
     doi?: string | null;
     arxiv?: string | null;
     referenceId?: string | null;
+    title?: string | null;
+    year?: number | null;
   }): Promise<ExternalPreview> {
     const query = new URLSearchParams();
     if (params.doi) query.set("doi", params.doi);
     if (params.arxiv) query.set("arxiv", params.arxiv);
     if (params.referenceId) query.set("reference_id", params.referenceId);
+    if (params.title) query.set("title", params.title);
+    if (params.year != null) query.set("year", String(params.year));
     return this.request<ExternalPreview>(
       `/api/v1/citations/external-preview?${query}`,
     );

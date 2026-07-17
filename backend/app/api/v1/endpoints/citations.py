@@ -274,15 +274,19 @@ def get_external_preview(
     doi: str | None = Query(None),
     arxiv: str | None = Query(None),
     reference_id: uuid.UUID | None = Query(None),
+    title: str | None = Query(None, max_length=500),
+    year: int | None = Query(None),
     db: Session = DB_DEP,
     actor: User = AUTH_DEP,
 ) -> ExternalPreviewResponse:
-    """Fetch a metadata preview for a cited-but-missing reference by DOI / arXiv id.
+    """Fetch a metadata preview for a cited-but-missing reference by DOI / arXiv id / title.
 
-    Identifier-only egress (SPEC §7): only the identifier is sent to the enrichment connectors. When
-    ``reference_id`` is given, its citing work must be visible to the actor (404 otherwise) and the
-    reference's DOI/arXiv id is used. With no identifier — or when no source returns anything — the
-    response is ``available=false`` with a "no preview available" message rather than an error.
+    Identifier egress first (SPEC §7); with NO identifier, a ``title`` (+ optional ``year``) is
+    sent to Crossref for a confident bibliographic match instead — the same title egress
+    find-on-web performs, and only on this explicit user action. When ``reference_id`` is given,
+    its citing work must be visible to the actor (404 otherwise) and the reference's DOI/arXiv id
+    is used. When nothing resolves the response is ``available=false`` with a message rather
+    than an error.
     """
     if reference_id is not None:
         reference = db.get(Reference, reference_id)
@@ -303,14 +307,21 @@ def get_external_preview(
         doi = doi or reference.doi
         arxiv = arxiv or reference.arxiv_id
 
-    if not (doi or arxiv):
+    if not (doi or arxiv or title):
         return ExternalPreviewResponse(
             available=False, message="No preview available (no identifier)."
         )
 
-    preview = external_preview(doi=doi, arxiv_id=arxiv, settings=get_settings())
+    preview = external_preview(
+        doi=doi, arxiv_id=arxiv, title=title, year=year, settings=get_settings()
+    )
     if preview is None:
-        return ExternalPreviewResponse(available=False, message="No preview available.")
+        message = (
+            "No preview available."
+            if (doi or arxiv)
+            else "No preview available (no identifier, and no confident title match)."
+        )
+        return ExternalPreviewResponse(available=False, message=message)
     return ExternalPreviewResponse(
         available=True,
         title=preview.title,

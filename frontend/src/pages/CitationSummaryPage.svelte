@@ -25,7 +25,7 @@
   import ChartHost from '../components/ChartHost.svelte';
   import { activeVizTheme } from '../lib/theme/store';
   import { resolveScopeRequest, type ScopeRequest } from '../lib/scope';
-  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
+  import { pendingIdentifierImport, pendingImportText, pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -199,6 +199,10 @@
         doi: missing.doi,
         arxiv: missing.arxiv_id,
         referenceId: missing.reference_id,
+        // Title fallback: lets identifier-less references still resolve a preview via a
+        // confident Crossref title match.
+        title: missing.title,
+        year: missing.year,
       });
       previews = { ...previews, [missing.key]: preview };
     } catch (error) {
@@ -224,6 +228,34 @@
     }
   }
 
+  // Full import via the Import tab (like clicking an external graph node): identifier form
+  // when the reference carries a DOI/arXiv id, else the citations box with a lookup line.
+  function importViaImportTab(missing: MissingWork): void {
+    const identifier = missing.doi || missing.arxiv_id;
+    if (identifier) {
+      pendingIdentifierImport.set(identifier);
+    } else {
+      const line = missing.year != null ? `${missing.title} (${missing.year})` : missing.title;
+      pendingImportText.set(line);
+    }
+    window.location.hash = '#import';
+  }
+
+  // Send the queued (decision = import) missing works to the Import tab's citation box as
+  // free-text lines — the Queue mark becomes an actionable acquisition list, not just a badge.
+  function sendQueuedToImport(): void {
+    const queued = (summary?.frequently_cited_missing ?? []).filter(
+      (m) => decisions[m.key] === 'import',
+    );
+    if (!queued.length) return;
+    const lines = queued.map((m) => {
+      const base = m.year != null ? `${m.title} (${m.year})` : m.title;
+      return m.doi ? `${base} doi:${m.doi}` : base;
+    });
+    pendingImportText.set(lines.join('\n'));
+    window.location.hash = '#import';
+  }
+
   async function exportMissing(format: 'bibtex' | 'csv'): Promise<void> {
     exportingMissing = true;
     try {
@@ -245,6 +277,9 @@
   }
 
   // Partition the missing list by decision so ignored items collapse out of the active worklist.
+  $: queuedCount = (summary?.frequently_cited_missing ?? []).filter(
+    (m) => decisions[m.key] === 'import',
+  ).length;
   $: activeMissing = (summary?.frequently_cited_missing ?? []).filter(
     (m) => decisions[m.key] !== 'ignore',
   );
@@ -403,6 +438,15 @@
             <h3>Frequently cited but missing</h3>
             {#if summary.frequently_cited_missing.length > 0}
               <span class="export-group">
+                {#if queuedCount > 0}
+                  <button
+                    class="ghost"
+                    type="button"
+                    on:click={sendQueuedToImport}
+                    data-testid="summary-send-queued"
+                    title="Prefill the Import tab's citation box with the queued works">
+                    Send {queuedCount} queued to Import</button>
+                {/if}
                 <button
                   class="ghost"
                   type="button"
@@ -435,16 +479,14 @@
                     {/if}
                   </div>
                   <div class="missing-actions">
-                    {#if m.doi || m.arxiv_id || m.reference_id}
-                      <button
-                        class="ghost"
-                        type="button"
-                        on:click={() => togglePreview(m)}
-                        data-testid="summary-preview-toggle"
-                        title="Preview title, authors and abstract before importing">
-                        {m.key in previews ? 'Hide preview' : 'Preview'}
-                      </button>
-                    {/if}
+                    <button
+                      class="ghost"
+                      type="button"
+                      on:click={() => togglePreview(m)}
+                      data-testid="summary-preview-toggle"
+                      title="Preview title, authors and abstract before importing (falls back to a title lookup when there is no identifier)">
+                      {m.key in previews ? 'Hide preview' : 'Preview'}
+                    </button>
                     {#if decisions[m.key] === 'import'}
                       <button
                         class="ghost"
@@ -471,10 +513,21 @@
                         type="button"
                         disabled={importing === m.key}
                         on:click={() => importMissing(m)}
-                        data-testid="summary-import">
-                        {importing === m.key ? 'Importing…' : 'Import'}
+                        data-testid="summary-create"
+                        title="Create a bare paper record from this reference's metadata (you fill in the rest)">
+                        {importing === m.key ? 'Creating…' : 'Create'}
                       </button>
                     {/if}
+                    <button
+                      class="import"
+                      type="button"
+                      on:click={() => importViaImportTab(m)}
+                      data-testid="summary-import"
+                      title={m.doi || m.arxiv_id
+                        ? 'Open the Import tab with this identifier prefilled (full import: metadata lookup + enrichment)'
+                        : 'Open the Import tab with this citation prefilled (lookup by title)'}>
+                      Import
+                    </button>
                   </div>
                   {#if m.key in previews}
                     <div class="preview" data-testid="summary-preview">
@@ -821,7 +874,9 @@
 
   .block ol {
     margin: 0;
-    padding-left: 1.2rem;
+    /* Wide enough for 3-digit list markers: they render OUTSIDE the content box and the scroll
+       container clips them, so 1.2rem showed only the last digit of "10."+ (user report). */
+    padding-left: 2.4rem;
   }
 
   /* Fold each column into a ~15-item window (UX batch): every significant entry is returned and
