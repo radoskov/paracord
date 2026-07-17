@@ -9,6 +9,20 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## NUL-byte PDF import 500 fixed (2026-07-17)
+
+- **"NetworkError" on importing `95-ont-ijcai95-ont-method.pdf` root-caused**: NOT the embedded
+  file the PDF carries (that's inert) — the 1995-era custom font encoding makes PyMuPDF extract
+  the first page with raw control codes including **NUL (0x00)**, and the `files.preview_text`
+  INSERT died with Postgres `DataError: text fields cannot contain NUL` → 500 → the browser
+  reports "NetworkError". Fix: `sanitize_extracted_text` (storage service) strips C0 controls
+  (keeping `\t \n \r`) at the preview extractor, so every ingest path (Import tab, paper-detail
+  attach, folder scan, from-path/from-URL) is covered at the single source. The chunking
+  service's identical private regex (it hit the same DataError earlier via GROBID labels) now
+  imports the shared `CONTROL_CHARS`. Verified live: the real file imports, GROBID extracts
+  title + year 1995, and enrich/chunk/embed jobs all complete; 3 regression tests added (SQLite
+  accepts NULs, so they assert on the stored value).
+
 ## Profile layout + attach-from-URL/server-path (2026-07-17)
 
 - **Profile page reorganized**: two independent flex columns inside the grid (no cross-column
