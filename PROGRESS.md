@@ -9,6 +9,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Citation-summary polish + S2 downloads + graph overlap fan-out (2026-07-17)
+
+- **Citation summary** (`dd7f7ec`): Preview gains a title fallback (confident Crossref match ≥0.9
+  normalized-title similarity, year ±1 → resolved DOI feeds the normal multi-source preview;
+  never guesses — refuses ambiguity). Note: widens preview egress from identifier-only to title,
+  like find-on-web, only on the explicit click. The Queue mark is now actionable ("Send N queued
+  to Import" prefills the citations box); the record-creator is renamed **Create** and a new
+  **Import** button routes to the Import tab (Identifier form with DOI/arXiv, else citations
+  box). List numbering fixed: `ol` padding 1.2→2.4rem (outside markers were clipped to the last
+  digit by the scroll container).
+- **Semantic Scholar downloads** (`b6b6140`): semanticscholar.org serves an empty 202 to
+  non-browsers, so page-anchor discovery saw nothing. New `api_pdf_candidates()`: S2 Graph API
+  (openAccessPdf/arXiv/DOI→Unpaywall) + a **DBLP hop** for pre-2017 NeurIPS papers (no DOI/arXiv/
+  OA-PDF in the S2 API; DBLP lists the electronic editions) + NeurIPS publisher rewrites +
+  explicit 429 backoff (S2's shared pool sends no Retry-After) + 1h discovery cache. Fallback
+  loop tries up to 8 candidates, all policy-gated. Live-verified: the TransE SS page attached
+  the real 9-page NeurIPS PDF. Under `restricted` policy the refusal names the host with the
+  policy hint — the owner can allow `papers.nips.cc`/`proceedings.neurips.cc` or switch to
+  `careful` to let NeurIPS downloads through.
+- **Graph overlap fan-out** (`c75c35e`): co-located markers from different color-group series
+  stacked exactly (pies hiding under circles). Temporal map: per-group x-offset ~1.2% of the
+  axis range; reference graph: group-level fan-out nested on the existing action-kind fan-out.
+
 ## UX batch: jobs visibility, per-item shelves, descriptions, title tags (2026-07-17)
 
 - **Insights external node → import by DOI**: clicking an external graph node now opens the
