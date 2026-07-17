@@ -10,13 +10,26 @@ import type { VizTheme } from "./theme";
 // imports the heavy echarts bundle — the renderer is pure and the Svelte host lazy-loads echarts.
 export type EChartsOptionLike = Record<string, unknown>;
 
+// Per-render options the host passes down for the encoding info row and the legend-chip
+// hover-highlight. Both are optional so a renderer/host that ignores them still works.
+export interface RenderOpts {
+  // Human label for the size encoding, shown in the tooltip's "size = …" info row (e.g. "degree",
+  // "citation count", "weighted citations"). Omitted → the renderer skips/uses its own size label.
+  sizeLabel?: string;
+  // Legend-chip hover highlight: dim every node that has NONE of these color groups, so hovering a
+  // chip makes ALL nodes carrying that color pop (OR semantics for multi-membership nodes). Null/
+  // empty → no dimming.
+  highlightGroups?: Set<string> | null;
+}
+
 export interface VizRenderer {
   viewType: string;
   // Ordering hint for the view-type selector (lower = earlier). Unset renderers sort after ordered
   // ones, then alphabetically. Lets us make the temporal map the default without a hardcoded string.
   order?: number;
-  // Build the ECharts option from a payload + theme. Pure and synchronous → unit-testable.
-  buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike;
+  // Build the ECharts option from a payload + theme (+ host render options). Pure and synchronous →
+  // unit-testable.
+  buildOption(payload: VizPayload, theme: VizTheme, opts?: RenderOpts): EChartsOptionLike;
 }
 
 const RENDERERS = new Map<string, VizRenderer>();

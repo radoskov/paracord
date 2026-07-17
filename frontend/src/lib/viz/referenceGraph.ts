@@ -3,6 +3,7 @@
 import { pieSymbol } from "../graphPie";
 // unit-testable in jsdom (the modal lazy-loads echarts and calls setOption with this).
 import type { ReferenceGraph, ReferenceGraphNode } from "../../api/client";
+import { encodingRow, isHighlighted } from "./colorGroups";
 import type { EChartsOptionLike } from "./registry";
 import type { VizTheme } from "./theme";
 
@@ -212,6 +213,66 @@ export function yValueFor(
   }
 }
 
+// Node-kind → legend label (the color-group name when colorBy === "kind").
+const REF_KIND_LABEL: Record<string, string> = {
+  base: "This paper",
+  local: "In library",
+  likely_local: "Likely in library",
+  external: "External",
+  citing: "Cites this",
+};
+
+/** The color-group names a reference node belongs to for the active `colorBy` — the LIST for
+ * shelf/rack/tag (via memberships), else its single venue/kind group. Shared by the renderer's
+ * highlight/tooltip and the modal's legend chips so filtering/highlight use one definition. */
+export function referenceNodeGroups(n: ReferenceGraphNode, colorBy: string): string[] {
+  if (colorBy === "venue") return [n.venue || "unknown"];
+  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag")
+    return n.memberships?.[colorBy] ?? [];
+  return [REF_KIND_LABEL[n.kind] ?? n.kind];
+}
+
+/** Ordered color groups + their colors for the active `colorBy`, mirroring the renderer's series
+ * colors EXACTLY so the modal's legend chips match the plotted markers. Venue keeps insertion
+ * order; shelf/rack/tag sort alphabetically; kind uses its fixed palette slots (present kinds
+ * only). */
+export function referenceColorGroups(
+  graph: ReferenceGraph,
+  colorBy: string,
+  theme: VizTheme,
+): { groups: string[]; colors: string[] } {
+  const palette = theme.categorical ?? [];
+  const wrap = (i: number) => palette[i % Math.max(1, palette.length)] ?? theme.text;
+  if (colorBy === "venue") {
+    const groups = [...new Set(graph.nodes.map((n) => n.venue || "unknown"))];
+    return { groups, colors: groups.map((_, i) => wrap(i)) };
+  }
+  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+    const groups = [
+      ...new Set(graph.nodes.flatMap((n) => n.memberships?.[colorBy] ?? [])),
+    ].sort((a, b) => a.localeCompare(b));
+    return { groups, colors: groups.map((_, i) => wrap(i)) };
+  }
+  // kind: fixed palette slots (matches the renderer's kind series), present kinds only.
+  const localColor = palette[1] ?? theme.text;
+  const kindDefs: { kind: string; color: string }[] = [
+    { kind: "base", color: palette[0] ?? theme.axisLine },
+    { kind: "local", color: localColor },
+    { kind: "likely_local", color: lighten(localColor, 0.45) },
+    { kind: "external", color: palette[3] ?? theme.splitLine },
+    { kind: "citing", color: (palette ?? [])[4] ?? theme.text },
+  ];
+  const present = new Set<string>(graph.nodes.map((n) => n.kind));
+  const groups: string[] = [];
+  const colors: string[] = [];
+  for (const d of kindDefs) {
+    if (!present.has(d.kind)) continue;
+    groups.push(REF_KIND_LABEL[d.kind]);
+    colors.push(d.color);
+  }
+  return { groups, colors };
+}
+
 /**
  * Build the per-paper reference-graph ECharts scatter option from a fetched graph payload.
  * X is always publication year (a "no year" lane sits left of the earliest year); Y is the
@@ -227,11 +288,24 @@ export function buildReferenceGraphOption(
   graph: ReferenceGraph,
   weights: Record<string, number>,
   theme: VizTheme,
-  opts: { yAxis?: string; colorBy?: string; showRefEdges?: boolean } = {},
+  opts: {
+    yAxis?: string;
+    colorBy?: string;
+    showRefEdges?: boolean;
+    highlightGroups?: Set<string> | null;
+  } = {},
 ): EChartsOptionLike {
   const yAxisKey = opts.yAxis ?? "weighted";
   const colorBy = opts.colorBy ?? "kind";
   const showRefEdges = opts.showRefEdges ?? false;
+  const highlight = opts.highlightGroups ?? null;
+  // Chip-hover highlight: a collapsed marker stays lit if ANY of its members' colors is hovered
+  // (OR), else it dims. `null`/empty highlight → everything stays lit.
+  const dimmed = (members: ReferenceGraphNode[]): boolean =>
+    !isHighlighted(
+      [...new Set(members.flatMap((m) => referenceNodeGroups(m, colorBy)))],
+      highlight,
+    );
   const axisName =
     REFERENCE_Y_AXES.find((o) => o.key === yAxisKey)?.axisName ??
     "Weighted citations";
@@ -299,28 +373,24 @@ export function buildReferenceGraphOption(
     // entry — they're all citing papers — but in-library vs external stays distinguishable, the
     // same related-but-different scheme as "likely in library" vs "in library").
     const externalCiting = rep.kind === "citing" && !rep.resolved_work_id;
+    // Merge the marker's base style (external-citing tint, n/a dashed outline) with the chip-hover
+    // dim so hovering a color chip fades every non-matching marker (dim wins on opacity).
+    const itemStyle: Record<string, unknown> = {};
+    if (externalCiting) itemStyle.color = lighten(citingColor, 0.45);
+    if (isNa(rep)) {
+      itemStyle.borderType = "dashed";
+      itemStyle.borderColor = theme.text;
+      itemStyle.borderWidth = 1.5;
+      itemStyle.opacity = 0.65;
+    }
+    if (dimmed(members)) itemStyle.opacity = 0.15;
     const point: Record<string, unknown> = {
       value: [xPlot(rep), yFor(rep)],
       name: rep.id,
       node: rep,
       members,
       symbolSize: Math.max(...members.map(symbolFor)),
-      // A node with no value for this axis gets a dashed outline so it reads as "n/a", not zero.
-      ...(isNa(rep) || externalCiting
-        ? {
-            itemStyle: {
-              ...(externalCiting ? { color: lighten(citingColor, 0.45) } : {}),
-              ...(isNa(rep)
-                ? {
-                    borderType: "dashed",
-                    borderColor: theme.text,
-                    borderWidth: 1.5,
-                    opacity: 0.65,
-                  }
-                : {}),
-            },
-          }
-        : {}),
+      ...(Object.keys(itemStyle).length ? { itemStyle } : {}),
     };
     if (members.length > 1) {
       point.label = {
@@ -462,6 +532,9 @@ export function buildReferenceGraphOption(
 
   const coordById = new Map<string, [number, number]>();
   for (const n of graph.nodes) coordById.set(n.id, [xPlot(n), yFor(n)]);
+  // The native legend is restricted to the edge-class color key — the node COLOR groups are driven
+  // by the modal's chip row (which filters/highlights with OR semantics the native legend can't).
+  const edgeLegendNames: string[] = [];
   if (graph.edges.length) {
     // 2026-07-16: three distinct, fixed edge colours by relation to the base paper — reference
     // (base → cited work) in BLUE, citing (a paper → base) in GOLD, and ref↔ref (between local
@@ -496,6 +569,7 @@ export function buildReferenceGraphOption(
         .map((e) => ({ coords: [coordById.get(e.source), coordById.get(e.target)] }))
         .filter((l) => l.coords[0] && l.coords[1]);
       if (!data.length) continue;
+      edgeLegendNames.push(cls.name);
       series.push({
         type: "lines",
         name: cls.name,
@@ -511,7 +585,10 @@ export function buildReferenceGraphOption(
   return {
     backgroundColor: theme.background,
     textStyle: { color: theme.text, fontFamily: theme.fontFamily },
-    legend: { top: 0, textStyle: { color: theme.text } },
+    // Only the edge-class color key (node colors are the modal's chip row); omitted if no edges.
+    legend: edgeLegendNames.length
+      ? { top: 0, data: edgeLegendNames, textStyle: { color: theme.text } }
+      : undefined,
     tooltip: {
       trigger: "item",
       // 5c: clamp the tooltip inside the chart box so a node near the modal edge doesn't overflow.
@@ -587,12 +664,16 @@ export function buildReferenceGraphOption(
           n.kind === "citing"
             ? ""
             : `Cited ${n.mention_count}× ${breakdown ? `(${escapeHtml(breakdown)})` : ""}`,
-          // Encoded channels (UX batch 3): what this node's position/size/colour mean.
+          // Encoded channels (UX batch 3): what this node's position/size/colour mean. The colour
+          // part reads ALL of the node's groups for the active scheme (shelf/rack/tag list, venue,
+          // or kind), so a multi-membership node spells out every colour it carries.
           `<span style="opacity:.75">Y = ${escapeHtml(axisName)}: ${
             yById.get(n.id) != null ? String(yById.get(n.id)) : "n/a"
-          } · size = weighted citations: ${weightedById.get(n.id) ?? "n/a"} · color = ${
-            colorBy === "venue" ? `venue: ${escapeHtml(n.venue ?? "n/a")}` : `kind: ${n.kind}`
-          }</span>`,
+          } · size = weighted citations: ${weightedById.get(n.id) ?? "n/a"}${(() => {
+            const groups = referenceNodeGroups(n, colorBy);
+            const row = encodingRow({ colorBy, groups });
+            return row ? ` · ${escapeHtml(row)}` : "";
+          })()}</span>`,
         ]
           .filter(Boolean)
           .join("<br>");

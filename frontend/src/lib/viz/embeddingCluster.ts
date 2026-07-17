@@ -5,7 +5,8 @@
 // clicking a point opens the paper (handled by the page via the point's `name` = work id).
 
 import type { VizPayload } from '../../api/client';
-import { registerRenderer, type EChartsOptionLike, type VizRenderer } from './registry';
+import { encodingRow, groupsOfViz, isHighlighted } from './colorGroups';
+import { registerRenderer, type EChartsOptionLike, type RenderOpts, type VizRenderer } from './registry';
 import { colorForGroup, type VizTheme } from './theme';
 
 const MIN_SYMBOL = 8;
@@ -30,18 +31,28 @@ function symbolSizer(payload: VizPayload): (size: number | null) => number {
   };
 }
 
-/** ECharts tooltip formatter for a scatter point: title, cluster (from meta or color_group), year. */
-function tooltipFormatter(params: { data?: { node?: VizPayload['nodes'][number] } }): string {
-  const node = params.data?.node;
-  if (!node) return '';
-  const m = node.meta ?? {};
-  const cluster = m.cluster ?? node.color_group;
-  const rows = [
-    `<strong>${escapeHtml(node.label)}</strong>`,
-    cluster != null ? `Cluster: ${escapeHtml(String(cluster))}` : '',
-    m.year != null ? `Year: ${m.year}` : '',
-  ].filter(Boolean);
-  return rows.join('<br>');
+/** ECharts tooltip formatter for a scatter point: title, cluster, year + the "size = … · color = …"
+ * encoding row (bound to the active size label; color-by here is the k-means cluster). */
+function makeTooltipFormatter(colorBy: string | null, sizeLabel: string | undefined) {
+  return (params: { data?: { node?: VizPayload['nodes'][number] } }): string => {
+    const node = params.data?.node;
+    if (!node) return '';
+    const m = node.meta ?? {};
+    const cluster = m.cluster ?? node.color_group;
+    const row = encodingRow({
+      sizeLabel,
+      sizeValue: node.size,
+      colorBy,
+      groups: groupsOfViz(node),
+    });
+    const rows = [
+      `<strong>${escapeHtml(node.label)}</strong>`,
+      cluster != null ? `Cluster: ${escapeHtml(String(cluster))}` : '',
+      m.year != null ? `Year: ${m.year}` : '',
+      row ? `<span style="opacity:.75">${escapeHtml(row)}</span>` : '',
+    ].filter(Boolean);
+    return rows.join('<br>');
+  };
 }
 
 /** Minimal HTML-escape for values interpolated into ECharts tooltip HTML. */
@@ -56,13 +67,15 @@ function escapeHtml(s: string): string {
  * k-means cluster (see file header for the overall design). */
 export const embeddingClusterRenderer: VizRenderer = {
   viewType: 'embedding_cluster',
-  buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
+  buildOption(payload: VizPayload, theme: VizTheme, opts?: RenderOpts): EChartsOptionLike {
     const nodes = plottable(payload);
     const sizeFor = symbolSizer(payload);
     const groups = payload.legend?.groups ?? [];
+    const colorBy = payload.legend?.color_by ?? null;
+    const highlight = opts?.highlightGroups ?? null;
 
-    // One scatter series per cluster so ECharts renders a cluster legend; a single series when the
-    // server reported no cluster groups.
+    // One scatter series per cluster so co-located points keep their cluster color; a single series
+    // when the server reported no cluster groups.
     const seriesGroups = groups.length ? groups : [null];
     const series: Record<string, unknown>[] = seriesGroups.map((group) => {
       const groupNodes = group === null ? nodes : nodes.filter((n) => n.color_group === group);
@@ -74,6 +87,8 @@ export const embeddingClusterRenderer: VizRenderer = {
           value: [n.x, n.y],
           name: n.id,
           node: n,
+          // Chip-hover highlight: dim points whose cluster isn't the hovered one.
+          itemStyle: { opacity: isHighlighted(groupsOfViz(n), highlight) ? 1 : 0.15 },
           symbolSize: sizeFor(n.size),
         })),
         emphasis: { focus: 'series' },
@@ -83,15 +98,16 @@ export const embeddingClusterRenderer: VizRenderer = {
     return {
       backgroundColor: theme.background,
       textStyle: { color: theme.text, fontFamily: theme.fontFamily },
-      legend: groups.length > 0 ? { top: 0, textStyle: { color: theme.text } } : undefined,
+      // No native legend — the host renders the color chips.
+      legend: undefined,
       tooltip: {
         trigger: 'item',
         backgroundColor: theme.tooltipBg,
         borderColor: theme.tooltipBg,
         textStyle: { color: theme.tooltipText },
-        formatter: tooltipFormatter,
+        formatter: makeTooltipFormatter(colorBy, opts?.sizeLabel),
       },
-      grid: { left: 56, right: 24, top: groups.length > 0 ? 36 : 16, bottom: 48 },
+      grid: { left: 56, right: 24, top: 16, bottom: 48 },
       xAxis: {
         type: 'value',
         name: payload.axes?.x.label ?? 'Component 1',

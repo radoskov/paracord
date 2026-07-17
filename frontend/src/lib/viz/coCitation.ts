@@ -8,7 +8,8 @@
 
 import type { VizPayload } from '../../api/client';
 import { pieSymbol } from '../graphPie';
-import { registerRenderer, type EChartsOptionLike, type VizRenderer } from './registry';
+import { encodingRow, groupsOfViz, isHighlighted } from './colorGroups';
+import { registerRenderer, type EChartsOptionLike, type RenderOpts, type VizRenderer } from './registry';
 import { colorForGroup, type VizTheme } from './theme';
 
 const MIN_SYMBOL = 10;
@@ -43,23 +44,33 @@ function edgeWidther(payload: VizPayload): (weight: number) => number {
   };
 }
 
-/** ECharts tooltip formatter: node hover shows title/year/degree, edge hover shows shared weight. */
-function tooltipFormatter(params: {
-  dataType?: string;
-  data?: { node?: VizPayload['nodes'][number]; value?: number };
-}): string {
-  const node = params.data?.node;
-  if (node) {
-    const m = node.meta ?? {};
-    const rows = [
-      `<strong>${escapeHtml(node.label)}</strong>`,
-      m.year != null ? `Year: ${m.year}` : '',
-      m.degree != null ? `Linked papers: ${m.degree}` : '',
-    ].filter(Boolean);
-    return rows.join('<br>');
-  }
-  if (params.data?.value != null) return `Shared: ${params.data.value}`;
-  return '';
+/** ECharts tooltip formatter bound to the active color-by / size label: node hover shows
+ * title/year/degree + the "size = … · color = …" encoding row, edge hover shows shared weight. */
+function makeTooltipFormatter(colorBy: string | null, sizeLabel: string | undefined) {
+  return (params: {
+    dataType?: string;
+    data?: { node?: VizPayload['nodes'][number]; value?: number };
+  }): string => {
+    const node = params.data?.node;
+    if (node) {
+      const m = node.meta ?? {};
+      const row = encodingRow({
+        sizeLabel,
+        sizeValue: node.size,
+        colorBy,
+        groups: groupsOfViz(node),
+      });
+      const rows = [
+        `<strong>${escapeHtml(node.label)}</strong>`,
+        m.year != null ? `Year: ${m.year}` : '',
+        m.degree != null ? `Linked papers: ${m.degree}` : '',
+        row ? `<span style="opacity:.75">${escapeHtml(row)}</span>` : '',
+      ].filter(Boolean);
+      return rows.join('<br>');
+    }
+    if (params.data?.value != null) return `Shared: ${params.data.value}`;
+    return '';
+  };
 }
 
 /** Minimal HTML-escape for values interpolated into ECharts tooltip HTML. */
@@ -74,8 +85,10 @@ function escapeHtml(s: string): string {
  * force-directed graph (see file header for the overall design). */
 export const coCitationRenderer: VizRenderer = {
   viewType: 'co_citation',
-  buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
+  buildOption(payload: VizPayload, theme: VizTheme, opts?: RenderOpts): EChartsOptionLike {
     const groups = payload.legend?.groups ?? [];
+    const colorBy = payload.legend?.color_by ?? null;
+    const highlight = opts?.highlightGroups ?? null;
     const categories = groups.length
       ? groups.map((g, i) => ({ name: g, itemStyle: { color: colorForGroup(theme, g, groups) } }))
       : [{ name: 'Papers', itemStyle: { color: theme.categorical[0] } }];
@@ -85,6 +98,8 @@ export const coCitationRenderer: VizRenderer = {
     const data = payload.nodes.map((n) => {
       // Multi-membership (shelf/rack/tag) nodes render as a color wheel, one segment per group.
       const nodeGroups = n.color_groups ?? [];
+      // Chip-hover highlight: dim a node whose colors don't include the hovered group (OR).
+      const dim = isHighlighted(groupsOfViz(n), highlight) ? 1 : 0.15;
       return {
         id: n.id,
         // `name` is the work id so the page's click handler opens the paper (as in the scatter views).
@@ -95,6 +110,7 @@ export const coCitationRenderer: VizRenderer = {
         ...(nodeGroups.length > 1
           ? { symbol: pieSymbol(nodeGroups.map((g) => colorForGroup(theme, g, groups))) }
           : {}),
+        itemStyle: { opacity: dim },
         node: n,
       };
     });
@@ -108,14 +124,14 @@ export const coCitationRenderer: VizRenderer = {
     return {
       backgroundColor: theme.background,
       textStyle: { color: theme.text, fontFamily: theme.fontFamily },
-      legend:
-        groups.length > 0 ? { top: 0, data: groups, textStyle: { color: theme.text } } : undefined,
+      // No native legend — the host renders the OR-aware color chips.
+      legend: undefined,
       tooltip: {
         trigger: 'item',
         backgroundColor: theme.tooltipBg,
         borderColor: theme.tooltipBg,
         textStyle: { color: theme.tooltipText },
-        formatter: tooltipFormatter,
+        formatter: makeTooltipFormatter(colorBy, opts?.sizeLabel),
       },
       series: [
         {

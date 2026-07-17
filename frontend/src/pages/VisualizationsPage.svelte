@@ -30,7 +30,10 @@
   import ChartHost from '../components/ChartHost.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
   import { activeVizTheme } from '../lib/theme/store';
+  import ColorGroupChips from '../lib/viz/ColorGroupChips.svelte';
+  import { groupsOfViz, nextChipState, orHiddenIds } from '../lib/viz/colorGroups';
   import { enableLegendSolo } from '../lib/viz/legendSolo';
+  import { colorForGroup } from '../lib/viz/theme';
   import { resolveScopeRequest } from '../lib/scope';
   import { pendingLibraryOpen, selectedPaperIds } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
@@ -156,7 +159,8 @@
   function vizFocusOnGroup(name: string): void {
     const seeds = new Set(
       (payload?.nodes ?? [])
-        .filter((n) => (n.color_group ?? 'Papers') === name)
+        // A node qualifies if ANY of its colors is this group (multi-membership → OR).
+        .filter((n) => groupsOfViz(n).includes(name))
         .map((n) => n.id),
     );
     if (!seeds.size) return; // e.g. the "Citations" edge-overlay legend entry
@@ -174,6 +178,49 @@
   $: vizFocusLabelText = vizFocus
     ? (payload?.nodes.find((n) => n.id === vizFocus?.label)?.label ?? vizFocus.label)
     : '';
+
+  // --- Color-group legend chips (OR filter + hover highlight over multi-membership nodes) --------
+  // The node-scatter/network views drop their native ECharts legend (it can only toggle a whole
+  // series, so a multi-membership node vanishes when one of its colors is hidden). This chip row
+  // owns node coloring: click = show/hide, shift-click = solo, ctrl-click = focus, hover = highlight
+  // — all with OR semantics (a node stays while ANY of its colors is shown).
+  let hiddenGroups = new Set<string>();
+  let soloGroup: string | null = null;
+  let highlightGroup: string | null = null;
+  $: vizGroups = payload?.legend?.groups ?? [];
+  $: vizColors = vizGroups.map((g) => colorForGroup($activeVizTheme, g, vizGroups));
+  // Chips apply to the node views (scatter/network), not the chart carriers (river/heatmap).
+  $: showChips = !isChart && vizGroups.length > 0;
+  // Human label for the size encoding, shown in each node's tooltip info row.
+  $: sizeLabelText =
+    viewType === 'co_citation'
+      ? 'linked papers'
+      : (SIZE_OPTIONS.find(([v]) => v === sizeBy)?.[1] ?? undefined);
+
+  function resetChips(): void {
+    hiddenGroups = new Set();
+    soloGroup = null;
+    highlightGroup = null;
+  }
+
+  function onVizChipToggle(
+    e: CustomEvent<{ group: string; shiftKey: boolean; ctrlKey: boolean }>,
+  ): void {
+    const { group, shiftKey, ctrlKey } = e.detail;
+    if (ctrlKey) {
+      vizFocusOnGroup(group);
+      return;
+    }
+    const next = nextChipState(group, shiftKey, vizGroups, hiddenGroups, soloGroup);
+    hiddenGroups = next.hidden;
+    soloGroup = next.solo;
+    chartRevision += 1;
+  }
+
+  function onVizChipHover(e: CustomEvent<string | null>): void {
+    highlightGroup = e.detail;
+    chartRevision += 1;
+  }
 
   // The embedding-cluster view has fixed PCA-component axes and server-driven cluster coloring, so
   // the axis / color / edge controls do not apply — only the size encoding and node cap do.
@@ -220,6 +267,7 @@
         layout: isCluster ? clusterLayout : undefined,
       });
       vizFocus = null; // fresh payload → stale focus ids would hide everything
+      resetChips(); // new group set → drop any stale chip filter/highlight
     } catch (error) {
       message = errorMessage(error);
       payload = null;
@@ -240,6 +288,7 @@
   // (their size/color changes the server-side computation).
   function restyleIfLoaded(): void {
     if (!payload) return;
+    resetChips(); // the group set may change → drop any stale chip filter/highlight
     // Entering OR leaving a membership color needs the server (it attaches/clears the groups).
     const crossesMembership =
       MEMBERSHIP_COLOR_KINDS.has(colorBy) || MEMBERSHIP_COLOR_KINDS.has(lastColorBy);
@@ -256,20 +305,28 @@
     if (!payload) return;
     const renderer = getRenderer(payload.view_type);
     if (!renderer) throw new Error("no renderer");
-    // Ctrl-click focus filters the PAYLOAD (nodes + edges) before the pure renderer builds the
-    // option, so it works identically for the network and the scatter overlay.
+    // Ctrl-click focus AND the OR legend-chip filter both narrow the PAYLOAD (nodes + edges) before
+    // the pure renderer builds the option — a node is dropped when hidden by focus OR when ALL its
+    // colors are chip-hidden (kept while ANY color is still shown).
     const focus = vizFocus;
-    const p =
-      focus && focusSupported
-        ? {
-            ...payload,
-            nodes: payload.nodes.filter((n) => focus.ids.has(n.id)),
-            edges: (payload.edges ?? []).filter(
-              (e) => focus.ids.has(e.source) && focus.ids.has(e.target),
-            ),
-          }
-        : payload;
-    chart.setOption(renderer.buildOption(p, $activeVizTheme), true);
+    const colorHidden = orHiddenIds(payload.nodes, groupsOfViz, hiddenGroups);
+    const keep = (id: string): boolean =>
+      !colorHidden.has(id) && (!focus || !focusSupported || focus.ids.has(id));
+    const filtered = colorHidden.size || (focus && focusSupported);
+    const p = filtered
+      ? {
+          ...payload,
+          nodes: payload.nodes.filter((n) => keep(n.id)),
+          edges: (payload.edges ?? []).filter((e) => keep(e.source) && keep(e.target)),
+        }
+      : payload;
+    chart.setOption(
+      renderer.buildOption(p, $activeVizTheme, {
+        sizeLabel: sizeLabelText,
+        highlightGroups: highlightGroup ? new Set([highlightGroup]) : null,
+      }),
+      true,
+    );
     chart.off('click');
     chart.on(
       'click',
@@ -528,6 +585,15 @@
       {#if !hasData}
         <p class="empty">No papers to plot in this scope.</p>
       {:else}
+        {#if showChips}
+          <ColorGroupChips
+            groups={vizGroups}
+            colors={vizColors}
+            hidden={hiddenGroups}
+            on:toggle={onVizChipToggle}
+            on:hover={onVizChipHover}
+          />
+        {/if}
         <div class="chart" data-testid="viz-chart">
           <ChartHost bind:this={vizHost} render={renderChart} onReady={wireEvents} revision={chartRevision} {visible}
             height="100%" ariaLabel="Visualization chart">

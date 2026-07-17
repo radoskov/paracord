@@ -9,6 +9,29 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Graphs: OR-aware color legend + encoding info row on reference & visualization graphs (2026-07-17)
+
+- **Problem**: the Insights citation/topic graphs already (a) show a per-node encoding row (`size =
+  … · color = …`) and (b) treat a multi-color node (several shelves/racks/tags) with OR semantics —
+  it stays visible while ANY of its colors is shown and hides only when ALL are, and hover-highlights
+  on ANY matching color. The **paper-view reference graph** and the **Visualizations-tab graphs**
+  did not: they used the native ECharts legend with one series per group and put a multi-membership
+  node in only its FIRST group's series, so hiding one color dropped the whole node and hovering
+  another of its colors didn't highlight it; and their tooltips lacked (or hardcoded) the info row.
+- **Fix**: new shared `lib/viz/colorGroups.ts` (OR-hidden predicate, distinct/sort, chip-state
+  gesture, `isHighlighted`, `encodingRow`) + a shared `ColorGroupChips.svelte` legend (click =
+  show/hide, shift = solo, ctrl = focus, hover = highlight) mirroring the citation graph. Renderers
+  (`temporalMap`, `coCitation`, `embeddingCluster`, `referenceGraph`) drop their native color legend,
+  add the `size = … · color = <groups>` tooltip row, and dim non-matching markers on chip hover; the
+  hosts (`ReferenceGraphModal`, `VisualizationsPage`) render the chip row and filter the payload with
+  OR semantics before the (pure) renderer builds the option. `RenderOpts` (`sizeLabel`,
+  `highlightGroups`) added to the renderer contract. Reference graph's native legend now carries only
+  the edge-class color key. CitationGraph (already correct) untouched.
+- **Tests**: new `colorGroups.test.ts` (12) covers OR filtering/highlight/chip-state/encoding row;
+  all viz renderer + citation-graph tests still green (62 total). Host components have no unit tests;
+  verified via the shared helper + typecheck — needs a visual pass. See
+  `docs/agent_handoffs/2026-07-17-graph-color-legend-or.md`.
+
 ## Fix: "color by rack" showed "unracked" for an owner's private racks (2026-07-17)
 
 - **Root cause**: graph node coloring by **rack** is inferred from a paper's shelves

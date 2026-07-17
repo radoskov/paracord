@@ -6,9 +6,11 @@
 
 import type { VizPayload } from "../../api/client";
 import { pieSymbol } from "../graphPie";
+import { encodingRow, groupsOfViz, isHighlighted } from "./colorGroups";
 import {
   registerRenderer,
   type EChartsOptionLike,
+  type RenderOpts,
   type VizRenderer,
 } from "./registry";
 import { colorForGroup, type VizTheme } from "./theme";
@@ -82,37 +84,46 @@ function groupByCoord(nodes: Node[]): Node[][] {
   return [...by.values()];
 }
 
-function singleTooltip(node: Node): string {
+function singleTooltip(node: Node, colorBy: string | null, sizeLabel: string | undefined): string {
   const m = node.meta ?? {};
+  const row = encodingRow({
+    sizeLabel,
+    sizeValue: node.size,
+    colorBy,
+    groups: groupsOfViz(node),
+  });
   return [
     `<strong>${escapeHtml(node.label)}</strong>`,
     m.year != null ? `Year: ${m.year}` : "",
     m.citation_count != null ? `Citations: ${m.citation_count}` : "",
     m.local_degree != null ? `Local degree: ${m.local_degree}` : "",
+    row ? `<span style="opacity:.75">${escapeHtml(row)}</span>` : "",
   ]
     .filter(Boolean)
     .join("<br>");
 }
 
-function tooltipFormatter(params: {
-  data?: { node?: Node; members?: Node[] };
-}): string {
-  const members = params.data?.members;
-  // Overlap: list every paper at this spot with an [open] link. The host delegates clicks on
-  // [data-viz-open] to open the paper (the tooltip is enterable so the user can reach the links).
-  if (members && members.length > 1) {
-    const linkStyle =
-      "color:inherit;text-decoration:underline;cursor:pointer;display:block;margin-top:2px";
-    const rows = members
-      .map(
-        (m) =>
-          `<a data-viz-open="${escapeHtml(m.id)}" style="${linkStyle}" title="Open this paper">${escapeHtml(m.label)}</a>`,
-      )
-      .join("");
-    return `<strong>${members.length} papers here</strong>${rows}`;
-  }
-  const node = params.data?.node ?? members?.[0];
-  return node ? singleTooltip(node) : "";
+// Tooltip formatter bound to the active color-by / size label so single-node tooltips carry the
+// "size = … · color = …" encoding row (the host owns those labels).
+function makeTooltipFormatter(colorBy: string | null, sizeLabel: string | undefined) {
+  return (params: { data?: { node?: Node; members?: Node[] } }): string => {
+    const members = params.data?.members;
+    // Overlap: list every paper at this spot with an [open] link. The host delegates clicks on
+    // [data-viz-open] to open the paper (the tooltip is enterable so the user can reach the links).
+    if (members && members.length > 1) {
+      const linkStyle =
+        "color:inherit;text-decoration:underline;cursor:pointer;display:block;margin-top:2px";
+      const rows = members
+        .map(
+          (m) =>
+            `<a data-viz-open="${escapeHtml(m.id)}" style="${linkStyle}" title="Open this paper">${escapeHtml(m.label)}</a>`,
+        )
+        .join("");
+      return `<strong>${members.length} papers here</strong>${rows}`;
+    }
+    const node = params.data?.node ?? members?.[0];
+    return node ? singleTooltip(node, colorBy, sizeLabel) : "";
+  };
 }
 
 function escapeHtml(s: string): string {
@@ -183,11 +194,17 @@ export const temporalMapRenderer: VizRenderer = {
    * Build the ECharts scatter option: one series per color group (for the legend), coordinate
    * overlap grouped into count-badged markers, and an optional citation-edge `lines` overlay.
    */
-  buildOption(payload: VizPayload, theme: VizTheme): EChartsOptionLike {
+  buildOption(payload: VizPayload, theme: VizTheme, opts?: RenderOpts): EChartsOptionLike {
     const nodes = plottable(payload);
     const sizeFor = symbolSizer(payload);
     const groups = payload.legend?.groups ?? [];
     const colored = payload.legend !== null;
+    const colorBy = payload.legend?.color_by ?? null;
+    const highlight = opts?.highlightGroups ?? null;
+    // Chip-hover highlight: dim a marker whose colors don't include the hovered group (OR — a
+    // multi-membership marker stays lit if ANY of its colors matches).
+    const dimOf = (members: Node[]): number =>
+      isHighlighted([...new Set(members.flatMap(groupsOfViz))], highlight) ? 1 : 0.15;
 
     // One scatter series per color group so ECharts renders a legend; a single series when
     // color_by is "none".
@@ -244,6 +261,7 @@ export const temporalMapRenderer: VizRenderer = {
             ...(repGroups.length > 1
               ? { symbol: pieSymbol(repGroups.map((g) => colorForGroup(theme, g, groups))) }
               : {}),
+            itemStyle: { opacity: dimOf(members) },
             symbolSize: Math.max(...members.map((m) => sizeFor(m.size))),
             label:
               members.length > 1
@@ -289,10 +307,9 @@ export const temporalMapRenderer: VizRenderer = {
     return {
       backgroundColor: theme.background,
       textStyle: { color: theme.text, fontFamily: theme.fontFamily },
-      legend:
-        colored && groups.length > 0
-          ? { top: 0, textStyle: { color: theme.text } }
-          : undefined,
+      // No native legend — the host renders the color chips (they filter/highlight with OR
+      // semantics over multi-membership nodes, which the native legend can't express).
+      legend: undefined,
       tooltip: {
         trigger: "item",
         // Enterable so the user can move into an overlap tooltip and click a specific paper's link.
@@ -300,12 +317,12 @@ export const temporalMapRenderer: VizRenderer = {
         backgroundColor: theme.tooltipBg,
         borderColor: theme.tooltipBg,
         textStyle: { color: theme.tooltipText },
-        formatter: tooltipFormatter,
+        formatter: makeTooltipFormatter(colorBy, opts?.sizeLabel),
       },
       grid: {
         left: 56,
         right: 24,
-        top: colored && groups.length > 0 ? 36 : 16,
+        top: 16,
         bottom: 48,
       },
       xAxis: {

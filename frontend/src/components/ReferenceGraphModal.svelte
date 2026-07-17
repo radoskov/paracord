@@ -13,13 +13,16 @@
   import ChartHost from './ChartHost.svelte';
   import Modal from './Modal.svelte';
   import { activeVizTheme } from '../lib/theme/store';
-  import { enableLegendSolo } from '../lib/viz/legendSolo';
+  import ColorGroupChips from '../lib/viz/ColorGroupChips.svelte';
+  import { nextChipState, orHiddenIds } from '../lib/viz/colorGroups';
   import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
   import {
     DEFAULT_SECTION_WEIGHTS,
     REFERENCE_GRAPH_HELP,
     REFERENCE_Y_AXES,
     buildReferenceGraphOption,
+    referenceColorGroups,
+    referenceNodeGroups,
     yValueFor,
   } from '../lib/viz/referenceGraph';
   import { errorMessage } from '../lib/ui';
@@ -227,28 +230,56 @@
     revision += 1;
   }
 
-  // Ctrl-click a legend entry: focus that whole category + the direct neighbors of its nodes
-  // (e.g. "external" shows every external reference plus this paper). Node ids are read from the
-  // clicked series' plotted data, so it works for kind AND venue coloring alike.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function focusOnLegendSeries(chart: any, name: string): void {
-    if (focusIds && focusLabel === name) {
+  // --- Color-group legend chips (OR filter + hover highlight over multi-membership nodes) --------
+  // The node colors are driven by these chips (not the native ECharts legend, which can only toggle
+  // a whole series and so can't express "keep the node while ANY of its colors is shown").
+  let hiddenGroups = new Set<string>();
+  let soloGroup: string | null = null;
+  let highlightGroup: string | null = null;
+  $: refLegend = graph
+    ? referenceColorGroups(graph, colorBy, $activeVizTheme)
+    : { groups: [] as string[], colors: [] as string[] };
+  // A colour scheme switch invalidates the old group names → clear any chip filter/highlight.
+  let prevColorBy = colorBy;
+  $: if (colorBy !== prevColorBy) {
+    prevColorBy = colorBy;
+    hiddenGroups = new Set();
+    soloGroup = null;
+    highlightGroup = null;
+  }
+
+  function onChipToggle(e: CustomEvent<{ group: string; shiftKey: boolean; ctrlKey: boolean }>): void {
+    const { group, shiftKey, ctrlKey } = e.detail;
+    if (ctrlKey) {
+      focusOnGroup(group);
+      return;
+    }
+    const next = nextChipState(group, shiftKey, refLegend.groups, hiddenGroups, soloGroup);
+    hiddenGroups = next.hidden;
+    soloGroup = next.solo;
+    revision += 1;
+  }
+
+  function onChipHover(e: CustomEvent<string | null>): void {
+    highlightGroup = e.detail;
+    revision += 1;
+  }
+
+  // Ctrl-click a chip: focus that color group + the direct neighbors of its nodes (a node counts
+  // if ANY of its colors is this group), e.g. "External" shows every external reference + this paper.
+  function focusOnGroup(group: string): void {
+    if (focusIds && focusLabel === group) {
       clearFocus();
       return;
     }
-    const series = ((chart.getOption()?.series ?? []) as {
-      name?: string;
-      type?: string;
-      data?: { node?: ReferenceGraphNode; members?: ReferenceGraphNode[] }[];
-    }[]).find((s) => s.name === name && s.type === 'scatter');
-    const seeds = new Set<string>();
-    for (const d of series?.data ?? []) {
-      if (d?.members) for (const m of d.members) seeds.add(m.id);
-      else if (d?.node) seeds.add(d.node.id);
-    }
+    const seeds = new Set(
+      (graph?.nodes ?? [])
+        .filter((n) => referenceNodeGroups(n, colorBy).includes(group))
+        .map((n) => n.id),
+    );
     if (!seeds.size) return;
     focusIds = neighborhoodOf(seeds);
-    focusLabel = name;
+    focusLabel = group;
     revision += 1;
   }
 
@@ -260,18 +291,24 @@
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function renderChart(chart: any): void {
     if (!graph) return;
-    const g = focusIds
-      ? {
-          ...graph,
-          nodes: graph.nodes.filter((n) => focusIds?.has(n.id)),
-          edges: graph.edges.filter((e) => focusIds?.has(e.source) && focusIds?.has(e.target)),
-        }
-      : graph;
+    // OR legend filtering (a node is hidden only when ALL its colors are hidden) combined with the
+    // ctrl-click neighborhood focus; edges are kept only between still-visible nodes.
+    const hidden = orHiddenIds(graph.nodes, (n) => referenceNodeGroups(n, colorBy), hiddenGroups);
+    const nodes = graph.nodes.filter(
+      (n) => !hidden.has(n.id) && (!focusIds || focusIds.has(n.id)),
+    );
+    const ids = new Set(nodes.map((n) => n.id));
+    const g = {
+      ...graph,
+      nodes,
+      edges: graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+    };
     chart.setOption(
       buildReferenceGraphOption(g, weights, $activeVizTheme, {
         yAxis,
         colorBy,
         showRefEdges: includeRefEdges,
+        highlightGroups: highlightGroup ? new Set([highlightGroup]) : null,
       }),
       true,
     );
@@ -332,23 +369,8 @@
         openOrImportNode(node);
       },
     );
-    // Track modifier state at the DOM level (legendselectchanged carries no modifiers), so a
-    // ctrl-click on a legend entry becomes a neighborhood focus instead of a hide/show toggle.
-    let legendCtrl = false;
-    chart.getDom()?.addEventListener(
-      'click',
-      (ev: MouseEvent) => {
-        legendCtrl = ev.ctrlKey || ev.metaKey;
-      },
-      true,
-    );
-    chart.on('legendselectchanged', (params: { name?: string }) => {
-      if (!legendCtrl || !params.name) return;
-      legendCtrl = false;
-      chart.dispatchAction({ type: 'legendAllSelect' }); // undo the toggle the click caused
-      focusOnLegendSeries(chart, params.name);
-    });
-    // Delegate clicks on the enterable-tooltip links (overlap clusters) at the container level.
+    // Node COLOR filtering/focus is the chip row (OR-aware); the native legend now carries only the
+    // edge-class color key. Delegate clicks on the enterable-tooltip links (overlap clusters) below.
     // 'auxclick' catches middle-click (button 1); 'click' also fires with ctrl/meta held.
     chart.getDom()?.addEventListener('click', onContainerClick);
     chart.getDom()?.addEventListener('auxclick', onContainerClick);
@@ -356,8 +378,6 @@
     chart.getDom()?.addEventListener('input', onTooltipSearch);
     chart.getDom()?.addEventListener('keydown', onTooltipKey);
     chart.getDom()?.addEventListener('keyup', onTooltipKey);
-    // Shift-click a legend entry to show only that kind/venue; shift-click again to show all.
-    enableLegendSolo(chart);
     wireEdgeSnapZoom(chart);
   }
 
@@ -382,7 +402,11 @@
   function rgResetView(): void {
     rgShowAll();
     chartHost?.getChart()?.dispatchAction({ type: 'legendAllSelect' });
+    hiddenGroups = new Set();
+    soloGroup = null;
+    highlightGroup = null;
     if (focusIds) clearFocus();
+    else revision += 1;
   }
 
   function toggleRefEdges(): void {
@@ -461,6 +485,13 @@
   </div>
   {#if message}<p class="msg" role="status">{message}</p>{/if}
   {#if loading && !graph}<p class="muted">Loading…</p>{/if}
+  <ColorGroupChips
+    groups={refLegend.groups}
+    colors={refLegend.colors}
+    hidden={hiddenGroups}
+    on:toggle={onChipToggle}
+    on:hover={onChipHover}
+  />
   <div class="rg-chart" data-testid="rg-chart">
     <ChartHost bind:this={chartHost} render={renderChart} onReady={wireEvents} {revision} height="100%"
       ariaLabel="Reference graph">
