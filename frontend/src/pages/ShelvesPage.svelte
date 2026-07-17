@@ -31,6 +31,8 @@
   let newShelfName = '';
   let newShelfAccess: AccessLevel = 'open';
   let renameName = '';
+  let editDescription = '';
+  let newShelfDescription = '';
   let pickWorkId = '';
   let workFilter = '';
   let loading = false;
@@ -78,10 +80,23 @@
     selected = shelf;
     selectedShelfId.set(shelf.id);
     renameName = shelf.name;
+    editDescription = shelf.description ?? '';
     pickWorkId = '';
     await run(async () => {
       shelfWorks = await client.listShelfWorks(shelf.id);
     });
+  }
+
+  async function saveDescription(): Promise<void> {
+    const shelf = selected;
+    if (!shelf) return;
+    await run(async () => {
+      const updated = await client.updateShelf(shelf.id, {
+        description: editDescription.trim() || null,
+      });
+      $shelves = $shelves.map((sh) => (sh.id === updated.id ? updated : sh));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Description saved');
   }
 
   async function renameShelf(): Promise<void> {
@@ -98,7 +113,11 @@
 
   async function createShelf(): Promise<void> {
     await run(async () => {
-      const shelf = await client.createShelf({ name: newShelfName, access_level: newShelfAccess });
+      const shelf = await client.createShelf({
+        name: newShelfName,
+        access_level: newShelfAccess,
+        ...(newShelfDescription.trim() ? { description: newShelfDescription.trim() } : {}),
+      });
       newShelfName = '';
       newShelfAccess = 'open';
       await refreshShelves(client);
@@ -182,6 +201,8 @@
           Add
         </button>
       </div>
+      <input bind:value={newShelfDescription} placeholder="Description (optional)"
+        aria-label="New shelf description" disabled={!$canManageStructure} />
       <select bind:value={newShelfAccess} aria-label="New shelf access level" disabled={!$canManageStructure}
         title={$canManageStructure ? 'Who may see and modify the new shelf' : INSUFFICIENT_ROLE}>
         {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
@@ -218,6 +239,7 @@
         <div>
           <span class="muted">Shelf</span>
           <h2>{selected.name}</h2>
+          {#if selected.description}<p class="muted desc">{selected.description}</p>{/if}
         </div>
         <div class="head-actions">
           <label class="access-inline">
@@ -245,6 +267,15 @@
         <button type="submit" class="secondary"
           disabled={loading || !$canManageStructure || !renameName.trim() || renameName.trim() === selected.name}
           title={$canManageStructure ? 'Rename this shelf' : INSUFFICIENT_ROLE}>Rename</button>
+      </form>
+
+      <form on:submit|preventDefault={saveDescription} class="rename">
+        <input bind:value={editDescription} aria-label="Shelf description"
+          placeholder="Description (optional — what belongs on this shelf)"
+          disabled={loading || !$canManageStructure} />
+        <button type="submit" class="secondary"
+          disabled={loading || !$canManageStructure || editDescription.trim() === (selected.description ?? '')}
+          title={$canManageStructure ? 'Save this shelf’s description' : INSUFFICIENT_ROLE}>Save description</button>
       </form>
 
       <div class="add-work">

@@ -621,6 +621,7 @@ export interface AppliedTag {
   id: string;
   name: string;
   color: string | null;
+  description?: string | null;
 }
 
 export interface Source {

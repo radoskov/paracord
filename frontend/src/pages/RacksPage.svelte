@@ -31,6 +31,8 @@
   let newRackName = '';
   let newRackAccess: AccessLevel = 'open';
   let renameName = '';
+  let editDescription = '';
+  let newRackDescription = '';
   let pickShelfId = '';
   let loading = false;
   let message = '';
@@ -68,10 +70,23 @@
     selected = rack;
     selectedRackId.set(rack.id);
     renameName = rack.name;
+    editDescription = rack.description ?? '';
     pickShelfId = '';
     await run(async () => {
       rackShelves = await client.listRackShelves(rack.id);
     });
+  }
+
+  async function saveDescription(): Promise<void> {
+    const rack = selected;
+    if (!rack) return;
+    await run(async () => {
+      const updated = await client.updateRack(rack.id, {
+        description: editDescription.trim() || null,
+      });
+      $racks = $racks.map((r) => (r.id === updated.id ? updated : r));
+      if (selected?.id === updated.id) selected = updated;
+    }, 'Description saved');
   }
 
   async function renameRack(): Promise<void> {
@@ -88,8 +103,13 @@
 
   async function createRack(): Promise<void> {
     await run(async () => {
-      const rack = await client.createRack({ name: newRackName, access_level: newRackAccess });
+      const rack = await client.createRack({
+        name: newRackName,
+        access_level: newRackAccess,
+        ...(newRackDescription.trim() ? { description: newRackDescription.trim() } : {}),
+      });
       newRackName = '';
+      newRackDescription = '';
       newRackAccess = 'open';
       await refreshRacks(client);
       await select(rack);
@@ -183,6 +203,8 @@
           Add
         </button>
       </div>
+      <input bind:value={newRackDescription} placeholder="Description (optional)"
+        aria-label="New rack description" disabled={!$canManageStructure} />
       <select bind:value={newRackAccess} aria-label="New rack access level" disabled={!$canManageStructure}
         title={$canManageStructure ? 'Who may see and modify the new rack' : INSUFFICIENT_ROLE}>
         {#each ACCESS_LEVELS as lvl}<option value={lvl.value}>{lvl.label}</option>{/each}
@@ -219,6 +241,7 @@
         <div>
           <span class="muted">Rack</span>
           <h2>{selected.name}</h2>
+          {#if selected.description}<p class="muted desc">{selected.description}</p>{/if}
         </div>
         <div class="head-actions">
           <label class="access-inline">
@@ -246,6 +269,15 @@
         <button type="submit" class="secondary"
           disabled={loading || !$canManageStructure || !renameName.trim() || renameName.trim() === selected.name}
           title={$canManageStructure ? 'Rename this rack' : INSUFFICIENT_ROLE}>Rename</button>
+      </form>
+
+      <form on:submit|preventDefault={saveDescription} class="rename">
+        <input bind:value={editDescription} aria-label="Rack description"
+          placeholder="Description (optional — what this rack collects)"
+          disabled={loading || !$canManageStructure} />
+        <button type="submit" class="secondary"
+          disabled={loading || !$canManageStructure || editDescription.trim() === (selected.description ?? '')}
+          title={$canManageStructure ? 'Save this rack’s description' : INSUFFICIENT_ROLE}>Save description</button>
       </form>
 
       <div class="add-shelf">

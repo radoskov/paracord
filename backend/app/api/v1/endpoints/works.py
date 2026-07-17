@@ -215,11 +215,12 @@ class WorkRackRef(BaseModel):
 
 
 class WorkTagRef(BaseModel):
-    """A tag applied to a paper (id + name + colour; batch10 library column)."""
+    """A tag applied to a paper (id + name + colour + description; batch10 library column)."""
 
     id: uuid.UUID
     name: str
     color: str | None = None
+    description: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1135,11 +1136,12 @@ def list_work_shelves(
 
 
 class WorkTagRead(BaseModel):
-    """A tag applied to a paper (id + name + colour), for the detail view's applied-tags list."""
+    """A tag applied to a paper (id/name/colour/description), for the detail view's applied tags."""
 
     id: uuid.UUID
     name: str
     color: str | None = None
+    description: str | None = None
 
     model_config = {"from_attributes": True}
 

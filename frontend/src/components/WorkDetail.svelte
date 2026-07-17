@@ -1277,6 +1277,17 @@
         <span class="stub-badge" title="Indexed by the local agent but not yet extracted — attach/extract or teleport to fill in metadata and text">not extracted</span>
       {/if}
     </h2>
+    {#if appliedTags.length}
+      <!-- Applied tags at a glance (also editable in the Tags section below). -->
+      <div class="title-tags" aria-label="Tags on this paper">
+        {#each appliedTags as tag (tag.id)}
+          <span class="tag-chip" style={`--tag-color:${tag.color ?? 'var(--ink-muted)'}`}
+            title={tag.description ?? tag.name}>
+            <span class="dot"></span>{tag.name}
+          </span>
+        {/each}
+      </div>
+    {/if}
     <div class="bar-actions">
       {#if onBack}
         <button type="button" class="secondary small" on:click={onBack} data-testid="detail-back"
@@ -2513,6 +2524,13 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     margin-top: 0.5rem;
+  }
+
+  .title-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0.15rem 0 0.3rem;
   }
 
   .tag-chip {

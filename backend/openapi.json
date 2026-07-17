@@ -1419,6 +1419,18 @@
             "title": "Include",
             "type": "boolean"
           },
+          "target_shelf_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Shelf Id"
+          },
           "title": {
             "anyOf": [
               {
@@ -7078,6 +7090,18 @@
             "title": "Item Id",
             "type": "string"
           },
+          "target_shelf_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Shelf Id"
+          },
           "target_work_id": {
             "anyOf": [
               {
@@ -9809,7 +9833,7 @@
         "type": "object"
       },
       "WorkTagRead": {
-        "description": "A tag applied to a paper (id + name + colour), for the detail view's applied-tags list.",
+        "description": "A tag applied to a paper (id/name/colour/description), for the detail view's applied tags.",
         "properties": {
           "color": {
             "anyOf": [
@@ -9821,6 +9845,17 @@
               }
             ],
             "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "id": {
             "format": "uuid",
@@ -9840,7 +9875,7 @@
         "type": "object"
       },
       "WorkTagRef": {
-        "description": "A tag applied to a paper (id + name + colour; batch10 library column).",
+        "description": "A tag applied to a paper (id + name + colour + description; batch10 library column).",
         "properties": {
           "color": {
             "anyOf": [
@@ -9852,6 +9887,17 @@
               }
             ],
             "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "id": {
             "format": "uuid",
@@ -18260,7 +18306,7 @@
             "required": false,
             "schema": {
               "default": 25,
-              "maximum": 100,
+              "maximum": 500,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
