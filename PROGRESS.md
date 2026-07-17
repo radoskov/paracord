@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Profile layout + attach-from-URL/server-path (2026-07-17)
+
+- **Profile page reorganized**: two independent flex columns inside the grid (no cross-column
+  row-height gaps) — main column: Appearance (most-used, now first) + Reference-graph weights;
+  side column: Account, Password, Roles & access. Width raised 52rem → 72rem so the theme grid
+  actually uses the horizontal space; single column under 860px. Bonus fix: `.theme-option`
+  inherited the global button's inverse ink, leaving theme names near-invisible — now
+  `--ink-strong`.
+- **Attach from URL (Files panel)**: "From URL…" opens a Proceed/Cancel modal; the URL is sent
+  as a synthetic `manual_url` item through the EXISTING `find-on-web/download` endpoint, so the
+  entire download policy applies unchanged (shadow-library denylist, SSRF guard, allow-list mode
+  gate, `needs_confirmation` handshake — the modal shows the warning with "Download anyway").
+  Success reports attached vs deduped and refreshes the paper (doi/arxiv backfill + queued
+  extraction). Verified live: fetched the real arXiv 1706.03762 PDF (2.2 MB) end-to-end.
+- **Attach from server path**: new `POST /works/{id}/files/from-path`. Path must resolve
+  (symlinks followed) to a file INSIDE a merged allowed import root (server.yaml + Admin rows) —
+  same containment rule as the server-folder import; then the bytes pass the exact browser-upload
+  validation (size cap, %PDF, openability) and the shared attach/dedupe/extraction tail (factored
+  into `_attach_pdf_bytes_to_work`). 10 endpoint tests incl. symlink-escape + `..`-traversal
+  refusals; audited as `work.file_attached_from_path`. Verified live against the dev stack.
+- **Tests**: backend 1237, frontend 305 (5 new modal tests), safety 161, e2e 37/37 with a new
+  Journey 35 (both modals' offline-deterministic refusal paths). Journey 13's go-to-page flake
+  root-caused: `fill` + synthetic `change` dispatch raced the pager re-render (`value={page}`
+  reset the input between the calls) — now types + Enter like the input's title says.
+
 ## Skipped-test audit + journey 19 fix + e2e flake root-causes (2026-07-17)
 
 - **Journey 19 (arXiv import) fixed**: it failed because the Import page gained method tabs (the
