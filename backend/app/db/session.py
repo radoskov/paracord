@@ -15,9 +15,7 @@ settings = get_settings()
 # real reason) rather than wait forever — an unbounded wait on the event loop deadlocked the whole
 # API once every connection was held by in-flight requests (2026-07-17). max_overflow gives a
 # little more headroom for request bursts (e.g. the 16-worker e2e suite).
-engine = create_engine(
-    settings.database_url, pool_pre_ping=True, pool_timeout=30, max_overflow=20
-)
+engine = create_engine(settings.database_url, pool_pre_ping=True, pool_timeout=30, max_overflow=20)
 # autocommit/autoflush disabled: callers control commit/flush explicitly (e.g. via ``get_db`` below,
 # or ``with SessionLocal() as db: ... db.commit()`` in scripts/workers) rather than SQLAlchemy
 # flushing implicitly before every query.
