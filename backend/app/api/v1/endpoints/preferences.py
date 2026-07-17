@@ -33,6 +33,10 @@ class LibraryColumnPrefs(BaseModel):
     order: list[str] = []
     visible: list[str] = []
     sort: LibraryColumnSort | None = None
+    # Per-column width RATIOS (relative weights; the client divides the list width by their sum)
+    # and the row-divider-lines toggle. Validated/clamped client-side (normalizeColumnPrefs).
+    widths: dict[str, float] | None = None
+    dividers: bool | None = None
 
     model_config = ConfigDict(extra="allow")
 

@@ -9,7 +9,14 @@
      adding a column requires both a LIBRARY_COLUMNS entry and a branch here. -->
 <script lang="ts">
   import type { ReadingStatus, Work, WorkSortKey } from '../api/client';
-  import { type ColumnDef, type ColumnId, LIBRARY_COLUMNS } from '../lib/columns';
+  import {
+    type ColumnDef,
+    type ColumnId,
+    columnWidthPercents,
+    defaultColumnWidths,
+    LIBRARY_COLUMNS,
+  } from '../lib/columns';
+  import { tameTitle } from '../lib/titleCase';
   import { canModifyWork, currentUser, INSUFFICIENT_ROLE } from '../lib/session';
   import { formatDate } from '../lib/ui';
 
@@ -40,10 +47,19 @@
   export let onSelect: (work: Work) => void | Promise<void> = () => {};
   export let onStatusChange: (work: Work, status: ReadingStatus) => void = () => {};
 
+  // Per-column width RATIOS (relative weights — see columns.ts). Callers that don't pass them
+  // get the registry defaults, so every PaperTable surface shares the same proportions.
+  export let widths: Record<ColumnId, number> = defaultColumnWidths();
+  // Thin divider lines between rows (user-toggleable from the Columns dialog).
+  export let dividers = true;
+
   // In compact mode hide the lower-priority Venue column (keeps the old compact behaviour without
   // the nth-child CSS hack).
   $: shownColumns = compact ? columns.filter((c) => c.id !== 'venue') : columns;
   $: colCount = shownColumns.length + (selectable ? 1 : 0);
+  // Ratio → percent of the table width, recomputed for whichever columns are actually shown so
+  // hiding/showing a column redistributes space without the user re-tuning anything.
+  $: widthPercents = columnWidthPercents(shownColumns, widths);
 
   const readingStatuses: ReadingStatus[] = [
     'unread',
@@ -55,7 +71,8 @@
   ];
 
   function titleFor(work: Work): string {
-    return work.canonical_title?.trim() || 'Untitled paper';
+    // tameTitle: ALL-CAPS titles render in title case (display-only; stored title untouched).
+    return tameTitle(work.canonical_title) || 'Untitled paper';
   }
 
   // Map a backend badge token to a human label + a state class (drives the chip colour). Unknown
@@ -81,7 +98,15 @@
   }
 </script>
 
-<table class:compact>
+<table class:compact class:no-dividers={!dividers}>
+  <!-- table-layout is fixed, so these <col> percentages ARE the column widths; they always sum
+       to ~100% of whatever width the list currently has (the ratio mechanic). -->
+  <colgroup>
+    {#if selectable}<col class="check-col" />{/if}
+    {#each shownColumns as col (col.id)}
+      <col style={`width:${widthPercents[col.id]}%`} />
+    {/each}
+  </colgroup>
   <thead>
     <tr>
       {#if selectable}
@@ -248,16 +273,36 @@
   th,
   td {
     border-bottom: 1px solid var(--border-normal);
+    overflow-wrap: anywhere; /* long unbroken values (DOIs) wrap inside user-narrowed columns */
     padding: 0.66rem 0.7rem;
     text-align: left;
     vertical-align: middle;
+  }
+
+  /* Divider toggle: keep the header underline (it anchors the sort row), drop the row lines. */
+  .no-dividers td {
+    border-bottom: none;
+  }
+
+  .check-col {
+    width: 2.4rem;
   }
 
   th {
     color: var(--ink-muted);
     font-size: 0.76rem;
     font-weight: 700;
+    /* Headers truncate with … instead of wrapping mid-word when a column is user-narrowed. */
+    overflow: hidden;
+    text-overflow: ellipsis;
     text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Row controls (the status dropdown) must shrink into a user-narrowed column, not overlap the
+     neighbour cell. */
+  td select {
+    max-width: 100%;
   }
 
   .sort {

@@ -4177,6 +4177,17 @@
       "LibraryColumnPrefs": {
         "additionalProperties": true,
         "properties": {
+          "dividers": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividers"
+          },
           "order": {
             "default": [],
             "items": {
@@ -4202,6 +4213,20 @@
             },
             "title": "Visible",
             "type": "array"
+          },
+          "widths": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Widths"
           }
         },
         "title": "LibraryColumnPrefs",

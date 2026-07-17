@@ -255,7 +255,12 @@
     }, 600);
   }
 
-  function applyColumns(next: { order: ColumnId[]; visible: ColumnId[] }): void {
+  function applyColumns(next: {
+    order: ColumnId[];
+    visible: ColumnId[];
+    widths: Record<ColumnId, number>;
+    dividers: boolean;
+  }): void {
     columnPrefs = normalizeColumnPrefs({ ...columnPrefs, ...next });
     persistColumnPrefs();
   }
@@ -959,6 +964,8 @@
         <PaperTable
           {works}
           columns={visibleColumns}
+          widths={columnPrefs.widths}
+          dividers={columnPrefs.dividers}
           sortable
           {sortKey}
           {sortOrder}
@@ -1073,6 +1080,8 @@
   <ColumnPicker
     order={columnPrefs.order}
     visible={columnPrefs.visible}
+    widths={columnPrefs.widths}
+    dividers={columnPrefs.dividers}
     onApply={applyColumns}
     onClose={() => (showColumns = false)}
   />

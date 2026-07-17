@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  columnWidthPercents,
   DEFAULT_VISIBLE,
   defaultColumnPrefs,
   exceedsSoftCap,
+  LIBRARY_COLUMNS,
   normalizeColumnPrefs,
   SOFT_COLUMN_CAP,
   visibleColumnDefs,
@@ -96,5 +98,56 @@ describe('column prefs registry + validation', () => {
     });
     const defs = visibleColumnDefs(prefs);
     expect(defs.map((d) => d.id)).toEqual(['doi', 'title']);
+  });
+});
+
+describe('column width ratios + divider toggle', () => {
+  it('defaults: every column has a width ratio and dividers are on', () => {
+    const prefs = normalizeColumnPrefs({});
+    for (const def of LIBRARY_COLUMNS) {
+      expect(prefs.widths[def.id]).toBe(def.width);
+    }
+    expect(prefs.dividers).toBe(true);
+  });
+
+  it('keeps valid custom widths, clamps out-of-range ones, drops unknown ids', () => {
+    const prefs = normalizeColumnPrefs({
+      widths: { title: 50, year: 0, doi: 500, bogus: 10, venue: 'NaN' },
+    });
+    expect(prefs.widths.title).toBe(50);
+    expect(prefs.widths.year).toBe(2); // clamped to MIN
+    expect(prefs.widths.doi).toBe(80); // clamped to MAX
+    expect(prefs.widths.venue).toBe(14); // invalid → registry default
+    expect('bogus' in prefs.widths).toBe(false);
+  });
+
+  it('round-trips the dividers toggle and defaults it to true for legacy blobs', () => {
+    expect(normalizeColumnPrefs({ dividers: false }).dividers).toBe(false);
+    expect(normalizeColumnPrefs({ order: ['title'] }).dividers).toBe(true);
+  });
+
+  it('columnWidthPercents divides the ratios into percentages over the shown set', () => {
+    const prefs = normalizeColumnPrefs({
+      visible: ['title', 'year'],
+      widths: { title: 30, year: 10 },
+    });
+    const defs = visibleColumnDefs(prefs);
+    const pct = columnWidthPercents(defs, prefs.widths);
+    expect(pct.title).toBe(75);
+    expect(pct.year).toBe(25);
+  });
+
+  it('columnWidthPercents redistributes when the shown set changes (no re-tuning needed)', () => {
+    const widths = normalizeColumnPrefs({ widths: { title: 30, year: 10, doi: 10 } }).widths;
+    const two = columnWidthPercents(
+      visibleColumnDefs(normalizeColumnPrefs({ visible: ['title', 'year'], widths })),
+      widths,
+    );
+    const three = columnWidthPercents(
+      visibleColumnDefs(normalizeColumnPrefs({ visible: ['title', 'year', 'doi'], widths })),
+      widths,
+    );
+    expect(two.title).toBeGreaterThan(three.title); // same ratio, more columns → smaller share
+    expect(three.title + three.year + three.doi).toBeCloseTo(100, 0);
   });
 });
