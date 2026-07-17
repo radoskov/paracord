@@ -1247,6 +1247,133 @@ def test_landing_page_fallback_never_escapes_the_policy(db_session, tmp_path):
     assert db_session.scalar(select(File)) is None
 
 
+# A landing host NOT on any allow-list (semanticscholar.org itself is a built-in default, so a
+# genuinely refused landing page needs an unknown aggregator host).
+_REFUSED_PAGE_URL = "https://paper-aggregator.example/paper/2582ab7c"
+_NIPS_PDF = "https://papers.nips.cc/paper/5071-translating.pdf"
+
+
+def _gate_mirroring_stream(tried: list[str], pdf_url: str):
+    """A fake streamer mirroring the real per-URL policy gate; serves a PDF only for ``pdf_url``."""
+
+    def fake_stream(url, *, timeout, max_bytes, policy=None, merged_allowed=None, resolver=None):
+        tried.append(url)
+        outcome, reason = web_find._classify_download_host(
+            url, policy=policy or "restricted", merged_allowed=merged_allowed or set()
+        )
+        if outcome != "allow":
+            raise DownloadRefused(reason)
+        return _PDF_BYTES if url == pdf_url else None
+
+    return fake_stream
+
+
+def _refused_page(url, **_kw):
+    # Mirrors _fetch_landing_html on a mode-gate-refused host: refused before any network I/O.
+    raise DownloadRefused("page read refused")
+
+
+def test_refused_landing_host_still_tries_api_discovery(db_session, tmp_path, monkeypatch):
+    """A mode-gate-refused landing host is no longer a dead end: API-backed discovery (metadata
+    lookups, not downloads) still runs, and a discovered PDF on an ALLOWED host attaches."""
+    add_allowed_host(db_session, host="papers.nips.cc", created_by_user_id=None)
+    db_session.commit()  # download policy stays at the 'restricted' default
+    monkeypatch.setattr(web_find, "api_pdf_candidates", lambda url, doi, settings=None: [_NIPS_PDF])
+    tried: list[str] = []
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url=_REFUSED_PAGE_URL,
+        source="semanticscholar",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=_gate_mirroring_stream(tried, _NIPS_PDF),
+        html_fetcher=_refused_page,
+    )
+    assert out["status"] == "attached"
+    assert _REFUSED_PAGE_URL not in tried  # the refused landing URL itself is never fetched
+    assert _NIPS_PDF in tried
+
+
+def test_refused_landing_and_refused_discovery_reports_the_pdf_host(
+    db_session, tmp_path, monkeypatch
+):
+    """When the landing host AND every discovered PDF URL are refused, the answer is the
+    actionable 'a PDF was found but its host isn't allowed' block naming the PDF URL — the user
+    should allow papers.nips.cc, not the landing host."""
+    monkeypatch.setattr(web_find, "api_pdf_candidates", lambda url, doi, settings=None: [_NIPS_PDF])
+    tried: list[str] = []
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url=_REFUSED_PAGE_URL,
+        source="semanticscholar",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),  # restricted; papers.nips.cc NOT allowed
+        streamer=_gate_mirroring_stream(tried, _NIPS_PDF),
+        html_fetcher=_refused_page,
+    )
+    assert out["status"] == "blocked"
+    assert "A PDF was found" in out["reason"]
+    assert _NIPS_PDF in out["reason"]  # listed among the tried URLs
+    assert "Admin → Find-on-web" in out["reason"]
+    assert db_session.scalar(select(File)) is None
+
+
+def test_refused_landing_with_no_discovery_returns_the_refusal(db_session, tmp_path, monkeypatch):
+    """No discovered alternative → the original mode-gate refusal (with its policy hint) stands."""
+    monkeypatch.setattr(web_find, "api_pdf_candidates", lambda url, doi, settings=None: [])
+    tried: list[str] = []
+    out = download_and_attach(
+        db_session,
+        work=_seed_work(db_session),
+        candidate_url="https://unknown-publisher.example/article",
+        source="crossref",
+        actor=_Actor(),
+        settings=_attach_settings(tmp_path),
+        streamer=_gate_mirroring_stream(tried, _NIPS_PDF),
+        html_fetcher=_refused_page,
+    )
+    assert out["status"] == "error"
+    assert "allowed-downloads" in out["reason"].lower()
+    assert "Admin → Find-on-web" in out["reason"]
+    assert tried == []  # nothing was ever fetched
+    assert db_session.scalar(select(File)) is None
+
+
+def test_web_candidate_normalizes_blank_urls():
+    """Upstream APIs sometimes send "" where they mean null (e.g. S2's openAccessPdf.url) — a
+    blank URL must read as absent, or the client attempts an empty download URL."""
+    cand = WebCandidate(source="x", title="T", pdf_url="", landing_url="  ", resolved_url="")
+    assert cand.pdf_url is None
+    assert cand.landing_url is None
+    assert cand.resolved_url is None
+
+
+def test_semantic_scholar_blank_open_access_pdf_reads_as_absent(monkeypatch):
+    """The real-world shape of the bug above: S2 answered ``openAccessPdf: {"url": ""}`` for the
+    TransE paper, which surfaced as a 'directly downloadable' candidate with an empty URL."""
+    payload = {
+        "data": [
+            {
+                "paperId": "abc123",
+                "title": "A Paper",
+                "year": 2020,
+                "externalIds": {},
+                "openAccessPdf": {"url": ""},
+                "isOpenAccess": False,
+                "url": "https://www.semanticscholar.org/paper/abc123",
+                "authors": [],
+            }
+        ]
+    }
+    _patch_get(monkeypatch, _FakeResponse(json_data=payload))
+    out = search_semantic_scholar("A Paper", [], 2020)
+    assert len(out) == 1
+    assert out[0].pdf_url is None
+    assert out[0].landing_url == "https://www.semanticscholar.org/paper/abc123"
+
+
 def test_denied_host_blocked_in_every_mode_incl_unrestricted_confirmed(db_session, tmp_path):
     for policy in ("restricted", "careful", "unrestricted"):
         set_download_policy(db_session, policy=policy)

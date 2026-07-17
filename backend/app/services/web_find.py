@@ -234,6 +234,13 @@ class WebCandidate:
     platform: str | None = None
 
     def __post_init__(self) -> None:
+        # Upstream APIs sometimes send "" where they mean null (e.g. Semantic Scholar's
+        # ``openAccessPdf: {"url": ""}``) — a blank URL must read as absent, or clients treat the
+        # candidate as directly downloadable and attempt an empty download URL.
+        for attr in ("pdf_url", "landing_url", "resolved_url"):
+            value = getattr(self, attr)
+            if value is not None and not value.strip():
+                setattr(self, attr, None)
         if not self.sources:
             self.sources = [self.source]
         if not self.candidate_id:
@@ -648,7 +655,7 @@ def search_unpaywall(doi: str, *, email: str | None = None) -> dict | None:
         return None
     best = payload.get("best_oa_location") or {}
     return {
-        "pdf_url": best.get("url_for_pdf") or best.get("url"),
+        "pdf_url": best.get("url_for_pdf") or best.get("url") or None,
         "landing_url": best.get("url_for_landing_page"),
         "is_oa": bool(payload.get("is_oa")),
     }
@@ -1359,13 +1366,21 @@ def download_and_attach(
         )
         if outcome == "hard_block":
             return {"status": "blocked", "reason": reason}
+        # Fallback discovery only runs on the real network path (or when a test injects
+        # html_fetcher), so injected-streamer tests keep single-attempt semantics.
+        use_fallbacks = streamer is None or html_fetcher is not None
+        landing_refusal: str | None = None
         if outcome == "error":
-            # A host refused by the mode gate (not a hard block): keep the status, but append the
-            # actionable hint so the user knows it's a policy choice they can change (UX batch 4).
-            return {
-                "status": "error",
-                "reason": reason + _policy_refusal_hint(candidate_url, policy),
-            }
+            # A host refused by the mode gate (not a hard block). That needn't be a dead end:
+            # publisher URL rewrites and API-backed discovery (S2/DBLP/Unpaywall — metadata
+            # lookups, not downloads) can surface the same PDF on an ALLOWED host, e.g. a
+            # bot-walled semanticscholar.org page whose actual PDF lives on papers.nips.cc.
+            # Skip the direct fetch, run discovery, and let every discovered URL pass the full
+            # gates; if nothing allowed turns up, this refusal (with the actionable policy
+            # hint, UX batch 4) is the final answer.
+            landing_refusal = reason + _policy_refusal_hint(candidate_url, policy)
+            if not use_fallbacks:
+                return {"status": "error", "reason": landing_refusal}
         # In unrestricted mode an unknown public host needs an explicit confirmation; a confirmed
         # item falls through to allow.
         if outcome == "needs_confirmation" and not confirmed:
@@ -1393,22 +1408,25 @@ def download_and_attach(
                 return stream(url_try, **kwargs)
             return stream(url_try, timeout=timeout, max_bytes=max_bytes)
 
-        try:
-            # The real streamer re-classifies every redirect hop under the same policy; an injected
-            # test streamer keeps the original (url, timeout, max_bytes) signature.
-            pdf_bytes = _attempt(candidate_url)
-        except DownloadRefused as exc:
-            # A redirect escaped the policy (e.g. doi.org → a known publisher under 'restricted').
-            # Hard blocks (denylist/SSRF) keep their raw reason; a mode-gate refusal gets the hint.
-            reason_text = str(exc)
-            if "allowed-downloads list" in reason_text and policy in ("restricted", "careful"):
-                reason_text += _policy_refusal_hint(candidate_url, policy)
-            return {"status": "blocked", "reason": reason_text}
-        except ValueError:
-            return {"status": "error", "reason": "file exceeds the download size cap"}
-        except Exception as exc:  # noqa: BLE001 - network/parse failure → manual fallback
-            logger.warning("find-on-web download failed for %s: %s", candidate_url, exc)
-            pdf_bytes = None
+        pdf_bytes: bytes | None = None
+        if landing_refusal is None:
+            try:
+                # The real streamer re-classifies every redirect hop under the same policy; an
+                # injected test streamer keeps the original (url, timeout, max_bytes) signature.
+                pdf_bytes = _attempt(candidate_url)
+            except DownloadRefused as exc:
+                # A redirect escaped the policy (e.g. doi.org → a known publisher under
+                # 'restricted'). Hard blocks (denylist/SSRF) keep their raw reason; a mode-gate
+                # refusal gets the hint.
+                reason_text = str(exc)
+                if "allowed-downloads list" in reason_text and policy in ("restricted", "careful"):
+                    reason_text += _policy_refusal_hint(candidate_url, policy)
+                return {"status": "blocked", "reason": reason_text}
+            except ValueError:
+                return {"status": "error", "reason": "file exceeds the download size cap"}
+            except Exception as exc:  # noqa: BLE001 - network/parse failure → manual fallback
+                logger.warning("find-on-web download failed for %s: %s", candidate_url, exc)
+                pdf_bytes = None
 
         # "Less weak" attempt (UX batch 3): when the direct fetch didn't yield a PDF, do what the
         # user would do on the landing page — try known publisher PDF-URL rewrites, then read the
@@ -1420,7 +1438,6 @@ def download_and_attach(
         fetched_url = candidate_url
         tried_urls: list[str] = [candidate_url]
         policy_refusal: str | None = None  # a refused PDF URL, if any (drives the actionable hint)
-        use_fallbacks = streamer is None or html_fetcher is not None
         if pdf_bytes is None and use_fallbacks:
             from app.services.pdf_link_finder import find_pdf_links, publisher_pdf_urls
 
@@ -1511,6 +1528,10 @@ def download_and_attach(
                         + f" Tried: {shown}{more}"
                     ),
                 }
+            if landing_refusal is not None:
+                # The landing host was refused AND discovery surfaced no allowed alternative:
+                # report the original mode-gate refusal (with its policy hint).
+                return {"status": "error", "reason": landing_refusal}
             return {
                 "status": "manual_upload_needed",
                 "reason": f"no downloadable PDF (login/HTML/blocked). Tried: {shown}{more}",

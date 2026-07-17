@@ -752,9 +752,11 @@
 
   // The URL we attempt for a candidate: a direct PDF if it has one, else its resolved (final
   // post-redirect) URL, else its landing URL. The backend fetches whatever we send, %PDF-validates
-  // it, and falls back to manual_upload_needed for an HTML/login/paywall page.
+  // it, and falls back to manual_upload_needed for an HTML/login/paywall page. `||` (not `??`):
+  // some sources deliver "" where they mean null, and an empty string must not win the chain
+  // (the backend rejects it as "missing download url").
   function fetchUrl(c: WebCandidate): string | null {
-    return c.pdf_url ?? c.resolved_url ?? c.landing_url ?? null;
+    return c.pdf_url || c.resolved_url || c.landing_url || null;
   }
 
   // A candidate is download-attemptable when it has ANY fetchable URL (find-on-web item 4): a
