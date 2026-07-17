@@ -592,9 +592,9 @@
                 <select class="item-shelf" bind:value={itemShelves[item.id]}
                   aria-label={`Shelf for ${item.filename}`}
                   title="Shelf for this paper — overrides the batch's 'Add to shelf' selection above">
-                  <option value="">Shelf: batch default</option>
+                  <option value="">(batch default)</option>
                   {#each $shelves as shelf (shelf.id)}
-                    <option value={shelf.id}>Shelf: {shelf.name}</option>
+                    <option value={shelf.id}>{shelf.name}</option>
                   {/each}
                 </select>
               {/if}
