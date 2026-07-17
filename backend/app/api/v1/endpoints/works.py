@@ -5,6 +5,7 @@ import math
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
@@ -59,6 +60,7 @@ from app.services.semantic_search import related_works
 from app.services.storage import (
     attach_uploaded_pdf_to_work,
     mark_extraction_requested,
+    merged_server_roots,
     probe_pdf_openable,
 )
 from app.services.summarization import list_work_summaries, summarize_work
@@ -2031,8 +2033,20 @@ def upload_work_file(
     pdf_error = probe_pdf_openable(pdf_bytes)  # E2: reject encrypted/unopenable before any worker
     if pdf_error is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
-    file_obj, created_file, _linked = attach_uploaded_pdf_to_work(
+    return _attach_pdf_bytes_to_work(
         db, work=work, filename=file.filename or "upload.pdf", pdf_bytes=pdf_bytes, actor=actor
+    )
+
+
+def _attach_pdf_bytes_to_work(
+    db: Session, *, work: Work, filename: str, pdf_bytes: bytes, actor: User
+) -> WorkFileRead:
+    """Shared attach tail for validated PDF bytes (browser upload + server-path attach).
+
+    Stores/dedupes the file, links it to the work, queues extraction, and builds the response.
+    """
+    file_obj, created_file, _linked = attach_uploaded_pdf_to_work(
+        db, work=work, filename=filename, pdf_bytes=pdf_bytes, actor=actor
     )
     # If this is a deduped attach of an already-extracted PDF, don't re-run extraction: the file's
     # extraction is keyed by file id and would only (re)write the file's original paper, not this one
@@ -2045,9 +2059,88 @@ def upload_work_file(
     db.refresh(file_obj)
     if not already_extracted:
         extraction_queued = enqueue_extraction(file_obj.id) is not None
-    also_in = _other_work_counts(db, [file_obj.id], work_id).get(file_obj.id, 0)
+    also_in = _other_work_counts(db, [file_obj.id], work.id).get(file_obj.id, 0)
     return _file_read(db, file_obj, also_in_count=also_in).model_copy(
         update={"extraction_queued": extraction_queued}
+    )
+
+
+class AttachFromPathRequest(BaseModel):
+    """A file path on the SERVER machine to attach to a paper (Files panel "From server path")."""
+
+    path: str
+
+
+@router.post(
+    "/{work_id}/files/from-path", response_model=WorkFileRead, status_code=status.HTTP_201_CREATED
+)
+def attach_work_file_from_path(
+    work_id: uuid.UUID,
+    payload: AttachFromPathRequest,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> WorkFileRead:
+    """Attach a PDF that already exists on the server's filesystem, by absolute path.
+
+    Saves the download-then-reupload round trip when the file is already reachable from the server
+    (e.g. a shared drive). Security mirrors the server-folder import: the path must resolve —
+    symlinks followed — to a file INSIDE one of the merged allowed roots (``server.yaml``
+    ``storage.server_allowed_roots`` + the owner-managed Admin rows); anything else is refused
+    before the filesystem is touched. The bytes then pass the exact same validation as a browser
+    upload (size cap, %PDF magic, openability probe) and the same attach/dedupe/extraction path.
+    """
+    assert_queue_has_capacity(db)
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    raw = (payload.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a file path")
+    try:
+        resolved = Path(raw).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Not a valid file path"
+        ) from exc
+    roots = merged_server_roots(db, get_settings())
+    if not any(resolved.is_relative_to(root) for root in roots.values()):
+        # Same containment rule as the server-folder import; symlink escapes are caught because the
+        # check runs on the fully-resolved target.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Path is not inside an allowed server folder. An owner can add folders under "
+                "Admin → Server import folders."
+            ),
+        )
+    if not resolved.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No file exists at that path on the server",
+        )
+    if resolved.stat().st_size > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="File exceeds 200 MB limit"
+        )
+    pdf_bytes = resolved.read_bytes()
+    if len(pdf_bytes) < 4 or pdf_bytes[:4] != b"%PDF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="The file is not a valid PDF"
+        )
+    pdf_error = probe_pdf_openable(pdf_bytes)
+    if pdf_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=pdf_error)
+    record_event(
+        db,
+        "work.file_attached_from_path",
+        actor_user_id=actor.id,
+        entity_type="work",
+        entity_id=str(work.id),
+        details={"path": str(resolved)},
+    )
+    return _attach_pdf_bytes_to_work(
+        db, work=work, filename=resolved.name, pdf_bytes=pdf_bytes, actor=actor
     )
 
 

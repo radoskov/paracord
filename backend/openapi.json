@@ -1223,6 +1223,20 @@
         "title": "AppConfigUpdate",
         "type": "object"
       },
+      "AttachFromPathRequest": {
+        "description": "A file path on the SERVER machine to attach to a paper (Files panel \"From server path\").",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "AttachFromPathRequest",
+        "type": "object"
+      },
       "AuthorStatModel": {
         "description": "Aggregate stats for one (normalized) author within a scope.",
         "properties": {
@@ -22923,6 +22937,76 @@
           }
         },
         "summary": "Upload Work File",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/files/from-path": {
+      "post": {
+        "description": "Attach a PDF that already exists on the server's filesystem, by absolute path.\n\nSaves the download-then-reupload round trip when the file is already reachable from the server\n(e.g. a shared drive). Security mirrors the server-folder import: the path must resolve —\nsymlinks followed — to a file INSIDE one of the merged allowed roots (``server.yaml``\n``storage.server_allowed_roots`` + the owner-managed Admin rows); anything else is refused\nbefore the filesystem is touched. The bytes then pass the exact same validation as a browser\nupload (size cap, %PDF magic, openability probe) and the same attach/dedupe/extraction path.",
+        "operationId": "attach_work_file_from_path_api_v1_works__work_id__files_from_path_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachFromPathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkFileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach Work File From Path",
         "tags": [
           "works"
         ]
