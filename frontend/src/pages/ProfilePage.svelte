@@ -219,73 +219,11 @@
 
 {#if me}
   <div class="profile">
-    <section class="card account">
-      <span class="role-badge role-{me.role} corner" title={`Your role: ${me.role}`}>{me.role}</span>
-      <div class="head">
-        <h2>Account</h2>
-      </div>
-      <dl class="meta">
-        <div><dt>Username</dt><dd>{me.username} <small class="muted">(cannot be changed)</small></dd></div>
-        <div><dt>Member since</dt><dd>{formatDate(me.created_at)}</dd></div>
-        <div><dt>Last sign-in</dt><dd>{formatDate(me.last_login_at)}</dd></div>
-      </dl>
-
-      <form class="fields" on:submit|preventDefault={saveProfile}>
-        <label>
-          Appearance name
-          <input bind:value={displayName} maxlength="255" placeholder="How your name is shown (optional)" />
-        </label>
-        <label>
-          Email
-          <input type="email" bind:value={email} maxlength="320" placeholder="Contact email (optional)" />
-        </label>
-        <label>
-          Papers per page
-          <input
-            type="number"
-            min="1"
-            bind:value={papersPerPage}
-            placeholder="Library page size (blank = default)"
-          />
-        </label>
-        <div class="actions">
-          <button type="submit" disabled={savingProfile || !dirty}
-            title={dirty ? 'Save your appearance name and email' : 'No changes to save'}>Save changes</button>
-        </div>
-        {#if profileMsg}<p class="muted">{profileMsg}</p>{/if}
-        {#if profileErr}<p class="danger">{profileErr}</p>{/if}
-      </form>
-    </section>
-
-    <section class="card pw">
-      <div class="head">
-        <h2>Password</h2>
-        <button type="button" class="secondary" on:click={togglePw}
-          title={showPw ? 'Close the password form' : 'Change your account password'}>
-          {showPw ? 'Cancel' : 'Change password'}
-        </button>
-      </div>
-      {#if showPw}
-        <form class="fields" on:submit|preventDefault={submitPassword}>
-          <label>Current password<input type="password" bind:value={curPw} autocomplete="current-password" /></label>
-          <label>New password<input type="password" bind:value={newPw} autocomplete="new-password" /></label>
-          {#if newPw && newPw.length < 8}<p class="hintline">New password must be at least 8 characters.</p>{/if}
-          <div class="actions">
-            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}
-              title={!curPw
-                ? 'Enter your current password'
-                : newPw.length < 8
-                  ? 'New password must be at least 8 characters'
-                  : 'Change your password (signs out other sessions)'}>Change</button>
-          </div>
-          {#if pwMsg}<p class="muted">{pwMsg}</p>{/if}
-          {#if pwErr}<p class="danger">{pwErr}</p>{/if}
-        </form>
-      {:else}
-        <p class="muted">Signs you out everywhere else (other browsers/devices). This tab stays signed in.</p>
-      {/if}
-    </section>
-
+    <!-- Main (wider) column: Appearance first — it's the most-used panel — then the graph
+         weights. The side column holds the smaller account/security/info cards. Two flex
+         columns (not one shared grid) so each column packs its cards without cross-column
+         row-height gaps. -->
+    <div class="col main">
     <section class="card appearance">
       <div class="head">
         <h2>Appearance</h2>
@@ -359,6 +297,75 @@
       </div>
       {#if refWeightsMsg}<p class="muted">{refWeightsMsg}</p>{/if}
     </section>
+    </div>
+
+    <div class="col side">
+    <section class="card account">
+      <span class="role-badge role-{me.role} corner" title={`Your role: ${me.role}`}>{me.role}</span>
+      <div class="head">
+        <h2>Account</h2>
+      </div>
+      <dl class="meta">
+        <div><dt>Username</dt><dd>{me.username} <small class="muted">(cannot be changed)</small></dd></div>
+        <div><dt>Member since</dt><dd>{formatDate(me.created_at)}</dd></div>
+        <div><dt>Last sign-in</dt><dd>{formatDate(me.last_login_at)}</dd></div>
+      </dl>
+
+      <form class="fields" on:submit|preventDefault={saveProfile}>
+        <label>
+          Appearance name
+          <input bind:value={displayName} maxlength="255" placeholder="How your name is shown (optional)" />
+        </label>
+        <label>
+          Email
+          <input type="email" bind:value={email} maxlength="320" placeholder="Contact email (optional)" />
+        </label>
+        <label>
+          Papers per page
+          <input
+            type="number"
+            min="1"
+            bind:value={papersPerPage}
+            placeholder="Library page size (blank = default)"
+          />
+        </label>
+        <div class="actions">
+          <button type="submit" disabled={savingProfile || !dirty}
+            title={dirty ? 'Save your appearance name and email' : 'No changes to save'}>Save changes</button>
+        </div>
+        {#if profileMsg}<p class="muted">{profileMsg}</p>{/if}
+        {#if profileErr}<p class="danger">{profileErr}</p>{/if}
+      </form>
+    </section>
+
+    <section class="card pw">
+      <div class="head">
+        <h2>Password</h2>
+        <button type="button" class="secondary" on:click={togglePw}
+          title={showPw ? 'Close the password form' : 'Change your account password'}>
+          {showPw ? 'Cancel' : 'Change password'}
+        </button>
+      </div>
+      {#if showPw}
+        <form class="fields" on:submit|preventDefault={submitPassword}>
+          <label>Current password<input type="password" bind:value={curPw} autocomplete="current-password" /></label>
+          <label>New password<input type="password" bind:value={newPw} autocomplete="new-password" /></label>
+          {#if newPw && newPw.length < 8}<p class="hintline">New password must be at least 8 characters.</p>{/if}
+          <div class="actions">
+            <button type="submit" disabled={pwBusy || !curPw || newPw.length < 8}
+              title={!curPw
+                ? 'Enter your current password'
+                : newPw.length < 8
+                  ? 'New password must be at least 8 characters'
+                  : 'Change your password (signs out other sessions)'}>Change</button>
+          </div>
+          {#if pwMsg}<p class="muted">{pwMsg}</p>{/if}
+          {#if pwErr}<p class="danger">{pwErr}</p>{/if}
+        </form>
+      {:else}
+        <p class="muted">Signs you out everywhere else (other browsers/devices). This tab stays signed in.</p>
+      {/if}
+    </section>
 
     <section class="card roles">
       <h2>Roles &amp; access</h2>
@@ -370,6 +377,7 @@
         <span class="muted">{ROLE_INFO[me.role]?.blurb ?? ''}</span>
       </div>
     </section>
+    </div>
   </div>
 {:else}
   <p class="muted">Loading your profile…</p>
@@ -400,37 +408,22 @@
     align-items: start;
     display: grid;
     gap: 1rem;
-    /* Account + Password stack in the main column; Roles & access is pinned top-right. */
-    grid-template-columns: minmax(0, 1fr) 17rem;
+    /* Main (Appearance + graph weights) column left, the smaller account/security/info cards
+       right. Each column is an independent flex stack so card heights never open cross-column
+       gaps. */
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     margin: 0 auto;
-    max-width: 52rem;
+    max-width: 72rem;
   }
-  .account {
-    grid-column: 1;
-    grid-row: 1;
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
   }
-  .pw {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .appearance {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .roles {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  @media (max-width: 720px) {
+  @media (max-width: 860px) {
     .profile {
       grid-template-columns: 1fr;
-    }
-    .account,
-    .pw,
-    .appearance,
-    .roles {
-      grid-column: 1;
-      grid-row: auto;
     }
   }
   .follow {
@@ -472,6 +465,9 @@
     background: var(--surface-raised);
     border: 1px solid var(--border-normal);
     border-radius: var(--radius-md);
+    /* Buttons default to the primary-action inverse ink; on this raised-surface card the theme
+       name would be near-invisible without restoring the normal ink. */
+    color: var(--ink-strong);
     cursor: pointer;
     display: flex;
     gap: 0.6rem;
