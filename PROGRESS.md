@@ -9,6 +9,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## UX batch: jobs visibility, per-item shelves, descriptions, title tags (2026-07-17)
+
+- **Insights external node → import by DOI**: clicking an external graph node now opens the
+  Import tab's Identifier form with the DOI prefilled (`pendingIdentifierImport` store) instead
+  of a Library search that couldn't import. Unit-tested.
+- **Jobs tab**: workers run with `--results-ttl 86400` (RQ's 500s default silently evicted
+  finished jobs mid-session); the endpoint cap rises to 500 and the page requests 200 rows.
+- **Per-item shelf on import**: every multi-PDF preview row and citation draft gets an optional
+  shelf select; unset rows use the global "Add to shelf" pick, else the default-shelf placement.
+  `StagingDecision`/`BatchCommitDraft` gain `target_shelf_id` (note: shelf membership needs
+  librarian+, enforced by the existing ACL). Backend test incl. override-vs-global.
+- **Shelf/rack descriptions**: create-form input + a "Save description" editor on the selected
+  shelf/rack (backend supported it all along; tags already had UI); descriptions display under
+  the detail heading.
+- **Tags under the paper title**: applied-tag chips render right below the WorkDetail heading
+  (tooltip = tag description, now carried by the applied-tag read models).
+- **Import preview polish**: "extracted ✓" renders green (pending/extracting muted), an
+  "N / M processed" progress bar tracks extraction, and the commit button shows "Creating…".
+  All verified live (screenshots); battery green: backend 1265, frontend 325, safety 161,
+  e2e 37/37 0-flake.
+
 ## Graph color-by shelf/rack/tag + whole-API deadlock fix (2026-07-17)
 
 - **Color by shelf / rack / tag across the full graph trio** (owner request): the Insights
