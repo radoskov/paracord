@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.exc import DataError
 
 from app.api.v1.router import api_router
@@ -211,7 +212,12 @@ def create_app() -> FastAPI:
         scheme, _, raw_token = (request.headers.get("authorization") or "").partition(" ")
         token = raw_token.strip() if scheme.lower() == "bearer" else None
         ip = request.client.host if request.client else None
-        decision = rate_limit.check(token=token, ip=ip)
+        # OFF the event loop: check() reads the effective ceilings from the DB on cache expiry
+        # (sync SQLAlchemy). Run inline it once froze the WHOLE loop: under a request burst the
+        # pool was momentarily empty, the loop blocked on the pool checkout, and every in-flight
+        # threadpool request (each holding a connection) froze mid-response — none could return
+        # its connection through the frozen loop, deadlocking the API permanently (2026-07-17).
+        decision = await run_in_threadpool(rate_limit.check, token=token, ip=ip)
         if not decision.allowed:
             if decision.scope == "unavailable":
                 return JSONResponse(
