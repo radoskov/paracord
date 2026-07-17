@@ -476,8 +476,8 @@ def _batch_library_columns(
     Four grouped queries total (O(1) per page, not O(n)): files-per-work (for count + status +
     text-layer badges), applied tags, and a conflict probe over metadata assertions. Returns
     ``(work_id -> file_count, work_id -> tags, work_id -> badges)``. Badge tokens are UI-agnostic
-    strings (``extracted``/``extract_failed``/``not_extracted``/``text_poor``/``text_none``/
-    ``ocr_added``/``conflicts``) that the frontend maps to labels + colours.
+    strings (``extracted``/``extract_failed``/``degraded``/``not_extracted``/``text_poor``/
+    ``text_none``/``ocr_added``/``conflicts``) that the frontend maps to labels + colours.
     """
     file_counts: dict[uuid.UUID, int] = {}
     work_tags: dict[uuid.UUID, list[WorkTagRef]] = {}
@@ -489,15 +489,18 @@ def _batch_library_columns(
     # Files linked to each work → count + the set of statuses + text-layer qualities present.
     statuses: dict[uuid.UUID, set[str]] = {}
     qualities: dict[uuid.UUID, set[str]] = {}
+    degraded_ids: set[uuid.UUID] = set()
     file_rows = db.execute(
-        select(FileWorkLink.work_id, File.status, File.text_layer_quality)
+        select(FileWorkLink.work_id, File.status, File.text_layer_quality, File.extraction_degraded)
         .join(File, File.id == FileWorkLink.file_id)
         .where(FileWorkLink.work_id.in_(work_ids))
     ).all()
-    for work_id, status_, quality in file_rows:
+    for work_id, status_, quality, degraded in file_rows:
         file_counts[work_id] = file_counts.get(work_id, 0) + 1
         statuses.setdefault(work_id, set()).add(status_)
         qualities.setdefault(work_id, set()).add(quality)
+        if degraded:
+            degraded_ids.add(work_id)
 
     # Applied tags per work (entity_type discriminator == "work").
     tag_rows = db.execute(
@@ -567,6 +570,8 @@ def _batch_library_columns(
             tokens.append("extracted")
         if "extract_failed" in work_statuses:
             tokens.append("extract_failed")
+        if work.id in degraded_ids:
+            tokens.append("degraded")
         for quality in sorted(qualities.get(work.id, set())):
             token = _TEXT_QUALITY_BADGES.get(quality)
             if token:
@@ -1934,6 +1939,10 @@ class WorkFileRead(BaseModel):
     # How many OTHER papers this exact PDF (same sha256) is also attached to — drives the
     # "duplicate PDF" badge so a deduped attach is visible. Search the hash to find those papers.
     also_in_count: int = 0
+    # True when this file's stored extraction came from the degraded header+references fallback
+    # (GROBID's full-text parser crashed): metadata/bibliography/plain body text present, real
+    # section structure + citation contexts absent. Drives the "degraded extraction" badge.
+    extraction_degraded: bool = False
 
     model_config = {"from_attributes": True}
 

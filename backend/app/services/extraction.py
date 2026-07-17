@@ -182,6 +182,12 @@ def store_parsed_extraction(
         work.keywords = extract_keywords(keyword_source, top_k=12, boost_text=boost)
     if file is not None:
         file.text_layer_quality = _text_layer_quality(body_text, parsed.abstract, file.page_count)
+        # Flag (or clear, on a successful re-extract) the degraded header+references fallback —
+        # drives the "degraded extraction" badge. Central here so every TEI-storing path (extract
+        # job, staging create, staging append) agrees.
+        from app.services.grobid_client import is_degraded_tei  # noqa: PLC0415 (import cycle)
+
+        file.extraction_degraded = is_degraded_tei(raw_tei_xml)
 
     work.updated_at = datetime.now(UTC)
 

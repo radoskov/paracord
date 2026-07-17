@@ -653,3 +653,41 @@ def test_extract_force_ocr_runs_even_on_good_text_layer(db_session, tmp_path, mo
     assert summary["ocr_forced"] is True
     assert summary["ocr_available"] is True
     assert seen["skip_if_good"] is False  # forcing disables the good-layer skip
+
+
+def test_degraded_tei_flags_file_and_yields_body_section(db_session) -> None:
+    """A degraded-fallback TEI (marker + plain-text body) flags the file and still feeds the
+    summarizer/chunker a 'Full text' section; a later full re-extract clears the flag."""
+    from app.models.file import File
+    from app.services.grobid_client import merge_header_and_references
+    from app.services.tei_parser import extract_sections
+
+    header = (
+        '<TEI xmlns="http://www.tei-c.org/ns/1.0"><teiHeader></teiHeader>'
+        '<text xml:lang="en"></text></TEI>'
+    )
+    degraded = merge_header_and_references(
+        header, None, body_text_pages=["Page one text.", "Page <two> & more."]
+    )
+    # The plain-text body parses into a section the chunker/summarizer will pick up, XML-escaped.
+    sections = extract_sections(degraded)
+    assert sections and sections[0][0] == "Full text"
+    assert "Page one text." in sections[0][1] and "Page <two> & more." in sections[0][1]
+
+    work = Work(canonical_title="Degraded", normalized_title="degraded")
+    file = File(sha256="f" * 64, size_bytes=10, status="available")
+    db_session.add_all([work, file])
+    db_session.commit()
+
+    store_parsed_extraction(
+        db_session, work=work, parsed=parse_tei(degraded), file=file, raw_tei_xml=degraded
+    )
+    db_session.commit()
+    assert file.extraction_degraded is True
+
+    # A successful full re-extract (normal TEI) clears the badge.
+    store_parsed_extraction(
+        db_session, work=work, parsed=parse_tei(FIXTURE), file=file, raw_tei_xml=FIXTURE
+    )
+    db_session.commit()
+    assert file.extraction_degraded is False

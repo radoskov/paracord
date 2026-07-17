@@ -80,6 +80,8 @@
   const BADGE_META: Record<string, { label: string; state: string }> = {
     extracted: { label: 'extracted', state: 'ok' },
     extract_failed: { label: 'extraction failed', state: 'error' },
+    // GROBID's full-text parser crashed on a file; the header+references fallback ran instead.
+    degraded: { label: 'degraded extraction', state: 'warn' },
     not_extracted: { label: 'not extracted', state: 'muted' },
     text_poor: { label: 'poor text', state: 'warn' },
     text_none: { label: 'no text layer', state: 'warn' },

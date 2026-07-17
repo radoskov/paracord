@@ -69,9 +69,21 @@ def test_merge_splices_listbibl_into_header_text() -> None:
     assert merged.index("<listBibl>") < merged.index("</text>")
 
 
-def test_merge_without_references_returns_header_unchanged() -> None:
-    assert gc.merge_header_and_references(HEADER_TEI, None) == HEADER_TEI
-    assert gc.merge_header_and_references(HEADER_TEI, "<TEI>no refs here</TEI>") == HEADER_TEI
+def test_merge_without_references_keeps_header_and_stamps_marker() -> None:
+    merged = gc.merge_header_and_references(HEADER_TEI, None)
+    assert merged.replace(gc.DEGRADED_TEI_MARKER, "") == HEADER_TEI
+    assert gc.is_degraded_tei(merged)
+    assert not gc.is_degraded_tei(HEADER_TEI)
+
+
+def test_merge_injects_plain_text_body_pages_escaped() -> None:
+    merged = gc.merge_header_and_references(
+        HEADER_TEI, REFS_TEI, body_text_pages=["Page one.", "a < b & c"]
+    )
+    assert "<head>Full text</head>" in merged
+    assert "<p>Page one.</p>" in merged
+    assert "<p>a &lt; b &amp; c</p>" in merged  # XML-escaped
+    assert merged.index("<body>") < merged.index("<back>")  # body precedes back within <text>
 
 
 class _CrashyFulltextClient:

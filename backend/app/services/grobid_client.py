@@ -17,30 +17,72 @@ class GrobidUnavailableError(RuntimeError):
 
 _LISTBIBL_RE = re.compile(r"<listBibl>.*</listBibl>", re.DOTALL)
 
+# Stamped into every degraded-fallback TEI so the extraction store can flag the file (the UI's
+# "degraded extraction" badge). An XML comment: invisible to the TEI parsers, survives storage.
+DEGRADED_TEI_MARKER = "<!-- paracord:degraded-extraction -->"
 
-def merge_header_and_references(header_tei: str, references_tei: str | None) -> str:
+
+def is_degraded_tei(tei_xml: str | None) -> bool:
+    """True when this stored TEI came from the degraded header+references fallback."""
+    return bool(tei_xml) and DEGRADED_TEI_MARKER in tei_xml
+
+
+def merge_header_and_references(
+    header_tei: str, references_tei: str | None, body_text_pages: list[str] | None = None
+) -> str:
     """Build a degraded-but-useful TEI from the header + references endpoints' outputs.
 
     Some PDFs crash GROBID's FULL-TEXT body formatter with an internal 500
     (``TEIFormatter.toTEITextPiece: fromIndex > toIndex``) while its header and references
-    parsers handle the same file fine. Splice the references ``<listBibl>`` into the header TEI's
-    ``<text>`` so the standard ``parse_tei`` sees title/authors/abstract/DOI AND the bibliography
-    — only body sections (and their citation contexts) are lost. Both documents share the default
-    TEI namespace, so a string splice keeps the fragment well-formed.
+    parsers handle the same file fine. Splice the references ``<listBibl>`` (and, when provided,
+    a plain-text body extracted with PyMuPDF — one ``<p>`` per page under a single "Full text"
+    section) into the header TEI's ``<text>`` so the standard ``parse_tei``/``extract_sections``
+    path sees title/authors/abstract/DOI, the bibliography, AND summarizable/chunkable body text
+    — only real section structure and citation contexts are lost. Both documents share the
+    default TEI namespace, so a string splice keeps the fragment well-formed. The result carries
+    :data:`DEGRADED_TEI_MARKER` so downstream can badge the file.
     """
-    listbibl = None
+    from xml.sax.saxutils import escape
+
+    from app.services.storage import CONTROL_CHARS
+
+    fragment = ""
+    pages = [
+        escaped
+        for page in body_text_pages or []
+        if (escaped := escape(CONTROL_CHARS.sub(" ", page)).strip())
+    ]
+    if pages:
+        paragraphs = "".join(f"<p>{page}</p>" for page in pages)
+        fragment += (
+            f'<body><div type="plain-text-fallback"><head>Full text</head>{paragraphs}</div></body>'
+        )
     if references_tei:
         match = _LISTBIBL_RE.search(references_tei)
         if match:
-            listbibl = match.group(0)
-    if not listbibl:
-        return header_tei
-    fragment = f'<back><div type="references">{listbibl}</div></back>'
-    if "</text>" in header_tei:
-        return header_tei.replace("</text>", f"{fragment}</text>", 1)
-    if "</TEI>" in header_tei:
-        return header_tei.replace("</TEI>", f"<text>{fragment}</text></TEI>", 1)
-    return header_tei
+            fragment += f'<back><div type="references">{match.group(0)}</div></back>'
+    merged = header_tei
+    if fragment:
+        if "</text>" in merged:
+            merged = merged.replace("</text>", f"{fragment}</text>", 1)
+        elif "</TEI>" in merged:
+            merged = merged.replace("</TEI>", f"<text>{fragment}</text></TEI>", 1)
+    if "</TEI>" in merged:
+        merged = merged.replace("</TEI>", f"{DEGRADED_TEI_MARKER}</TEI>", 1)
+    else:
+        merged += DEGRADED_TEI_MARKER
+    return merged
+
+
+def _pymupdf_page_texts(pdf_path: Path) -> list[str]:
+    """Best-effort per-page plain text via PyMuPDF for the degraded body; [] on any failure."""
+    try:
+        import fitz  # type: ignore[import-not-found]  # noqa: PLC0415 (optional heavy dep)
+
+        with fitz.open(pdf_path) as document:
+            return [page.get_text("text") for page in document]
+    except Exception:  # noqa: BLE001 - the fallback must never make things worse
+        return []
 
 
 def _unavailable(base_url: str, exc: Exception) -> GrobidUnavailableError:
@@ -134,7 +176,9 @@ class GrobidClient:
             )
         if refs.status_code == 200:
             references_tei = refs.text
-        return merge_header_and_references(header.text, references_tei)
+        return merge_header_and_references(
+            header.text, references_tei, body_text_pages=_pymupdf_page_texts(pdf_path)
+        )
 
     def process_fulltext_document_sync(self, pdf_path: Path) -> str:
         """Synchronous TEI extraction for use inside RQ workers.
@@ -187,7 +231,9 @@ class GrobidClient:
             )
         if refs.status_code == 200:
             references_tei = refs.text
-        return merge_header_and_references(header.text, references_tei)
+        return merge_header_and_references(
+            header.text, references_tei, body_text_pages=_pymupdf_page_texts(pdf_path)
+        )
 
     def _citation_form_data(self, citations: str | list[str]) -> dict[str, str | list[str]]:
         """Build the form fields for the citation-parse endpoints.

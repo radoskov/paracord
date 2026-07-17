@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -42,6 +43,13 @@ class File(Base):
     # transient failure is treated as terminal so retries can't loop forever across restarts.
     extraction_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0
+    )
+    # True when the stored extraction came from the degraded header+references fallback (GROBID's
+    # full-text parser crashed on this PDF): metadata + bibliography + plain body text are present
+    # but real section structure and citation contexts are not. Drives the "degraded extraction"
+    # badge; cleared/reset by every (re-)extraction based on the TEI it stores.
+    extraction_degraded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa_false(), default=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

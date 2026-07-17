@@ -1487,6 +1487,10 @@
                 {#if file.id === work.main_file_id}
                   <span class="fstatus fmain" title="This is the paper's main (default-to-open) file.">main</span>
                 {/if}
+                {#if file.extraction_degraded}
+                  <span class="fstatus fdegraded"
+                    title="GROBID could not process this PDF's full text (an internal parser error), so a fallback extracted the metadata, the bibliography, and plain body text. Section structure and in-text citation contexts are unavailable for this file.">degraded extraction</span>
+                {/if}
                 {#if file.also_in_count}
                   <button type="button" class="fstatus fdup"
                     on:click={() => findDuplicatePapers(file.sha256)}
@@ -2634,6 +2638,11 @@
   .focr {
     background: var(--surface-sunken);
     color: var(--ink-normal);
+  }
+
+  .fdegraded {
+    background: var(--status-warning-bg);
+    color: var(--status-warning);
   }
 
   /* Clickable "duplicate PDF" badge → Library hash search. Warning-tinted, button reset. */
