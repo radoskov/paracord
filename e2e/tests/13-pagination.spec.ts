@@ -47,9 +47,15 @@ test('Journey 13 — pagination: page size, prev/next, dropdown and go-to-page',
     // --- Next → page 2, then the go-to-page number input → last page (Next disabled) ---
     await next.click();
     await expect(page.getByText(/page 2 of 3/)).toBeVisible();
+    // Type + Enter like a real user (the input's title says so): a bare fill + synthetic
+    // change-event dispatch raced the pager's re-render (`value={page}`), which could reset the
+    // input to the current page between the two calls — the value the change handler then read
+    // was the old page (observed as a first-attempt flake).
     const goto = page.getByLabel('Go to page number');
-    await goto.fill('3');
-    await goto.dispatchEvent('change'); // the input navigates on its change handler
+    await goto.click();
+    await goto.press('ControlOrMeta+a');
+    await goto.pressSequentially('3');
+    await goto.press('Enter');
     await expect(page.getByText(/page 3 of 3/)).toBeVisible();
     await expect(next).toBeDisabled();
 
