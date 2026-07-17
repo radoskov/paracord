@@ -8,7 +8,7 @@ from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink
-from app.models.organization import Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
 from app.models.source import ImportBatch
 from app.models.work import Work
 from app.services.citation_graph import (
@@ -34,6 +34,8 @@ def db_session(tmp_path: Path):
             ReferenceCitation.__table__,
             Shelf.__table__,
             ShelfWork.__table__,
+            Rack.__table__,
+            RackShelf.__table__,
             ImportBatch.__table__,
             Tag.__table__,
             TagLink.__table__,
@@ -842,3 +844,66 @@ def test_large_scope_citation_graph_is_queued(client, auth_headers, db, monkeypa
     assert resp.status_code == 200
     body = resp.json()
     assert body["queued"] is True and body["job_id"] == "analysis-citation-x"
+
+
+def test_color_by_rack_and_multi_membership_groups(db_session) -> None:
+    """Rack color-by resolves through the paper's shelves; a paper on several shelves carries ALL
+    of them in ``color_groups`` (the UI's color-wheel data) with ``color_group`` = the first."""
+    work = Work(canonical_title="Multi", normalized_title="multi")
+    db_session.add(work)
+    shelf_a = Shelf(name="Alpha", access_level="open")
+    shelf_b = Shelf(name="Beta", access_level="open")
+    private = Shelf(name="Secret", access_level="private")
+    db_session.add_all([shelf_a, shelf_b, private])
+    db_session.flush()
+    for s in (shelf_a, shelf_b, private):
+        db_session.add(ShelfWork(shelf_id=s.id, work_id=work.id))
+    rack_a = Rack(name="Rack One", access_level="open")
+    rack_hidden = Rack(name="Hidden Rack", access_level="private")
+    db_session.add_all([rack_a, rack_hidden])
+    db_session.flush()
+    db_session.add(RackShelf(rack_id=rack_a.id, shelf_id=shelf_a.id))
+    db_session.add(RackShelf(rack_id=rack_hidden.id, shelf_id=shelf_b.id))
+    db_session.commit()
+
+    by_shelf = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="shelf",
+    )
+    node = by_shelf.nodes[0]
+    assert node.color_groups == ["Alpha", "Beta"]  # private shelf never surfaces
+    assert node.color_group == "Alpha"
+
+    by_rack = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="rack",
+    )
+    node = by_rack.nodes[0]
+    assert node.color_groups == ["Rack One"]  # the private rack never surfaces
+    assert node.color_group == "Rack One"
+
+
+def test_membership_groups_defaults_and_tag_multi(db_session) -> None:
+    from app.services.graph_color import membership_groups
+
+    work = Work(canonical_title="Tags", normalized_title="tags")
+    bare = Work(canonical_title="Bare", normalized_title="bare")
+    db_session.add_all([work, bare])
+    t1 = Tag(name="alpha", normalized_name="alpha")
+    t2 = Tag(name="beta", normalized_name="beta")
+    db_session.add_all([t1, t2])
+    db_session.flush()
+    db_session.add(TagLink(tag_id=t1.id, entity_type="work", entity_id=work.id))
+    db_session.add(TagLink(tag_id=t2.id, entity_type="work", entity_id=work.id))
+    db_session.commit()
+
+    groups = membership_groups(db_session, [work.id, bare.id], "tag")
+    assert groups[work.id] == ["alpha", "beta"]
+    assert groups[bare.id] == ["untagged"]
+    assert membership_groups(db_session, [bare.id], "rack")[bare.id] == ["unracked"]

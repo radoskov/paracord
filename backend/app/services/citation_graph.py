@@ -19,16 +19,12 @@ from sqlalchemy.orm import Session
 from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import FileWorkLink
-from app.models.organization import Shelf, ShelfWork, Tag, TagLink
 from app.models.work import Work
 from app.services.duplicate_detection import split_arxiv_id
+from app.services.graph_color import MEMBERSHIP_COLOR_KINDS, membership_groups
 from app.services.reference_links import citing_work_ids_subquery
 from app.services.scope_resolution import resolve_scope_works
 from app.utils.normalization import arxiv_base_from_doi, normalize_doi
-
-# Non-private shelf access levels (mirrors ``access._OPEN_OR_VISIBLE``): only these shelves may
-# surface as a ``color_by=shelf`` group so a private shelf's name never leaks as a node color.
-_NON_PRIVATE_SHELF_LEVELS = ("open", "visible")
 
 # 1-hop neighborhood cap (mirrors the graph node cap): the focus work plus its expanded neighbors are
 # capped so a hub paper can't produce an unbounded neighborhood.
@@ -50,7 +46,7 @@ SizeBy = Literal["degree", "pagerank", "betweenness"]
 # Node-color grouping (§8.9). ``none`` leaves nodes uncolored; the others attach one categorical
 # ``color_group`` per local node from existing library data (SEE-clamped). External nodes are never
 # colored.
-ColorBy = Literal["none", "shelf", "tag", "topic", "status", "year"]
+ColorBy = Literal["none", "shelf", "rack", "tag", "topic", "status", "year"]
 
 
 @dataclass
@@ -73,6 +69,10 @@ class GraphNode:
     citation_count: int | None = None
     # Categorical color group per the request's ``color_by`` (``None`` when uncolored/external).
     color_group: str | None = None
+    # ALL membership groups for shelf/rack/tag color-by (a paper can be on several shelves/racks
+    # and carry several tags) — the UI renders >1 as a multi-segment "color wheel" node.
+    # ``color_group`` stays the first entry for anything reading the single value.
+    color_groups: list[str] | None = None
     # Review-warning marker: the work has a file-link warning state or an open duplicate candidate.
     warning: bool = False
 
@@ -739,9 +739,13 @@ def _attach_node_metrics(
     local_ids = [node.work_id for node in graph.nodes if node.work_id is not None]
     if color_by != "none":
         groups = _color_groups(db, local_ids, color_by)
+        multi = (
+            membership_groups(db, local_ids, color_by) if color_by in MEMBERSHIP_COLOR_KINDS else {}
+        )
         for node in graph.nodes:
             if node.work_id is not None:
                 node.color_group = groups.get(node.work_id)
+                node.color_groups = multi.get(node.work_id)
             # 2026-07-16: external nodes conform to the colour scheme where they carry the value —
             # `year` is the only attribute they have — so they aren't forced into a flat grey. Other
             # color-by modes (status/shelf/tag/topic) have no external data → they stay uncoloured.
@@ -759,10 +763,10 @@ def _color_groups(
 ) -> dict[uuid.UUID, str]:
     """Map each local work id to a categorical color group for ``color_by``.
 
-    ``status``/``topic``/``year`` read directly off the work; ``shelf``/``tag`` pick the
-    alphabetically-first membership (a work may be on several — one group per node keeps the legend
-    readable) and default to ``unshelved``/``untagged``. ``shelf`` considers only non-private
-    shelves so a private shelf's name can never surface as a node color.
+    ``status``/``topic``/``year`` read directly off the work; ``shelf``/``rack``/``tag`` resolve
+    through the shared membership helper (privacy-filtered) and use the alphabetically-first
+    membership here — the FULL list additionally lands on ``node.color_groups`` so the UI can
+    render multi-membership nodes as a color wheel.
     """
     if not work_ids:
         return {}
@@ -775,34 +779,12 @@ def _color_groups(
     if color_by == "topic":
         rows = db.execute(select(Work.id, Work.topics).where(Work.id.in_(work_ids))).all()
         return {work_id: (str(topics[0]) if topics else "untopiced") for work_id, topics in rows}
-    if color_by == "shelf":
-        rows = db.execute(
-            select(ShelfWork.work_id, Shelf.name)
-            .join(Shelf, Shelf.id == ShelfWork.shelf_id)
-            .where(
-                ShelfWork.work_id.in_(work_ids),
-                Shelf.access_level.in_(_NON_PRIVATE_SHELF_LEVELS),
-            )
-        ).all()
-        return _first_membership(work_ids, rows, default="unshelved")
-    if color_by == "tag":
-        rows = db.execute(
-            select(TagLink.entity_id, Tag.name)
-            .join(Tag, Tag.id == TagLink.tag_id)
-            .where(TagLink.entity_type == "work", TagLink.entity_id.in_(work_ids))
-        ).all()
-        return _first_membership(work_ids, rows, default="untagged")
+    if color_by in MEMBERSHIP_COLOR_KINDS:  # shelf / rack / tag — shared, privacy-filtered
+        return {
+            work_id: names[0]
+            for work_id, names in membership_groups(db, work_ids, color_by).items()
+        }
     return {}
-
-
-def _first_membership(
-    work_ids: list[uuid.UUID], rows: list[tuple[uuid.UUID, str]], *, default: str
-) -> dict[uuid.UUID, str]:
-    best: dict[uuid.UUID, str] = {}
-    for work_id, name in rows:
-        if work_id not in best or name < best[work_id]:
-            best[work_id] = name
-    return {work_id: best.get(work_id, default) for work_id in work_ids}
 
 
 def _warning_work_ids(db: Session, work_ids: list[uuid.UUID]) -> set[uuid.UUID]:

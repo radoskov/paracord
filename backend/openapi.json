@@ -2020,6 +2020,7 @@
             "enum": [
               "none",
               "shelf",
+              "rack",
               "tag",
               "topic",
               "status",
@@ -3428,6 +3429,20 @@
               }
             ],
             "title": "Color Group"
+          },
+          "color_groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Groups"
           },
           "degree": {
             "default": 0,
@@ -7848,6 +7863,23 @@
             "title": "Label",
             "type": "string"
           },
+          "memberships": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memberships"
+          },
           "work_id": {
             "format": "uuid",
             "title": "Work Id",
@@ -8552,6 +8584,20 @@
               }
             ],
             "title": "Color Group"
+          },
+          "color_groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Groups"
           },
           "id": {
             "title": "Id",

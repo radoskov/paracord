@@ -54,7 +54,7 @@ class CitationGraphRequest(BaseModel):
     # §8.9 depth: categorical node coloring from existing library data (SEE-clamped; external nodes
     # are never colored). Node *sizing* (degree/pagerank/betweenness) is a pure client re-style — all
     # three centrality metrics ship on every node, so the frontend switches size without a refetch.
-    color_by: Literal["none", "shelf", "tag", "topic", "status", "year"] = "none"
+    color_by: Literal["none", "shelf", "rack", "tag", "topic", "status", "year"] = "none"
     # Separate caps (2026-07-16) on external REFERENCE nodes (cited-but-not-in-library) and external
     # CITING nodes (papers that cite the scope), each distributed across the scope papers.
     max_external: int = Field(default=50, ge=0, le=500)
@@ -76,6 +76,8 @@ class GraphNodeRead(BaseModel):
     betweenness: float = 0.0
     citation_count: int | None = None
     color_group: str | None = None
+    # ALL membership groups for shelf/rack/tag color-by (2+ → color-wheel node in the UI).
+    color_groups: list[str] | None = None
     warning: bool = False
 
 
@@ -181,6 +183,9 @@ class TopicGraphNodeRead(BaseModel):
     work_id: uuid.UUID
     year: int | None = None
     citation_count: int | None = None
+    # ALL privacy-filtered membership names per kind ({shelf|rack|tag: [names]}) for client-side
+    # membership coloring incl. color-wheel nodes.
+    memberships: dict[str, list[str]] | None = None
 
 
 class TopicGraphEdgeRead(BaseModel):

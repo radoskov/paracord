@@ -127,6 +127,9 @@ class VizNode:
     shape: str
     label: str
     meta: dict
+    # ALL membership groups for shelf/rack/tag color-by (multi-membership nodes render as a
+    # color wheel client-side); None for the single-valued encodings (status/year/...).
+    color_groups: list[str] | None = None
 
 
 @dataclass
@@ -372,6 +375,22 @@ def _color_group(work: Work, color_by: str) -> str | None:
     return work.reading_status or "unread"  # status default
 
 
+def _membership_map(db: Session, works: list[Work], color_by: str) -> dict[str, list[str]]:
+    """work-id(str) → ALL membership groups when ``color_by`` is shelf/rack/tag, else empty.
+
+    Shared, privacy-filtered resolution (see graph_color); the caller attaches the list as
+    ``color_groups`` and its first entry as the single ``color_group``.
+    """
+    from app.services.graph_color import MEMBERSHIP_COLOR_KINDS, membership_groups
+
+    if color_by not in MEMBERSHIP_COLOR_KINDS or not works:
+        return {}
+    return {
+        str(wid): names
+        for wid, names in membership_groups(db, [w.id for w in works], color_by).items()
+    }
+
+
 @register_viz("temporal_map")
 def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> VizPayload:
     """The Litmaps-style temporal citation map: one point per in-library paper.
@@ -464,17 +483,20 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
         if note:
             notes.append(note)
 
+    membership = _membership_map(db, works, color_by)
     nodes: list[VizNode] = []
     for work in works:
         node_id = str(work.id)
         local_degree = degree.get(node_id, 0)
+        node_groups = membership.get(node_id)
         nodes.append(
             VizNode(
                 id=node_id,
                 x=x_values.get(work.id),
                 y=y_values.get(work.id),
                 size=_size_value(work, size_by, degree),
-                color_group=_color_group(work, color_by),
+                color_group=node_groups[0] if node_groups else _color_group(work, color_by),
+                color_groups=node_groups,
                 shape="in_library",
                 label=work.canonical_title or f"Untitled work ({node_id[:8]})",
                 meta={
@@ -492,7 +514,10 @@ def temporal_map(db: Session, actor: User, scope: VizScope, params: dict) -> Viz
 
     legend: dict | None = None
     if color_by != "none":
-        groups = sorted({n.color_group for n in nodes if n.color_group is not None})
+        groups = sorted(
+            {n.color_group for n in nodes if n.color_group is not None}
+            | {g for n in nodes for g in (n.color_groups or [])}
+        )
         legend = {"color_by": color_by, "groups": groups}
 
     edges: list[VizEdge] | None = None
@@ -990,16 +1015,19 @@ def co_citation(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
         degree[edge.source] += 1
         degree[edge.target] += 1
 
+    membership = _membership_map(db, works, color_by)
     nodes: list[VizNode] = []
     for work in works:
         node_id = str(work.id)
+        node_groups = membership.get(node_id)
         nodes.append(
             VizNode(
                 id=node_id,
                 x=None,
                 y=None,
                 size=float(degree.get(node_id, 0)),
-                color_group=_color_group(work, color_by),
+                color_group=node_groups[0] if node_groups else _color_group(work, color_by),
+                color_groups=node_groups,
                 shape="in_library",
                 label=work.canonical_title or f"Untitled work ({node_id[:8]})",
                 meta={
@@ -1015,7 +1043,10 @@ def co_citation(db: Session, actor: User, scope: VizScope, params: dict) -> VizP
 
     legend: dict | None = None
     if color_by != "none":
-        groups = sorted({n.color_group for n in nodes if n.color_group is not None})
+        groups = sorted(
+            {n.color_group for n in nodes if n.color_group is not None}
+            | {g for n in nodes for g in (n.color_groups or [])}
+        )
         legend = {"color_by": color_by, "groups": groups}
 
     return VizPayload(

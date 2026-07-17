@@ -41,6 +41,9 @@ class TopicGraphNode:
     year: int | None = None
     # UX batch 4: lets the UI offer citation-count node sizing / year coloring.
     citation_count: int | None = None
+    # ALL privacy-filtered membership names per kind ({shelf|rack|tag: [names]}), so the UI can
+    # color by them client-side and render multi-membership nodes as a color wheel.
+    memberships: dict[str, list[str]] | None = None
 
 
 @dataclass
@@ -138,6 +141,7 @@ def build_topic_graph(
         )
         for w in works
     ]
+    _attach_memberships(db, nodes)
     edges = _knn_edges(works, vectors, k=k, min_similarity=min_similarity)
     summary = {
         "node_count": len(nodes),
@@ -192,3 +196,13 @@ def _knn_edges(
     return [
         TopicGraphEdge(source=a, target=b, weight=round(w, 4)) for (a, b), w in edge_weight.items()
     ]
+
+
+def _attach_memberships(db, nodes: list[TopicGraphNode]) -> None:
+    """Attach {shelf|rack|tag: [names]} to every node (shared, privacy-filtered resolution)."""
+    from app.services.graph_color import membership_groups
+
+    ids = [n.work_id for n in nodes]
+    per_kind = {kind: membership_groups(db, ids, kind) for kind in ("shelf", "rack", "tag")}
+    for node in nodes:
+        node.memberships = {kind: per_kind[kind][node.work_id] for kind in per_kind}

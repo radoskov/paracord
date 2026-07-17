@@ -310,6 +310,28 @@ def build_reference_graph(
             e for e in edges if e["source"] not in dropped_ids and e["target"] not in dropped_ids
         ]
 
+    # Membership names (privacy-filtered, ALL of them) for the base + local nodes, so the client
+    # can color by shelf/rack/tag entirely client-side (like its kind/venue coloring) and render
+    # multi-membership nodes as a color wheel. External nodes have no memberships by definition.
+    from app.services.graph_color import membership_groups
+
+    membered_ids = [uuid.UUID(base_id), *work_to_ref_node.keys()]
+    memberships: dict[str, dict[str, list[str]]] = {}
+    for kind in ("shelf", "rack", "tag"):
+        for wid, names in membership_groups(db, membered_ids, kind).items():
+            memberships.setdefault(str(wid), {})[kind] = names
+    node_by_work = {
+        str(uuid.UUID(base_id)): base_id,
+        **{str(w): n for w, n in work_to_ref_node.items()},
+    }
+    by_node_id = {
+        node_by_work[wid]: groups for wid, groups in memberships.items() if wid in node_by_work
+    }
+    for node in nodes:
+        groups = by_node_id.get(node["id"])
+        if groups:
+            node["memberships"] = groups
+
     return {
         "base_work_id": base_id,
         "nodes": nodes,

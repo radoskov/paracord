@@ -47,6 +47,8 @@ class VizNodeModel(BaseModel):
     y: float | None = None
     size: float | None = None
     color_group: str | None = None
+    # ALL membership groups for shelf/rack/tag color-by (2+ → color-wheel marker in the UI).
+    color_groups: list[str] | None = None
     shape: str
     label: str
     meta: dict
