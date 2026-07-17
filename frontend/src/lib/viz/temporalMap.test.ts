@@ -240,3 +240,56 @@ describe("restyleTemporalMap (C4 client-side re-encoding)", () => {
     expect(restyleTemporalMap(payload, "local_degree", "none").legend).toBeNull();
   });
 });
+
+describe("cross-series overlap fan-out (2026-07-17)", () => {
+  it("offsets co-located markers from different color groups so they don't stack", () => {
+    const theme = resolveTheme("light");
+    const payload = makePayload({
+      legend: { color_by: "shelf", groups: ["Alpha", "Beta"] },
+      nodes: [
+        {
+          id: "a",
+          x: 2020,
+          y: 10,
+          size: 2,
+          color_group: "Alpha",
+          color_groups: ["Alpha"],
+          shape: "in_library",
+          label: "A",
+          meta: {},
+        },
+        {
+          id: "b",
+          x: 2020,
+          y: 10,
+          size: 1,
+          color_group: "Beta",
+          color_groups: ["Beta", "Alpha"],
+          shape: "in_library",
+          label: "B",
+          meta: {},
+        },
+      ],
+    });
+    const option = temporalMapRenderer.buildOption(payload, theme) as {
+      series: { name: string; data?: { value: [number, number] }[] }[];
+    };
+    // a plots in the Alpha series, b (first group Beta) in the Beta series — same raw (x, y).
+    const xs = option.series
+      .filter((s) => ["Alpha", "Beta"].includes(s.name))
+      .flatMap((s) => (s.data ?? []).map((d) => d.value[0]));
+    expect(xs).toHaveLength(2);
+    expect(xs[0]).not.toBe(xs[1]); // fanned apart …
+    for (const x of xs) expect(Math.abs(x - 2020)).toBeLessThan(0.1); // … by a tiny nudge only
+  });
+
+  it("applies no offset when only one group occupies a spot", () => {
+    const theme = resolveTheme("light");
+    const option = temporalMapRenderer.buildOption(makePayload(), theme) as {
+      series: { data?: { value: [number, number] }[] }[];
+    };
+    const xs = option.series.flatMap((s) => (s.data ?? []).map((d) => d.value[0]));
+    expect(xs).toContain(2020);
+    expect(xs).toContain(2018);
+  });
+});

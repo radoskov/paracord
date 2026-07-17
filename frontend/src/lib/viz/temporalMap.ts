@@ -195,6 +195,31 @@ export const temporalMapRenderer: VizRenderer = {
     const coordById = new Map<string, [number, number]>();
     for (const n of nodes) coordById.set(n.id, [n.x as number, n.y as number]);
 
+    // Cross-series overlap fan-out (2026-07-17): co-located markers from DIFFERENT color groups
+    // plot in different series and would stack exactly on top of each other. Offset each group's
+    // marker slightly on X — scaled to the axis range, since X isn't always years here.
+    const groupOf = (n: (typeof nodes)[number]): string =>
+      (n.color_groups?.[0] ?? n.color_group) ?? "__single__";
+    const xValues = nodes.map((n) => n.x as number).filter((v) => Number.isFinite(v));
+    const xRange = xValues.length ? Math.max(...xValues) - Math.min(...xValues) : 0;
+    // ~1.2% of the axis range separates the markers by about half a symbol width; the fallback
+    // covers a degenerate all-one-x scope.
+    const overlapDx = xRange > 0 ? xRange * 0.012 : 0.2;
+    const groupsAtSpot = new Map<string, string[]>();
+    if (colored && groups.length > 1) {
+      for (const n of nodes) {
+        const key = `${n.x}|${n.y}`;
+        const arr = groupsAtSpot.get(key) ?? [];
+        if (!arr.includes(groupOf(n))) arr.push(groupOf(n));
+        groupsAtSpot.set(key, arr);
+      }
+    }
+    const xOffsetFor = (n: (typeof nodes)[number]): number => {
+      const at = groupsAtSpot.get(`${n.x}|${n.y}`) ?? [];
+      if (at.length < 2) return 0;
+      return (at.indexOf(groupOf(n)) - (at.length - 1) / 2) * overlapDx;
+    };
+
     const series: Record<string, unknown>[] = seriesGroups.map((group) => {
       const groupNodes = colored
         ? nodes.filter((n) => (n.color_groups?.[0] ?? n.color_group) === group)
@@ -212,7 +237,7 @@ export const temporalMapRenderer: VizRenderer = {
           // group, instead of the series' single colour.
           const repGroups = rep.color_groups ?? [];
           return {
-            value: [rep.x, rep.y],
+            value: [(rep.x as number) + xOffsetFor(rep), rep.y],
             name: rep.id,
             node: rep,
             members,

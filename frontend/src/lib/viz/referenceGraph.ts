@@ -371,11 +371,33 @@ export function buildReferenceGraphOption(
           ? { ...point, symbol: pieSymbol(repGroups.map((g) => colorOf.get(g) ?? theme.text)) }
           : point;
       });
+    // Markers from DIFFERENT groups plot in different series, so co-located ones would stack —
+    // nest a second fan-out (on top of the action-kind one) by the node's first group, mirroring
+    // kindsAt/xPlot (2026-07-17 user report: pies hiding under single-color markers).
+    const groupKeyOf = (n: ReferenceGraphNode): string => groupsOf(n)[0] ?? "__none__";
+    const groupsAtSpot = new Map<string, string[]>();
+    for (const n of graph.nodes) {
+      const key = `${xPlot(n)}|${yFor(n)}`;
+      const arr = groupsAtSpot.get(key) ?? [];
+      if (!arr.includes(groupKeyOf(n))) arr.push(groupKeyOf(n));
+      groupsAtSpot.set(key, arr);
+    }
+    const xPlotGrouped = (n: ReferenceGraphNode): number => {
+      const base = xPlot(n);
+      const at = groupsAtSpot.get(`${base}|${yFor(n)}`) ?? [];
+      if (at.length < 2) return base;
+      return base + (at.indexOf(groupKeyOf(n)) - (at.length - 1) / 2) * OVERLAP_DX;
+    };
+    const groupedM = (nodes: ReferenceGraphNode[]) =>
+      groupByCoord(nodes, xPlotGrouped, yFor).map((members) => ({
+        ...collapsedPoint(members),
+        value: [xPlotGrouped(members[0]), yFor(members[0])],
+      }));
     series = groups.map((g) => ({
       type: "scatter",
       name: g,
       color: colorOf.get(g),
-      data: withPies(grouped(graph.nodes.filter((n) => groupsOf(n)[0] === g))),
+      data: withPies(groupedM(graph.nodes.filter((n) => groupsOf(n)[0] === g))),
       emphasis: { focus: "series" },
       z: 2,
     }));
@@ -385,7 +407,7 @@ export function buildReferenceGraphOption(
         type: "scatter",
         name: "external / no data",
         color: theme.splitLine,
-        data: grouped(unmembered),
+        data: groupedM(unmembered),
         emphasis: { focus: "series" },
         z: 1,
       });
