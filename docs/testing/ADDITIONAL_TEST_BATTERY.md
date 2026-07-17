@@ -93,3 +93,13 @@ counts remain bounded by requested limits.
 If a test fails, prefer fixing the product contract rather than hard-coding the
 implementation to satisfy the test. When a behavior is intentionally changed,
 adjust the test to the new specification-level invariant.
+
+## Status (2026-07-17)
+
+All future-stage placeholders from this bundle have graduated: the backend
+`tests/future` skips were resolved in the UX batch 4 review (see the docstring in
+`backend/tests/future/test_future_ext_acceptance_contracts.py`), and
+`frontend/src/future/FutureUserFlow.test.ts` was deleted on 2026-07-17 — its
+browser-level literature-review flow is now covered end-to-end by the real
+Playwright journeys (import, shelves/racks, reader, annotations, scoped graphs,
+citation summary, export).
