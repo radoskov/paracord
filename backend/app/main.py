@@ -1,12 +1,14 @@
 """FastAPI application entrypoint for PaRacORD."""
 
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DataError
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
@@ -111,12 +113,78 @@ def create_app() -> FastAPI:
         description="Local-first scientific paper library and literature graph API.",
         lifespan=lifespan,
     )
+
+    @app.middleware("http")
+    async def _error_envelope(request: Request, call_next):
+        """Request-id tagging + a descriptive error envelope for otherwise-unhandled exceptions.
+
+        Every request gets an id (incoming ``X-Request-ID`` or a fresh one) that is echoed on the
+        response and embedded in error details, so a UI error message can be matched to the exact
+        server-log traceback.
+
+        This is deliberately a MIDDLEWARE registered BEFORE (= wrapped by) CORSMiddleware, not an
+        ``@app.exception_handler(Exception)``: Starlette routes an ``Exception`` handler to the
+        outermost ServerErrorMiddleware, whose response bypasses CORS — the browser then blocks
+        the response and fetch() reports only "NetworkError", hiding the real cause (exactly what
+        made the NUL-byte upload failure undiagnosable from the UI). Here the JSON error passes
+        through CORS like any normal response.
+
+        Two tiers:
+        * ``sqlalchemy.DataError`` (bad values for a column: NUL bytes, over-length, out-of-range)
+          → 400 with the database's own first-line reason — client input, not a server fault;
+        * anything else → 500 with the exception class + message. This intentionally exposes the
+          exception text: PaRacORD is a self-hosted, LAN-scoped tool where diagnosability beats
+          secrecy (owner decision, 2026-07-17). The full traceback goes to the server log tagged
+          with the request id.
+        """
+        rid = (request.headers.get("x-request-id") or "").strip()[:32] or uuid.uuid4().hex[:12]
+        request.state.request_id = rid
+        try:
+            response = await call_next(request)
+        except DataError as exc:
+            logger.exception(
+                "DataError on %s %s [request %s]", request.method, request.url.path, rid
+            )
+            reason = str(getattr(exc, "orig", None) or exc).strip().splitlines()[0]
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "detail": f"The database rejected the data: {reason} [request {rid}]",
+                    "request_id": rid,
+                },
+                headers={"X-Request-ID": rid},
+            )
+        except Exception as exc:  # noqa: BLE001 - the whole point: no error leaves undescribed
+            logger.exception(
+                "Unhandled %s on %s %s [request %s]",
+                type(exc).__name__,
+                request.method,
+                request.url.path,
+                rid,
+            )
+            message = str(exc).strip().splitlines()[0][:300] if str(exc).strip() else ""
+            described = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": (
+                        f"Internal server error ({described}) [request {rid}] — the full "
+                        "traceback is in the server logs."
+                    ),
+                    "request_id": rid,
+                },
+                headers={"X-Request-ID": rid},
+            )
+        response.headers["X-Request-ID"] = rid
+        return response
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
 
     from app.services.app_config import BatchTooLargeError
