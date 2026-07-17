@@ -624,17 +624,6 @@
     gap: 0.2rem;
   }
 
-  /* 5f: paired min/max number inputs sit side by side, each compact. */
-  .range {
-    flex-direction: row;
-    align-items: center;
-    gap: 0.3rem;
-  }
-
-  .range input {
-    width: 4.5rem;
-  }
-
   .toggle {
     flex-direction: row;
     align-items: center;
