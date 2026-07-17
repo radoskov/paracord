@@ -9,6 +9,28 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## PDF-import collision resolution: append-to-existing + DOI editing (2026-07-17)
+
+- **"Append PDF" action**: the Preview & choose table now resolves collisions per file — an
+  action dropdown replaces the Create checkbox when a staged PDF matches existing papers:
+  Skip / Create new paper / Attach PDF to \<matching paper\>. Same-DOI (and same-PDF) collisions
+  refuse Create-new (attach or skip only, per the owner's rule); title-only matches allow BOTH
+  (workshop vs. journal version). Backend: `append` decision on the staging commit — the file is
+  linked to the chosen paper (ACL-checked) and the stored preview TEI is applied only when that
+  paper has no extraction yet, so a PDF-less record gains full extraction while an already-
+  extracted paper just gains an alternate file. Verified live end-to-end: knowrow.pdf attached
+  through the real UI to a PDF-less same-DOI record; 100 references landed, no worker errors.
+- **No more post-append DOI crashes**: `store_parsed_extraction` never promotes a DOI another
+  live paper owns (previously a unique-violation 500 on re-extraction or append-to-title-match);
+  it lands as a reviewable metadata assertion instead.
+- **Book-vs-chapter same-DOI batch fixed**: the commit pre-checks accepted items' DOIs and
+  refuses with a message naming the actual owner ("same DOI as 'X' — choose Attach PDF to it")
+  or the sibling file in the batch ("same DOI as 'book.pdf' in this batch — edit/clear one DOI"),
+  replacing the old "could not create paper (possible duplicate DOI)". The preview warns both
+  rows about the intra-batch clash, and each row's DOI is editable/clearable inline
+  (`PATCH /imports/staging/{batch}/items/{item}`); the override supersedes GROBID's original at
+  commit, so a cleared DOI stays cleared.
+
 ## Title taming + column width ratios + error envelope (2026-07-17)
 
 - **ALL-CAPS titles tamed at display time** (`lib/titleCase.ts`, used by PaperTable cells + the
