@@ -332,9 +332,12 @@
     cursor: pointer;
   }
 
-  tbody tr:hover,
-  tbody tr.selected {
+  tbody tr:hover {
     background: var(--status-success-bg);
+  }
+
+  tbody tr.selected {
+    background: color-mix(in srgb, var(--status-success-bg) 78%, var(--status-success) 22%);
   }
 
   tbody tr.flash {
