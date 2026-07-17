@@ -9,6 +9,22 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## GROBID full-text crash fallback + Files-panel button wrap (2026-07-17)
+
+- **`open_ease.pdf` extraction fixed**: GROBID's body formatter crashes on this PDF with an
+  internal 500 (`TEIFormatter.toTEITextPiece: fromIndex(9) > toIndex(8)`) no matter the request
+  parameters, and a PyMuPDF re-save doesn't help — but its header and references parsers handle
+  the same file fine. `GrobidClient` now degrades on a full-text 5xx: it calls
+  `processHeaderDocument` + `processReferences` and splices the `listBibl` into the header TEI,
+  so the standard `parse_tei` path still yields title/authors/abstract/DOI **and the full
+  bibliography** (40 references for this paper); only body sections and their citation contexts
+  are lost. Header-also-fails re-raises the original error. Verified live: the real PDF imports,
+  the worker logs the "degrading to header+references" warning, and extract → enrich → chunk →
+  embed all complete. 4 client tests added.
+- **Files panel button overflow fixed**: `.file-actions` was `flex-shrink: 0` with no wrap, so
+  the seven per-file buttons (Read … Remove) pushed out of the page in a narrow paper-view
+  column; they now wrap into extra rows (verified at 1100px viewport).
+
 ## PDF-import collision resolution: append-to-existing + DOI editing (2026-07-17)
 
 - **"Append PDF" action**: the Preview & choose table now resolves collisions per file — an
