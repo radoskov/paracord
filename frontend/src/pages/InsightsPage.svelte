@@ -22,7 +22,7 @@
   import ScopePicker from '../components/ScopePicker.svelte';
   import { resolveScopeRequest } from '../lib/scope';
   import { renderSummaryMath } from '../lib/renderMath';
-  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds } from '../lib/selection';
+  import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds, pendingIdentifierImport } from '../lib/selection';
   import { errorMessage } from '../lib/ui';
 
   export let client: ApiClient;
@@ -171,10 +171,11 @@
     return awaitAnalysis(await client.topicGraph(scopeArgs));
   }
 
-  // External graph node → jump to the Library search for its DOI so the user can import it (#8).
+  // External graph node → prefill the Import tab's Identifier form with its DOI so one click
+  // lands on "import by DOI" (previously this jumped to a Library search, which can't import).
   function importExternal(doi: string): void {
-    pendingLibrarySearch.set({ query: doi, mode: 'metadata' });
-    if (typeof window !== 'undefined') window.location.hash = '#library';
+    pendingIdentifierImport.set(doi);
+    if (typeof window !== 'undefined') window.location.hash = '#import';
   }
 
   // S15: a large scope is answered with a queued background job — poll until it leaves the

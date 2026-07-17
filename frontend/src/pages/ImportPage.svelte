@@ -19,7 +19,8 @@
   import BatchImport from '../components/BatchImport.svelte';
   import DraftReview from '../components/DraftReview.svelte';
   import ShelfPicker from '../components/ShelfPicker.svelte';
-  import { pendingImportText, pendingLibraryOpen } from '../lib/selection';
+  import { ensureShelves, shelves } from '../lib/catalog';
+  import { pendingIdentifierImport, pendingImportText, pendingLibraryOpen } from '../lib/selection';
   import { isOwner } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -85,11 +86,24 @@
 
   onMount(() => {
     void load();
+    void ensureShelves(client); // feeds the per-item shelf selects in the preview table
     // A reference-graph "import citation" push prefills the citations box (BatchImport consumes
     // the store when it mounts) — jump to that sub-tab so the pushed text is actually visible.
-    return pendingImportText.subscribe((val) => {
+    const unsubText = pendingImportText.subscribe((val) => {
       if (val) activeTab = 'citations';
     });
+    // An Insights external-node click pushes its DOI here: open the Identifier sub-tab with the
+    // value prefilled so one click lands on "import by DOI".
+    const unsubIdentifier = pendingIdentifierImport.subscribe((val) => {
+      if (!val) return;
+      activeTab = 'identifier';
+      identifierValue = val;
+      pendingIdentifierImport.set(null);
+    });
+    return () => {
+      unsubText();
+      unsubIdentifier();
+    };
   });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
@@ -149,6 +163,8 @@
   // Per-item decision: 'accept' (create a new paper), 'skip', or 'append:<workId>' (attach the
   // PDF to that existing paper — the collision-resolution action).
   let choices: Record<string, string> = {};
+  // Optional per-item shelf for created papers ('' = use the batch's global shelf selection).
+  let itemShelves: Record<string, string> = {};
   let commitResult: {
     created: number;
     appended?: number;
@@ -227,6 +243,7 @@
     multiFiles = [];
     staging = null;
     choices = {};
+    itemShelves = {};
     commitResult = null;
   }
 
@@ -351,7 +368,14 @@
     if (choice.startsWith('append:')) {
       return { item_id: itemId, action: 'append', target_work_id: choice.slice('append:'.length) };
     }
-    return { item_id: itemId, action: choice === 'accept' ? 'accept' : 'skip' };
+    return {
+      item_id: itemId,
+      action: choice === 'accept' ? 'accept' : 'skip',
+      // Per-item shelf override; the server falls back to the batch's global shelf.
+      ...(choice === 'accept' && itemShelves[itemId]
+        ? { target_shelf_id: itemShelves[itemId] }
+        : {}),
+    };
   }
 
   async function commitSelected(partial: boolean): Promise<void> {
@@ -523,6 +547,14 @@
     {#if multiFiles.length}<p class="hintline">{multiFiles.length} file(s) selected.</p>{/if}
 
     {#if staging && staging.status !== 'committed'}
+      {@const pending = staging.items.filter((i) => ['pending', 'extracting'].includes(i.status)).length}
+      {@const done = staging.items.length - pending}
+      {#if pending > 0}
+        <div class="extract-progress" role="status" aria-label="Extraction progress">
+          <progress max={staging.items.length} value={done}></progress>
+          <span class="small">{done} / {staging.items.length} processed</span>
+        </div>
+      {/if}
       <div class="preview-table" role="table" aria-label="Extraction preview">
         <div class="preview-head" role="row">
           <span>Create</span><span>File / title</span><span>Details</span><span>Status</span>
@@ -555,6 +587,16 @@
                   checked={choices[item.id] === 'accept'}
                   on:change={(e) => (choices = { ...choices, [item.id]: e.currentTarget.checked ? 'accept' : 'skip' })}
                   disabled={item.status !== 'extracted'} aria-label={`Create paper from ${item.filename}`} />
+              {/if}
+              {#if item.status === 'extracted' && choices[item.id] === 'accept'}
+                <select class="item-shelf" bind:value={itemShelves[item.id]}
+                  aria-label={`Shelf for ${item.filename}`}
+                  title="Shelf for this paper — overrides the batch's 'Add to shelf' selection above">
+                  <option value="">Shelf: batch default</option>
+                  {#each $shelves as shelf (shelf.id)}
+                    <option value={shelf.id}>Shelf: {shelf.name}</option>
+                  {/each}
+                </select>
               {/if}
             </span>
             <span role="cell">
@@ -603,7 +645,8 @@
             <span role="cell" class="small">
               {#if item.status === 'extract_failed'}<span class="dup">extraction failed{item.error ? `: ${item.error}` : ''}</span>
               {:else if blocked}<span class="dup">collision ({blocked.replace('_', ' ')})</span>
-              {:else}{item.status}{/if}
+              {:else if item.status === 'extracted'}<span class="status-ok">extracted ✓</span>
+              {:else}<span class="status-busy">{item.status}…</span>{/if}
             </span>
           </div>
         {/each}
@@ -630,7 +673,7 @@
       {:else}
         <div class="row">
           <button type="button" on:click={() => commitSelected(false)} disabled={loading}
-            title="Create the checked papers (unchecked ones are skipped)">Create selected papers</button>
+            title="Create the checked papers (unchecked ones are skipped)">{loading ? 'Creating…' : 'Create selected papers'}</button>
           <button type="button" class="secondary" on:click={resetMulti} disabled={loading}>Cancel</button>
         </div>
       {/if}
@@ -898,6 +941,33 @@
     max-width: 15rem;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .status-ok {
+    color: var(--status-success);
+    font-weight: 600;
+  }
+
+  .status-busy {
+    color: var(--ink-muted);
+  }
+
+  .extract-progress {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .extract-progress progress {
+    flex: 1;
+    max-width: 24rem;
+  }
+
+  .item-shelf {
+    display: block;
+    margin-top: 0.25rem;
+    max-width: 15rem;
   }
 
   .linklike {

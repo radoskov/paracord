@@ -522,15 +522,24 @@ def commit_staging(
             continue
         # Per-item SAVEPOINT so one bad item (e.g. a unique conflict this pre-check didn't cover)
         # rolls back only itself and the rest of the commit still proceeds.
+        # Per-item shelf override (falls back to the batch's global target shelf).
+        try:
+            item_shelf_id = (
+                uuid.UUID(str(decision["target_shelf_id"]))
+                if decision.get("target_shelf_id")
+                else batch.target_shelf_id
+            )
+        except (ValueError, TypeError):
+            item_shelf_id = batch.target_shelf_id
         try:
             with db.begin_nested():
                 work, needs_extraction = _create_work_from_item(
                     db, item=item, actor=actor, settings=settings
                 )
                 db.flush()  # surface a DOI/unique conflict inside the savepoint
-                if batch.target_shelf_id is not None:
+                if item_shelf_id is not None:
                     add_work_to_shelf_checked(
-                        db, shelf_id=batch.target_shelf_id, work_id=work.id, actor=actor
+                        db, shelf_id=item_shelf_id, work_id=work.id, actor=actor
                     )
         except Exception as exc:  # noqa: BLE001 - one bad item must not abort the whole commit
             item.status = "extract_failed"

@@ -109,6 +109,8 @@ class ConfirmedDraft:
     # BibTeX-engine passthrough (not user-editable in the review UI).
     arxiv_id: str | None = None
     work_type: str | None = None
+    # Optional per-draft shelf override; falls back to the commit's global target_shelf_id.
+    target_shelf_id: uuid.UUID | None = None
 
 
 def clean_lines(lines: list[str], *, settings: Settings) -> list[str]:
@@ -360,15 +362,16 @@ def commit_drafts(
     db.add(batch)
     db.flush()
 
-    def _add_to_shelf(work_id: uuid.UUID) -> None:
+    def _add_to_shelf(work_id: uuid.UUID, per_item_shelf_id: uuid.UUID | None = None) -> None:
         nonlocal added_to_shelf
-        if target_shelf_id is None:
+        effective = per_item_shelf_id or target_shelf_id
+        if effective is None:
             # No explicit shelf → keep it off the floor by placing loose papers on the default (#1).
             place_on_default_if_loose(db, work_id, actor_id=actor.id)
             return
         add_work_to_shelf_checked(
             db,
-            shelf_id=target_shelf_id,
+            shelf_id=effective,
             work_id=work_id,
             actor=actor,
             settings=settings,
@@ -388,7 +391,7 @@ def commit_drafts(
         existing = _find_existing(db, doi=doi, normalized_title=normalized)
         if existing is not None:
             matched += 1
-            _add_to_shelf(existing.id)
+            _add_to_shelf(existing.id, draft.target_shelf_id)
             continue
         work = Work(
             canonical_title=title,
@@ -424,7 +427,7 @@ def commit_drafts(
         enqueue_embedding(work.id)
         if enrich and doi:
             enqueue_enrichment(work.id)
-        _add_to_shelf(work.id)
+        _add_to_shelf(work.id, draft.target_shelf_id)
 
     stats = {
         "lines": len(drafts),

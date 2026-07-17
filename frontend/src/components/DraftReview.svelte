@@ -17,6 +17,7 @@
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
   import ShelfPicker from './ShelfPicker.svelte';
+  import { ensureShelves, shelves } from '../lib/catalog';
 
   export let client: ApiClient;
   // While the parent is still producing drafts (chunked search), a commit is partial: committed
@@ -30,6 +31,8 @@
   type Row = {
     draft: ParsedDraft;
     include: boolean;
+    // Optional per-row shelf override ('' = the global "Add committed papers to shelf" pick).
+    shelfId: string;
     title: string;
     authors: string;
     year: string;
@@ -60,6 +63,7 @@
       // Default-checked for confident matches; reviewers opt in to the rest. Already-in-library
       // entries start unchecked — committing them only re-matches (and shelves) the existing paper.
       include: draft.match_status === 'matched' && !draft.existing_work_id,
+      shelfId: '',
       title: draft.suggested_title ?? draft.raw_line,
       authors: draft.suggested_authors.join('; '),
       year: draft.suggested_year != null ? String(draft.suggested_year) : '',
@@ -101,6 +105,8 @@
       include: true,
       arxiv_id: r.draft.suggested_arxiv_id ?? null,
       work_type: r.draft.suggested_work_type ?? null,
+      // Per-row shelf override; the server falls back to the commit's global target shelf.
+      target_shelf_id: r.shelfId || null,
     }));
     loading = true;
     message = '';
@@ -176,6 +182,16 @@
           <label class="field">
             <span class="field-label">Venue</span>
             <input bind:value={row.venue} aria-label="Venue" />
+          </label>
+          <label class="field">
+            <span class="field-label">Shelf</span>
+            <select bind:value={row.shelfId} aria-label="Shelf for this paper"
+              title="Shelf for this paper — overrides the global pick below">
+              <option value="">(use pick below)</option>
+              {#each $shelves as shelf (shelf.id)}
+                <option value={shelf.id}>{shelf.name}</option>
+              {/each}
+            </select>
           </label>
           {#if row.draft.candidates.length > 1}
             <label class="field">

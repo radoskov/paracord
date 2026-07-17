@@ -27,3 +27,8 @@ export const pendingLibraryOpen = writable<string | null>(null);
 // an external reference node in the reference graph, issue 5g). BatchImport subscribes, appends each
 // non-empty payload as new line(s), and resets this to null.
 export const pendingImportText = writable<string | null>(null);
+
+// An arXiv id / DOI to prefill the Import tab's Identifier form with, set from elsewhere (e.g.
+// clicking an external node in the Insights citation graph). ImportPage consumes it once --
+// switches to the Identifier sub-tab and fills the input -- and resets this to null.
+export const pendingIdentifierImport = writable<string | null>(null);

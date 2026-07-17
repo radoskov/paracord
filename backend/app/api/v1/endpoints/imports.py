@@ -315,6 +315,9 @@ class StagingDecision(BaseModel):
     # the collision-resolution action for same-DOI / same-title matches.
     action: Literal["accept", "skip", "append"]
     target_work_id: uuid.UUID | None = None
+    # Optional per-item shelf for accepted (newly created) papers; falls back to the batch's
+    # global target shelf.
+    target_shelf_id: uuid.UUID | None = None
 
 
 class StagingCommitRequest(BaseModel):
@@ -494,6 +497,7 @@ def commit_staging_batch(
                 "item_id": str(d.item_id),
                 "action": d.action,
                 "target_work_id": d.target_work_id,
+                "target_shelf_id": d.target_shelf_id,
             }
             for d in payload.decisions
         ]
@@ -723,6 +727,8 @@ class BatchCommitDraft(BaseModel):
     # BibTeX-engine passthrough (kept out of the editable review fields).
     arxiv_id: str | None = None
     work_type: str | None = None
+    # Optional per-draft shelf; falls back to the request's global target_shelf_id.
+    target_shelf_id: uuid.UUID | None = None
 
 
 class BatchCommitRequest(BaseModel):
@@ -830,6 +836,7 @@ def batch_commit(
             include=d.include,
             arxiv_id=d.arxiv_id,
             work_type=d.work_type,
+            target_shelf_id=d.target_shelf_id,
         )
         for d in payload.drafts
     ]

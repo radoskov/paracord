@@ -2,6 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { StagingBatch } from '../api/client';
+import { get } from 'svelte/store';
+
+import { pendingIdentifierImport } from '../lib/selection';
 import { currentUser } from '../lib/session';
 import ImportPage from './ImportPage.svelte';
 
@@ -377,5 +380,26 @@ describe('ImportPage sub-tabs', () => {
     render(ImportPage, { client: makeClient() as never });
     expect(screen.getByLabelText('arXiv id or DOI')).toBeTruthy();
     expect(screen.queryByLabelText('PDF files')).toBeNull();
+  });
+});
+
+describe('ImportPage pending identifier import (Insights external-node click)', () => {
+  beforeEach(() => {
+    currentUser.set({ id: 'u', username: 'ed', role: 'editor' } as never);
+    sessionStorage.clear();
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it('opens the Identifier sub-tab with the pushed DOI prefilled', async () => {
+    const client = makeClient();
+    render(ImportPage, { client: client as never });
+
+    pendingIdentifierImport.set('10.1177/0278364913481635');
+    await waitFor(() => {
+      const input = screen.getByLabelText('arXiv id or DOI') as HTMLInputElement;
+      expect(input.value).toBe('10.1177/0278364913481635');
+    });
+    // Consumed once — the store resets so a later Import visit doesn't re-prefill.
+    expect(get(pendingIdentifierImport)).toBeNull();
   });
 });

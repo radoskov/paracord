@@ -570,3 +570,48 @@ def test_commit_append_endpoint_roundtrip(client, auth_headers, db, managed_root
     assert body["appended"] == 1 and body["created"] == 0
     files = client.get(f"/api/v1/works/{existing['id']}/files", headers=h).json()
     assert len(files) == 1
+
+
+def test_per_item_shelf_overrides_batch_shelf(db, make_user, managed_root):
+    """An accepted item with its own target_shelf_id lands there; others use the batch shelf."""
+    from app.models.organization import Shelf, ShelfWork
+
+    actor = make_user("shelver", role="librarian")  # shelf membership needs librarian+
+    global_shelf = Shelf(name="Global", access_level="open")
+    custom_shelf = Shelf(name="Custom", access_level="open")
+    db.add_all([global_shelf, custom_shelf])
+    db.commit()
+
+    batch = import_staging.stage_pdfs(
+        db,
+        actor=actor,
+        uploads=[("one.pdf", _pdf("one")), ("two.pdf", _pdf("two"))],
+        mode="preview",
+        target_shelf_id=global_shelf.id,
+    )
+    db.commit()
+    items = list(
+        db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id))
+    )
+    for item in items:
+        import_staging.extract_staging_item(db, item=item, fetch_tei=lambda _p: TEI_NO_DOI)
+    import_staging.finalize_if_ready(db, batch)
+
+    summary = import_staging.commit_staging(
+        db,
+        actor=actor,
+        batch=batch,
+        decisions=[
+            {"item_id": str(items[0].id), "action": "accept"},
+            {
+                "item_id": str(items[1].id),
+                "action": "accept",
+                "target_shelf_id": str(custom_shelf.id),
+            },
+        ],
+    )
+    db.commit()
+    assert summary["created"] == 2, [i.error for i in items]
+    shelf_of = {sw.work_id: sw.shelf_id for sw in db.scalars(select(ShelfWork)).all()}
+    assert shelf_of[items[0].created_work_id] == global_shelf.id
+    assert shelf_of[items[1].created_work_id] == custom_shelf.id
