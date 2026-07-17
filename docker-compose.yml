@@ -70,6 +70,10 @@ services:
       - ./scripts:/app/scripts
       - ./config:/app/config
       - ./pyproject.toml:/app/pyproject.toml
+      # The safety suite's CSP/security-header test reads the committed nginx config; without
+      # this read-only mount it skips inside `make test-safety` (the file otherwise only exists
+      # in the frontend image).
+      - ./frontend/nginx.conf:/app/frontend/nginx.conf:ro
       # Managed library: shared with the worker and persisted across restarts so uploaded/
       # teleported PDFs the API stores are readable by the extraction worker.
       - paperracks_library:/app/storage
