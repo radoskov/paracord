@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Title taming + column width ratios + error envelope (2026-07-17)
+
+- **ALL-CAPS titles tamed at display time** (`lib/titleCase.ts`, used by PaperTable cells + the
+  WorkDetail heading): triggers only on >10-char titles with >95% uppercase letters, then title-
+  cases with small words lowercased, digit tokens/Roman numerals kept, and short words missing
+  from an embedded common-word list kept caps as likely acronyms (DNA, SVM, LSTM stay; DEEP,
+  DATA get cased). Display-only — stored titles/search/dedupe/exports untouched; the edit form
+  shows the raw title. 11 unit tests.
+- **Columns dialog: per-column width ratios + divider toggle.** Width is a ratio (relative
+  weight): the table divides its actual width by the sum of visible ratios (`columnWidthPercents`
+  → `<colgroup>` percentages under `table-layout: fixed`), so layouts adapt to the list width and
+  the chosen column set without re-tuning. Number input sits between the column name and the
+  order arrows; "Divider lines between rows" checkbox toggles the row borders (header underline
+  stays). Persisted per user via the existing preferences flow (localStorage + backend blob —
+  `LibraryColumnPrefs.widths/dividers`). Headers ellipsize and the status select shrinks into
+  narrowed columns. Verified live incl. persistence across reload.
+- **Request-id + descriptive error envelope** (user request, follow-up to the NUL-byte 500):
+  every request/response carries `X-Request-ID`; `sqlalchemy.DataError` → 400 with the DB's own
+  reason; any other unhandled exception → 500 naming the exception class + message, both with
+  the request id embedded (and the full traceback logged under the same id). Implemented as a
+  middleware wrapped BY CORSMiddleware — an `@app.exception_handler(Exception)` lands in
+  Starlette's outermost ServerErrorMiddleware whose response bypasses CORS, which is precisely
+  why the browser only said "NetworkError". Trade-off note: exception text is exposed to
+  clients by design (self-hosted LAN tool; diagnosability over secrecy — owner decision).
+
 ## NUL-byte PDF import 500 fixed (2026-07-17)
 
 - **"NetworkError" on importing `95-ont-ijcai95-ont-method.pdf` root-caused**: NOT the embedded
