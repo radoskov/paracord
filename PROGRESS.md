@@ -9,6 +9,31 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Graph color-by shelf/rack/tag + whole-API deadlock fix (2026-07-17)
+
+- **Color by shelf / rack / tag across the full graph trio** (owner request): the Insights
+  citation graph (rack was missing) and topic graph, the paper-view reference graph, and the
+  Visualizations temporal map + co-citation network. Multi-membership papers (several shelves/
+  racks/tags) render as a **color wheel** — an SVG pie with one segment per membership, passed to
+  ECharts as an `image://` symbol (`lib/graphPie.ts`); single-membership nodes keep plain
+  circles. Backend: shared `graph_color.membership_groups()` resolves ALL privacy-filtered
+  membership names (non-private shelves/racks only; racks via the paper's shelves) and every
+  graph payload carries them (`color_groups` / `memberships`). Legends union all memberships;
+  legend chips hide a node only when ALL its groups are hidden; tooltips list every membership.
+  Verified live (screenshot: two-segment wheels in the Insights graph). +2 backend tests
+  (multi-groups, rack privacy) — `test_citation_graph.py` gained the rack tables in its trimmed
+  SQLite fixture.
+- **Whole-API deadlock root-caused and fixed** (found when the e2e burst wedged the API): the
+  rate-limit middleware read the effective ceilings with sync SQLAlchemy ON the event loop
+  (cache-expiry path). With the pool momentarily empty under 16 parallel e2e workers, the loop
+  blocked forever on the pool checkout, freezing every in-flight threadpool request mid-response
+  — their 15 connections could never be released through the frozen loop → permanent deadlock
+  (even `/health` dead; confirmed with py-spy: MainThread parked in `pool checkout` under
+  `_rate_limit`; 15 Postgres connections idle-in-transaction). Pre-existing bug, independent of
+  the day's changes. Fixes: the middleware check runs via `run_in_threadpool`, and the engine
+  gets `pool_timeout=30` + `max_overflow=20`, so exhaustion now errors descriptively (through
+  the error envelope) instead of hanging. e2e 37/37 zero-flake after.
+
 ## Degraded badge + scope-summary timeout fix + import preview links (2026-07-17)
 
 - **Degraded extraction is now visible AND summarizable** (follow-up to the GROBID fallback):
