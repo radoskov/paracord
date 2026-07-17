@@ -1279,17 +1279,6 @@
         <span class="stub-badge" title="Indexed by the local agent but not yet extracted — attach/extract or teleport to fill in metadata and text">not extracted</span>
       {/if}
     </h2>
-    {#if appliedTags.length}
-      <!-- Applied tags at a glance (also editable in the Tags section below). -->
-      <div class="title-tags" aria-label="Tags on this paper">
-        {#each appliedTags as tag (tag.id)}
-          <span class="tag-chip" style={`--tag-color:${tag.color ?? 'var(--ink-muted)'}`}
-            title={tag.description ?? tag.name}>
-            <span class="dot"></span>{tag.name}
-          </span>
-        {/each}
-      </div>
-    {/if}
     <div class="bar-actions">
       {#if onBack}
         <button type="button" class="secondary small" on:click={onBack} data-testid="detail-back"
@@ -1307,6 +1296,17 @@
       {/if}
       <button type="button" class="secondary small" on:click={onClose} title="Close detail panel">✕</button>
     </div>
+    {#if appliedTags.length}
+      <!-- Applied tags at a glance (also editable in the Tags section below). -->
+      <div class="title-tags" aria-label="Tags on this paper">
+        {#each appliedTags as tag (tag.id)}
+          <span class="tag-chip" style={`--tag-color:${tag.color ?? 'var(--ink-muted)'}`}
+            title={tag.description ?? tag.name}>
+            <span class="dot"></span>{tag.name}
+          </span>
+        {/each}
+      </div>
+    {/if}
   </div>
   {#if message}<p class="muted">{message}</p>{/if}
   {#if mainFile}
@@ -2355,12 +2355,14 @@
     font-size: 0.85rem;
   }
 
+  /* Stack the header vertically so each part gets its own row and nothing shifts between papers:
+     title (wraps as needed) → action buttons → tag chips (if any). Status/keywords/topics follow
+     as their own blocks below the bar. */
   .bar {
-    align-items: center;
+    align-items: stretch;
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
   h2 {
@@ -2743,6 +2745,7 @@
 
   .bar-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
   }
 

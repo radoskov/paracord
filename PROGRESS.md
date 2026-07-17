@@ -19,7 +19,12 @@
   `narrow-card` (44rem), which crammed the `DraftReview` preview's 5-column field grid (~40.5rem
   min) — the title and fields collapsed to their minimums. Card switched to `wide` (matching the
   BibTeX tab) with a new `.form-narrow` cap on just the intro + lookup form, so the form stays
-  compact but the found-paper preview gets full width. See
+  compact but the found-paper preview gets full width.
+- **Paper-detail header stacking** (`6516799`): the header `.bar` was a wrapping flex with
+  `space-between` holding title + tag chips + action buttons on one line, so the buttons drifted
+  per paper depending on how many tags/how long the title. `.bar` is now a vertical stack: title
+  (wraps) → action buttons (own row, wraps) → tag chips (own row, if any); the status/message
+  line, keywords and topics follow as their own blocks below. See
   `docs/agent_handoffs/2026-07-17-lib-selected-color-import-layout.md`.
 
 ## Citation-summary polish + S2 downloads + graph overlap fan-out (2026-07-17)
