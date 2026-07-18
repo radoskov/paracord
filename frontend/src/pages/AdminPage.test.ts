@@ -19,6 +19,7 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     ]),
     listRacks: vi.fn().mockResolvedValue([]),
     listShelves: vi.fn().mockResolvedValue([]),
+    listRows: vi.fn().mockResolvedValue([]),
     listThemes: vi.fn().mockResolvedValue([]),
     listDefaultGrants: vi.fn().mockResolvedValue([]),
     getAccessSettings: vi.fn().mockResolvedValue({ default_access_level: 'open', allowed: ['open', 'visible', 'private'] }),
