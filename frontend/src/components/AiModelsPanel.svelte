@@ -826,6 +826,17 @@
           disabled={busy || !config.auto_unmount} title="Idle minutes before an on-demand model unloads." />
         min idle
       </label>
+      <label class="llm-timeout">LLM timeout (s)
+        <input type="number" min="1" step="10" bind:value={config.summary_llm_timeout} placeholder="120" disabled={busy}
+          title="Per-call timeout for a local-LLM summary. Raise it for reasoning models (they think before answering, so a call can take minutes). On timeout the summary degrades to the extractive fallback. Save to persist." />
+      </label>
+      <label class="reasoning" title="Let a reasoning model (e.g. qwen3.5, deepseek-r1) actually think before answering: higher quality, MUCH slower (seconds→minutes per call). Off suppresses thinking so it answers as fast as a plain model. Has no effect on non-reasoning models. Save to persist.">
+        <input type="checkbox" bind:checked={config.summary_reasoning} disabled={busy} />
+        Reasoning mode
+        {#if config.summary_reasoning}
+          <span class="reason-warn" title="Reasoning is slow — make sure the LLM timeout above is generous (e.g. 600s+), especially for detailed summaries.">⚠ slow</span>
+        {/if}
+      </label>
       <!-- #5: alive-and-reachable semaphore (green/red), like the Jobs-tab dot. Reflects the daemon
            at the configured Ollama URL; its tooltip carries the URL + version for quick debugging. -->
       <span class="ollama-sema"
@@ -838,6 +849,19 @@
           : 'unreachable'}
       </span>
     </div>
+    {#if status.ollama_reachable && config.summary_provider === "local_llm"}
+      <p class="muted small reasoning-detect">
+        Summary model <code>{config.summary_model}</code>
+        {#if status.summary_model_reasoning}
+          is a <strong>reasoning model</strong> —
+          {config.summary_reasoning
+            ? "Reasoning mode is on, so it thinks before answering (higher quality, slower)."
+            : "turn on Reasoning mode above to use its full reasoning (slower)."}
+        {:else}
+          is not a reasoning model, so the Reasoning-mode toggle has no effect on it.
+        {/if}
+      </p>
+    {/if}
 
     <!-- #5: models currently held in the Ollama daemon's memory. -->
     <h3 class="section">Loaded in memory</h3>
@@ -1141,6 +1165,26 @@
       </details>
 
       <details>
+        <summary>Summaries: reasoning models, timeout &amp; formatting</summary>
+        <p>A <strong>reasoning model</strong> (e.g. qwen3, qwen3.5, deepseek-r1) writes out a private
+          chain-of-thought before its answer. That can improve quality but is <em>much</em> slower —
+          seconds become minutes, and a detailed summary makes one call per section. The panel
+          <strong>auto-detects</strong> whether your summary model is a reasoning model (via its Ollama
+          capabilities) and tells you under the settings row.</p>
+        <p><strong>Reasoning mode</strong> (default <em>off</em>): when off, thinking is suppressed so a
+          reasoning model answers about as fast as a plain one — the clean final answer only, never the
+          raw thoughts. Turn it <em>on</em> to let the model reason for higher-quality summaries; expect
+          it to be slow, so raise the timeout. The toggle has no effect on non-reasoning models (the
+          flag is only ever sent to models that support it).</p>
+        <p><strong>LLM timeout (s)</strong> is the per-call budget for one generation. If a call exceeds
+          it, that summary safely degrades to the fast extractive fallback (and the card says so). The
+          default 120&nbsp;s suits non-reasoning models; for reasoning mode set it generously
+          (600&nbsp;s+), especially for detailed summaries.</p>
+        <p class="note">Whatever the model, its internal “thinking” is always stripped from the stored
+          summary, so a summary never starts mid-thought.</p>
+      </details>
+
+      <details>
         <summary>Finding, pulling &amp; deleting models</summary>
         <p><strong>Find a model</strong> searches a curated catalog (plus a live lookup on
           <code>ollama.com</code> when reachable) and shows an <em>estimated</em> memory requirement.
@@ -1371,8 +1415,11 @@
   .ollama-url { flex: 1 1 16rem; }
   .vram-budget { flex: 0 0 9rem; }
   .query-cache { flex: 0 0 8rem; }
-  .auto-unmount { align-items: center; display: flex; flex: 0 0 auto; gap: 0.35rem; }
+  .llm-timeout { flex: 0 0 8rem; }
+  .auto-unmount, .reasoning { align-items: center; display: flex; flex: 0 0 auto; gap: 0.35rem; }
   .auto-unmount .unmount-mins { width: 4rem; }
+  .reason-warn { color: var(--status-warning, #b26a00); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+  .reasoning-detect code { font-size: 0.85em; }
   .mount-row { align-items: center; display: flex; gap: 0.5rem; margin-top: 0.1rem; }
   .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
   .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }

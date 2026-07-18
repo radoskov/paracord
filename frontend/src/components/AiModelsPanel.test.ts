@@ -20,6 +20,8 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       query_cache_size: 2048,
       auto_unmount: true,
       auto_unmount_minutes: 5,
+      summary_llm_timeout: 120,
+      summary_reasoning: false,
     },
     allowed: {
       embedding_provider: ["hash_bow", "sentence_transformers", "ollama"],

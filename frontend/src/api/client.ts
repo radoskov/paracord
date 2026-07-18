@@ -1334,6 +1334,11 @@ export interface AiConfig {
   // manually unmounted; true → they unload after auto_unmount_minutes idle.
   auto_unmount: boolean;
   auto_unmount_minutes: number;
+  // Per-call local-LLM summary timeout (seconds); raise it for reasoning models.
+  summary_llm_timeout: number;
+  // Opt-in: let a reasoning model think before answering (slower, higher quality); only affects
+  // models whose Ollama capabilities include "thinking".
+  summary_reasoning: boolean;
 }
 
 export interface AiProviderInfo {
@@ -1380,6 +1385,9 @@ export interface AiStatus {
   ollama_reachable: boolean;
   // Ollama daemon version (for the reachability semaphore tooltip); null when unreachable (#5).
   ollama_version?: string | null;
+  // Auto-detected: is the configured summary model a reasoning model? Drives the reasoning toggle's
+  // hint/warning. false when Ollama is unreachable (not probed).
+  summary_model_reasoning?: boolean;
   bertopic_installed: boolean;
   sentence_transformers_installed: boolean;
   active: {

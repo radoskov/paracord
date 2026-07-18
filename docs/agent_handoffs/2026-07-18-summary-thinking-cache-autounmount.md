@@ -68,9 +68,35 @@ bool/number values for `_FALSY_VALID_FIELDS` (so auto_unmount off / cache size 0
   head`); worker restarted; `get_ai_config` reads the new fields; the live qwen3.5:4b summary test above.
 - Dev server healed after `frontend-test` (cleared `.vite`, restarted frontend, warmed `main.ts`).
 
+## Follow-up (same day): configurable LLM timeout + opt-in reasoning mode + auto-detect
+
+Owner: the 120 s timeout wasn't a setting (make it one); and allow opting into a reasoning model's
+full thinking (default off, warn it's slow), auto-detecting whether a model is a reasoning model.
+
+- **Auto-detect**: `model_management.model_capabilities()` / `model_supports_thinking()` read Ollama
+  `/api/show` `capabilities` (contains `"thinking"` for reasoning models), cached 5 min. Verified live:
+  qwen3.5:4b → True, nomic-embed-text → False.
+- **think behavior** (confirmed live): on modern Ollama `think:true` puts reasoning in a separate
+  `thinking` field and `response` is the clean answer (19.7 s vs 0.5 s here); Ollama **rejects** the
+  `think` field for models without the capability — so we only ever send it to capable models.
+- **New config** `summary_llm_timeout` (default 120) + `summary_reasoning` (default off). The three
+  per-call LLM knobs (keep_alive, think, timeout) are now bundled in a `_LlmOpts` dataclass and
+  resolved once per summary by `_llm_opts_for(ai_cfg, model)`: think = None for non-capable models,
+  else the opt-in bool; timeout from config. Replaced the earlier `keep_alive`-only threading.
+- `recommendation.ollama_generate_json` now guards `think:false` behind the same capability check
+  (previously unconditional — would have errored on a non-reasoning ranker model).
+- `ai_status` returns `summary_model_reasoning` (auto-detected) so the panel shows whether the current
+  summary model is a reasoning model and whether reasoning mode is doing anything.
+- Frontend: **LLM timeout (s)** input + **Reasoning mode** toggle (with a "⚠ slow" hint) in the
+  settings row; a detection line under the row; a new Help section. `client.ts` gains the fields.
+- **Migration gotcha**: alembic `version_num` is `varchar(32)`; the first revision id
+  (`0082_ai_config_llm_timeout_reasoning`, 36 chars) overflowed and rolled the migration back. Renamed
+  to `0082_ai_llm_timeout_reasoning` (29). Keep future revision ids ≤ 32 chars.
+- Verified: backend suites pass (added `_llm_opts_for`, timeout/reasoning-persist, config-validation
+  tests); ruff + openapi clean; `make frontend-test` 342; live DB upgraded 0081→0082; worker restarted.
+
 ## Notes / follow-ups
-- `keep_alive` was **not** threaded into `recommendation.ollama_generate_json` (only `think:false`),
-  so the recommendation ranker still uses Ollama's default TTL — out of scope; revisit if auto-unmount
-  should also govern it.
 - Scope-summary fallback still stores the requested model name by design (its read path keys on it);
   the UI `provenanceName` fix covers both work and scope displays.
+- `keep_alive` is threaded through summary generation + embeddings but NOT the recommendation ranker
+  (only its `think` guard) — the ranker still uses Ollama's default TTL; revisit if needed.

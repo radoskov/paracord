@@ -9,6 +9,20 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Configurable LLM timeout + opt-in reasoning mode with auto-detect (2026-07-18)
+
+Same handoff (follow-up section). Owner: the LLM timeout wasn't a setting, and a reasoning model
+should optionally be allowed to *think*. Added config **`summary_llm_timeout`** (default 120 s) and
+**`summary_reasoning`** (default off). Auto-detection via Ollama `/api/show` capabilities
+(`model_supports_thinking`, cached) — verified qwen3.5:4b→reasoning, nomic→not. The per-call knobs
+(keep_alive/think/timeout) are bundled in `_LlmOpts`, resolved per summary by `_llm_opts_for`: the
+`think` flag is sent **only** to reasoning-capable models (Ollama rejects it otherwise), carrying the
+opt-in (off = suppress thinking → fast; on = full reasoning, slower — clean answer either way, thoughts
+stripped/separate). `ai_status` exposes `summary_model_reasoning`; the panel adds an LLM-timeout input,
+a Reasoning-mode toggle (⚠ slow) + a detection line + Help copy. Recommendation ranker's `think` is now
+capability-guarded too. alembic **0082** (revision ids must stay ≤32 chars — first attempt overflowed
+`version_num varchar(32)` and rolled back). Live DB 0081→0082; backend + `make frontend-test` pass.
+
 ## Reasoning-model summaries, query-embedding cache, auto-unmount, short history (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-summary-thinking-cache-autounmount.md`. Four owner items:
