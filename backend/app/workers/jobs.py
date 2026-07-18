@@ -820,9 +820,7 @@ def unmount_model_job(model: str, kind: str, actor_user_id: str | None) -> None:
         ollama_url = cfg.ollama_url
         is_active = (
             embedding and cfg.embedding_provider == "ollama" and cfg.embedding_model == model
-        ) or (
-            not embedding and cfg.summary_provider == "local_llm" and cfg.summary_model == model
-        )
+        ) or (not embedding and cfg.summary_provider == "local_llm" and cfg.summary_model == model)
 
     unmount_model(model, embedding=embedding, ollama_url=ollama_url)
 

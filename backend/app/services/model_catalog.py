@@ -31,7 +31,9 @@ _BYTES_PER_PARAM = {
 }
 
 
-def estimate_vram_gb(params_b: float, quant: str = "Q4_K_M", *, context_tokens: int = 4096) -> float:
+def estimate_vram_gb(
+    params_b: float, quant: str = "Q4_K_M", *, context_tokens: int = 4096
+) -> float:
     """Rough VRAM (GB) to run a model: quantized weights + a KV-cache/overhead allowance.
 
     ``params_b`` is the parameter count in billions. Conservative on purpose — a sizing aid, not a
@@ -49,30 +51,237 @@ def estimate_vram_gb(params_b: float, quant: str = "Q4_K_M", *, context_tokens: 
 # fills in families we don't list.
 _CATALOG: list[dict] = [
     # --- general-purpose LLMs (summaries / recommend) --------------------------------------------
-    {"name": "llama3.2:3b", "family": "llama3.2", "params_b": 3.0, "quant": "Q4_K_M", "size_bytes": 2_020_000_000, "kind": "llm", "popularity": 96, "blurb": "Llama 3.2 3B — fast, capable small general model."},  # noqa: E501
-    {"name": "llama3.2:1b", "family": "llama3.2", "params_b": 1.0, "quant": "Q4_K_M", "size_bytes": 1_300_000_000, "kind": "llm", "popularity": 88, "blurb": "Llama 3.2 1B — tiny, runs on almost anything."},  # noqa: E501
-    {"name": "llama3.1:8b", "family": "llama3.1", "params_b": 8.0, "quant": "Q4_K_M", "size_bytes": 4_900_000_000, "kind": "llm", "popularity": 97, "blurb": "Llama 3.1 8B — strong all-round mid-size model."},  # noqa: E501
-    {"name": "qwen3:0.6b", "family": "qwen3", "params_b": 0.6, "quant": "Q4_K_M", "size_bytes": 500_000_000, "kind": "llm", "popularity": 80, "blurb": "Qwen3 0.6B — smallest Qwen3, ultra-light."},  # noqa: E501
-    {"name": "qwen3:1.7b", "family": "qwen3", "params_b": 1.7, "quant": "Q4_K_M", "size_bytes": 1_400_000_000, "kind": "llm", "popularity": 86, "blurb": "Qwen3 1.7B — light general model."},  # noqa: E501
-    {"name": "qwen3:4b", "family": "qwen3", "params_b": 4.0, "quant": "Q4_K_M", "size_bytes": 2_497_280_480, "kind": "llm", "popularity": 93, "blurb": "Qwen3 4B — strong small general model."},  # noqa: E501
-    {"name": "qwen3:8b", "family": "qwen3", "params_b": 8.0, "quant": "Q4_K_M", "size_bytes": 5_200_000_000, "kind": "llm", "popularity": 90, "blurb": "Qwen3 8B — capable mid-size model."},  # noqa: E501
-    {"name": "qwen3:14b", "family": "qwen3", "params_b": 14.0, "quant": "Q4_K_M", "size_bytes": 9_300_000_000, "kind": "llm", "popularity": 84, "blurb": "Qwen3 14B — larger, needs a real GPU."},  # noqa: E501
-    {"name": "qwen2.5:3b", "family": "qwen2.5", "params_b": 3.0, "quant": "Q4_K_M", "size_bytes": 1_900_000_000, "kind": "llm", "popularity": 82, "blurb": "Qwen2.5 3B — solid small general model."},  # noqa: E501
-    {"name": "qwen2.5:7b", "family": "qwen2.5", "params_b": 7.0, "quant": "Q4_K_M", "size_bytes": 4_700_000_000, "kind": "llm", "popularity": 88, "blurb": "Qwen2.5 7B — well-rounded mid-size model."},  # noqa: E501
-    {"name": "gemma3:1b", "family": "gemma3", "params_b": 1.0, "quant": "Q4_K_M", "size_bytes": 815_000_000, "kind": "llm", "popularity": 84, "blurb": "Gemma 3 1B — tiny Google model."},  # noqa: E501
-    {"name": "gemma3:4b", "family": "gemma3", "params_b": 4.0, "quant": "Q4_K_M", "size_bytes": 3_300_000_000, "kind": "llm", "popularity": 91, "blurb": "Gemma 3 4B — capable small model."},  # noqa: E501
-    {"name": "gemma3:12b", "family": "gemma3", "params_b": 12.0, "quant": "Q4_K_M", "size_bytes": 8_100_000_000, "kind": "llm", "popularity": 82, "blurb": "Gemma 3 12B — larger, needs a GPU."},  # noqa: E501
-    {"name": "phi4", "family": "phi4", "params_b": 14.0, "quant": "Q4_K_M", "size_bytes": 9_100_000_000, "kind": "llm", "popularity": 83, "blurb": "Phi-4 14B — strong reasoning for its size."},  # noqa: E501
-    {"name": "phi3.5", "family": "phi3.5", "params_b": 3.8, "quant": "Q4_K_M", "size_bytes": 2_200_000_000, "kind": "llm", "popularity": 79, "blurb": "Phi-3.5 3.8B — compact, capable."},  # noqa: E501
-    {"name": "mistral", "family": "mistral", "params_b": 7.0, "quant": "Q4_K_M", "size_bytes": 4_100_000_000, "kind": "llm", "popularity": 89, "blurb": "Mistral 7B — classic fast mid-size model."},  # noqa: E501
-    {"name": "deepseek-r1:7b", "family": "deepseek-r1", "params_b": 7.0, "quant": "Q4_K_M", "size_bytes": 4_700_000_000, "kind": "llm", "popularity": 85, "blurb": "DeepSeek-R1 7B — reasoning-focused model."},  # noqa: E501
-    {"name": "deepseek-r1:8b", "family": "deepseek-r1", "params_b": 8.0, "quant": "Q4_K_M", "size_bytes": 5_200_000_000, "kind": "llm", "popularity": 83, "blurb": "DeepSeek-R1 8B — reasoning-focused model."},  # noqa: E501
+    {
+        "name": "llama3.2:3b",
+        "family": "llama3.2",
+        "params_b": 3.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 2_020_000_000,
+        "kind": "llm",
+        "popularity": 96,
+        "blurb": "Llama 3.2 3B — fast, capable small general model.",
+    },  # noqa: E501
+    {
+        "name": "llama3.2:1b",
+        "family": "llama3.2",
+        "params_b": 1.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 1_300_000_000,
+        "kind": "llm",
+        "popularity": 88,
+        "blurb": "Llama 3.2 1B — tiny, runs on almost anything.",
+    },  # noqa: E501
+    {
+        "name": "llama3.1:8b",
+        "family": "llama3.1",
+        "params_b": 8.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 4_900_000_000,
+        "kind": "llm",
+        "popularity": 97,
+        "blurb": "Llama 3.1 8B — strong all-round mid-size model.",
+    },  # noqa: E501
+    {
+        "name": "qwen3:0.6b",
+        "family": "qwen3",
+        "params_b": 0.6,
+        "quant": "Q4_K_M",
+        "size_bytes": 500_000_000,
+        "kind": "llm",
+        "popularity": 80,
+        "blurb": "Qwen3 0.6B — smallest Qwen3, ultra-light.",
+    },  # noqa: E501
+    {
+        "name": "qwen3:1.7b",
+        "family": "qwen3",
+        "params_b": 1.7,
+        "quant": "Q4_K_M",
+        "size_bytes": 1_400_000_000,
+        "kind": "llm",
+        "popularity": 86,
+        "blurb": "Qwen3 1.7B — light general model.",
+    },  # noqa: E501
+    {
+        "name": "qwen3:4b",
+        "family": "qwen3",
+        "params_b": 4.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 2_497_280_480,
+        "kind": "llm",
+        "popularity": 93,
+        "blurb": "Qwen3 4B — strong small general model.",
+    },  # noqa: E501
+    {
+        "name": "qwen3:8b",
+        "family": "qwen3",
+        "params_b": 8.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 5_200_000_000,
+        "kind": "llm",
+        "popularity": 90,
+        "blurb": "Qwen3 8B — capable mid-size model.",
+    },  # noqa: E501
+    {
+        "name": "qwen3:14b",
+        "family": "qwen3",
+        "params_b": 14.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 9_300_000_000,
+        "kind": "llm",
+        "popularity": 84,
+        "blurb": "Qwen3 14B — larger, needs a real GPU.",
+    },  # noqa: E501
+    {
+        "name": "qwen2.5:3b",
+        "family": "qwen2.5",
+        "params_b": 3.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 1_900_000_000,
+        "kind": "llm",
+        "popularity": 82,
+        "blurb": "Qwen2.5 3B — solid small general model.",
+    },  # noqa: E501
+    {
+        "name": "qwen2.5:7b",
+        "family": "qwen2.5",
+        "params_b": 7.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 4_700_000_000,
+        "kind": "llm",
+        "popularity": 88,
+        "blurb": "Qwen2.5 7B — well-rounded mid-size model.",
+    },  # noqa: E501
+    {
+        "name": "gemma3:1b",
+        "family": "gemma3",
+        "params_b": 1.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 815_000_000,
+        "kind": "llm",
+        "popularity": 84,
+        "blurb": "Gemma 3 1B — tiny Google model.",
+    },  # noqa: E501
+    {
+        "name": "gemma3:4b",
+        "family": "gemma3",
+        "params_b": 4.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 3_300_000_000,
+        "kind": "llm",
+        "popularity": 91,
+        "blurb": "Gemma 3 4B — capable small model.",
+    },  # noqa: E501
+    {
+        "name": "gemma3:12b",
+        "family": "gemma3",
+        "params_b": 12.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 8_100_000_000,
+        "kind": "llm",
+        "popularity": 82,
+        "blurb": "Gemma 3 12B — larger, needs a GPU.",
+    },  # noqa: E501
+    {
+        "name": "phi4",
+        "family": "phi4",
+        "params_b": 14.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 9_100_000_000,
+        "kind": "llm",
+        "popularity": 83,
+        "blurb": "Phi-4 14B — strong reasoning for its size.",
+    },  # noqa: E501
+    {
+        "name": "phi3.5",
+        "family": "phi3.5",
+        "params_b": 3.8,
+        "quant": "Q4_K_M",
+        "size_bytes": 2_200_000_000,
+        "kind": "llm",
+        "popularity": 79,
+        "blurb": "Phi-3.5 3.8B — compact, capable.",
+    },  # noqa: E501
+    {
+        "name": "mistral",
+        "family": "mistral",
+        "params_b": 7.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 4_100_000_000,
+        "kind": "llm",
+        "popularity": 89,
+        "blurb": "Mistral 7B — classic fast mid-size model.",
+    },  # noqa: E501
+    {
+        "name": "deepseek-r1:7b",
+        "family": "deepseek-r1",
+        "params_b": 7.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 4_700_000_000,
+        "kind": "llm",
+        "popularity": 85,
+        "blurb": "DeepSeek-R1 7B — reasoning-focused model.",
+    },  # noqa: E501
+    {
+        "name": "deepseek-r1:8b",
+        "family": "deepseek-r1",
+        "params_b": 8.0,
+        "quant": "Q4_K_M",
+        "size_bytes": 5_200_000_000,
+        "kind": "llm",
+        "popularity": 83,
+        "blurb": "DeepSeek-R1 8B — reasoning-focused model.",
+    },  # noqa: E501
     # --- embedding models (semantic search / related papers) -------------------------------------
-    {"name": "nomic-embed-text", "family": "nomic-embed-text", "params_b": 0.137, "quant": "F16", "size_bytes": 274_000_000, "kind": "embedding", "popularity": 98, "blurb": "Nomic embeddings (768-dim) — the recommended default for semantic search."},  # noqa: E501
-    {"name": "mxbai-embed-large", "family": "mxbai-embed-large", "params_b": 0.335, "quant": "F16", "size_bytes": 670_000_000, "kind": "embedding", "popularity": 90, "blurb": "mxbai large embeddings (1024-dim) — higher quality, larger."},  # noqa: E501
-    {"name": "bge-m3", "family": "bge-m3", "params_b": 0.567, "quant": "F16", "size_bytes": 1_200_000_000, "kind": "embedding", "popularity": 85, "blurb": "BGE-M3 embeddings (1024-dim) — multilingual."},  # noqa: E501
-    {"name": "all-minilm", "family": "all-minilm", "params_b": 0.023, "quant": "F16", "size_bytes": 46_000_000, "kind": "embedding", "popularity": 78, "blurb": "all-MiniLM (384-dim) — tiny, fast embeddings."},  # noqa: E501
-    {"name": "snowflake-arctic-embed", "family": "snowflake-arctic-embed", "params_b": 0.335, "quant": "F16", "size_bytes": 670_000_000, "kind": "embedding", "popularity": 76, "blurb": "Snowflake Arctic embeddings — strong retrieval quality."},  # noqa: E501
+    {
+        "name": "nomic-embed-text",
+        "family": "nomic-embed-text",
+        "params_b": 0.137,
+        "quant": "F16",
+        "size_bytes": 274_000_000,
+        "kind": "embedding",
+        "popularity": 98,
+        "blurb": "Nomic embeddings (768-dim) — the recommended default for semantic search.",
+    },  # noqa: E501
+    {
+        "name": "mxbai-embed-large",
+        "family": "mxbai-embed-large",
+        "params_b": 0.335,
+        "quant": "F16",
+        "size_bytes": 670_000_000,
+        "kind": "embedding",
+        "popularity": 90,
+        "blurb": "mxbai large embeddings (1024-dim) — higher quality, larger.",
+    },  # noqa: E501
+    {
+        "name": "bge-m3",
+        "family": "bge-m3",
+        "params_b": 0.567,
+        "quant": "F16",
+        "size_bytes": 1_200_000_000,
+        "kind": "embedding",
+        "popularity": 85,
+        "blurb": "BGE-M3 embeddings (1024-dim) — multilingual.",
+    },  # noqa: E501
+    {
+        "name": "all-minilm",
+        "family": "all-minilm",
+        "params_b": 0.023,
+        "quant": "F16",
+        "size_bytes": 46_000_000,
+        "kind": "embedding",
+        "popularity": 78,
+        "blurb": "all-MiniLM (384-dim) — tiny, fast embeddings.",
+    },  # noqa: E501
+    {
+        "name": "snowflake-arctic-embed",
+        "family": "snowflake-arctic-embed",
+        "params_b": 0.335,
+        "quant": "F16",
+        "size_bytes": 670_000_000,
+        "kind": "embedding",
+        "popularity": 76,
+        "blurb": "Snowflake Arctic embeddings — strong retrieval quality.",
+    },  # noqa: E501
 ]
 
 _PARAM_TAG = re.compile(r"(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
@@ -119,16 +328,18 @@ def _scrape_ollama_library(query: str, *, timeout: float = 6.0) -> list[str]:
     """Best-effort: return model family slugs from ollama.com search for `query`. Empty on any
     failure (no egress, timeout, markup change) — the caller falls back to the curated catalog."""
     slugs: list[str] = []
-    with contextlib.suppress(Exception):
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            resp = client.get("https://ollama.com/search", params={"q": query})
-            resp.raise_for_status()
-            seen: set[str] = set()
-            for slug in _LIBRARY_HREF.findall(resp.text):
-                s = slug.lower()
-                if s not in seen:
-                    seen.add(s)
-                    slugs.append(s)
+    with (
+        contextlib.suppress(Exception),
+        httpx.Client(timeout=timeout, follow_redirects=True) as client,
+    ):
+        resp = client.get("https://ollama.com/search", params={"q": query})
+        resp.raise_for_status()
+        seen: set[str] = set()
+        for slug in _LIBRARY_HREF.findall(resp.text):
+            s = slug.lower()
+            if s not in seen:
+                seen.add(s)
+                slugs.append(s)
     return slugs[:20]
 
 

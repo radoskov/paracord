@@ -102,6 +102,17 @@
               }
             ],
             "title": "Topic Embedding Model"
+          },
+          "vram_budget_gb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Budget Gb"
           }
         },
         "title": "AIConfigUpdate",
@@ -4590,6 +4601,35 @@
           "model"
         ],
         "title": "ModelRef",
+        "type": "object"
+      },
+      "MountRef": {
+        "description": "A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind).\n\n``compute`` (mount only) selects Ollama's GPU offload: auto (daemon decides), gpu (offload all\nlayers), or cpu (force CPU / RAM).",
+        "properties": {
+          "compute": {
+            "default": "auto",
+            "title": "Compute",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "default": "ollama",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "kind"
+        ],
+        "title": "MountRef",
         "type": "object"
       },
       "MoveFileRequest": {
@@ -11452,6 +11492,59 @@
         ]
       }
     },
+    "/api/v1/admin/ai/loaded": {
+      "get": {
+        "description": "Models currently held in the Ollama daemon's memory + the admin's VRAM budget (#5).\n\nPowers the mount panel: what's loaded (and its VRAM), so the admin can free memory and so the\n'will it fit?' warning can compare an estimate against the budget and what's already loaded.",
+        "operationId": "ai_loaded_models_api_v1_admin_ai_loaded_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ai Loaded Models Api V1 Admin Ai Loaded Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ai Loaded Models",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
     "/api/v1/admin/ai/models": {
       "delete": {
         "description": "Remove a locally-pulled model (Ollama).",
@@ -11566,6 +11659,69 @@
         ]
       }
     },
+    "/api/v1/admin/ai/models/mount": {
+      "post": {
+        "description": "Queue a model mount (#5): the worker loads it (keep_alive=-1) and makes it the active model\nfor its capability — one per kind, freeing the previous; a changed embedding model queues a\nreindex. Runs as a background job so a slow load never blocks the API/UI; poll the job for status.\nConfig only changes after the load succeeds, so a failed mount leaves the prior selection intact.",
+        "operationId": "mount_model_endpoint_api_v1_admin_ai_models_mount_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MountRef"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mount Model Endpoint Api V1 Admin Ai Models Mount Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mount Model Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
     "/api/v1/admin/ai/models/pull": {
       "post": {
         "description": "Queue a model download/pull (tracked as a background job).",
@@ -11623,6 +11779,132 @@
           }
         },
         "summary": "Pull Model Endpoint",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/models/search": {
+      "get": {
+        "description": "Find pullable models by name/keyword, popularity-ranked, each with an estimated VRAM need.\n\nOllama has no search API or VRAM reporting, so results come from a curated catalog plus a\nbest-effort live enrichment from ollama.com (falls back to the catalog on any failure). Models\nalready pulled locally are flagged so the UI can hide/label their Pull button (#5).",
+        "operationId": "ai_models_search_api_v1_admin_ai_models_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ai Models Search Api V1 Admin Ai Models Search Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ai Models Search",
+        "tags": [
+          "admin",
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/admin/ai/models/unmount": {
+      "post": {
+        "description": "Queue a model unmount (#5): the worker releases it from memory (keep_alive=0) and, if it was\nthe active model for its kind, drops that capability to its baseline (hash-BOW / extractive) so\nfeatures keep working. Background job (poll for status); the unload is robust to a wrong kind.",
+        "operationId": "unmount_model_endpoint_api_v1_admin_ai_models_unmount_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MountRef"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Unmount Model Endpoint Api V1 Admin Ai Models Unmount Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unmount Model Endpoint",
         "tags": [
           "admin",
           "ai"

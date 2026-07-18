@@ -127,9 +127,7 @@ def ai_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
 
 
 @router.get("/ai/models/search")
-def ai_models_search(
-    q: str = "", db: Session = DB_DEP, _: User = ADMIN_DEP
-) -> dict:
+def ai_models_search(q: str = "", db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """Find pullable models by name/keyword, popularity-ranked, each with an estimated VRAM need.
 
     Ollama has no search API or VRAM reporting, so results come from a curated catalog plus a
@@ -282,7 +280,9 @@ def mount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = 
 
 
 @router.post("/ai/models/unmount", status_code=status.HTTP_202_ACCEPTED)
-def unmount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
+def unmount_model_endpoint(
+    payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP
+) -> dict:
     """Queue a model unmount (#5): the worker releases it from memory (keep_alive=0) and, if it was
     the active model for its kind, drops that capability to its baseline (hash-BOW / extractive) so
     features keep working. Background job (poll for status); the unload is robust to a wrong kind."""
@@ -475,7 +475,9 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
         "lexical_index": lexical_cache_info(db),
         "ollama_reachable": providers["ollama_reachable"],
         # Version powers the reachability semaphore's tooltip (#5); None when unreachable.
-        "ollama_version": ollama_version(config.ollama_url) if providers["ollama_reachable"] else None,
+        "ollama_version": ollama_version(config.ollama_url)
+        if providers["ollama_reachable"]
+        else None,
         "bertopic_installed": providers["bertopic_installed"],
         "sentence_transformers_installed": providers["sentence_transformers_installed"],
         "active": _active_capability_status(config_dict, providers),

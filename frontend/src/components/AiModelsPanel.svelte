@@ -268,7 +268,7 @@
   async function runningAiJobs(): Promise<string[]> {
     const q = await client.getJobs(50).catch(() => null);
     if (!q) return [];
-    const AI = /embed|reindex|summar|recommend|keyword|topic|model-pull|lexical/i;
+    const AI = /embed|reindex|summ|recommend|keyword|topic|model-pull|lexical/i;
     return q.jobs
       .filter((j) => (j.status === 'started' || j.status === 'queued') && AI.test(j.task))
       .map((j) => j.task);

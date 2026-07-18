@@ -466,9 +466,11 @@ def enqueue_model_mount(
     """Best-effort enqueue of a model mount (load into memory + make active). Runs in the worker so
     a slow load never blocks the API/UI (#5)."""
     try:
-        return get_queue().enqueue(
-            MOUNT_MODEL_JOB, model, kind, compute, actor_user_id, job_timeout=1800
-        ).id
+        return (
+            get_queue()
+            .enqueue(MOUNT_MODEL_JOB, model, kind, compute, actor_user_id, job_timeout=1800)
+            .id
+        )
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue model mount %s (%s): %s", model, kind, exc)
         return None
@@ -477,7 +479,9 @@ def enqueue_model_mount(
 def enqueue_model_unmount(model: str, kind: str, actor_user_id: str | None) -> str | None:
     """Best-effort enqueue of a model unmount (release memory + revert to baseline) (#5)."""
     try:
-        return get_queue().enqueue(UNMOUNT_MODEL_JOB, model, kind, actor_user_id, job_timeout=300).id
+        return (
+            get_queue().enqueue(UNMOUNT_MODEL_JOB, model, kind, actor_user_id, job_timeout=300).id
+        )
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue
         logger.warning("Could not enqueue model unmount %s (%s): %s", model, kind, exc)
         return None

@@ -155,7 +155,9 @@ def test_models_search_ranks_and_flags_pulled(client, auth_headers, monkeypatch)
 
 def test_models_search_is_owner_only(client, auth_headers):
     assert (
-        client.get("/api/v1/admin/ai/models/search?q=qwen", headers=auth_headers("editor")).status_code
+        client.get(
+            "/api/v1/admin/ai/models/search?q=qwen", headers=auth_headers("editor")
+        ).status_code
         == 403
     )
 
@@ -167,9 +169,13 @@ def test_vram_budget_persists_and_rejects_negative(client, auth_headers, db):
     owner = auth_headers("owner")
     r = client.put("/api/v1/admin/ai-config", headers=owner, json={"vram_budget_gb": 8})
     assert r.status_code == 200
-    assert client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]["vram_budget_gb"] == 8
     assert (
-        client.put("/api/v1/admin/ai-config", headers=owner, json={"vram_budget_gb": -1}).status_code
+        client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]["vram_budget_gb"] == 8
+    )
+    assert (
+        client.put(
+            "/api/v1/admin/ai-config", headers=owner, json={"vram_budget_gb": -1}
+        ).status_code
         == 400
     )
 
@@ -200,7 +206,9 @@ def test_mount_endpoint_enqueues_and_validates(client, auth_headers, monkeypatch
         {"provider": "ollama", "model": "x", "kind": "summary", "compute": "quantum"},
         {"provider": "sentence_transformers", "model": "x", "kind": "summary"},
     ):
-        assert client.post("/api/v1/admin/ai/models/mount", headers=owner, json=bad).status_code == 400
+        assert (
+            client.post("/api/v1/admin/ai/models/mount", headers=owner, json=bad).status_code == 400
+        )
 
 
 def test_unmount_endpoint_enqueues(client, auth_headers, monkeypatch):
@@ -220,9 +228,7 @@ def test_loaded_endpoint_owner_only(client, auth_headers, monkeypatch):
     import app.api.v1.endpoints.ai_admin as m
 
     monkeypatch.setattr(m, "list_loaded", lambda *, ollama_url: [])
-    assert (
-        client.get("/api/v1/admin/ai/loaded", headers=auth_headers("editor")).status_code == 403
-    )
+    assert client.get("/api/v1/admin/ai/loaded", headers=auth_headers("editor")).status_code == 403
     r = client.get("/api/v1/admin/ai/loaded", headers=auth_headers("owner"))
     assert r.status_code == 200
     assert "loaded" in r.json() and "vram_budget_gb" in r.json()

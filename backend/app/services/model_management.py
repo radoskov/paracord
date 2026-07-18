@@ -184,7 +184,9 @@ def list_models(*, ollama_url: str) -> list[dict]:
         name = entry.get("name")
         details = entry.get("details") or {}
         # Newer Ollama tags report "parameter_size" ("4.0B") + "quantization_level" ("Q4_K_M").
-        params = params_from_name(details.get("parameter_size") or "") or params_from_name(name or "")
+        params = params_from_name(details.get("parameter_size") or "") or params_from_name(
+            name or ""
+        )
         quant = details.get("quantization_level") or "Q4_K_M"
         models.append(
             {
@@ -226,7 +228,13 @@ _COMPUTE_NUM_GPU = {"cpu": 0, "gpu": 999, "auto": None}
 
 
 def _load_call(
-    client: httpx.Client, base: str, model: str, *, embedding: bool, keep_alive: int, num_gpu: int | None
+    client: httpx.Client,
+    base: str,
+    model: str,
+    *,
+    embedding: bool,
+    keep_alive: int,
+    num_gpu: int | None,
 ) -> httpx.Response:
     """One load/unload request, routed by kind (embedding-only models reject /api/generate)."""
     payload: dict = {"model": model, "keep_alive": keep_alive}
@@ -239,13 +247,11 @@ def _load_call(
     return client.post(f"{base}/api/generate", json=payload)
 
 
-def mount_model(
-    model: str, *, embedding: bool, ollama_url: str, compute: str = "auto"
-) -> dict:
+def mount_model(model: str, *, embedding: bool, ollama_url: str, compute: str = "auto") -> dict:
     """Load a model into memory and pin it (keep_alive=-1). ``compute`` ∈ auto|gpu|cpu selects the
     Ollama ``num_gpu`` offload. Raises RuntimeError (actionable) on failure."""
     base = ollama_url.rstrip("/")
-    num_gpu = _COMPUTE_NUM_GPU.get(compute, None)
+    num_gpu = _COMPUTE_NUM_GPU.get(compute)
     # Loading a big model off disk can take a while; a short connect timeout still fails fast when
     # the daemon is down.
     try:
@@ -290,7 +296,9 @@ def unmount_model(model: str, *, embedding: bool, ollama_url: str) -> dict:
         raise RuntimeError(
             f"Ollama daemon unreachable at {ollama_url} — is the ollama service running?"
         ) from exc
-    raise RuntimeError(f"Ollama could not unload {model!r} ({'; '.join(errors) or 'unknown error'}).")
+    raise RuntimeError(
+        f"Ollama could not unload {model!r} ({'; '.join(errors) or 'unknown error'})."
+    )
 
 
 def _pull_ollama(
