@@ -16,6 +16,6 @@ test('Journey 5 — AI & Models panel shows provider availability', async ({ pag
   // At least one capability card reports its engine availability (the built-in baselines always do).
   await expect(page.getByText('Built-in baseline').first()).toBeVisible();
 
-  // Ollama reachability line is part of the availability readout.
-  await expect(page.getByText(/Ollama:/)).toBeVisible();
+  // The Ollama reachability semaphore is part of the availability readout (green/red dot + label).
+  await expect(page.getByText(/Ollama (reachable|unreachable)/)).toBeVisible();
 });

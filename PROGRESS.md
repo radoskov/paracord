@@ -9,6 +9,20 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Full battery run + e2e fix (2026-07-18)
+
+Ran the full pre-push battery after the AI-models work. `make ready-full` (lint + codespell + full
+backend + OpenAPI + frontend build/test) — green after fixing a nested-`with` (SIM117), a codespell
+false-positive in a job-label regex, and regenerating `backend/openapi.json` for the new endpoints.
+`make test-safety` — **161 passed**. `make e2e` — fixed **Journey 5** (its `getByText(/Ollama:/)`
+assertion broke when the reachability text became the new semaphore; updated to
+`/Ollama (reachable|unreachable)/`). **Journey 22** is flaky (passes on retry/in isolation).
+**Journey 41** (recommend) times out **only on this box** because the live config uses Ollama
+embeddings (`qwen3-embedding:0.6b`) which take ~2m30s on a CPU-only host — the worker logs show the
+job *completes successfully*, just past the 45s test budget; it passes with the default hash-BOW
+baseline (as in CI). Not a code regression — left as-is (deterministic e2e provider setup is a possible
+future hardening).
+
 ## HTTPS/TLS reasoning + guidance (2026-07-18)
 
 Owner question: the browser session is plain HTTP; how to encrypt it? Finding: auth is a **bearer
