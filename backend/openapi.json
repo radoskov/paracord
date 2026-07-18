@@ -4,6 +4,28 @@
       "AIConfigUpdate": {
         "description": "Partial-update payload for the AI provider/model configuration.",
         "properties": {
+          "auto_unmount": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Unmount"
+          },
+          "auto_unmount_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Unmount Minutes"
+          },
           "embedding_model": {
             "anyOf": [
               {
@@ -58,6 +80,17 @@
               }
             ],
             "title": "Ollama Url"
+          },
+          "query_cache_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Cache Size"
           },
           "summary_model": {
             "anyOf": [

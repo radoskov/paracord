@@ -180,6 +180,46 @@ def test_vram_budget_persists_and_rejects_negative(client, auth_headers, db):
     )
 
 
+def test_query_cache_and_auto_unmount_persist_including_falsy(client, auth_headers, db):
+    """Falsy-but-valid settings (auto_unmount off, cache size 0) must persist, not be dropped as
+    'unset' by the generic overlay/persist loops."""
+    owner = auth_headers("owner")
+    r = client.put(
+        "/api/v1/admin/ai-config",
+        headers=owner,
+        json={"query_cache_size": 512, "auto_unmount": False, "auto_unmount_minutes": 15},
+    )
+    assert r.status_code == 200
+    cfg = client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]
+    assert cfg["query_cache_size"] == 512
+    assert cfg["auto_unmount"] is False
+    assert cfg["auto_unmount_minutes"] == 15
+    # A cache size of 0 (disable) is a real value and must survive the round-trip, not reset to default.
+    assert (
+        client.put(
+            "/api/v1/admin/ai-config", headers=owner, json={"query_cache_size": 0}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]["query_cache_size"]
+        == 0
+    )
+    # Invalid values are rejected.
+    assert (
+        client.put(
+            "/api/v1/admin/ai-config", headers=owner, json={"query_cache_size": -5}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.put(
+            "/api/v1/admin/ai-config", headers=owner, json={"auto_unmount_minutes": 0}
+        ).status_code
+        == 400
+    )
+
+
 # --- mount/unmount ENDPOINTS: enqueue a background job (the load runs in the worker) ---
 
 

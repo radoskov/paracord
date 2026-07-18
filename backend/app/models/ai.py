@@ -105,6 +105,12 @@ class AIConfig(Base):
     # Admin-set VRAM/RAM budget (GB) for the Ollama host — the mount/unmount panel warns before
     # loading a model whose estimate + already-loaded models would exceed it. NULL → no budget check.
     vram_budget_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Query-embedding LRU cache size (per model). NULL → Settings.query_cache_size (2048); 0 disables.
+    query_cache_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Auto-unmount on-demand models after idle (keep_alive). NULL → Settings.ai_auto_unmount.
+    auto_unmount: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Idle minutes before an on-demand model unloads when auto_unmount is on. NULL → Settings default.
+    auto_unmount_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

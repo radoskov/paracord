@@ -63,6 +63,9 @@ class AIConfigUpdate(BaseModel):
     ocr_language: str | None = None
     ollama_url: str | None = None
     vram_budget_gb: float | None = None
+    query_cache_size: int | None = None
+    auto_unmount: bool | None = None
+    auto_unmount_minutes: float | None = None
 
 
 class ModelRef(BaseModel):

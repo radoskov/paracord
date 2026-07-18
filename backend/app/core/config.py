@@ -300,6 +300,16 @@ class Settings(BaseSettings):
     embedding_model: str | None = None  # provider-specific model id (None = provider default)
     summary_llm_enabled: bool = False  # allow summary_type=local_llm via Ollama
     summary_llm_model: str = "qwen3:4b"
+    # Query-embedding LRU cache (per embedding model): a search re-embeds the same query string
+    # on every keystroke/repeat, and for an Ollama embedder that is a network round-trip each time.
+    # Size is the max number of distinct (model, query) vectors kept in-process; 0 disables it.
+    query_cache_size: int = 2048
+    # Auto-unmount: the ``keep_alive`` applied to on-demand Ollama use (summaries/embeddings NOT
+    # pinned via the Mount button). When on, a model unloads after ``ai_auto_unmount_minutes`` idle
+    # (this reproduces Ollama's built-in 5-minute default); when off, on-demand use pins the model
+    # (keep_alive=-1) so it stays resident until manually unmounted.
+    ai_auto_unmount: bool = True
+    ai_auto_unmount_minutes: float = 5.0
     topic_backend: str = "tfidf"  # tfidf | embedding (BERTopic-style, embedding-clustered)
     # H7: use the pgvector `<=>` operator for ANN ranking when on Postgres (a registered real model
     # gets sub-linear HNSW search out of the box). On SQLite / no-pgvector, or when the ANN column is

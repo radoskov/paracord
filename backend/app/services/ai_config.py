@@ -37,7 +37,14 @@ EDITABLE_FIELDS = (
     "ocr_language",
     "ollama_url",
     "vram_budget_gb",
+    "query_cache_size",
+    "auto_unmount",
+    "auto_unmount_minutes",
 )
+# Fields where a falsy value (``False`` / ``0``) is a legitimate setting, not "unset". The generic
+# overlay/persist loops treat empty strings as "unset" but must NOT drop these — e.g. auto_unmount
+# off (False) or a query cache size of 0 (disabled) are real, intended values.
+_FALSY_VALID_FIELDS = frozenset({"query_cache_size", "auto_unmount", "auto_unmount_minutes"})
 EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
 SUMMARY_PROVIDERS = ("extractive", "local_llm")
 TOPIC_BACKENDS = ("tfidf", "embedding", "bertopic")
@@ -63,6 +70,11 @@ class EffectiveAIConfig:
     ollama_url: str
     # Admin-set memory budget (GB) for the Ollama host; None → no mount VRAM warning.
     vram_budget_gb: float | None
+    # Max distinct (model, query) vectors kept in the in-process query-embedding cache; 0 disables.
+    query_cache_size: int
+    # Auto-unmount on-demand models after idle (drives Ollama ``keep_alive``); see keep_alive_value.
+    auto_unmount: bool
+    auto_unmount_minutes: float
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -80,6 +92,9 @@ def _defaults(settings: Settings) -> EffectiveAIConfig:
         ocr_language=settings.ocr_language,
         ollama_url=settings.ollama_url,
         vram_budget_gb=None,
+        query_cache_size=settings.query_cache_size,
+        auto_unmount=settings.ai_auto_unmount,
+        auto_unmount_minutes=settings.ai_auto_unmount_minutes,
     )
 
 
@@ -96,8 +111,13 @@ def get_ai_config(db: Session, *, settings: Settings | None = None) -> Effective
         return cfg
     for field in EDITABLE_FIELDS:
         value = getattr(row, field, None)
-        if value:
-            setattr(cfg, field, value)
+        if value is None:
+            continue
+        # Empty strings mean "unset → use the default"; but a falsy bool/number (auto_unmount off,
+        # cache size 0) is a real setting and must be honored.
+        if isinstance(value, str) and not value:
+            continue
+        setattr(cfg, field, value)
     # Tolerate a legacy/removed ocr_backend value (e.g. the dropped "full_ml") stored in an older
     # row: degrade to the Settings default rather than surfacing an out-of-range enum to callers.
     if cfg.ocr_backend not in OCR_BACKENDS:
@@ -121,7 +141,14 @@ def update_ai_config(
         db.add(row)
     for field in EDITABLE_FIELDS:
         if field in changes:
-            setattr(row, field, changes[field] or None)
+            value = changes[field]
+            # An empty/blank string clears the override (falls back to the Settings default), as does
+            # any other falsy value EXCEPT for the _FALSY_VALID_FIELDS, where False / 0 are real,
+            # intended settings (auto_unmount off, cache size 0) that must be persisted as-is.
+            blank_str = isinstance(value, str) and not value.strip()
+            if blank_str or (field not in _FALSY_VALID_FIELDS and not value):
+                value = None
+            setattr(row, field, value)
     row.updated_by_user_id = actor_user_id
     db.flush()
     after = get_ai_config(db)
@@ -197,3 +224,31 @@ def _validate(changes: dict, *, settings: Settings) -> None:
             raise ValueError("vram_budget_gb must be a number of gigabytes") from exc
         if budget < 0:
             raise ValueError("vram_budget_gb must be non-negative")
+    if changes.get("query_cache_size") is not None:
+        try:
+            size = int(changes["query_cache_size"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("query_cache_size must be a whole number") from exc
+        if size < 0:
+            raise ValueError("query_cache_size must be non-negative (0 disables the cache)")
+    if changes.get("auto_unmount_minutes") is not None:
+        try:
+            minutes = float(changes["auto_unmount_minutes"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("auto_unmount_minutes must be a number of minutes") from exc
+        if minutes <= 0:
+            raise ValueError("auto_unmount_minutes must be greater than 0")
+
+
+def keep_alive_value(cfg: EffectiveAIConfig) -> int:
+    """Ollama ``keep_alive`` (in seconds) for ON-DEMAND model use (summaries/embeddings that were
+    not pinned via the admin Mount button).
+
+    When auto-unmount is off the model is pinned (``-1``) so it stays resident until manually
+    unmounted; when on it is unloaded after ``auto_unmount_minutes`` idle. Ollama treats each request
+    independently, so applying this on every call is what actually enforces the idle timeout (or the
+    pin) — omitting it would silently reset the model to Ollama's built-in 5-minute default.
+    """
+    if not cfg.auto_unmount:
+        return -1
+    return max(1, int(round(cfg.auto_unmount_minutes * 60)))
