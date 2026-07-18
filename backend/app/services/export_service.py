@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.citation import Reference
 from app.models.metadata import MetadataAssertion
-from app.models.organization import RackShelf, ShelfWork
+from app.models.organization import RackShelf, RowRack, ShelfWork
 from app.models.work import Work
 from app.services import csl
 from app.services.audit import record_event
@@ -207,6 +207,19 @@ def _resolve_works(
             .join(ShelfWork, ShelfWork.work_id == Work.id)
             .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
             .where(RackShelf.rack_id == uuid.UUID(scope_id))
+            .distinct()
+            .order_by(Work.year, Work.canonical_title)
+        )
+        return _filter(list(db.scalars(stmt).all()))
+    if scope_type == "row":
+        if not scope_id:
+            raise ValueError("scope_id is required for row export")
+        stmt = (
+            select(Work)
+            .join(ShelfWork, ShelfWork.work_id == Work.id)
+            .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+            .join(RowRack, RowRack.rack_id == RackShelf.rack_id)
+            .where(RowRack.row_id == uuid.UUID(scope_id))
             .distinct()
             .order_by(Work.year, Work.canonical_title)
         )

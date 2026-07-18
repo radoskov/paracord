@@ -17,6 +17,7 @@ class SavedFilterParams(BaseModel):
     reading_status: str | None = None
     shelf_id: uuid.UUID | None = None
     rack_id: uuid.UUID | None = None
+    row_id: uuid.UUID | None = None
     tag_id: uuid.UUID | None = None
     has_pdf: bool | None = None
     has_references: bool | None = None

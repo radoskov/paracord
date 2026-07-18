@@ -26,7 +26,16 @@ from app.models.citation import CitationMention, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Row,
+    RowRack,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+)
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
@@ -214,6 +223,15 @@ class WorkRackRef(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkRowRef(BaseModel):
+    """A row containing one of a paper's (see-able) racks, SEE-filtered (work→shelf→rack→row)."""
+
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
 class WorkTagRef(BaseModel):
     """A tag applied to a paper (id + name + colour + description; batch10 library column)."""
 
@@ -267,6 +285,7 @@ class WorkRead(BaseModel):
     # by ``list_works`` (batched across the page); other endpoints leave these empty.
     shelves: list[WorkShelfRef] = []
     racks: list[WorkRackRef] = []
+    rows: list[WorkRowRef] = []
     # Library columns (batch10): number of files attached, applied tags, and status "badges"
     # (extraction/text-layer/conflict flags). Populated by ``list_works`` (batched across the page);
     # other endpoints leave file_count=0 and the lists empty.
@@ -339,6 +358,8 @@ class WorkShelfMembership(BaseModel):
     access_level: str
     can_modify: bool
     racks: list[WorkShelfRackRef] = []
+    # Rows containing this shelf's (see-able) racks — work→shelf→rack→row, SEE-filtered.
+    rows: list[WorkShelfRackRef] = []
 
 
 # Count-based sort expressions (library count columns). Correlated scalar subqueries so a page can be
@@ -420,18 +441,24 @@ _DEFAULT_SORT_COLUMN = Work.updated_at
 
 def _batch_shelf_rack_refs(
     db: Session, actor: User, work_ids: list[uuid.UUID]
-) -> tuple[dict[uuid.UUID, list[WorkShelfRef]], dict[uuid.UUID, list[WorkRackRef]]]:
-    """Batch-load the SEE-filtered shelves (and their SEE-filtered racks) for a page of works.
+) -> tuple[
+    dict[uuid.UUID, list[WorkShelfRef]],
+    dict[uuid.UUID, list[WorkRackRef]],
+    dict[uuid.UUID, list[WorkRowRef]],
+]:
+    """Batch-load the SEE-filtered shelves (their SEE-filtered racks, and those racks' SEE-filtered
+    rows) for a page of works.
 
-    Two grouped queries total (O(1) per page, not O(n)): one over ``ShelfWork`` intersected with the
-    caller's visible shelves, one over ``RackShelf`` intersected with the caller's visible racks.
-    Returns ``(work_id -> shelves, work_id -> racks)``; a work's racks are the deduped union of the
-    racks containing any of its (see-able) shelves.
+    Three grouped queries total (O(1) per page, not O(n)): ``ShelfWork`` ∩ visible shelves,
+    ``RackShelf`` ∩ visible racks, ``RowRack`` ∩ visible rows. Returns
+    ``(work_id -> shelves, work_id -> racks, work_id -> rows)``; a work's racks/rows are the deduped
+    union across its (see-able) shelves / racks (work→shelf→rack→row).
     """
     work_shelves: dict[uuid.UUID, list[WorkShelfRef]] = {}
     work_racks: dict[uuid.UUID, list[WorkRackRef]] = {}
+    work_rows: dict[uuid.UUID, list[WorkRowRef]] = {}
     if not work_ids:
-        return work_shelves, work_racks
+        return work_shelves, work_racks, work_rows
     # Shelves the caller may SEE that contain any of the page's works (SEE-filtered subquery).
     shelf_sub = access.visible_shelves_query(db, actor).subquery()
     shelf_rows = db.execute(
@@ -445,7 +472,7 @@ def _batch_shelf_rack_refs(
         work_shelves.setdefault(work_id, []).append(WorkShelfRef(id=shelf_id, name=shelf_name))
         shelf_to_works.setdefault(shelf_id, []).append(work_id)
     if not shelf_to_works:
-        return work_shelves, work_racks
+        return work_shelves, work_racks, work_rows
     # Racks the caller may SEE that contain any of those shelves (SEE-filtered subquery).
     rack_sub = access.visible_racks_query(db, actor).subquery()
     rack_rows = db.execute(
@@ -455,14 +482,34 @@ def _batch_shelf_rack_refs(
         .order_by(rack_sub.c.name)
     ).all()
     seen: dict[uuid.UUID, set[uuid.UUID]] = {}
+    rack_to_works: dict[uuid.UUID, set[uuid.UUID]] = {}
     for shelf_id, rack_id, rack_name in rack_rows:
         for work_id in shelf_to_works.get(shelf_id, []):
+            rack_to_works.setdefault(rack_id, set()).add(work_id)
             rack_ids = seen.setdefault(work_id, set())
             if rack_id in rack_ids:
                 continue
             rack_ids.add(rack_id)
             work_racks.setdefault(work_id, []).append(WorkRackRef(id=rack_id, name=rack_name))
-    return work_shelves, work_racks
+    if not rack_to_works:
+        return work_shelves, work_racks, work_rows
+    # Rows the caller may SEE that contain any of those racks (SEE-filtered subquery).
+    row_sub = access.visible_rows_query(db, actor).subquery()
+    row_rows = db.execute(
+        select(RowRack.rack_id, row_sub.c.id, row_sub.c.name)
+        .join(row_sub, row_sub.c.id == RowRack.row_id)
+        .where(RowRack.rack_id.in_(list(rack_to_works)))
+        .order_by(row_sub.c.name)
+    ).all()
+    seen_rows: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for rack_id, row_id, row_name in row_rows:
+        for work_id in rack_to_works.get(rack_id, set()):
+            row_ids = seen_rows.setdefault(work_id, set())
+            if row_id in row_ids:
+                continue
+            row_ids.add(row_id)
+            work_rows.setdefault(work_id, []).append(WorkRowRef(id=row_id, name=row_name))
+    return work_shelves, work_racks, work_rows
 
 
 # Text-layer qualities that are worth surfacing as a badge (good/unknown are unremarkable).
@@ -653,6 +700,7 @@ def list_works(
     reading_status: str | None = Query(default=None),
     shelf_id: uuid.UUID | None = Query(default=None),
     rack_id: uuid.UUID | None = Query(default=None),
+    row_id: uuid.UUID | None = Query(default=None),
     tag_id: uuid.UUID | None = Query(default=None),
     has_pdf: bool | None = None,
     has_references: bool | None = None,
@@ -691,6 +739,7 @@ def list_works(
         reading_status=reading_status,
         shelf_id=shelf_id,
         rack_id=rack_id,
+        row_id=row_id,
         tag_id=tag_id,
         has_pdf=has_pdf,
         has_references=has_references,
@@ -725,7 +774,7 @@ def list_works(
         .limit(effective_per_page)
     )
     works = list(db.scalars(stmt).all())
-    work_shelves, work_racks = _batch_shelf_rack_refs(db, actor, [w.id for w in works])
+    work_shelves, work_racks, work_rows = _batch_shelf_rack_refs(db, actor, [w.id for w in works])
     file_counts, work_tags, work_badges = _batch_library_columns(db, works)
     ref_counts, local_ref_counts, local_cit_counts = _batch_reference_counts(db, works)
     items = [
@@ -733,6 +782,7 @@ def list_works(
             update={
                 "shelves": work_shelves.get(w.id, []),
                 "racks": work_racks.get(w.id, []),
+                "rows": work_rows.get(w.id, []),
                 "file_count": file_counts.get(w.id, 0),
                 "tags": work_tags.get(w.id, []),
                 "badges": work_badges.get(w.id, []),
@@ -1123,6 +1173,18 @@ def list_work_shelves(
                 .order_by(Rack.name)
             ).all()
         )
+        # Rows containing any of those racks, SEE-filtered and deduped (work→shelf→rack→row).
+        rows: list[Row] = []
+        if racks:
+            rows = list(
+                db.scalars(
+                    access.visible_rows_query(db, actor)
+                    .join(RowRack, RowRack.row_id == Row.id)
+                    .where(RowRack.rack_id.in_([r.id for r in racks]))
+                    .distinct()
+                    .order_by(Row.name)
+                ).all()
+            )
         memberships.append(
             WorkShelfMembership(
                 id=shelf.id,
@@ -1130,6 +1192,7 @@ def list_work_shelves(
                 access_level=shelf.access_level,
                 can_modify=access.can_modify_shelf(db, actor, shelf),
                 racks=[WorkShelfRackRef(id=r.id, name=r.name) for r in racks],
+                rows=[WorkShelfRackRef(id=r.id, name=r.name) for r in rows],
             )
         )
     return memberships

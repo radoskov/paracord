@@ -22,7 +22,7 @@ from app.models.citation import RawTeiDocument, Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.file import File, FileWorkLink
 from app.models.metadata import MetadataAssertion
-from app.models.organization import RackShelf, ShelfWork, Tag, TagLink
+from app.models.organization import RackShelf, RowRack, ShelfWork, Tag, TagLink
 from app.models.user import User
 from app.models.work import Work, WorkVersion
 from app.services import access
@@ -71,6 +71,7 @@ def build_works_query(
     reading_status: str | None = None,
     shelf_id: uuid.UUID | None = None,
     rack_id: uuid.UUID | None = None,
+    row_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     has_pdf: bool | None = None,
     has_references: bool | None = None,
@@ -187,6 +188,20 @@ def build_works_query(
             .exists()
         )
         stmt = stmt.where(member)
+    if parsed.row:
+        # Works whose shelf sits in a rack that sits in a row matched by name or id, restricted to
+        # rows the caller may SEE (row->rack->shelf->work; only see-able rows contribute).
+        row_ids_q = access.visible_rows_query(db, actor).subquery()
+        row_cond = _name_or_id_condition(row_ids_q.c.name, row_ids_q.c.id, parsed.row)
+        member = (
+            select(ShelfWork.work_id)
+            .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+            .join(RowRack, RowRack.rack_id == RackShelf.rack_id)
+            .join(row_ids_q, row_ids_q.c.id == RowRack.row_id)
+            .where(ShelfWork.work_id == Work.id, row_cond)
+            .exists()
+        )
+        stmt = stmt.where(member)
     if parsed.cites:
         # cites:X — works that cite the work(s) matching X. A local citation edge is a Reference
         # resolved to a target work, cited by a work via ReferenceCitation, so this keeps works that
@@ -288,13 +303,17 @@ def build_works_query(
         has_references = parsed.has_references
     if reading_status:
         stmt = stmt.where(Work.reading_status == reading_status)
-    if shelf_id or rack_id:
+    if shelf_id or rack_id or row_id:
         stmt = stmt.join(ShelfWork, ShelfWork.work_id == Work.id)
     if shelf_id:
         stmt = stmt.where(ShelfWork.shelf_id == shelf_id)
+    if rack_id or row_id:  # both need the shelf→rack hop; join RackShelf only once
+        stmt = stmt.join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
     if rack_id:
-        stmt = stmt.join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id).where(
-            RackShelf.rack_id == rack_id
+        stmt = stmt.where(RackShelf.rack_id == rack_id)
+    if row_id:
+        stmt = stmt.join(RowRack, RowRack.rack_id == RackShelf.rack_id).where(
+            RowRack.row_id == row_id
         )
     if tag_id:
         stmt = stmt.join(

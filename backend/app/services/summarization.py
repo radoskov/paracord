@@ -610,6 +610,7 @@ _SCOPE_DESCRIPTOR = {
     "library": "the user's entire research library",
     "shelf": "one shelf — a curated collection of papers",
     "rack": "one rack — a group of related shelves of papers",
+    "row": "one row — a broad group of related racks of papers",
 }
 
 
@@ -909,9 +910,10 @@ def _scope_label(db: Session, scope_type: str, scope_id: uuid.UUID | None) -> st
         return "whole library"
     if scope_id is None:
         return None
-    from app.models.organization import Rack, Shelf  # noqa: PLC0415 (avoid import cycle)
+    from app.models.organization import Rack, Row, Shelf  # noqa: PLC0415 (avoid import cycle)
 
-    container = db.get(Shelf if scope_type == "shelf" else Rack, scope_id)
+    model = {"shelf": Shelf, "rack": Rack, "row": Row}.get(scope_type, Rack)
+    container = db.get(model, scope_id)
     return getattr(container, "name", None)
 
 

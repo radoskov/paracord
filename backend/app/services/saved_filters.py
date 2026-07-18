@@ -40,6 +40,7 @@ def resolve_saved_filter_work_ids(
         reading_status=params.get("reading_status"),
         shelf_id=_as_uuid(params.get("shelf_id")),
         rack_id=_as_uuid(params.get("rack_id")),
+        row_id=_as_uuid(params.get("row_id")),
         tag_id=_as_uuid(params.get("tag_id")),
         has_pdf=params.get("has_pdf"),
         has_references=params.get("has_references"),

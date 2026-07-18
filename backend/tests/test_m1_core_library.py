@@ -26,7 +26,16 @@ from app.models.citation import Reference, ReferenceCitation
 from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink, Location
 from app.models.metadata import MetadataAssertion
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Row,
+    RowRack,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+)
 from app.models.source import ImportBatch, Source
 from app.models.user import User
 from app.models.work import Work
@@ -56,8 +65,10 @@ def db_session(tmp_path: Path):
             FileWorkLink.__table__,
             Shelf.__table__,
             Rack.__table__,
+            Row.__table__,
             ShelfWork.__table__,
             RackShelf.__table__,
+            RowRack.__table__,
             Tag.__table__,
             TagLink.__table__,
             Reference.__table__,
@@ -303,6 +314,7 @@ def test_work_list_filters_by_shelf_rack_and_tag(db_session, owner: User) -> Non
                 reading_status=None,
                 shelf_id=filters.get("shelf_id"),
                 rack_id=filters.get("rack_id"),
+                row_id=filters.get("row_id"),
                 tag_id=filters.get("tag_id"),
                 page=1,
                 per_page=100,
@@ -340,6 +352,7 @@ def test_work_list_filters_by_extraction_status(db_session, owner: User, make_re
                 reading_status=None,
                 shelf_id=None,
                 rack_id=None,
+                row_id=None,
                 tag_id=None,
                 page=1,
                 per_page=100,

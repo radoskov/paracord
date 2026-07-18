@@ -1,7 +1,7 @@
 """Structured search-query parsing (SPEC §8.7 / §14).
 
 Turns a free-text query that may contain field operators — ``author:`` ``year:>=2020`` ``venue:``
-``tag:`` ``type:`` ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``cites:``
+``tag:`` ``type:`` ``title:`` ``doi:`` ``arxiv:`` ``status:`` ``shelf:`` ``rack:`` ``row:`` ``cites:``
 ``cited_by_local:`` ``abstract:`` ``summary:`` ``fulltext:`` ``file:`` ``duplicate:`` ``version:``
 ``warning:`` ``has:pdf`` ``has:references`` ``has:notes`` ``has:annotations`` ``has:summary``
 ``has:abstract`` ``has:grobid`` ``has:ocr`` — into a structured filter plus the leftover free
@@ -33,6 +33,7 @@ _KNOWN = {
     "status",
     "shelf",
     "rack",
+    "row",
     "cites",
     "cited_by_local",
     "keyword",
@@ -67,6 +68,7 @@ class ParsedQuery:
     reading_status: str | None = None
     shelf: str | None = None
     rack: str | None = None
+    row: str | None = None
     cites: str | None = None
     cited_by_local: str | None = None
     keyword: str | None = None  # keyword:<text> — match within the extracted keywords list
@@ -176,6 +178,8 @@ def parse_search_query(q: str | None) -> ParsedQuery:
             parsed.shelf = value
         elif key_l == "rack":
             parsed.rack = value
+        elif key_l == "row":
+            parsed.row = value
         elif key_l == "cites":
             parsed.cites = value
         elif key_l == "cited_by_local":

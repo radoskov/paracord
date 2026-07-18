@@ -14,11 +14,14 @@ from app.db.session import get_db
 from app.models.organization import (
     Rack,
     RackShelf,
+    Row,
+    RowRack,
     Shelf,
     ShelfWork,
     Tag,
     TagLink,
     TagRack,
+    TagRow,
     TagShelf,
 )
 from app.models.user import User
@@ -42,17 +45,20 @@ TAGGABLE_MODELS = {
     "work": Work,
     "shelf": Shelf,
     "rack": Rack,
+    "row": Row,
 }
 
 
 def _guard_tag_target(db: Session, actor: User, entity_type: str, entity: object) -> None:
-    """Raise 403 if the actor may not modify the tagged entity (work/shelf/rack modify rules)."""
+    """Raise 403 if the actor may not modify the tagged entity (work/shelf/rack/row modify rules)."""
     if entity_type == "work":
         allowed = access.can_modify_work(db, actor, entity)
     elif entity_type == "shelf":
         allowed = access.can_modify_shelf(db, actor, entity)
     elif entity_type == "rack":
         allowed = access.can_modify_rack(db, actor, entity)
+    elif entity_type == "row":
+        allowed = access.can_modify_row(db, actor, entity)
     else:
         allowed = False
     if not allowed:
@@ -86,9 +92,10 @@ class TagRead(BaseModel):
     color: str | None = None
     description: str | None = None
     created_at: datetime
-    # 2026-07-16 tag scoping: the shelves/racks this tag is OFFERED for. Both empty = global.
+    # 2026-07-16 tag scoping: the shelves/racks/rows this tag is OFFERED for. All empty = global.
     shelf_ids: list[uuid.UUID] = []
     rack_ids: list[uuid.UUID] = []
+    row_ids: list[uuid.UUID] = []
 
     model_config = {"from_attributes": True}
 
@@ -98,6 +105,7 @@ class TagScopeUpdate(BaseModel):
 
     shelf_ids: list[uuid.UUID] = []
     rack_ids: list[uuid.UUID] = []
+    row_ids: list[uuid.UUID] = []
 
 
 def _tag_reads(db: Session, tags: list[Tag]) -> list[TagRead]:
@@ -105,6 +113,7 @@ def _tag_reads(db: Session, tags: list[Tag]) -> list[TagRead]:
     ids = [t.id for t in tags]
     shelves: dict[uuid.UUID, list[uuid.UUID]] = {}
     racks: dict[uuid.UUID, list[uuid.UUID]] = {}
+    rows: dict[uuid.UUID, list[uuid.UUID]] = {}
     if ids:
         for tag_id, shelf_id in db.execute(
             select(TagShelf.tag_id, TagShelf.shelf_id).where(TagShelf.tag_id.in_(ids))
@@ -114,6 +123,10 @@ def _tag_reads(db: Session, tags: list[Tag]) -> list[TagRead]:
             select(TagRack.tag_id, TagRack.rack_id).where(TagRack.tag_id.in_(ids))
         ).all():
             racks.setdefault(tag_id, []).append(rack_id)
+        for tag_id, row_id in db.execute(
+            select(TagRow.tag_id, TagRow.row_id).where(TagRow.tag_id.in_(ids))
+        ).all():
+            rows.setdefault(tag_id, []).append(row_id)
     return [
         TagRead(
             id=t.id,
@@ -124,6 +137,7 @@ def _tag_reads(db: Session, tags: list[Tag]) -> list[TagRead]:
             created_at=t.created_at,
             shelf_ids=shelves.get(t.id, []),
             rack_ids=racks.get(t.id, []),
+            row_ids=rows.get(t.id, []),
         )
         for t in tags
     ]
@@ -137,18 +151,22 @@ def _tag_read(db: Session, tag: Tag) -> TagRead:
 def list_tags(
     shelf_id: uuid.UUID | None = Query(default=None),
     rack_id: uuid.UUID | None = Query(default=None),
+    row_id: uuid.UUID | None = Query(default=None),
     db: Session = DB_DEP,
 ) -> list[TagRead]:
-    """List tags. ``shelf_id``/``rack_id`` filter to tags OFFERED there (global tags always shown)."""
+    """List tags. ``shelf_id``/``rack_id``/``row_id`` filter to tags OFFERED there (global tags
+    always shown)."""
     tags = list(db.scalars(select(Tag).order_by(Tag.name)).all())
     reads = _tag_reads(db, tags)
-    if shelf_id is None and rack_id is None:
+    if shelf_id is None and rack_id is None and row_id is None:
         return reads
     out = []
     for r in reads:
-        is_global = not r.shelf_ids and not r.rack_ids
-        matches = (shelf_id is not None and shelf_id in r.shelf_ids) or (
-            rack_id is not None and rack_id in r.rack_ids
+        is_global = not r.shelf_ids and not r.rack_ids and not r.row_ids
+        matches = (
+            (shelf_id is not None and shelf_id in r.shelf_ids)
+            or (rack_id is not None and rack_id in r.rack_ids)
+            or (row_id is not None and row_id in r.row_ids)
         )
         if is_global or matches:
             out.append(r)
@@ -162,7 +180,8 @@ def list_assignable_tags(
     actor: User = CONTRIBUTOR_DEP,
 ) -> list[TagRead]:
     """Tags offered for a given paper (2026-07-16): global tags (no scope rows) PLUS tags scoped to
-    any shelf the paper is on OR any rack containing one of those shelves."""
+    any shelf the paper is on, any rack containing one of those shelves, OR any row containing one of
+    those racks (work→shelf→rack→row)."""
     work = db.get(Work, work_id)
     if work is None or not access.can_see_work(db, actor, work):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work not found")
@@ -174,8 +193,15 @@ def list_assignable_tags(
         if shelf_ids
         else set()
     )
-    scoped_ids = set(db.scalars(select(TagShelf.tag_id)).all()) | set(
-        db.scalars(select(TagRack.tag_id)).all()
+    row_ids = (
+        set(db.scalars(select(RowRack.row_id).where(RowRack.rack_id.in_(rack_ids))).all())
+        if rack_ids
+        else set()
+    )
+    scoped_ids = (
+        set(db.scalars(select(TagShelf.tag_id)).all())
+        | set(db.scalars(select(TagRack.tag_id)).all())
+        | set(db.scalars(select(TagRow.tag_id)).all())
     )
     matching = (
         set(db.scalars(select(TagShelf.tag_id).where(TagShelf.shelf_id.in_(shelf_ids))).all())
@@ -185,6 +211,10 @@ def list_assignable_tags(
     if rack_ids:
         matching |= set(
             db.scalars(select(TagRack.tag_id).where(TagRack.rack_id.in_(rack_ids))).all()
+        )
+    if row_ids:
+        matching |= set(
+            db.scalars(select(TagRow.tag_id).where(TagRow.row_id.in_(row_ids))).all()
         )
     tags = list(db.scalars(select(Tag).order_by(Tag.name)).all())
     # A tag is offered when it is global (no scope rows) or its scope matches this paper's places.
@@ -275,17 +305,20 @@ def set_tag_scope(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
     valid_shelves = set(db.scalars(select(Shelf.id).where(Shelf.id.in_(payload.shelf_ids))).all())
     valid_racks = set(db.scalars(select(Rack.id).where(Rack.id.in_(payload.rack_ids))).all())
+    valid_rows = set(db.scalars(select(Row.id).where(Row.id.in_(payload.row_ids))).all())
     db.execute(delete(TagShelf).where(TagShelf.tag_id == tag_id))
     db.execute(delete(TagRack).where(TagRack.tag_id == tag_id))
+    db.execute(delete(TagRow).where(TagRow.tag_id == tag_id))
     db.add_all(TagShelf(tag_id=tag_id, shelf_id=sid) for sid in valid_shelves)
     db.add_all(TagRack(tag_id=tag_id, rack_id=rid) for rid in valid_racks)
+    db.add_all(TagRow(tag_id=tag_id, row_id=rid) for rid in valid_rows)
     record_event(
         db,
         "tag.scope_set",
         actor_user_id=actor.id,
         entity_type="tag",
         entity_id=str(tag_id),
-        details={"shelves": len(valid_shelves), "racks": len(valid_racks)},
+        details={"shelves": len(valid_shelves), "racks": len(valid_racks), "rows": len(valid_rows)},
     )
     db.commit()
     db.refresh(tag)
