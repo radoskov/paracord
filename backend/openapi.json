@@ -2033,6 +2033,7 @@
               "none",
               "shelf",
               "rack",
+              "row",
               "tag",
               "topic",
               "status",
@@ -3545,6 +3546,7 @@
               "library",
               "shelf",
               "rack",
+              "row",
               "search_result",
               "selected_papers",
               "import_batch",
@@ -5246,6 +5248,195 @@
         "title": "RankedWorkModel",
         "type": "object"
       },
+      "RecommendRequest": {
+        "properties": {
+          "cap": {
+            "default": 100,
+            "title": "Cap",
+            "type": "integer"
+          },
+          "k": {
+            "default": 5,
+            "title": "K",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "categorization",
+            "title": "Mode",
+            "type": "string"
+          },
+          "parent_combine": {
+            "default": "sum",
+            "title": "Parent Combine",
+            "type": "string"
+          },
+          "prefilter": {
+            "default": false,
+            "title": "Prefilter",
+            "type": "boolean"
+          },
+          "recompute": {
+            "default": false,
+            "title": "Recompute",
+            "type": "boolean"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "scoring": {
+            "default": "ranking",
+            "title": "Scoring",
+            "type": "string"
+          },
+          "work_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Ids"
+          }
+        },
+        "required": [
+          "scope_type"
+        ],
+        "title": "RecommendRequest",
+        "type": "object"
+      },
+      "RecommendRunRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "provider_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Used"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope_type",
+          "mode",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RecommendRunRead",
+        "type": "object"
+      },
       "ReferenceActionRequest": {
         "description": "A confirm/reject/import action on a (canonical) reference (batch 12, item #4).",
         "properties": {
@@ -5845,6 +6036,208 @@
         "title": "Role",
         "type": "string"
       },
+      "RowCreate": {
+        "properties": {
+          "access_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Level"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RowCreate",
+        "type": "object"
+      },
+      "RowRackAdd": {
+        "properties": {
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "rack_id": {
+            "format": "uuid",
+            "title": "Rack Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rack_id"
+        ],
+        "title": "RowRackAdd",
+        "type": "object"
+      },
+      "RowRackRead": {
+        "properties": {
+          "access_level": {
+            "title": "Access Level",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "access_level"
+        ],
+        "title": "RowRackRead",
+        "type": "object"
+      },
+      "RowRead": {
+        "properties": {
+          "access_level": {
+            "title": "Access Level",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "access_level",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RowRead",
+        "type": "object"
+      },
+      "RowUpdate": {
+        "properties": {
+          "access_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Level"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "title": "RowUpdate",
+        "type": "object"
+      },
       "SavedFilterCreate": {
         "description": "Body to save a new named Library query.",
         "properties": {
@@ -5941,6 +6334,18 @@
               }
             ],
             "title": "Reading Status"
+          },
+          "row_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Id"
           },
           "shelf_id": {
             "anyOf": [
@@ -6150,7 +6555,8 @@
             "enum": [
               "library",
               "shelf",
-              "rack"
+              "rack",
+              "row"
             ],
             "title": "Scope Type",
             "type": "string"
@@ -6224,7 +6630,8 @@
             "enum": [
               "library",
               "shelf",
-              "rack"
+              "rack",
+              "row"
             ],
             "title": "Scope Type",
             "type": "string"
@@ -7572,6 +7979,15 @@
             "title": "Rack Ids",
             "type": "array"
           },
+          "row_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Row Ids",
+            "type": "array"
+          },
           "shelf_ids": {
             "default": [],
             "items": {
@@ -7601,6 +8017,15 @@
               "type": "string"
             },
             "title": "Rack Ids",
+            "type": "array"
+          },
+          "row_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Row Ids",
             "type": "array"
           },
           "shelf_ids": {
@@ -8239,7 +8664,8 @@
             "enum": [
               "library",
               "shelf",
-              "rack"
+              "rack",
+              "row"
             ],
             "title": "Scope Type",
             "type": "string"
@@ -9693,6 +10119,14 @@
             "title": "Reference Count",
             "type": "integer"
           },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkRowRef"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
           "shelves": {
             "default": [],
             "items": {
@@ -9754,6 +10188,26 @@
         "title": "WorkRead",
         "type": "object"
       },
+      "WorkRowRef": {
+        "description": "A row containing one of a paper's (see-able) racks, SEE-filtered (work→shelf→rack→row).",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "WorkRowRef",
+        "type": "object"
+      },
       "WorkShelfMembership": {
         "description": "A shelf that contains a paper, with the caller's modify-flag and its containing racks.\n\n``can_modify`` reflects ``access.can_modify_shelf`` for the caller (the librarian-floor\nSTRUCTURE rule), so the UI can gate the per-shelf Remove button. ``racks`` is filtered to the\nracks the caller may SEE (a shelf may sit in 0..N racks).",
         "properties": {
@@ -9780,6 +10234,14 @@
               "$ref": "#/components/schemas/WorkShelfRackRef"
             },
             "title": "Racks",
+            "type": "array"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkShelfRackRef"
+            },
+            "title": "Rows",
             "type": "array"
           }
         },
@@ -14990,7 +15452,8 @@
               "enum": [
                 "library",
                 "shelf",
-                "rack"
+                "rack",
+                "row"
               ],
               "title": "Scope Type",
               "type": "string"
@@ -15131,7 +15594,8 @@
               "enum": [
                 "library",
                 "shelf",
-                "rack"
+                "rack",
+                "row"
               ],
               "title": "Scope Type",
               "type": "string"
@@ -15439,7 +15903,8 @@
               "enum": [
                 "library",
                 "shelf",
-                "rack"
+                "rack",
+                "row"
               ],
               "title": "Scope Type",
               "type": "string"
@@ -15933,6 +16398,7 @@
                 "library",
                 "shelf",
                 "rack",
+                "row",
                 "search_result",
                 "selected_papers",
                 "import_batch",
@@ -16049,6 +16515,7 @@
                 "library",
                 "shelf",
                 "rack",
+                "row",
                 "search_result",
                 "selected_papers",
                 "import_batch",
@@ -16173,6 +16640,7 @@
                 "library",
                 "shelf",
                 "rack",
+                "row",
                 "search_result",
                 "selected_papers",
                 "import_batch",
@@ -19333,6 +19801,557 @@
         ]
       }
     },
+    "/api/v1/recommend": {
+      "post": {
+        "description": "Return a fresh cached run for these settings, or create + enqueue a new one.",
+        "operationId": "create_recommendation_api_v1_recommend_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Recommendation",
+        "tags": [
+          "recommend"
+        ]
+      }
+    },
+    "/api/v1/recommend/{run_id}": {
+      "get": {
+        "description": "Return a run's status + (when done) its cached result. Requester-gated: only the creator or\nan admin/owner may read it (the result can name shelves/rows a stranger shouldn't see).",
+        "operationId": "get_recommendation_api_v1_recommend__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Recommendation",
+        "tags": [
+          "recommend"
+        ]
+      }
+    },
+    "/api/v1/rows": {
+      "get": {
+        "description": "List rows the caller may see.",
+        "operationId": "list_rows_api_v1_rows_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowRead"
+                  },
+                  "title": "Response List Rows Api V1 Rows Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Rows",
+        "tags": [
+          "rows"
+        ]
+      },
+      "post": {
+        "description": "Create a row (librarian+). Defaults to the global default access level.",
+        "operationId": "create_row_api_v1_rows_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Row",
+        "tags": [
+          "rows"
+        ]
+      }
+    },
+    "/api/v1/rows/{row_id}": {
+      "delete": {
+        "description": "Hard-delete a row (requires modify access).\n\n``delete_racks=false`` (default): the row and its row↔rack links are removed; the racks\nthemselves survive (they simply leave this row — a rack with no row is fine).\n``delete_racks=true``: each associated rack the caller may modify is ALSO hard-deleted (its\nrack↔shelf links dropped; the shelves survive). Distinct from archiving (PATCH status).",
+        "operationId": "delete_row_api_v1_rows__row_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Row Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delete_racks",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Delete Racks",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Row",
+        "tags": [
+          "rows"
+        ]
+      },
+      "patch": {
+        "description": "Edit or archive a row (requires modify access to this row).",
+        "operationId": "update_row_api_v1_rows__row_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Row Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Row",
+        "tags": [
+          "rows"
+        ]
+      }
+    },
+    "/api/v1/rows/{row_id}/racks": {
+      "get": {
+        "description": "List racks in a row (filtered to racks the caller may see).",
+        "operationId": "list_row_racks_api_v1_rows__row_id__racks_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Row Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowRackRead"
+                  },
+                  "title": "Response List Row Racks Api V1 Rows  Row Id  Racks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Row Racks",
+        "tags": [
+          "rows"
+        ]
+      },
+      "post": {
+        "description": "Add a rack to a row (requires modify access to both row and rack).",
+        "operationId": "add_rack_to_row_api_v1_rows__row_id__racks_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Row Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowRackAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Rack To Row",
+        "tags": [
+          "rows"
+        ]
+      }
+    },
+    "/api/v1/rows/{row_id}/racks/{rack_id}": {
+      "delete": {
+        "description": "Remove a rack from a row (requires modify access to the row).",
+        "operationId": "remove_rack_from_row_api_v1_rows__row_id__racks__rack_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Row Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rack Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Rack From Row",
+        "tags": [
+          "rows"
+        ]
+      }
+    },
     "/api/v1/saved-filters": {
       "get": {
         "description": "List the caller's saved filters (ordered by name).",
@@ -20351,7 +21370,7 @@
     },
     "/api/v1/tags": {
       "get": {
-        "description": "List tags. ``shelf_id``/``rack_id`` filter to tags OFFERED there (global tags always shown).",
+        "description": "List tags. ``shelf_id``/``rack_id``/``row_id`` filter to tags OFFERED there (global tags\nalways shown).",
         "operationId": "list_tags_api_v1_tags_get",
         "parameters": [
           {
@@ -20386,6 +21405,23 @@
                 }
               ],
               "title": "Rack Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "row_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Row Id"
             }
           },
           {
@@ -20497,7 +21533,7 @@
     },
     "/api/v1/tags/assignable": {
       "get": {
-        "description": "Tags offered for a given paper (2026-07-16): global tags (no scope rows) PLUS tags scoped to\nany shelf the paper is on OR any rack containing one of those shelves.",
+        "description": "Tags offered for a given paper (2026-07-16): global tags (no scope rows) PLUS tags scoped to\nany shelf the paper is on, any rack containing one of those shelves, OR any row containing one of\nthose racks (work→shelf→rack→row).",
         "operationId": "list_assignable_tags_api_v1_tags_assignable_get",
         "parameters": [
           {
@@ -21471,6 +22507,23 @@
                 }
               ],
               "title": "Rack Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "row_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Row Id"
             }
           },
           {

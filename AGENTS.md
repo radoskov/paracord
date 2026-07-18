@@ -52,6 +52,9 @@ Update the progress tracking documents.
 Add add relevant files to staging and create a commit with descriptive message (but not too long).
 Don't put your credentials in the commit message (e.g., never put there "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>")
 
+Remember to always `make fix` to correct for simple mistakes. Also, verify if openapi changed and do `make openapi` if necessary.
+Do this before a commit or update the last unpushed commit so that the fixes & new openapi is attached to the right commit.
+
 ## Branch naming convention
 
 ```text

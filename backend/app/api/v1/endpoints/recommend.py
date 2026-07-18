@@ -95,7 +95,9 @@ def _params_hash(payload: RecommendRequest, k: int, cap: int, model: str) -> str
     return hashlib.sha256(blob.encode()).hexdigest()[:32]
 
 
-def _scope_key(scope_type: str, scope_id: uuid.UUID | None, work_ids: list[uuid.UUID] | None) -> uuid.UUID:
+def _scope_key(
+    scope_type: str, scope_id: uuid.UUID | None, work_ids: list[uuid.UUID] | None
+) -> uuid.UUID:
     """A concrete cache key id for the scope: the library sentinel, the container id, or a stable
     hash of an explicit work-id set (search_result / selected_papers)."""
     if scope_id is not None:
@@ -142,7 +144,11 @@ def create_recommendation(
 
     # Resolve the scope → concrete, visibility-clamped work ids (capped).
     explicit = resolve_scope_or_404(
-        db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id, work_ids=payload.work_ids
+        db,
+        actor,
+        scope_type=payload.scope_type,
+        scope_id=payload.scope_id,
+        work_ids=payload.work_ids,
     )
     works = resolve_scope_works(
         db,
@@ -211,12 +217,18 @@ def create_recommendation(
 
 
 @router.get("/{run_id}", response_model=RecommendRunRead)
-def get_recommendation(run_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> RecommendRunRead:
+def get_recommendation(
+    run_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
+) -> RecommendRunRead:
     """Return a run's status + (when done) its cached result. Requester-gated: only the creator or
     an admin/owner may read it (the result can name shelves/rows a stranger shouldn't see)."""
     run = db.get(RecommendationRun, run_id)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found"
+        )
     if run.created_by_user_id != actor.id and not access.is_admin_or_owner(actor):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Recommendation not found"
+        )
     return _read(run)

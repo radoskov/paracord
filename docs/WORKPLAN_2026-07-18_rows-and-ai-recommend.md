@@ -308,15 +308,15 @@ points; a rack gains `0.5 ×` its picked parent-rows' points; a shelf gains `0.5
 parent-racks' combined points; multiple parents summed; final ranking = shelves by combined score.
 Confirm the base formula and the `0.5` propagation factor (your example used slightly different
 numbers — `K−p` vs `K−p+1`).
-Answer: For the multiple parents, allow the user to choose approach before computation (simple 
+Answer: For the multiple parents, allow the user to choose approach before computation (simple
 dropdown) - sum parent score, median of parents, maximum of parents. Apply 0.5 reduction afterwards.
 For the rank score formula, use `K-p+1`.
 
 **C6. Affinity vs rank.** Local LLMs are unreliable at numeric scores. Plan: ask for JSON
 `{name, rank, affinity 0–100}`; if affinity is missing/garbage, fall back to rank-only (rank-points
 drive everything). Acceptable? (If you want affinity to *replace* rank-points when present, say so.)
-Answer: as I asnwered in the CLI, offer both ranking and affinity approaches as a pre-run option.
-If affinity is selected and the LLM does not provide it, fall back to ranking but make sure 
+Answer: as I answered in the CLI, offer both ranking and affinity approaches as a pre-run option.
+If affinity is selected and the LLM does not provide it, fall back to ranking but make sure
 this fact is surfaced for the user. Ideally, for the result panel, add two buttons: one will show
 (in a popup window) the already mentioned "raw" rank, score and affinity values for the paper.
 The other will show the raw LLM output (and possibly input) for that paper (again in popup).
@@ -337,11 +337,11 @@ should be an option. Make the default cap 100.
 nothing persisted (re-run to recompute). Or persist suggestions (MetadataAssertion/review-queue) for
 later? I lean ephemeral (matches your interactive-accept flow).
 Answer: I am leaning towards cached approach, with option to recompute. Similar to summaries,
-the results should be cached for the given scope / request combination (rememeber to record date&time,
+the results should be cached for the given scope / request combination (remember to record date&time,
 settings and model). What can often happen is that a connection is broken or something requires the user
 to refresh the tab or close and re-open the browser. This would require recomputation of the whole
 process, which may take up to a few hours. Therefore, caching of the last result (for given settings)
-is the best approach. Since it is a bunch of text, I am assuming we are talkin about maybe several tens
+is the best approach. Since it is a bunch of text, I am assuming we are talking about maybe several tens
 to hundreds of kB, maybe a few MB? That would not be that bad.
 
 **C10. No-LLM fallback.** If only the extractive/embedding stack is configured (no generative LLM),
@@ -353,7 +353,7 @@ Answer: (b), just message it clearly to the user.
 summary are separate top-level tabs). Options: (a) a new **card** inside Insights reusing its scope
 picker; (b) a new **top-level tab** "Recommend"; (c) a lightweight sub-tab switch inside Insights.
 You said "sub-tab under Insights" — I lean (a) card, or (b) if you'd rather it be its own tab.
-Answer: I would a new sub-tab (like Import or Admin tab). With just a card, the page would become 
+Answer: I would a new sub-tab (like Import or Admin tab). With just a card, the page would become
 overcrowded.
 
 **C12. Sequencing.** Rows (Part A) is a large cross-cutting migration; the AI feature (Part B) is

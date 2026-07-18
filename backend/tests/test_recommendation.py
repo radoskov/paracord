@@ -7,8 +7,8 @@ the end-to-end per-paper result shape — without any model."""
 from pathlib import Path
 
 import pytest
-from app.db.base import Base
 from app.core.security import Role
+from app.db.base import Base
 from app.models.organization import (
     Rack,
     RackShelf,
@@ -94,7 +94,10 @@ def test_combine_categorization_propagates_down_the_hierarchy() -> None:
     per_kind = {
         "row": [rec.Pick("rowA", "Row A", 1, None, 2.0), rec.Pick("rowB", "Row B", 2, None, 1.0)],
         "rack": [rec.Pick("rkA", "Rack A", 1, None, 2.0), rec.Pick("rkB", "Rack B", 2, None, 1.0)],
-        "shelf": [rec.Pick("shA", "Shelf A", 1, None, 2.0), rec.Pick("shB", "Shelf B", 2, None, 1.0)],
+        "shelf": [
+            rec.Pick("shA", "Shelf A", 1, None, 2.0),
+            rec.Pick("shB", "Shelf B", 2, None, 1.0),
+        ],
     }
     shelves, rack_final = rec.combine_categorization(
         per_kind,
@@ -110,7 +113,11 @@ def test_combine_categorization_propagates_down_the_hierarchy() -> None:
 
 def test_picks_from_rank_affinity_and_fallback() -> None:
     cands = [rec.Candidate("a", "A"), rec.Candidate("b", "B")]
-    res = rec.RankResult(picks=[{"index": 0, "affinity": 88}, {"index": 1, "affinity": 70}], raw_input="", raw_output="")
+    res = rec.RankResult(
+        picks=[{"index": 0, "affinity": 88}, {"index": 1, "affinity": 70}],
+        raw_input="",
+        raw_output="",
+    )
     picks, missing = rec.picks_from_rank(res, cands, k=2, scoring="affinity")
     assert [p.base for p in picks] == [88.0, 70.0] and not missing
     # affinity requested but none returned → base falls back to rank points, flagged.
@@ -121,7 +128,9 @@ def test_picks_from_rank_affinity_and_fallback() -> None:
 
 def test_extract_json_tolerates_prose() -> None:
     assert rec._extract_json('{"picks": []}') == {"picks": []}
-    assert rec._extract_json('here you go: {"picks": [{"index": 1}]} thanks')["picks"][0]["index"] == 1
+    assert (
+        rec._extract_json('here you go: {"picks": [{"index": 1}]} thanks')["picks"][0]["index"] == 1
+    )
     assert rec._extract_json("not json at all") is None
 
 
@@ -141,13 +150,24 @@ def test_run_recommendation_categorization_end_to_end(db_session) -> None:
     shA, shB = Shelf(name="Shelf A"), Shelf(name="Shelf B")
     db_session.add_all([work, rowA, rowB, rkA, rkB, shA, shB])
     db_session.flush()
-    db_session.add_all([RowRack(row_id=rowA.id, rack_id=rkA.id), RowRack(row_id=rowB.id, rack_id=rkB.id)])
-    db_session.add_all([RackShelf(rack_id=rkA.id, shelf_id=shA.id), RackShelf(rack_id=rkB.id, shelf_id=shB.id)])
+    db_session.add_all(
+        [RowRack(row_id=rowA.id, rack_id=rkA.id), RowRack(row_id=rowB.id, rack_id=rkB.id)]
+    )
+    db_session.add_all(
+        [RackShelf(rack_id=rkA.id, shelf_id=shA.id), RackShelf(rack_id=rkB.id, shelf_id=shB.id)]
+    )
     db_session.commit()
 
     out = rec.run_recommendation(
-        db_session, works=[work], mode="categorization", k=2, scoring="ranking",
-        parent_combine="sum", prefilter=False, actor=owner, bundle=_bundle(list(rec.CATEGORY_KINDS)),
+        db_session,
+        works=[work],
+        mode="categorization",
+        k=2,
+        scoring="ranking",
+        parent_combine="sum",
+        prefilter=False,
+        actor=owner,
+        bundle=_bundle(list(rec.CATEGORY_KINDS)),
     )
     assert out["mode"] == "categorization" and len(out["papers"]) == 1
     shelves = out["papers"][0]["shelves"]
@@ -159,15 +179,25 @@ def test_run_recommendation_categorization_end_to_end(db_session) -> None:
 def test_run_recommendation_tags_excludes_applied_and_flags_no_llm(db_session) -> None:
     owner = _owner(db_session)
     work = Work(canonical_title="P", normalized_title="p")
-    keep, applied = Tag(name="keep", normalized_name="keep"), Tag(name="applied", normalized_name="applied")
+    keep, applied = (
+        Tag(name="keep", normalized_name="keep"),
+        Tag(name="applied", normalized_name="applied"),
+    )
     db_session.add_all([work, keep, applied])
     db_session.flush()
     db_session.add(TagLink(tag_id=applied.id, entity_type="work", entity_id=work.id))
     db_session.commit()
 
     out = rec.run_recommendation(
-        db_session, works=[work], mode="tags", k=5, scoring="ranking", parent_combine="sum",
-        prefilter=False, actor=owner, bundle=_bundle(["tag"], no_llm=True),
+        db_session,
+        works=[work],
+        mode="tags",
+        k=5,
+        scoring="ranking",
+        parent_combine="sum",
+        prefilter=False,
+        actor=owner,
+        bundle=_bundle(["tag"], no_llm=True),
     )
     names = [s["name"] for s in out["papers"][0]["suggestions"]]
     assert "keep" in names and "applied" not in names  # already-applied tag is not re-suggested

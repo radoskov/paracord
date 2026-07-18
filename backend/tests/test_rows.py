@@ -26,8 +26,18 @@ def test_row_crud_and_rack_membership(client, auth_headers, db) -> None:
     assert any(x["id"] == row_id and x["description"] == "d" for x in listed)
 
     # Add both racks; the membership endpoint lists them.
-    assert client.post(f"/api/v1/rows/{row_id}/racks", headers=owner, json={"rack_id": rack1}).status_code == 204
-    assert client.post(f"/api/v1/rows/{row_id}/racks", headers=owner, json={"rack_id": rack2}).status_code == 204
+    assert (
+        client.post(
+            f"/api/v1/rows/{row_id}/racks", headers=owner, json={"rack_id": rack1}
+        ).status_code
+        == 204
+    )
+    assert (
+        client.post(
+            f"/api/v1/rows/{row_id}/racks", headers=owner, json={"rack_id": rack2}
+        ).status_code
+        == 204
+    )
     racks = client.get(f"/api/v1/rows/{row_id}/racks", headers=owner).json()
     assert {x["id"] for x in racks} == {rack1, rack2}
 
@@ -52,7 +62,9 @@ def test_delete_row_cascade_deletes_racks_when_requested(client, auth_headers, d
     rack = client.post("/api/v1/racks", headers=owner, json={"name": "Doomed Rack"}).json()["id"]
     client.post(f"/api/v1/rows/{row_id}/racks", headers=owner, json={"rack_id": rack})
 
-    assert client.delete(f"/api/v1/rows/{row_id}?delete_racks=true", headers=owner).status_code == 204
+    assert (
+        client.delete(f"/api/v1/rows/{row_id}?delete_racks=true", headers=owner).status_code == 204
+    )
     # The rack is gone too.
     assert all(x["id"] != rack for x in client.get("/api/v1/racks", headers=owner).json())
 
@@ -89,7 +101,9 @@ def test_private_row_hidden_from_reader_visible_to_owner(client, auth_headers, d
     owner = auth_headers("owner")
     reader = auth_headers("reader")
     row_id = _row_id(
-        client.post("/api/v1/rows", headers=owner, json={"name": "Secret Row", "access_level": "private"})
+        client.post(
+            "/api/v1/rows", headers=owner, json={"name": "Secret Row", "access_level": "private"}
+        )
     )
     # Owner (admin bypass) sees it; a plain reader without a grant does not.
     assert any(x["id"] == row_id for x in client.get("/api/v1/rows", headers=owner).json())
@@ -102,5 +116,15 @@ def test_row_modify_requires_librarian(client, auth_headers, db) -> None:
     owner = auth_headers("owner")
     row_id = _row_id(client.post("/api/v1/rows", headers=owner, json={"name": "Guarded"}))
     # A reader may not create or modify rows (librarian floor).
-    assert client.post("/api/v1/rows", headers=auth_headers("reader"), json={"name": "Nope"}).status_code == 403
-    assert client.patch(f"/api/v1/rows/{row_id}", headers=auth_headers("reader"), json={"name": "x"}).status_code == 403
+    assert (
+        client.post(
+            "/api/v1/rows", headers=auth_headers("reader"), json={"name": "Nope"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"/api/v1/rows/{row_id}", headers=auth_headers("reader"), json={"name": "x"}
+        ).status_code
+        == 403
+    )

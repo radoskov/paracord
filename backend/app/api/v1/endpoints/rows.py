@@ -157,9 +157,7 @@ def update_row(
 
 
 @router.get("/{row_id}/racks", response_model=list[RowRackRead])
-def list_row_racks(
-    row_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP
-) -> list[Rack]:
+def list_row_racks(row_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_DEP) -> list[Rack]:
     """List racks in a row (filtered to racks the caller may see)."""
     row = db.get(Row, row_id)
     if row is None:

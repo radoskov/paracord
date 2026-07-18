@@ -37,7 +37,13 @@ MAX_NEIGHBORHOOD_NODES = 500
 # ``work_ids`` list — the endpoint loads the filter (owned-by-actor 404) and passes the ids from
 # ``resolve_saved_filter_work_ids`` (already visibility-clamped) in, exactly like the explicit sets.
 ScopeType = Literal[
-    "library", "shelf", "rack", "row", "search_result", "selected_papers", "import_batch",
+    "library",
+    "shelf",
+    "rack",
+    "row",
+    "search_result",
+    "selected_papers",
+    "import_batch",
     "saved_filter",
 ]
 NodeMode = Literal["local_only", "include_external"]

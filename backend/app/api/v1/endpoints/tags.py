@@ -213,9 +213,7 @@ def list_assignable_tags(
             db.scalars(select(TagRack.tag_id).where(TagRack.rack_id.in_(rack_ids))).all()
         )
     if row_ids:
-        matching |= set(
-            db.scalars(select(TagRow.tag_id).where(TagRow.row_id.in_(row_ids))).all()
-        )
+        matching |= set(db.scalars(select(TagRow.tag_id).where(TagRow.row_id.in_(row_ids))).all())
     tags = list(db.scalars(select(Tag).order_by(Tag.name)).all())
     # A tag is offered when it is global (no scope rows) or its scope matches this paper's places.
     assignable = [t for t in tags if t.id not in scoped_ids or t.id in matching]

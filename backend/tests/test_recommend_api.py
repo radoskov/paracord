@@ -33,7 +33,9 @@ def test_create_is_cached_and_recompute_forces_new(client, auth_headers, db, _st
     assert again["id"] == r1["id"] and again["job_id"] is None
 
     # recompute → a fresh run.
-    forced = client.post("/api/v1/recommend", headers=owner, json={**body, "recompute": True}).json()
+    forced = client.post(
+        "/api/v1/recommend", headers=owner, json={**body, "recompute": True}
+    ).json()
     assert forced["id"] != r1["id"]
 
     # Different settings (k) → a fresh run too.
@@ -58,6 +60,19 @@ def test_get_is_requester_gated(client, auth_headers, db, _stub_enqueue) -> None
 
 def test_validation_rejects_bad_settings(client, auth_headers, db, _stub_enqueue) -> None:
     owner = auth_headers("owner")
-    assert client.post("/api/v1/recommend", headers=owner, json={"scope_type": "library", "mode": "bogus"}).status_code == 400
-    assert client.post("/api/v1/recommend", headers=owner, json={"scope_type": "library", "scoring": "bogus"}).status_code == 400
-    assert client.post("/api/v1/recommend", headers=owner, json={"scope_type": "nope"}).status_code == 400
+    assert (
+        client.post(
+            "/api/v1/recommend", headers=owner, json={"scope_type": "library", "mode": "bogus"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/recommend", headers=owner, json={"scope_type": "library", "scoring": "bogus"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post("/api/v1/recommend", headers=owner, json={"scope_type": "nope"}).status_code
+        == 400
+    )

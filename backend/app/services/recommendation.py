@@ -201,7 +201,9 @@ def visible_category_candidates(db: Session, actor: User, kind: str) -> list[Can
 def assignable_tag_candidates(db: Session, actor: User, work_id: uuid.UUID) -> list[Candidate]:
     """Tags offered for a paper (global + scoped to its shelves/racks/rows) that are NOT already
     applied — the candidate set for tag recommendation. Mirrors ``/tags/assignable``."""
-    shelf_ids = set(db.scalars(select(ShelfWork.shelf_id).where(ShelfWork.work_id == work_id)).all())
+    shelf_ids = set(
+        db.scalars(select(ShelfWork.shelf_id).where(ShelfWork.work_id == work_id)).all()
+    )
     rack_ids = (
         set(db.scalars(select(RackShelf.rack_id).where(RackShelf.shelf_id.in_(shelf_ids))).all())
         if shelf_ids
@@ -219,9 +221,13 @@ def assignable_tag_candidates(db: Session, actor: User, work_id: uuid.UUID) -> l
     )
     matching: set[uuid.UUID] = set()
     if shelf_ids:
-        matching |= set(db.scalars(select(TagShelf.tag_id).where(TagShelf.shelf_id.in_(shelf_ids))).all())
+        matching |= set(
+            db.scalars(select(TagShelf.tag_id).where(TagShelf.shelf_id.in_(shelf_ids))).all()
+        )
     if rack_ids:
-        matching |= set(db.scalars(select(TagRack.tag_id).where(TagRack.rack_id.in_(rack_ids))).all())
+        matching |= set(
+            db.scalars(select(TagRack.tag_id).where(TagRack.rack_id.in_(rack_ids))).all()
+        )
     if row_ids:
         matching |= set(db.scalars(select(TagRow.tag_id).where(TagRow.row_id.in_(row_ids))).all())
     applied = set(
@@ -240,8 +246,12 @@ def category_parent_maps(
     db: Session, actor: User
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """(rack_id→its visible row_ids, shelf_id→its visible rack_ids) for score propagation."""
-    visible_rows = {str(r) for r in db.scalars(select(access.visible_rows_query(db, actor).subquery().c.id))}
-    visible_racks = {str(r) for r in db.scalars(select(access.visible_racks_query(db, actor).subquery().c.id))}
+    visible_rows = {
+        str(r) for r in db.scalars(select(access.visible_rows_query(db, actor).subquery().c.id))
+    }
+    visible_racks = {
+        str(r) for r in db.scalars(select(access.visible_racks_query(db, actor).subquery().c.id))
+    }
     rack_parent_rows: dict[str, list[str]] = {}
     for row_id, rack_id in db.execute(select(RowRack.row_id, RowRack.rack_id)).all():
         if str(row_id) in visible_rows:
@@ -319,7 +329,7 @@ def _rank_prompt(feature_block_text: str, candidates: list[Candidate], k: int, k
     lines = [
         f"You are categorising an academic paper into the best-matching {kind}s from a fixed list.",
         f"Choose up to {k} {kind}s that best characterise the paper, best first.",
-        "Return ONLY JSON: {\"picks\": [{\"index\": <int>, \"affinity\": <0-100>}]}, where index "
+        'Return ONLY JSON: {"picks": [{"index": <int>, "affinity": <0-100>}]}, where index '
         f"refers to the numbered {kind} list and affinity is your confidence (0-100).",
         "",
         "PAPER:",
@@ -330,7 +340,7 @@ def _rank_prompt(feature_block_text: str, candidates: list[Candidate], k: int, k
     for i, c in enumerate(candidates):
         desc = f" — {c.description}" if c.description else ""
         lines.append(f"{i}: {c.name}{desc}")
-    return "\n".join(lines)[: 11000]
+    return "\n".join(lines)[:11000]
 
 
 @dataclass
@@ -399,13 +409,20 @@ def resolve_rankers(db: Session, kinds: list[str]) -> RankerBundle:
         by_kind = {
             k: OllamaRanker(model=cfg.summary_model, base_url=cfg.ollama_url, kind=k) for k in kinds
         }
-        return RankerBundle(by_kind, embed, provider_used=f"local_llm:{cfg.summary_model}", no_llm_fallback=False)
+        return RankerBundle(
+            by_kind, embed, provider_used=f"local_llm:{cfg.summary_model}", no_llm_fallback=False
+        )
     by_kind = {k: EmbeddingRanker(embed=embed) for k in kinds}
-    return RankerBundle(by_kind, embed, provider_used=f"embedding:{resolved.requested}", no_llm_fallback=True)
+    return RankerBundle(
+        by_kind, embed, provider_used=f"embedding:{resolved.requested}", no_llm_fallback=True
+    )
 
 
 def _prefilter(
-    candidates: list[Candidate], feature_block_text: str, embed: Callable[[str], list[float]], m: int
+    candidates: list[Candidate],
+    feature_block_text: str,
+    embed: Callable[[str], list[float]],
+    m: int,
 ) -> list[Candidate]:
     """Shortlist the top-``m`` candidates by embedding cosine (keeps prompts small + fast)."""
     if len(candidates) <= m:
@@ -439,18 +456,42 @@ def _rank_kind(
 
 
 def recommend_work_tags(
-    db: Session, work: Work, *, k: int, scoring: str, prefilter: bool, actor: User, bundle: RankerBundle
+    db: Session,
+    work: Work,
+    *,
+    k: int,
+    scoring: str,
+    prefilter: bool,
+    actor: User,
+    bundle: RankerBundle,
 ) -> tuple[dict[str, Any], bool]:
     """Tag recommendation for one paper. Returns (paper_result, affinity_missing)."""
     fb = feature_block(paper_features(work))
     candidates = assignable_tag_candidates(db, actor, work.id)
     if not candidates:
-        return {"work_id": str(work.id), "title": work.canonical_title, "suggestions": [], "raw": {}}, False
+        return {
+            "work_id": str(work.id),
+            "title": work.canonical_title,
+            "suggestions": [],
+            "raw": {},
+        }, False
     picks, result, affinity_missing = _rank_kind(
-        bundle.by_kind["tag"], fb, candidates, k=k, scoring=scoring, prefilter=prefilter, embed=bundle.embed
+        bundle.by_kind["tag"],
+        fb,
+        candidates,
+        k=k,
+        scoring=scoring,
+        prefilter=prefilter,
+        embed=bundle.embed,
     )
     suggestions = [
-        {"tag_id": p.id, "name": p.name, "rank": p.rank, "affinity": p.affinity, "base": round(p.base, 4)}
+        {
+            "tag_id": p.id,
+            "name": p.name,
+            "rank": p.rank,
+            "affinity": p.affinity,
+            "base": round(p.base, 4),
+        }
         for p in picks
     ]
     return {
@@ -485,7 +526,13 @@ def recommend_work_categories(
             per_kind[kind] = []
             continue
         picks, result, miss = _rank_kind(
-            bundle.by_kind[kind], fb, cands, k=k, scoring=scoring, prefilter=prefilter, embed=bundle.embed
+            bundle.by_kind[kind],
+            fb,
+            cands,
+            k=k,
+            scoring=scoring,
+            prefilter=prefilter,
+            embed=bundle.embed,
         )
         per_kind[kind] = picks
         raw[kind] = {"input": result.raw_input, "output": result.raw_output}
@@ -499,7 +546,13 @@ def recommend_work_categories(
     )
     per_kind_out = {
         kind: [
-            {"id": p.id, "name": p.name, "rank": p.rank, "affinity": p.affinity, "base": round(p.base, 4)}
+            {
+                "id": p.id,
+                "name": p.name,
+                "rank": p.rank,
+                "affinity": p.affinity,
+                "base": round(p.base, 4),
+            }
             for p in per_kind.get(kind, [])
         ]
         for kind in CATEGORY_KINDS
@@ -537,7 +590,9 @@ def run_recommendation(
     candidates_by_kind: dict[str, list[Candidate]] = {}
     parents: tuple[dict[str, list[str]], dict[str, list[str]]] = ({}, {})
     if mode == "categorization":
-        candidates_by_kind = {k2: visible_category_candidates(db, actor, k2) for k2 in CATEGORY_KINDS}
+        candidates_by_kind = {
+            k2: visible_category_candidates(db, actor, k2) for k2 in CATEGORY_KINDS
+        }
         parents = category_parent_maps(db, actor)
 
     papers: list[dict[str, Any]] = []
@@ -551,8 +606,16 @@ def run_recommendation(
             )
         else:
             paper, miss = recommend_work_categories(
-                db, work, k=k, scoring=scoring, parent_combine=parent_combine, prefilter=prefilter,
-                actor=actor, bundle=bundle, candidates_by_kind=candidates_by_kind, parents=parents,
+                db,
+                work,
+                k=k,
+                scoring=scoring,
+                parent_combine=parent_combine,
+                prefilter=prefilter,
+                actor=actor,
+                bundle=bundle,
+                candidates_by_kind=candidates_by_kind,
+                parents=parents,
             )
         fallback = fallback or miss
         papers.append(paper)
@@ -566,4 +629,3 @@ def run_recommendation(
         "provider_used": bundle.provider_used,
         "affinity_requested": scoring == "affinity",
     }
-
