@@ -147,6 +147,15 @@ describe("AiModelsPanel", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("opens a Help dialog explaining the options (incl. the embedding pre-filter)", async () => {
+    const client = makeClient(makeStatus());
+    render(AiModelsPanel, { client: client as never });
+    const { fireEvent } = await import("@testing-library/svelte");
+    await fireEvent.click(await screen.findByRole("button", { name: /Help/ }));
+    expect(await screen.findByText(/The five capabilities/i)).toBeTruthy();
+    expect(screen.getByText(/Embedding pre-filter/i)).toBeTruthy();
+  });
+
   it("renders the PDF text extraction / OCR card", async () => {
     const client = makeClient(makeStatus());
     render(AiModelsPanel, { client: client as never });

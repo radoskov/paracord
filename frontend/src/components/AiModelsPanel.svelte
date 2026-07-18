@@ -20,6 +20,7 @@
     type LoadedModel,
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
+  import Modal from './Modal.svelte';
 
   export let client: ApiClient;
 
@@ -67,6 +68,9 @@
 
   // Copy-to-clipboard confirmation for a clicked model name (#19).
   let copiedModel = '';
+
+  // Help dialog: a plain-language reference for every option on this tab (owner request 2026-07-18).
+  let showHelp = false;
 
   // #5: keep the Ollama semaphore + loaded-models list live — poll while the tab is visible, and
   // re-check immediately when the tab/window regains focus (so re-opening it shows the true state).
@@ -559,7 +563,11 @@
 </script>
 
 <section class="card">
-  <h2>AI &amp; Models</h2>
+  <div class="card-head">
+    <h2>AI &amp; Models</h2>
+    <button type="button" class="help-btn" on:click={() => (showHelp = true)}
+      title="Open a detailed guide to every option on this page">? Help</button>
+  </div>
   <p class="muted">
     Each capability below picks the engine used for one AI feature. The dependency-free baselines
     (hashed bag-of-words / extractive summaries / TF-IDF topics) always work; heavier engines need
@@ -978,19 +986,24 @@
               <button type="button" class="copy-name" on:click={() => copyModelName(m.name)}
                 title="Click to copy this model name">{m.name}</button>
               {#if copiedModel === m.name}<span class="copied">copied ✓</span>{/if}
-              <small class="muted">{m.provider} {fmtSize(m.size_bytes)}</small>
+              <small class="muted">{m.provider} {fmtSize(m.size_bytes)}{m.vram_gb != null ? ` · ~${m.vram_gb} GB to run` : ''}</small>
             </span>
-            <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy} title="Delete this downloaded model">Delete</button>
+            <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy} title="Delete this downloaded model (also drops its embedding registration)">Delete</button>
           </li>
         {/each}
       </ul>
     {/if}
 
     <!-- #21: registered embedding models + the model cap. -->
-    <h3 class="section">Registered embedding models</h3>
+    <h3 class="section" title="Embedding models that have a stored vector column and can be used for semantic search right now">Registered embedding models</h3>
     <p class="muted small">
-      Models registered for semantic search{maxModels ? ` (cap: ${maxModels})` : ''}. The Search tab
-      can rank with any of these, or fuse all of them (“Multimode”).
+      An embedding model becomes <em>registered</em> the first time you index papers with it (select it
+      as the Embedding model above and <strong>Save</strong>, or <strong>Mount</strong> it — either
+      queues a reindex that builds and stores a vector column for that model). Registered models keep
+      their vectors even when they aren't the active one, so you can switch between them without
+      re-indexing. The Search tab can rank with any registered model, or fuse them all (“Multimode”,
+      Reciprocal-Rank-Fusion){maxModels ? `. Up to ${maxModels} models can be registered at once` : ''}.
+      Deleting a model (above) also drops its registration and frees a slot.
     </p>
     {#if embeddingModels.length === 0}
       <p class="empty">No embedding models registered.</p>
@@ -1012,10 +1025,14 @@
       </ul>
     {/if}
 
-    <h3 class="section">Embedding index</h3>
+    <h3 class="section" title="Coverage of the stored vectors that power semantic search">Embedding index</h3>
     <p class="muted small">
-      How many papers currently have an embedding for the active model. Reindexing rebuilds them all
-      — do this after changing the embedding provider/model so semantic search stays consistent.
+      Semantic search compares a stored numeric <em>vector</em> (embedding) per paper. This shows how
+      many papers already have a vector for the active model. <strong>Reindex embeddings</strong>
+      (below) recomputes vectors for every paper with the current model — run it after changing the
+      embedding provider/model, or if coverage is below 100&nbsp;%, so search results stay consistent.
+      It runs in the background (watch the Jobs tab); search keeps working on whatever is already
+      indexed meanwhile.
     </p>
     {#if status.reindex}
       <p class="muted">
@@ -1056,9 +1073,193 @@
   {/if}
 </section>
 
+{#if showHelp}
+  <Modal wide title="AI &amp; Models — guide" onClose={() => (showHelp = false)}>
+    <div class="help">
+      <p class="lead">
+        This page controls the engines behind PaRacORD's AI features. Every feature has a
+        <strong>dependency-free baseline that always works</strong> (no downloads, no GPU, no
+        network); heavier engines (Ollama models) are optional and, when unavailable, silently fall
+        back to that baseline — nothing is ever fully off. Below is what each option does, what it
+        consumes, and what to expect.
+      </p>
+
+      <details open>
+        <summary>The five capabilities</summary>
+        <dl>
+          <dt>Semantic search &amp; related papers</dt>
+          <dd>Turns each paper into an <em>embedding</em> (a list of numbers — a “vector” — capturing
+            meaning) so search and the “related papers” list can match by <em>meaning</em>, not just
+            shared keywords. Baseline: <code>hash-BOW</code> (a dependency-free hashed
+            bag-of-words — works, but coarse). Better: an Ollama embedding model such as
+            <code>nomic-embed-text</code>.</dd>
+          <dt>Scope summaries</dt>
+          <dd>Writes a short prose summary of a paper, shelf or rack. Baseline: an extractive
+            summarizer (picks the most representative existing sentences). Better: a local LLM via
+            Ollama (<code>local_llm</code>), e.g. <code>qwen3</code> / <code>llama3.x</code>.</dd>
+          <dt>Topic modeling</dt>
+          <dd>Clusters a set of papers into topics and labels each with its top terms. Today every
+            backend is the built-in deterministic TF-IDF model (fast, no downloads).</dd>
+          <dt>Keyword extraction</dt>
+          <dd>Pulls representative keyword phrases from a title + abstract using RAKE (a
+            dependency-free algorithm). Always on, nothing to configure.</dd>
+          <dt>PDF text extraction / OCR</dt>
+          <dd>Adds a searchable text layer to scanned / poor-text PDFs before GROBID reads them.
+            Runs locally on the stored file (no network). Needs the OCR tools baked into the image.</dd>
+        </dl>
+      </details>
+
+      <details>
+        <summary>Providers &amp; baselines</summary>
+        <p>Each capability picks a <em>provider</em> (the engine). Baselines
+          (<code>hash_bow</code>, <code>extractive</code>, <code>tfidf</code>, RAKE) need nothing.
+          <code>ollama</code> / <code>local_llm</code> need a reachable Ollama daemon (the green
+          semaphore) with the model pulled. <code>sentence_transformers</code> needs that Python
+          package baked into the image. If a chosen provider can't run, the badge on its card turns
+          amber/red and it falls back to the baseline — your results still appear, just coarser.</p>
+      </details>
+
+      <details>
+        <summary>Finding, pulling &amp; deleting models</summary>
+        <p><strong>Find a model</strong> searches a curated catalog (plus a live lookup on
+          <code>ollama.com</code> when reachable) and shows an <em>estimated</em> memory requirement.
+          <strong>Pull</strong> downloads the weights in the background (with a live progress bar).
+          Pulled models appear under “Models” with their on-disk size, an estimate of the memory to
+          run them, and a <strong>Delete</strong> button (which also drops the model's embedding
+          registration and frees a slot).</p>
+        <p class="note">VRAM/RAM figures are <em>estimates</em> (quantized weights + a working-memory
+          allowance). They're a sizing guide, not a guarantee — actual use varies with context length
+          and the runtime.</p>
+      </details>
+
+      <details>
+        <summary>Mounting, unmounting &amp; memory (VRAM)</summary>
+        <p><strong>Mount</strong> = load the model into the Ollama daemon's memory <em>and</em> make it
+          the active model for its capability. <strong>Unmount</strong> = free that memory <em>and</em>
+          drop the capability back to its baseline (so features keep working). Only one model per kind
+          (summary / embedding) is active at a time — mounting a new one frees the previous.</p>
+        <p><strong>Loaded in memory</strong> lists what the daemon currently holds:</p>
+        <ul>
+          <li><span class="pin-badge">mounted</span> — pinned by you; stays until you unmount it.</li>
+          <li><span class="auto-badge">auto · frees in ~Nm</span> — loaded on demand to serve a request
+            (for example, embedding a <em>search query</em> — the stored document vectors don't need
+            reloading, but the query itself must be embedded with the same model). Ollama frees these
+            automatically after a few idle minutes; this is <em>not</em> a mount and needs no action.</li>
+        </ul>
+        <p><strong>Memory budget (GB)</strong>: set your machine's usable VRAM/RAM; mounting then warns
+          before a load would exceed it. <strong>Compute for next mount</strong>: <em>Auto</em> lets
+          Ollama decide; <em>Prefer GPU</em> offloads all layers to the GPU (if the container has GPU
+          access); <em>Force CPU</em> keeps it in system RAM. After a mount, each loaded row shows
+          whether it landed on <em>GPU (VRAM)</em> or <em>CPU (RAM)</em>. If you asked for GPU but it
+          loaded on CPU, the Ollama container has no GPU access — grant it (nvidia runtime /
+          <code>--gpus all</code>) to use the GPU.</p>
+      </details>
+
+      <details>
+        <summary>Registered embedding models &amp; “Multimode”</summary>
+        <p>A model is <em>registered</em> once you've indexed papers with it (selecting it + Save, or
+          Mount — both queue a reindex that stores a dedicated vector column for that model). Because
+          each registered model keeps its own vectors, you can switch between them without re-indexing.
+          On the Search tab you can rank with any one registered model, or fuse them all with
+          <strong>Multimode</strong> — Reciprocal-Rank-Fusion (RRF), which merges several models'
+          rankings into one more-robust order. There's a cap on how many can be registered at once;
+          deleting a model frees a slot.</p>
+      </details>
+
+      <details>
+        <summary>Embedding index, reindex, passage search &amp; the lexical index</summary>
+        <p><strong>Embedding index</strong> = how many papers have a stored vector for the active
+          model. <strong>Reindex embeddings</strong> recomputes them all with the current model — run
+          it after changing the embedding model, or when coverage is below 100&nbsp;%. It runs in the
+          background; search keeps working on whatever is already indexed.</p>
+        <p><strong>Chunk-level ANN</strong> (Approximate Nearest Neighbor) embeds individual
+          passages, not just whole papers, so search can point at the most relevant <em>section</em>.
+          It uses an HNSW index (a graph that finds near vectors fast) and only activates for models
+          with a dedicated vector column on Postgres. Reindexing backfills these too.</p>
+        <p><strong>Lexical (BM25F+) index</strong> powers classic keyword search (BM25 is the standard
+          keyword-relevance ranking; the “F” weights title vs abstract vs body). It rebuilds itself
+          when the library changes — <strong>Rebuild index</strong> just forces it now. This is
+          separate from embeddings: keyword search needs no model and always works.</p>
+      </details>
+
+      <details>
+        <summary>AI analysis &amp; “Recommend categorization” parameters</summary>
+        <p>These appear on the Insights → Recommend tab, but rely on the models configured here.</p>
+        <dl>
+          <dt>Embedding pre-filter</dt>
+          <dd>When ON, the system first uses <em>embeddings</em> (fast vector similarity) to shortlist
+            the most plausible candidate tags/shelves, then asks the LLM to rank only that shortlist.
+            It consumes the paper's and candidates' vectors. Use it when you have many candidate
+            shelves/tags: it keeps the LLM prompt small and fast. When OFF, <em>all</em> candidates go
+            to the ranker — more thorough but slower and more token-hungry, and it may exceed the
+            model's context on large libraries. It needs a working embedding model; with the hash-BOW
+            baseline the shortlist is coarser.</dd>
+          <dt>Scoring: ranking vs affinity</dt>
+          <dd><em>Ranking</em> scores by position (1st pick = K points, 2nd = K−1, …). <em>Affinity</em>
+            asks the model for a 0–100 fit score per candidate; if the model doesn't return one, it
+            falls back to ranking points (and flags the fallback).</dd>
+          <dt>Parent combine (sum / median / max)</dt>
+          <dd>How a shelf inherits relevance from its parent rack/row: sum (add), median (typical), or
+            max (best parent). A shelf's final score is its own score plus a 0.5× share of its
+            combined parents'.</dd>
+          <dt>K, cap, recompute</dt>
+          <dd><em>K</em> = how many suggestions per paper; <em>cap</em> = max papers analysed in one
+            run (large scopes are truncated — you're told when); <em>recompute</em> forces a fresh run
+            instead of reusing the cached one.</dd>
+        </dl>
+      </details>
+
+      <details>
+        <summary>Glossary</summary>
+        <dl>
+          <dt>Embedding / vector</dt><dd>A list of numbers representing a text's meaning; similar texts have nearby vectors.</dd>
+          <dt>Cosine similarity</dt><dd>The usual measure of how “close” two vectors point — the basis of semantic ranking.</dd>
+          <dt>Quantization (Q4_K_M, F16…)</dt><dd>Compressing model weights to fewer bits so they use less memory/disk, at a small quality cost. Q4 ≈ 4 bits/weight; F16 = 16-bit.</dd>
+          <dt>VRAM</dt><dd>The GPU's dedicated memory. A model must fit in VRAM to run on the GPU; otherwise it runs (slower) on CPU + system RAM.</dd>
+          <dt>keep_alive</dt><dd>How long Ollama keeps a model in memory after use. Mounting sets it to “forever” (pinned); a normal request uses a few minutes.</dd>
+          <dt>ANN / HNSW</dt><dd>Approximate Nearest Neighbor search and the graph index that makes it fast — how passage-level semantic search scales.</dd>
+          <dt>RRF (Multimode)</dt><dd>Reciprocal-Rank-Fusion: merges several rankings into one by rewarding items that rank high across models.</dd>
+          <dt>TF-IDF</dt><dd>Term Frequency–Inverse Document Frequency: weights words by how distinctive they are — the topic/keyword baseline.</dd>
+          <dt>BM25</dt><dd>The standard keyword-relevance ranking function used by the lexical index.</dd>
+          <dt>RAKE</dt><dd>Rapid Automatic Keyword Extraction — the dependency-free keyword extractor.</dd>
+          <dt>GROBID / OCR</dt><dd>GROBID extracts structured text (title, abstract, references) from a PDF; OCR adds a text layer to scanned pages first so GROBID can read them.</dd>
+        </dl>
+      </details>
+    </div>
+  </Modal>
+{/if}
+
 <style>
   h2 { font-size: 1.05rem; margin: 0 0 0.4rem; }
   h3 { font-size: 0.9rem; margin: 0; }
+  .card-head { align-items: baseline; display: flex; gap: 0.75rem; justify-content: space-between; }
+  .help-btn {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    color: var(--ink-normal);
+    cursor: pointer;
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    font-weight: 700;
+    min-height: 1.9rem;
+    padding: 0.2rem 0.6rem;
+  }
+  .help-btn:hover { background: var(--surface-raised); }
+  .help { font-size: 0.86rem; line-height: 1.5; }
+  .help .lead { margin: 0 0 0.75rem; }
+  .help .note { color: var(--ink-muted); font-size: 0.8rem; font-style: italic; }
+  .help details {
+    border-top: 1px solid var(--border-normal);
+    padding: 0.5rem 0;
+  }
+  .help summary { cursor: pointer; font-weight: 700; padding: 0.2rem 0; }
+  .help dl { margin: 0.4rem 0; }
+  .help dt { font-weight: 700; margin-top: 0.5rem; }
+  .help dd { color: var(--ink-normal); margin: 0.1rem 0 0; }
+  .help ul { margin: 0.4rem 0; padding-left: 1.2rem; }
+  .help code { font-size: 0.82em; }
+  .help .pin-badge, .help .auto-badge { display: inline; }
   h3.section { margin: 1.1rem 0 0.3rem; }
   .cards {
     display: grid;

@@ -9,6 +9,21 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI & Models panel clarity + Help dialog (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-ai-panel-clarity-help.md`. Owner request to make the tab
+self-explanatory (frontend-only, `AiModelsPanel.svelte`).
+
+- Rewrote the **Registered embedding models** (what "registered"/Multimode/RRF mean; how a model
+  registers) and **Embedding index** (vectors, when/why to reindex) sections; pulled-model rows now
+  show the estimated memory to run each model.
+- Added a **`? Help` dialog** (reusing `Modal.svelte`): collapsible, comprehensive plain-language guide
+  — capabilities, providers/baselines, pull/delete, mount/unmount & memory (VRAM budget, GPU/CPU,
+  pinned vs auto), registered models, embedding/chunk-ANN/lexical index & reindex, the Recommend
+  parameters (incl. **Embedding pre-filter** — what it consumes, effect when off), and a glossary
+  (embedding, cosine, quantization, VRAM, keep_alive, ANN/HNSW, RRF, TF-IDF, BM25, RAKE, GROBID/OCR).
+- More tooltips on headings/buttons/the compute selector. Tests: `make frontend-test` 342 passed.
+
 ## Mount/unmount robustness + GPU/CPU control (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-mount-robustness-gpu-cpu.md`. Fixes field reports on the
