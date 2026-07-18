@@ -9,25 +9,30 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
-## Rows grouping layer — Phase 1 backend foundation (2026-07-18, IN PROGRESS)
+## Rows grouping layer — COMPLETE (Part A) (2026-07-18)
 
-Big feature per `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md` (owner decisions resolved in
-Part C). New broadest grouping layer **Row ⊃ Rack ⊃ Shelf ⊃ Paper**; a paper's row is inferred
-work→shelf→rack→row. Landed so far (backend, tested):
+Big feature per `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md`. New broadest grouping layer
+**Row ⊃ Rack ⊃ Shelf ⊃ Paper**; a paper's row is inferred work→shelf→rack→row (rows/racks never
+attach to a work directly). Rack↔Row is many-to-many. All of Part A (A1–A11) landed & verified:
 
-- **Model + migration** (`948d209`): `Row`/`RowRack`/`TagRow` models + Alembic `0078_rows`. Migration
-  parity + autogenerate-clean tests green on Postgres.
-- **Access/scope/colour/grants/endpoints** (`bc8ba60`): `can_see/modify_row`, `visible_rows_query`,
-  `row` grant target type, `row` scope resolution, access-aware `row` colour membership
-  (`graph_color`), a `/rows` CRUD + rack-membership endpoint module, and `"row"` added to the
-  citation/graph/citations/visualization/ai scope & colour Literals + topic/reference membership
-  loops. Tests: row scope resolution + owner-sees-private-row colouring.
+- **Model + migration** (`948d209`): `Row`/`RowRack`/`TagRow` + Alembic `0078_rows` (parity +
+  autogenerate-clean green on Postgres). Applied to the live dev DB.
+- **Backend** (`bc8ba60`, `42a09ed`): access (`can_see/modify_row`, `visible_rows_query`,
+  scope-container), `row` grant target type, `row` scope resolution, access-aware `row` graph colour,
+  `/rows` CRUD + rack-membership endpoints (audit events incl. deletes), `"row"` in every
+  scope/colour Literal; tag scoping to rows (`TagRow`, assignable inference, `/tags` filters);
+  "where is this?" + library columns + `row:` search operator + `row_id` filter + saved filters +
+  export/summary scope labels.
+- **Frontend** (`1c0f7e8`): `Row` client type + methods, `rows` catalog store, RowsPage + Rows tab,
+  `row` scope in ScopePicker, colour-by-row on citation/topic/reference/visualization graphs, tag
+  scoping to rows (TagsPage), row grant target (AdminPage), row display in the paper panel.
+- **Tests + e2e + docs** (`895c5e9`): `test_rows.py` (CRUD/access/scope/tag/IDOR/librarian-gate),
+  row scope + owner-sees-private-row colour tests (citation graph + temporal map), e2e Journey 40
+  (row lifecycle), reference-doc updates. **Full fast tier: 973 passed, 0 failed**; migration-parity
+  + graph/viz slow suites green; ruff clean. Live API smoke (login → create/list/delete row) OK.
 
-**Still TODO** (see the workplan Parts A5–A11 + B): tag scoping to rows (tags endpoint), "where is
-this?" row display + `row:` search operator + saved-filter `row_id`, export/summarization scope
-labels, the whole frontend (client, catalog, RowsPage, ScopePicker, colour selectors, columns,
-WorkDetail, TagsPage, AdminPage), docs, the wider test/safety battery, the live-DB migration
-(`alembic upgrade head`), then the entire AI "Recommend categorization" feature. Handoff:
+Deferred (minor): an optional library "rows" column (off by default). NEXT: Part B — the AI
+"Recommend categorization" feature (see the workplan B0a–B4). Handoff:
 `docs/agent_handoffs/2026-07-18-rows-phase1-backend.md`.
 
 ## Insights citation graph: DOI-less external nodes import via the citations box (2026-07-18)
