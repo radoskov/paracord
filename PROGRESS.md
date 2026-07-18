@@ -9,6 +9,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Rows grouping layer — Phase 1 backend foundation (2026-07-18, IN PROGRESS)
+
+Big feature per `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md` (owner decisions resolved in
+Part C). New broadest grouping layer **Row ⊃ Rack ⊃ Shelf ⊃ Paper**; a paper's row is inferred
+work→shelf→rack→row. Landed so far (backend, tested):
+
+- **Model + migration** (`948d209`): `Row`/`RowRack`/`TagRow` models + Alembic `0078_rows`. Migration
+  parity + autogenerate-clean tests green on Postgres.
+- **Access/scope/colour/grants/endpoints** (`bc8ba60`): `can_see/modify_row`, `visible_rows_query`,
+  `row` grant target type, `row` scope resolution, access-aware `row` colour membership
+  (`graph_color`), a `/rows` CRUD + rack-membership endpoint module, and `"row"` added to the
+  citation/graph/citations/visualization/ai scope & colour Literals + topic/reference membership
+  loops. Tests: row scope resolution + owner-sees-private-row colouring.
+
+**Still TODO** (see the workplan Parts A5–A11 + B): tag scoping to rows (tags endpoint), "where is
+this?" row display + `row:` search operator + saved-filter `row_id`, export/summarization scope
+labels, the whole frontend (client, catalog, RowsPage, ScopePicker, colour selectors, columns,
+WorkDetail, TagsPage, AdminPage), docs, the wider test/safety battery, the live-DB migration
+(`alembic upgrade head`), then the entire AI "Recommend categorization" feature. Handoff:
+`docs/agent_handoffs/2026-07-18-rows-phase1-backend.md`.
+
 ## Insights citation graph: DOI-less external nodes import via the citations box (2026-07-18)
 
 - Clicking an external reference / citing paper in the Insights citation graph did nothing when the
