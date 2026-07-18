@@ -92,6 +92,17 @@
             ],
             "title": "Query Cache Size"
           },
+          "summary_llm_timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Llm Timeout"
+          },
           "summary_model": {
             "anyOf": [
               {
@@ -113,6 +124,17 @@
               }
             ],
             "title": "Summary Provider"
+          },
+          "summary_reasoning": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Reasoning"
           },
           "topic_backend": {
             "anyOf": [

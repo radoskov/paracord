@@ -220,6 +220,32 @@ def test_query_cache_and_auto_unmount_persist_including_falsy(client, auth_heade
     )
 
 
+def test_summary_llm_timeout_and_reasoning_persist(client, auth_headers, db):
+    owner = auth_headers("owner")
+    r = client.put(
+        "/api/v1/admin/ai-config",
+        headers=owner,
+        json={"summary_llm_timeout": 600, "summary_reasoning": True},
+    )
+    assert r.status_code == 200
+    cfg = client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]
+    assert cfg["summary_llm_timeout"] == 600
+    assert cfg["summary_reasoning"] is True
+    # Reasoning back off (a falsy value) must persist, not silently revert to the default.
+    client.put("/api/v1/admin/ai-config", headers=owner, json={"summary_reasoning": False})
+    assert (
+        client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]["summary_reasoning"]
+        is False
+    )
+    # A non-positive timeout is rejected.
+    assert (
+        client.put(
+            "/api/v1/admin/ai-config", headers=owner, json={"summary_llm_timeout": 0}
+        ).status_code
+        == 400
+    )
+
+
 # --- mount/unmount ENDPOINTS: enqueue a background job (the load runs in the worker) ---
 
 

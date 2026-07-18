@@ -300,6 +300,13 @@ class Settings(BaseSettings):
     embedding_model: str | None = None  # provider-specific model id (None = provider default)
     summary_llm_enabled: bool = False  # allow summary_type=local_llm via Ollama
     summary_llm_model: str = "qwen3:4b"
+    # Per-call timeout (seconds) for a local-LLM summary generation request. Raise it when using a
+    # reasoning model (they think before answering, so a single call can take minutes).
+    summary_llm_timeout: float = 120.0
+    # Opt-in: let a reasoning model (qwen3/qwen3.5/deepseek-r1, …) actually think before answering
+    # (higher quality, much slower). Off → thinking is suppressed so it answers as fast as a plain
+    # model. Only ever applied to models whose Ollama capabilities advertise "thinking".
+    summary_reasoning: bool = False
     # Query-embedding LRU cache (per embedding model): a search re-embeds the same query string
     # on every keystroke/repeat, and for an Ollama embedder that is a network round-trip each time.
     # Size is the max number of distinct (model, query) vectors kept in-process; 0 disables it.

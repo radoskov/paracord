@@ -40,11 +40,15 @@ EDITABLE_FIELDS = (
     "query_cache_size",
     "auto_unmount",
     "auto_unmount_minutes",
+    "summary_llm_timeout",
+    "summary_reasoning",
 )
 # Fields where a falsy value (``False`` / ``0``) is a legitimate setting, not "unset". The generic
 # overlay/persist loops treat empty strings as "unset" but must NOT drop these — e.g. auto_unmount
 # off (False) or a query cache size of 0 (disabled) are real, intended values.
-_FALSY_VALID_FIELDS = frozenset({"query_cache_size", "auto_unmount", "auto_unmount_minutes"})
+_FALSY_VALID_FIELDS = frozenset(
+    {"query_cache_size", "auto_unmount", "auto_unmount_minutes", "summary_reasoning"}
+)
 EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
 SUMMARY_PROVIDERS = ("extractive", "local_llm")
 TOPIC_BACKENDS = ("tfidf", "embedding", "bertopic")
@@ -75,6 +79,10 @@ class EffectiveAIConfig:
     # Auto-unmount on-demand models after idle (drives Ollama ``keep_alive``); see keep_alive_value.
     auto_unmount: bool
     auto_unmount_minutes: float
+    # Per-call timeout (seconds) for a local-LLM summary generation request.
+    summary_llm_timeout: float
+    # Opt-in: allow a reasoning model to think before answering (slower, higher quality).
+    summary_reasoning: bool
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -95,6 +103,8 @@ def _defaults(settings: Settings) -> EffectiveAIConfig:
         query_cache_size=settings.query_cache_size,
         auto_unmount=settings.ai_auto_unmount,
         auto_unmount_minutes=settings.ai_auto_unmount_minutes,
+        summary_llm_timeout=settings.summary_llm_timeout,
+        summary_reasoning=settings.summary_reasoning,
     )
 
 
@@ -238,6 +248,13 @@ def _validate(changes: dict, *, settings: Settings) -> None:
             raise ValueError("auto_unmount_minutes must be a number of minutes") from exc
         if minutes <= 0:
             raise ValueError("auto_unmount_minutes must be greater than 0")
+    if changes.get("summary_llm_timeout") is not None:
+        try:
+            timeout = float(changes["summary_llm_timeout"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("summary_llm_timeout must be a number of seconds") from exc
+        if timeout <= 0:
+            raise ValueError("summary_llm_timeout must be greater than 0")
 
 
 def keep_alive_value(cfg: EffectiveAIConfig) -> int:

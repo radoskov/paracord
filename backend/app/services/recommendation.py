@@ -315,19 +315,16 @@ def ollama_generate_json(prompt: str, *, model: str, base_url: str) -> tuple[Any
     """Ollama generation asking for JSON output (C7). Returns (parsed_or_None, raw_text)."""
     import httpx2 as httpx
 
+    from app.services.model_management import model_supports_thinking  # noqa: PLC0415 (cycle guard)
+
+    payload: dict = {"model": model, "prompt": prompt, "stream": False, "format": "json"}
+    # A reasoning model would prepend its chain-of-thought; suppress it so the JSON ranker stays fast
+    # and parseable. Only send the flag when the model actually supports thinking — Ollama rejects the
+    # ``think`` field outright for models that don't (so we must never send it blindly).
+    if model_supports_thinking(model, ollama_url=base_url):
+        payload["think"] = False
     with httpx.Client(timeout=120) as client:
-        response = client.post(
-            f"{base_url.rstrip('/')}/api/generate",
-            # think:false keeps a reasoning model (qwen3/qwen3.5/deepseek-r1) from prepending its
-            # chain-of-thought to the JSON payload (old daemons ignore the flag harmlessly).
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "think": False,
-            },
-        )
+        response = client.post(f"{base_url.rstrip('/')}/api/generate", json=payload)
         response.raise_for_status()
         raw = (response.json().get("response") or "").strip()
     return _extract_json(raw), raw

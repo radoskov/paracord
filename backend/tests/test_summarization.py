@@ -90,6 +90,8 @@ def test_keep_alive_value_pins_or_times_out() -> None:
             query_cache_size=2048,
             auto_unmount=True,
             auto_unmount_minutes=5.0,
+            summary_llm_timeout=120.0,
+            summary_reasoning=False,
         )
         base.update(over)
         return EffectiveAIConfig(**base)
@@ -98,6 +100,46 @@ def test_keep_alive_value_pins_or_times_out() -> None:
     assert keep_alive_value(cfg(auto_unmount=True, auto_unmount_minutes=5.0)) == 300
     assert keep_alive_value(cfg(auto_unmount=True, auto_unmount_minutes=0.5)) == 30
     assert keep_alive_value(cfg(auto_unmount=False)) == -1
+
+
+def test_llm_opts_reasoning_only_for_capable_models(monkeypatch) -> None:
+    """think is sent ONLY for reasoning-capable models, carrying the opt-in; a plain model gets no
+    think flag at all (Ollama rejects it), and the configured timeout flows through."""
+    import app.services.model_management as mm
+    import app.services.summarization as summ
+    from app.services.ai_config import EffectiveAIConfig
+
+    def cfg(**over):
+        base = dict(
+            embedding_provider="ollama",
+            embedding_model="nomic-embed-text",
+            summary_provider="local_llm",
+            summary_model="qwen3.5:4b",
+            topic_backend="tfidf",
+            topic_embedding_model=None,
+            ocr_backend="none",
+            ocr_language="eng",
+            ollama_url="http://ollama:11434",
+            vram_budget_gb=None,
+            query_cache_size=2048,
+            auto_unmount=True,
+            auto_unmount_minutes=5.0,
+            summary_llm_timeout=333.0,
+            summary_reasoning=True,
+        )
+        base.update(over)
+        return EffectiveAIConfig(**base)
+
+    monkeypatch.setattr(mm, "model_supports_thinking", lambda model, *, ollama_url: True)
+    opts = summ._llm_opts_for(cfg(summary_reasoning=True), "qwen3.5:4b")
+    assert opts.think is True and opts.timeout == 333.0
+    opts = summ._llm_opts_for(cfg(summary_reasoning=False), "qwen3.5:4b")
+    assert opts.think is False  # capable but opted out → suppress thinking
+
+    # A non-reasoning model never gets the think flag, regardless of the setting.
+    monkeypatch.setattr(mm, "model_supports_thinking", lambda model, *, ollama_url: False)
+    opts = summ._llm_opts_for(cfg(summary_reasoning=True), "llama3")
+    assert opts.think is None
 
 
 # --- pure extractive summarizer ---------------------------------------------
@@ -223,7 +265,7 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
     db_session.commit()
     seen: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url, keep_alive=None):
+    def fake_generate(prompt, *, model, base_url, opts=None):
         seen.append(prompt)
         if prompt.startswith(summ._DETAIL_INTRO_PROMPT[:30]):
             return "HIGH-LEVEL INTRO."
@@ -410,7 +452,7 @@ def test_detailed_effort_levels_coexist_and_fast_categorizes(db, monkeypatch) ->
     db.commit()
     calls: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url, keep_alive=None):
+    def fake_generate(prompt, *, model, base_url, opts=None):
         calls.append(prompt)
         if prompt.startswith("Classify each academic-paper section"):
             # Categorize: sections 1..N -> Background/Methods/Results round-robin-ish.
@@ -1078,13 +1120,13 @@ def test_scope_summary_api_uses_configured_provider(client, auth_headers, db, mo
     monkeypatch.setattr(
         summ,
         "_ollama_summarize",
-        lambda text, *, model, base_url, keep_alive=None: f"LLM summary via {model}",
+        lambda text, *, model, base_url, opts=None: f"LLM summary via {model}",
     )
     # The scope reduce step (map-reduce, UX batch 4) goes through the raw generator.
     monkeypatch.setattr(
         summ,
         "_ollama_generate",
-        lambda prompt, *, model, base_url, keep_alive=None: f"LLM summary via {model}",
+        lambda prompt, *, model, base_url, opts=None: f"LLM summary via {model}",
     )
 
     shelf = Shelf(name="cfg provider")
@@ -1123,7 +1165,7 @@ def test_scope_summary_map_reduce_prompts_and_chunking(db, monkeypatch) -> None:
     db.commit()
     prompts: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url, keep_alive=None):
+    def fake_generate(prompt, *, model, base_url, opts=None):
         prompts.append(prompt)
         if prompt.startswith("Summarize the following academic paper"):
             return "Digest sentence with several words in it. " * 8  # realistic-length digest

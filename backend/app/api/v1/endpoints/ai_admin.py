@@ -34,6 +34,7 @@ from app.services.model_management import (
     detect_providers,
     list_loaded,
     list_models,
+    model_supports_thinking,
     ollama_version,
     probe_embedding_model,
 )
@@ -66,6 +67,8 @@ class AIConfigUpdate(BaseModel):
     query_cache_size: int | None = None
     auto_unmount: bool | None = None
     auto_unmount_minutes: float | None = None
+    summary_llm_timeout: float | None = None
+    summary_reasoning: bool | None = None
 
 
 class ModelRef(BaseModel):
@@ -483,5 +486,12 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
         else None,
         "bertopic_installed": providers["bertopic_installed"],
         "sentence_transformers_installed": providers["sentence_transformers_installed"],
+        # Auto-detected: is the configured summary model a reasoning model? Lets the panel show the
+        # reasoning toggle meaningfully (and warn it's slow). Skipped when Ollama is down (no probe).
+        "summary_model_reasoning": (
+            model_supports_thinking(config.summary_model, ollama_url=config.ollama_url)
+            if providers["ollama_reachable"]
+            else False
+        ),
         "active": _active_capability_status(config_dict, providers),
     }

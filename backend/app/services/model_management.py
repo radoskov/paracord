@@ -16,6 +16,8 @@ from collections.abc import Callable
 
 import httpx2 as httpx
 
+from app.utils.bounded_cache import BoundedTTLCache
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -30,6 +32,40 @@ def _ollama_tags(ollama_url: str) -> list[dict] | None:
             return response.json().get("models", [])
     except Exception:  # noqa: BLE001 - unreachable daemon is a normal "not available" state
         return None
+
+
+# Model capabilities (from /api/show) rarely change, but the call isn't free; cache per (model, url).
+# A reasoning summary can issue one generate per section, so we must not /api/show on every call.
+_CAPS_CACHE = BoundedTTLCache(maxsize=64, ttl_seconds=300)
+_CAPS_MISS = object()
+
+
+def model_capabilities(model: str, *, ollama_url: str) -> list[str]:
+    """The Ollama model's declared capabilities (e.g. 'completion', 'thinking', 'vision', 'tools'),
+    or ``[]`` if the daemon is unreachable / too old to report them. Cached per (model, url)."""
+    if not model:
+        return []
+    key = (model, ollama_url)
+    cached = _CAPS_CACHE.get(key, _CAPS_MISS)
+    if cached is not _CAPS_MISS:
+        return cached
+    caps: list[str] = []
+    try:
+        with httpx.Client(timeout=5) as client:
+            response = client.post(f"{ollama_url.rstrip('/')}/api/show", json={"model": model})
+            response.raise_for_status()
+            raw = response.json().get("capabilities")
+            if isinstance(raw, list):
+                caps = [str(c) for c in raw]
+    except Exception:  # noqa: BLE001 - unreachable/old daemon → treat as "no known capabilities"
+        caps = []
+    _CAPS_CACHE.set(key, caps)
+    return caps
+
+
+def model_supports_thinking(model: str, *, ollama_url: str) -> bool:
+    """Whether the model is a reasoning model (advertises the 'thinking' capability)."""
+    return "thinking" in model_capabilities(model, ollama_url=ollama_url)
 
 
 def ollama_version(ollama_url: str) -> str | None:

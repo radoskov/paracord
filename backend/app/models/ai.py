@@ -111,6 +111,10 @@ class AIConfig(Base):
     auto_unmount: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Idle minutes before an on-demand model unloads when auto_unmount is on. NULL → Settings default.
     auto_unmount_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Per-call local-LLM summary timeout (seconds). NULL → Settings.summary_llm_timeout.
+    summary_llm_timeout: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Opt-in: let a reasoning model think before answering (slower, higher quality). NULL → Settings.
+    summary_reasoning: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
