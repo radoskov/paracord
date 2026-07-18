@@ -9,6 +9,27 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI model management — pull progress, error surfacing, search + VRAM (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-ai-model-pull-search-progress.md`. Fixes the owner's
+"Pull failed ✗ (job …)" dead-end and adds discovery. Root cause of the failed `qwen3:4b` pull was a
+**transient** connection-refused to Ollama — the real bug was the UI hiding the reason. Delete was
+already implemented; the owner saw no button only because the container Ollama had zero models.
+
+- **Streaming pull + actionable errors** (`services/model_management.py`): `pull_model(..., on_progress)`
+  streams Ollama `/api/pull` and relays byte progress; transport/daemon failures become clear
+  `RuntimeError`s. `pull_model_job` wires `job_report_progress` — progress + error already surface via
+  the Jobs API (`progress_done/total`, `error`).
+- **Catalog + search + VRAM** (`services/model_catalog.py`, NEW; `GET /ai/models/search`): curated
+  catalog of popular models + `estimate_vram_gb` + best-effort `ollama.com` scrape (falls back to the
+  catalog on any failure). Popularity-ranked, VRAM-estimated, marks already-pulled models.
+- **Frontend** (`AiModelsPanel.svelte`, `client.ts`): real `<progress>` bar + actual error text on
+  pull failure; a "Find a model" search box → results table (size, est. VRAM, popularity, Pull); empty
+  copy points at the per-model Delete button.
+- Tests: `test_model_catalog.py` + 2 search endpoint tests (33 passed); `make frontend-test` 339 passed.
+- **Deferred (owner's 4th ask, not yet built):** live mount/unmount for VRAM control (Ollama
+  `keep_alive:-1`/`0`, `/api/ps`; one-per-kind; VRAM + running-job warnings).
+
 ## AI "Recommend categorization" — COMPLETE (Part B) (2026-07-18)
 
 Second half of `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md`. For a paper scope, recommend

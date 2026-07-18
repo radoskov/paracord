@@ -15,6 +15,7 @@
     type AiConfig,
     type AiModel,
     type AiStatus,
+    type CatalogModel,
     type EmbeddingModelInfo,
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
@@ -38,10 +39,19 @@
   let validation: { present: boolean | null; embeddings: boolean | null; canonical: string; error: string | null } | null = null;
   let validating = false;
 
-  // Pull-progress tracking (#5): the job id returned by a pull + its polled status.
+  // Pull-progress tracking (#5): the job id returned by a pull + its polled status, byte progress,
+  // and (on failure) the daemon's actual error text instead of a bare "✗".
   let pullJobId: string | null = null;
   let pullJobStatus = '';
   let pullPolling = false;
+  let pullProgress: { done: number; total: number } | null = null;
+  let pullError = '';
+
+  // Model search (#5): query + popularity-ranked catalog results (name, size, estimated VRAM).
+  let searchQuery = '';
+  let searchResults: CatalogModel[] = [];
+  let searching = false;
+  let searchDone = false;
 
   // Copy-to-clipboard confirmation for a clicked model name (#19).
   let copiedModel = '';
@@ -111,18 +121,31 @@
     }
   }
 
-  // #5: poll the Jobs status for the pull job until it finishes/fails, updating a status label.
+  // #5: poll the Jobs status for the pull job until it finishes/fails, updating a status label, a
+  // byte-level progress bar (from the job's reported {done,total}) and, on failure, the real error.
   async function pollPull(jobId: string): Promise<void> {
     pullPolling = true;
     pullJobStatus = 'queued';
+    pullProgress = null;
+    pullError = '';
     try {
-      for (let i = 0; i < 600; i += 1) {
+      // ~1 h ceiling at 2 s/poll — big models take a while; the loop just stops updating after that.
+      for (let i = 0; i < 1800; i += 1) {
         const q = await client.getJobs(50).catch(() => null);
         const job = q?.jobs.find((j) => j.id === jobId);
         if (job) {
           pullJobStatus = job.status;
+          pullProgress =
+            job.progress_total && job.progress_total > 0
+              ? { done: job.progress_done ?? 0, total: job.progress_total }
+              : pullProgress;
           if (job.status === 'finished' || job.status === 'failed') {
-            if (job.status === 'finished') models = await client.listAiModels().then((r) => r.models);
+            if (job.status === 'finished') {
+              models = await client.listAiModels().then((r) => r.models);
+              pullProgress = null;
+              if (searchDone) void doSearch(); // refresh the "pulled ✓" flags in search results
+            }
+            if (job.status === 'failed') pullError = job.error ?? 'Pull failed (no error text).';
             return;
           }
         }
@@ -131,6 +154,31 @@
     } finally {
       pullPolling = false;
     }
+  }
+
+  function pct(p: { done: number; total: number }): string {
+    return p.total ? `${Math.floor((p.done / p.total) * 100)}%` : '';
+  }
+
+  // #5: search the model catalog (curated + best-effort ollama.com), popularity-ranked.
+  async function doSearch(): Promise<void> {
+    searching = true;
+    try {
+      searchResults = (await client.searchAiModels(searchQuery.trim())).models;
+      searchDone = true;
+    } catch (error) {
+      message = errorMessage(error);
+      searchResults = [];
+    } finally {
+      searching = false;
+    }
+  }
+
+  // Pull a model chosen from the search results (all catalog models are Ollama).
+  async function pullFromSearch(name: string): Promise<void> {
+    pullProvider = 'ollama';
+    pullModel = name;
+    await pull();
   }
 
   // Availability + how-to-enable note for a specific provider/backend option, read from the
@@ -516,6 +564,62 @@
       downloads the weights into the Hugging Face cache and needs that package installed in the
       image.
     </p>
+
+    <!-- #5: model search — Ollama has no search API/VRAM, so results are a curated catalog plus a
+         best-effort ollama.com lookup, popularity-ranked, with an *estimated* VRAM need. -->
+    <div class="row">
+      <input bind:value={searchQuery} placeholder="Find a model (e.g. qwen, embed, llama)" disabled={searching}
+        on:keydown={(e) => { if (e.key === 'Enter') doSearch(); }}
+        title="Search popular models by name or keyword" />
+      <button type="button" class="secondary" on:click={doSearch} disabled={searching}
+        title="Search the model catalog (popular models, sizes and estimated VRAM)">
+        {searching ? 'Searching…' : 'Search'}
+      </button>
+    </div>
+    {#if searchDone && !searching}
+      {#if searchResults.length === 0}
+        <p class="empty">No matches. Try a broader term, or type an exact name in “Pull model” below.</p>
+      {:else}
+        <p class="muted small">
+          VRAM is a rough estimate (quantized weights + overhead) — a sizing guide, not a guarantee.
+          Sizes are approximate; <code>ollama.com</code> hits show size/VRAM only once pulled.
+        </p>
+        <div class="catalog-wrap">
+          <table class="catalog">
+            <thead>
+              <tr><th>Model</th><th>Type</th><th>Size</th><th>Est. VRAM</th><th>Popularity</th><th></th></tr>
+            </thead>
+            <tbody>
+              {#each searchResults as r (r.name)}
+                <tr>
+                  <td>
+                    <button type="button" class="copy-name" on:click={() => copyModelName(r.name)}
+                      title="Click to copy this model name">{r.name}</button>
+                    {#if copiedModel === r.name}<span class="copied">copied ✓</span>{/if}
+                    {#if r.source === 'ollama.com'}<span class="src-badge" title="Live result from ollama.com">ollama.com</span>{/if}
+                    {#if r.blurb}<small class="muted blurb">{r.blurb}</small>{/if}
+                  </td>
+                  <td>{r.kind === 'embedding' ? 'embedding' : 'LLM'}</td>
+                  <td>{r.size_bytes ? fmtSize(r.size_bytes) : '—'}</td>
+                  <td>{r.vram_gb != null ? `~${r.vram_gb} GB` : '—'}</td>
+                  <td><span class="pop" style="--pop:{r.popularity}%" title="{r.popularity}/100"></span></td>
+                  <td>
+                    {#if r.pulled}
+                      <span class="copied">pulled ✓</span>
+                    {:else}
+                      <button type="button" class="secondary small" on:click={() => pullFromSearch(r.name)}
+                        disabled={busy} title="Download this model in the background">Pull</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {/if}
+
+    <p class="muted small">Or pull by exact name:</p>
     <div class="row">
       <select bind:value={pullProvider} disabled={busy} title="Provider to download the model from">
         <option value="ollama">ollama</option>
@@ -534,17 +638,24 @@
         Pull model
       </button>
     </div>
-    <!-- #5: live pull progress via Jobs polling. -->
+    <!-- #5: live pull progress + real error text via Jobs polling. -->
     {#if pullJobId}
-      <p class="pull-status" role="status">
-        {#if pullPolling}<span class="spinner" aria-hidden="true"></span>{/if}
-        Pull {pullJobStatus || 'queued'}
-        {#if pullJobStatus === 'finished'}✓{:else if pullJobStatus === 'failed'}✗{/if}
-        <small class="muted">(job {pullJobId.slice(0, 8)})</small>
-      </p>
+      <div class="pull-status" class:failed={pullJobStatus === 'failed'} role="status">
+        <p class="pull-line">
+          {#if pullPolling}<span class="spinner" aria-hidden="true"></span>{/if}
+          Pull {pullJobStatus || 'queued'}
+          {#if pullJobStatus === 'finished'}✓{:else if pullJobStatus === 'failed'}✗{/if}
+          <small class="muted">(job {pullJobId.slice(0, 8)})</small>
+        </p>
+        {#if pullProgress}
+          <progress max={pullProgress.total} value={pullProgress.done}></progress>
+          <small class="muted">{pct(pullProgress)} — {fmtSize(pullProgress.done)} / {fmtSize(pullProgress.total)}</small>
+        {/if}
+        {#if pullError}<p class="pull-err">{pullError}</p>{/if}
+      </div>
     {/if}
     {#if models.length === 0}
-      <p class="empty">No local models. Pull one above (needs the Ollama profile running).</p>
+      <p class="empty">No models pulled yet — search &amp; pull one above (needs the Ollama profile running). Pulled models appear here, each with a Delete button.</p>
     {:else}
       <ul class="models">
         {#each models as m (m.provider + m.name)}
@@ -714,13 +825,50 @@
     white-space: nowrap;
   }
   .pull-status {
-    align-items: center;
     background: var(--status-success-bg);
     border-radius: 6px;
     display: flex;
-    gap: 0.4rem;
+    flex-direction: column;
+    gap: 0.3rem;
     margin: 0.4rem 0;
     padding: 0.35rem 0.6rem;
+  }
+  .pull-status.failed { background: var(--status-danger-bg); }
+  .pull-line { align-items: center; display: flex; gap: 0.4rem; margin: 0; }
+  .pull-status progress { height: 0.55rem; width: 100%; }
+  .pull-err {
+    color: var(--status-danger);
+    font-size: 0.8rem;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .catalog-wrap { margin: 0.3rem 0 0.5rem; overflow-x: auto; }
+  .catalog { border-collapse: collapse; font-size: 0.82rem; width: 100%; }
+  .catalog th, .catalog td {
+    border-bottom: 1px solid var(--border-normal);
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+    vertical-align: top;
+    white-space: nowrap;
+  }
+  .catalog th { color: var(--ink-muted); font-size: 0.72rem; font-weight: 700; }
+  .catalog .blurb { display: block; font-size: 0.72rem; white-space: normal; }
+  .src-badge {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-normal);
+    border-radius: 999px;
+    color: var(--ink-muted);
+    font-size: 0.66rem;
+    margin-left: 0.35rem;
+    padding: 0.02rem 0.4rem;
+  }
+  .pop {
+    background: linear-gradient(to right, var(--accent-primary) var(--pop), var(--border-normal) var(--pop));
+    border-radius: 999px;
+    display: inline-block;
+    height: 0.5rem;
+    width: 4rem;
   }
   .spinner {
     animation: spin 0.8s linear infinite;

@@ -743,10 +743,19 @@ def pull_model_job(provider: str, model: str) -> None:
     from app.db.session import SessionLocal
     from app.services.ai_config import get_ai_config
     from app.services.model_management import pull_model
+    from app.workers.queue import job_report_progress
 
     with SessionLocal() as db:
         ollama_url = get_ai_config(db).ollama_url
-    pull_model(provider, model, ollama_url=ollama_url)
+    # Relay the daemon's byte-level download progress to the job's meta so the Jobs tab / AI panel
+    # can show a live progress bar (#5). RuntimeErrors carry an actionable message (unreachable
+    # daemon, daemon-reported error) which surfaces verbatim in the failed-job row.
+    pull_model(
+        provider,
+        model,
+        ollama_url=ollama_url,
+        on_progress=lambda completed, total, _status: job_report_progress(completed, total),
+    )
 
 
 @_audited_job

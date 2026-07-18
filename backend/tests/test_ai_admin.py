@@ -128,6 +128,38 @@ def test_models_list_when_ollama_up(client, auth_headers, monkeypatch):
     assert all(m["provider"] == "ollama" for m in models)
 
 
+def test_models_search_ranks_and_flags_pulled(client, auth_headers, monkeypatch):
+    from app.services import model_catalog, model_management
+
+    # No network in tests: kill the live scrape; report one already-pulled model via the daemon.
+    monkeypatch.setattr(model_catalog, "_scrape_ollama_library", lambda q, *, timeout=6.0: [])
+    monkeypatch.setattr(
+        model_management,
+        "_ollama_tags",
+        lambda ollama_url: [{"name": "nomic-embed-text:latest", "size": 274301056}],
+    )
+    r = client.get("/api/v1/admin/ai/models/search?q=embed", headers=auth_headers("owner"))
+    assert r.status_code == 200
+    models = r.json()["models"]
+    # Matches on name/family/blurb (so bge-m3 matches "embed" via its blurb), all catalog-sourced.
+    assert models and all(m["source"] == "catalog" for m in models)
+    assert "nomic-embed-text" in {m["name"] for m in models}
+    # Popularity-sorted + estimated VRAM present; the pulled model is flagged.
+    assert [m["popularity"] for m in models] == sorted(
+        (m["popularity"] for m in models), reverse=True
+    )
+    by_name = {m["name"]: m for m in models}
+    assert by_name["nomic-embed-text"]["pulled"] is True
+    assert by_name["nomic-embed-text"]["vram_gb"] is not None
+
+
+def test_models_search_is_owner_only(client, auth_headers):
+    assert (
+        client.get("/api/v1/admin/ai/models/search?q=qwen", headers=auth_headers("editor")).status_code
+        == 403
+    )
+
+
 # --- Phase B5: OCR / advanced-extraction backend ---
 
 

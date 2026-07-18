@@ -1387,6 +1387,22 @@ export interface AiModel {
   size_bytes: number | null;
 }
 
+// A pullable model from the catalog/search (#5): Ollama has no search API or VRAM reporting, so
+// these come from a curated catalog + best-effort ollama.com scrape, with an *estimated* vram_gb.
+export interface CatalogModel {
+  name: string;
+  family: string;
+  params_b: number | null;
+  quant: string;
+  size_bytes: number | null;
+  kind: "llm" | "embedding";
+  popularity: number;
+  vram_gb: number | null;
+  blurb: string;
+  source: "catalog" | "ollama.com";
+  pulled: boolean;
+}
+
 // Privilege ladder, highest first: owner > admin > librarian > editor > contributor > reader.
 export type UserRole =
   "owner" | "admin" | "librarian" | "editor" | "contributor" | "reader";
@@ -2944,6 +2960,16 @@ export class ApiClient {
 
   async listAiModels(): Promise<{ models: AiModel[] }> {
     return this.request("/api/v1/admin/ai/models");
+  }
+
+  /**
+   * Search pullable models by name/keyword (#5), popularity-ranked, each with an estimated VRAM
+   * need. A blank query returns the whole curated catalog.
+   */
+  async searchAiModels(q: string): Promise<{ models: CatalogModel[] }> {
+    return this.request(
+      `/api/v1/admin/ai/models/search?q=${encodeURIComponent(q)}`,
+    );
   }
 
   async pullAiModel(

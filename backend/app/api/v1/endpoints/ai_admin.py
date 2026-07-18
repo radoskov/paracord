@@ -28,6 +28,7 @@ from app.services.bm25_index import cache_info as lexical_cache_info
 from app.services.chunk_embeddings import chunk_embedding_status
 from app.services.embedding_registry import unregister_by_model_name
 from app.services.embeddings import get_embedding_provider
+from app.services.model_catalog import search_models
 from app.services.model_management import (
     delete_model,
     detect_providers,
@@ -103,6 +104,20 @@ def ai_providers(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
 def ai_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     """List locally-available downloadable models."""
     return {"models": list_models(ollama_url=get_ai_config(db).ollama_url)}
+
+
+@router.get("/ai/models/search")
+def ai_models_search(
+    q: str = "", db: Session = DB_DEP, _: User = ADMIN_DEP
+) -> dict:
+    """Find pullable models by name/keyword, popularity-ranked, each with an estimated VRAM need.
+
+    Ollama has no search API or VRAM reporting, so results come from a curated catalog plus a
+    best-effort live enrichment from ollama.com (falls back to the catalog on any failure). Models
+    already pulled locally are flagged so the UI can hide/label their Pull button (#5)."""
+    cfg = get_ai_config(db)
+    local = [m["name"] for m in list_models(ollama_url=cfg.ollama_url) if m.get("name")]
+    return {"models": search_models(q, local_names=local)}
 
 
 @router.get("/ai/embedding-models")

@@ -8,8 +8,11 @@ fully drivable from the UI: detect, list, pull, delete.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import json
 import shutil
+from collections.abc import Callable
 
 import httpx2 as httpx
 
@@ -172,17 +175,68 @@ def list_models(*, ollama_url: str) -> list[dict]:
     return models
 
 
-def pull_model(provider: str, model: str, *, ollama_url: str) -> dict:
-    """Download/pull a model. Blocks until done (run inside an RQ job). Raises on failure."""
-    if provider == "ollama":
-        # A finite (generous) timeout so a hung daemon can't tie up the worker forever (audit).
-        with httpx.Client(timeout=3600) as client:
-            # stream=false → the daemon completes the pull before responding.
-            response = client.post(
-                f"{ollama_url.rstrip('/')}/api/pull", json={"name": model, "stream": False}
-            )
+def _pull_ollama(
+    model: str, *, ollama_url: str, on_progress: Callable[[int, int, str], None] | None
+) -> dict:
+    """Stream an Ollama ``/api/pull`` and relay byte progress. Raises RuntimeError on failure."""
+    url = f"{ollama_url.rstrip('/')}/api/pull"
+    # Generous total budget so a big model can finish, but a short connect timeout so an unreachable
+    # daemon fails fast with a clear message instead of hanging the worker (audit).
+    timeout = httpx.Timeout(3600.0, connect=15.0)
+    last_status = ""
+    try:
+        with (
+            httpx.Client(timeout=timeout) as client,
+            client.stream("POST", url, json={"name": model, "stream": True}) as response,
+        ):
             response.raise_for_status()
-        return {"provider": "ollama", "model": model, "status": "pulled"}
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                # The daemon reports a failed pull inline (bad name, no disk, registry down, …).
+                err = event.get("error")
+                if err:
+                    raise RuntimeError(f"Ollama could not pull {model!r}: {err}")
+                last_status = event.get("status") or last_status
+                total = event.get("total")
+                if on_progress and total:
+                    on_progress(int(event.get("completed") or 0), int(total), last_status)
+    except httpx.ConnectError as exc:
+        raise RuntimeError(
+            f"Ollama daemon unreachable at {ollama_url} — is the ollama service running? "
+            "(start it with `make up-ai`)."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = (exc.response.text or "").strip()[:500]
+        raise RuntimeError(
+            f"Ollama rejected the pull of {model!r} (HTTP {exc.response.status_code})"
+            f"{f': {detail}' if detail else ''}."
+        ) from exc
+    return {"provider": "ollama", "model": model, "status": "pulled"}
+
+
+def pull_model(
+    provider: str,
+    model: str,
+    *,
+    ollama_url: str,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> dict:
+    """Download/pull a model. Blocks until done (run inside an RQ job). Raises on failure.
+
+    ``on_progress`` (when given) is called with ``(completed_bytes, total_bytes, status)`` as the
+    Ollama daemon streams layer-download progress, so the Jobs tab can show a live progress bar.
+    Failures raise a ``RuntimeError`` with an *actionable* message (the daemon being unreachable, or
+    the daemon's own error text) rather than a bare transport traceback (#5).
+    """
+    if provider == "ollama":
+        return _pull_ollama(model, ollama_url=ollama_url, on_progress=on_progress)
     if provider == "sentence_transformers":
         if not _module_available("sentence_transformers"):
             raise RuntimeError(
