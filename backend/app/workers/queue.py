@@ -341,20 +341,26 @@ def fetch_job_result(job_id: str, *, requester_id: str, is_admin: bool) -> dict:
             job = Job.fetch(job_id, connection=queue.connection)
         except NoSuchJobError:
             return {"status": "missing"}
-        requester = (job.get_meta(refresh=False) or {}).get("requester")
+        meta = job.get_meta(refresh=True) or {}
+        requester = meta.get("requester")
         if requester is not None and requester != requester_id and not is_admin:
             return {"status": "forbidden"}
+        # Byte/step progress a job published via job_report_progress (drives the pull progress bar);
+        # included so a by-id poll gets both terminal state AND progress in one reliable call.
+        progress = meta.get("progress") or {}
+        prog = {"progress_done": progress.get("done"), "progress_total": progress.get("total")}
         status = job.get_status(refresh=True)
         if status == "finished":
             result = job.latest_result()
-            return {"status": "finished", "result": getattr(result, "return_value", None)}
+            return {"status": "finished", "result": getattr(result, "return_value", None), **prog}
         if status == "failed":
             result = job.latest_result()
             return {
                 "status": "failed",
                 "error": (getattr(result, "exc_string", None) or "").strip()[-2000:] or None,
+                **prog,
             }
-        return {"status": status}
+        return {"status": status, **prog}
     except Exception as exc:  # noqa: BLE001 - a dead Redis reports as unavailable
         logger.warning("Could not fetch job result %s: %s", job_id, exc)
         return {"status": "unavailable"}

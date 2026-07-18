@@ -9,6 +9,16 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI panel job spinners stuck — poll by id (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-job-poll-by-id-fix.md`. Owner report: pull/mount/unmount
+spinners spun forever (pull frozen at "100% — 0 MB / 0 MB") though the Jobs tab showed the job finished
+and it worked after a manual Refresh. Cause: the pollers scanned the size-limited Jobs list
+(`getJobs(50)`) and searched it by id; once many jobs accumulate the finished job falls outside the
+window → the terminal state is never seen → infinite spin + no on-finish refresh. Fix: poll the job
+**by id** via `GET /jobs/{id}/result` (`fetch_job_result`, now also returning `progress_done/total`
+from meta) — `pollPull`/`pollModelJob` stop on finished/failed/missing. `make frontend-test` 342 passed.
+
 ## Ollama GPU passthrough (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-ollama-gpu-passthrough.md`. Owner's GPU host ran Ollama on

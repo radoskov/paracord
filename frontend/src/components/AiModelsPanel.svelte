@@ -179,8 +179,9 @@
     }
   }
 
-  // #5: poll the Jobs status for the pull job until it finishes/fails, updating a status label, a
-  // byte-level progress bar (from the job's reported {done,total}) and, on failure, the real error.
+  // #5: poll the pull job BY ID (reliable — scanning the size-limited Jobs list missed the finished
+  // job once many jobs had accumulated, so the spinner never stopped). Updates a status label, the
+  // byte progress bar, and (on failure) the real error. 'missing' = finished + expired from Redis.
   async function pollPull(jobId: string): Promise<void> {
     pullPolling = true;
     pullJobStatus = 'queued';
@@ -189,25 +190,26 @@
     try {
       // ~1 h ceiling at 2 s/poll — big models take a while; the loop just stops updating after that.
       for (let i = 0; i < 1800; i += 1) {
-        const q = await client.getJobs(50).catch(() => null);
-        const job = q?.jobs.find((j) => j.id === jobId);
-        if (job) {
-          pullJobStatus = job.status;
+        const r = await client.getJobResult(jobId).catch(() => null);
+        if (r) {
+          const done = r.status === 'finished' || r.status === 'failed' || r.status === 'missing';
+          pullJobStatus = r.status === 'missing' ? 'finished' : r.status;
           pullProgress =
-            job.progress_total && job.progress_total > 0
-              ? { done: job.progress_done ?? 0, total: job.progress_total }
+            r.progress_total && r.progress_total > 0
+              ? { done: r.progress_done ?? 0, total: r.progress_total }
               : pullProgress;
-          if (job.status === 'finished' || job.status === 'failed') {
-            if (job.status === 'finished') {
-              models = await client.listAiModels().then((r) => r.models);
+          if (done) {
+            if (r.status === 'failed') {
+              pullError = r.error ?? 'Pull failed (no error text).';
+            } else {
+              models = await client.listAiModels().then((x) => x.models);
               pullProgress = null;
               if (searchDone) void doSearch(); // refresh the "pulled ✓" flags in search results
             }
-            if (job.status === 'failed') pullError = job.error ?? 'Pull failed (no error text).';
             return;
           }
         }
-        await new Promise((r) => window.setTimeout(r, 2000));
+        await new Promise((res) => window.setTimeout(res, 2000));
       }
     } finally {
       pullPolling = false;
@@ -293,30 +295,32 @@
     modelJobError = '';
     try {
       for (let i = 0; i < 900; i += 1) {
-        const q = await client.getJobs(50).catch(() => null);
-        const job = q?.jobs.find((j) => j.id === jobId);
-        if (job) {
-          modelJobStatus = job.status;
-          if (job.status === 'finished' || job.status === 'failed') {
-            if (job.status === 'failed') modelJobError = job.error ?? `${verb} failed.`;
+        // Poll BY ID (not the size-limited Jobs list) so the terminal state is always detected.
+        const r = await client.getJobResult(jobId).catch(() => null);
+        if (r) {
+          const done = r.status === 'finished' || r.status === 'failed' || r.status === 'missing';
+          const failed = r.status === 'failed';
+          modelJobStatus = r.status === 'missing' ? 'finished' : r.status;
+          if (done) {
+            if (failed) modelJobError = r.error ?? `${verb} failed.`;
             await refreshLive();
-            if (verb === 'Mounting' && job.status === 'finished') {
+            if (verb === 'Mounting' && !failed) {
               const m = loaded.find((x) => sameModel(x.name, model));
               const onGpu = !!(m && m.size_vram_bytes && m.size_vram_bytes > 0);
               if (compute === 'gpu' && !onGpu) {
                 message =
                   `Mounted ${model} on CPU — GPU was requested but no VRAM is in use. The Ollama ` +
-                  `container likely has no GPU access; grant it (nvidia runtime / --gpus all) to use the GPU.`;
+                  `container likely has no GPU access; grant it (export OLLAMA_GPU=1 + make up-ai) to use the GPU.`;
               } else {
                 message = `Mounted ${model} — active ${kind} model (${m ? placementLabel(m) : 'loaded'}).`;
               }
-            } else if (verb === 'Unmounting' && job.status === 'finished') {
+            } else if (verb === 'Unmounting' && !failed) {
               message = `Unmounted ${model} — this capability now uses its built-in baseline.`;
             }
             return;
           }
         }
-        await new Promise((r) => window.setTimeout(r, 2000));
+        await new Promise((res) => window.setTimeout(res, 2000));
       }
     } finally {
       modelJobPolling = false;

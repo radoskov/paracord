@@ -200,10 +200,9 @@ describe("AiModelsPanel mount/unmount (#5)", () => {
         models: [{ provider: "ollama", name: "nomic-embed-text", size_bytes: null, vram_gb: 1 }],
       }),
       getLoadedModels: vi.fn().mockResolvedValue({ loaded: [], vram_budget_gb: null }),
-      // pollModelJob + runningAiJobs both read this; a finished non-AI-status job lets the poll end.
-      getJobs: vi.fn().mockResolvedValue({
-        jobs: [{ id: "mount-job", status: "finished", task: "model-mount", error: null }],
-      }),
+      // runningAiJobs reads getJobs (no in-flight AI jobs); pollModelJob polls getJobResult by id.
+      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+      getJobResult: vi.fn().mockResolvedValue({ status: "finished" }),
       mountAiModel,
       validateAiModel: vi.fn().mockResolvedValue({
         present: true,

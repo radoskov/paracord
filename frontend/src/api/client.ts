@@ -3347,9 +3347,14 @@ export class ApiClient {
     });
   }
 
-  async getJobResult(
-    jobId: string,
-  ): Promise<{ status: string; result?: unknown; error?: string | null }> {
+  async getJobResult(jobId: string): Promise<{
+    status: string;
+    result?: unknown;
+    error?: string | null;
+    // Progress a job published (bytes for a pull); present when the job reported it (#5).
+    progress_done?: number | null;
+    progress_total?: number | null;
+  }> {
     return this.request(`/api/v1/jobs/${jobId}/result`);
   }
 
