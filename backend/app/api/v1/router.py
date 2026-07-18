@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     jobs,
     preferences,
     racks,
+    recommend,
     rows,
     saved_filters,
     search,
@@ -86,6 +87,9 @@ api_router.include_router(
 )
 api_router.include_router(racks.router, prefix="/racks", tags=["racks"], dependencies=auth_required)
 api_router.include_router(rows.router, prefix="/rows", tags=["rows"], dependencies=auth_required)
+api_router.include_router(
+    recommend.router, prefix="/recommend", tags=["recommend"], dependencies=auth_required
+)
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"], dependencies=auth_required)
 api_router.include_router(
     citations.router,

@@ -32,6 +32,7 @@ BM25_REBUILD_JOB = "app.workers.jobs.rebuild_bm25_job"
 REF_MATCH_JOB = "app.workers.jobs.rescan_reference_matches_job"
 REF_CONSOLIDATE_JOB = "app.workers.jobs.consolidate_references_job"
 ANALYSIS_GRAPH_JOB = "app.workers.jobs.analysis_graph_job"
+RECOMMEND_JOB = "app.workers.jobs.recommend_job"
 BACKUP_EXPORT_JOB = "app.workers.jobs.export_backup_job"
 BACKUP_RESTORE_JOB = "app.workers.jobs.restore_backup_job"
 
@@ -502,6 +503,32 @@ def enqueue_scope_topics(scope_type: str, scope_id, **kwargs) -> str | None:
     return _enqueue_scope_job(TOPIC_SCOPE_JOB, "topics-scope", scope_type, scope_id, **kwargs)
 
 
+def enqueue_recommend(run_id, actor_user_id) -> str | None:
+    """Best-effort enqueue of an AI recommendation run (Insights → Recommend categorization).
+
+    Keyed by the run id so re-clicking Run on a still-computing run returns the live job instead of
+    stacking a duplicate. Long timeout (per-paper LLM calls over a scope run for minutes–hours);
+    ``meta.requester`` gates the result read. Never raises (queue-down → None)."""
+    key = f"recommend-{run_id}"
+    try:
+        queue = get_queue()
+        existing = _live_coalesced_job(queue.connection, key)
+        if existing is not None:
+            return existing
+        job = queue.enqueue(
+            RECOMMEND_JOB,
+            args=(str(run_id), str(actor_user_id) if actor_user_id else None),
+            job_id=_fresh_job_id(key),
+            job_timeout=6 * 3600,
+            meta={"requester": str(actor_user_id) if actor_user_id else None},
+        )
+        _remember_latest_job(queue.connection, key, job.id)
+        return job.id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue recommendation run %s: %s", run_id, exc)
+        return None
+
+
 _FUNC_LABELS = {
     EXTRACT_JOB: "extract",
     ENRICH_JOB: "enrich",
@@ -514,6 +541,7 @@ _FUNC_LABELS = {
     SUMMARY_SCOPE_JOB: "summary-scope",
     REF_CONSOLIDATE_JOB: "reference-consolidation",
     ANALYSIS_GRAPH_JOB: "analysis-graph",
+    RECOMMEND_JOB: "recommend",
     BACKUP_EXPORT_JOB: "backup-export",
     BACKUP_RESTORE_JOB: "backup-restore",
     TOPIC_SCOPE_JOB: "topics-scope",

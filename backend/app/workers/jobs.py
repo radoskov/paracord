@@ -565,6 +565,63 @@ def analysis_graph_job(kind: str, params: dict, actor_user_id: str | None = None
 
 
 @_audited_job
+def recommend_job(run_id: str, actor_user_id: str | None = None) -> dict:
+    """Compute a cached AI recommendation run (Insights → Recommend categorization). Reads the
+    RecommendationRun row (its params carry the already-resolved, capped work-id set), fills its
+    ``result``/``status`` in place, and reports per-paper progress. The frontend polls the job, then
+    reads GET /recommend/{run_id}."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.models.recommendation import RecommendationRun
+    from app.models.user import User
+    from app.models.work import Work
+    from app.services.recommendation import run_recommendation
+    from app.workers.queue import job_cancel_requested, job_report_progress
+
+    with SessionLocal() as db:
+        run = db.get(RecommendationRun, uuid.UUID(run_id))
+        if run is None:
+            return {"error": "recommendation run no longer exists"}
+        actor = db.get(User, uuid.UUID(actor_user_id)) if actor_user_id else None
+        if actor is None:
+            run.status = "failed"
+            run.error = "requesting user no longer exists"
+            db.commit()
+            return {"error": "requesting user no longer exists"}
+        params = run.params or {}
+        try:
+            work_ids = [uuid.UUID(w) for w in params.get("work_ids") or []]
+            works = [w for w in (db.get(Work, wid) for wid in work_ids) if w is not None]
+            result = run_recommendation(
+                db,
+                works=works,
+                mode=run.mode,
+                k=int(params.get("k", 5)),
+                scoring=params.get("scoring", "ranking"),
+                parent_combine=params.get("parent_combine", "sum"),
+                prefilter=bool(params.get("prefilter", False)),
+                actor=actor,
+                progress_cb=job_report_progress,
+                cancel_cb=job_cancel_requested,
+            )
+            run.result = result
+            run.provider_used = result.get("provider_used")
+            run.fallback = bool(result.get("fallback"))
+            run.status = "done"
+            db.commit()
+            return {"status": "done", "run_id": run_id, "papers": len(result.get("papers", []))}
+        except Exception as exc:
+            db.rollback()
+            failed = db.get(RecommendationRun, uuid.UUID(run_id))
+            if failed is not None:
+                failed.status = "failed"
+                failed.error = str(exc)[:1000]
+                db.commit()
+            raise
+
+
+@_audited_job
 def export_backup_job(include_pdfs: bool = False, actor_user_id: str | None = None) -> dict:
     """Write a logical backup archive (feature: export/backup). Returns {archive, manifest}."""
     import uuid
