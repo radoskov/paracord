@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models.work import Work
 from app.services.chunk_embeddings import _vec_literal, chunk_column_for
-from app.services.embeddings import EmbeddingProvider, get_embedding_provider
+from app.services.embeddings import EmbeddingProvider, embed_query, get_embedding_provider
 from app.services.semantic_search import semantic_search
 
 # Below this visible-fraction, pre-filter + exact beats ANN post-filtering (the recall cliff).
@@ -145,5 +145,8 @@ def semantic_search_papers(
         )
     column = col[0]
     k = min(max(1, limit) * CHUNK_FANOUT, MAX_CHUNK_FETCH)
-    rows = _fetch_chunk_rows(db, column, provider.embed(query), visible_ids=visible_ids, k=k)
+    from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+    qvec = embed_query(provider, query, cache_size=get_ai_config(db).query_cache_size)
+    rows = _fetch_chunk_rows(db, column, qvec, visible_ids=visible_ids, k=k)
     return _rollup(db, rows, limit)

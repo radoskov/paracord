@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from app.services.vector_math import dense_cosine
+from app.utils.bounded_cache import BoundedTTLCache
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -135,6 +136,12 @@ class OllamaProvider:
         self._model = canonical
         self._base_url = base_url.rstrip("/")
         self._client = None
+        # Ollama keep_alive (seconds; -1 pins) for on-demand embedding, refreshed from the admin
+        # auto-unmount config on each resolve (see resolve_embedding_provider). None → Ollama default.
+        self.keep_alive: int | None = None
+
+    def _keep_alive_payload(self) -> dict:
+        return {} if self.keep_alive is None else {"keep_alive": self.keep_alive}
 
     def embed(self, text: str) -> list[float]:
         import httpx2 as httpx  # noqa: PLC0415
@@ -145,7 +152,7 @@ class OllamaProvider:
             self._client = httpx.Client(timeout=30)
         response = self._client.post(
             f"{self._base_url}/api/embeddings",
-            json={"model": self._model, "prompt": text or ""},
+            json={"model": self._model, "prompt": text or "", **self._keep_alive_payload()},
         )
         response.raise_for_status()
         return [float(x) for x in response.json()["embedding"]]
@@ -164,7 +171,11 @@ class OllamaProvider:
         try:
             response = self._client.post(
                 f"{self._base_url}/api/embed",
-                json={"model": self._model, "input": [t or "" for t in texts]},
+                json={
+                    "model": self._model,
+                    "input": [t or "" for t in texts],
+                    **self._keep_alive_payload(),
+                },
                 timeout=120,
             )
             response.raise_for_status()
@@ -201,6 +212,42 @@ def evict_cached_providers(model_name: str) -> None:
     """Drop cached providers whose resolved model_name matches (model unregistered/deleted)."""
     for key in [k for k, p in _PROVIDER_CACHE.items() if p.model_name == model_name]:
         _PROVIDER_CACHE.pop(key, None)
+    # Cached query vectors are keyed by model_name; drop the whole cache so a re-pulled/changed
+    # model can never serve a stale vector (cheap — it just re-embeds live queries on next search).
+    if _QUERY_EMBED_CACHE is not None:
+        _QUERY_EMBED_CACHE.clear()
+
+
+# Per-(model, query) embedding cache: a search re-embeds the same query on every repeat/keystroke,
+# and for an Ollama embedder that is a network round-trip (plus a first-call model load) each time.
+# Sized from the runtime config (query_cache_size); rebuilt when the size changes. A long TTL keeps
+# it effectively size-bounded LRU — a query's vector for a fixed model doesn't go stale.
+_QUERY_EMBED_CACHE: BoundedTTLCache | None = None
+_QUERY_EMBED_CACHE_SIZE: int = -1
+_QUERY_EMBED_TTL_SECONDS = 24 * 60 * 60
+
+
+def embed_query(provider: EmbeddingProvider, query: str, *, cache_size: int) -> list[float]:
+    """Embed a search ``query`` with ``provider``, caching by (model, query) up to ``cache_size``.
+
+    ``cache_size <= 0`` disables caching (always embeds live). The key includes the provider's
+    ``model_name`` (which encodes provider+model+tag), so distinct models never collide.
+    """
+    global _QUERY_EMBED_CACHE, _QUERY_EMBED_CACHE_SIZE
+    if cache_size <= 0:
+        return provider.embed(query)
+    if _QUERY_EMBED_CACHE is None or cache_size != _QUERY_EMBED_CACHE_SIZE:
+        _QUERY_EMBED_CACHE = BoundedTTLCache(
+            maxsize=cache_size, ttl_seconds=_QUERY_EMBED_TTL_SECONDS
+        )
+        _QUERY_EMBED_CACHE_SIZE = cache_size
+    key = (provider.model_name, query)
+    cached = _QUERY_EMBED_CACHE.get(key)
+    if cached is not None:  # embedding vectors are never None, so this is a clean hit check
+        return cached
+    vector = provider.embed(query)
+    _QUERY_EMBED_CACHE.set(key, vector)
+    return vector
 
 
 @dataclass
@@ -228,11 +275,16 @@ def resolve_embedding_provider(
     When ``db`` is given, the owner-managed runtime config (``ai_config``) decides the provider;
     otherwise the static ``Settings`` defaults are used (back-compat / no-DB call sites).
     """
+    keep_alive: int | None = None
     if db is not None:
-        from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+        from app.services.ai_config import (  # noqa: PLC0415 (avoid import cycle)
+            get_ai_config,
+            keep_alive_value,
+        )
 
         cfg = get_ai_config(db, settings=settings)
         provider, model, ollama_url = cfg.embedding_provider, cfg.embedding_model, cfg.ollama_url
+        keep_alive = keep_alive_value(cfg)
     else:
         if settings is None:
             from app.core.config import get_settings  # noqa: PLC0415
@@ -247,6 +299,10 @@ def resolve_embedding_provider(
             return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
         if provider == "ollama":
             active = cached_provider(provider, model or "nomic-embed-text", ollama_url)
+            # Refresh the cached provider's keep_alive from the current auto-unmount config so the
+            # idle timeout (or pin) applies to on-demand embedding, not Ollama's fixed 5m default.
+            if isinstance(active, OllamaProvider):
+                active.keep_alive = keep_alive
             return ResolvedEmbeddingProvider(active, requested=provider, degraded=False)
     except Exception as exc:  # noqa: BLE001 - optional providers degrade, never break a request
         logger.warning("Embedding provider %r unavailable (%s); using hash-BOW.", provider, exc)

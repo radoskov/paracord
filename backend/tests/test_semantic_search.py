@@ -21,6 +21,40 @@ def db_session(tmp_path: Path):
         yield session
 
 
+# --- query-embedding LRU cache ----------------------------------------------
+
+
+def test_embed_query_caches_per_model_and_can_disable() -> None:
+    from app.services.embeddings import embed_query
+
+    class CountingProvider:
+        def __init__(self, name):
+            self.model_name = name
+            self.calls = 0
+
+        def embed(self, text):
+            self.calls += 1
+            return [float(len(text)), float(self.calls)]
+
+    p = CountingProvider("ollama:nomic-embed-text:latest")
+    # First call embeds; the identical (model, query) is served from cache.
+    v1 = embed_query(p, "attention", cache_size=2048)
+    v2 = embed_query(p, "attention", cache_size=2048)
+    assert v1 == v2
+    assert p.calls == 1  # second query hit the cache, not the provider
+
+    # A different model_name is a distinct key (no cross-model contamination).
+    other = CountingProvider("ollama:bge-m3:latest")
+    embed_query(other, "attention", cache_size=2048)
+    assert other.calls == 1
+
+    # cache_size=0 disables caching → every call re-embeds.
+    fresh = CountingProvider("ollama:nomic-embed-text:latest")
+    embed_query(fresh, "same", cache_size=0)
+    embed_query(fresh, "same", cache_size=0)
+    assert fresh.calls == 2
+
+
 # --- embedder ---------------------------------------------------------------
 
 

@@ -25,6 +25,7 @@ from app.services.embeddings import (
     HashBowProvider,
     cosine_similarity,
     embed_many,
+    embed_query,
     get_embedding_provider,
 )
 
@@ -335,7 +336,9 @@ def semantic_search(
     if auto_index:
         ensure_work_embeddings(db, provider=provider)
 
-    query_vector = provider.embed(query)
+    from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
+
+    query_vector = embed_query(provider, query, cache_size=get_ai_config(db).query_cache_size)
 
     # Fast path: rank in Postgres via pgvector when enabled (falls through to Python on any miss).
     # Over-fetch when filtering so the post-filter still yields up to ``limit`` visible works.
