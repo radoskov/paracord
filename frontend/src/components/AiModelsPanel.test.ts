@@ -16,6 +16,7 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       topic_embedding_model: null,
       ocr_backend: "ocrmypdf",
       ollama_url: "http://localhost:11434",
+      vram_budget_gb: null,
     },
     allowed: {
       embedding_provider: ["hash_bow", "sentence_transformers", "ollama"],
@@ -175,6 +176,69 @@ describe("AiModelsPanel", () => {
     ).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /install/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /pip/i })).toBeNull();
+  });
+});
+
+describe("AiModelsPanel mount/unmount (#5)", () => {
+  it("mounts the selected embedding model (load + make active)", async () => {
+    const status = makeStatus();
+    status.config.embedding_provider = "ollama";
+    status.config.embedding_model = "nomic-embed-text";
+    const mountAiModel = vi
+      .fn()
+      .mockResolvedValue({ config: status.config, reindex_job_id: null, loaded: [] });
+    const client = {
+      getAiStatus: vi.fn().mockResolvedValue(status),
+      listAiModels: vi.fn().mockResolvedValue({
+        models: [{ provider: "ollama", name: "nomic-embed-text", size_bytes: null, vram_gb: 1 }],
+      }),
+      getLoadedModels: vi.fn().mockResolvedValue({ loaded: [], vram_budget_gb: null }),
+      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+      mountAiModel,
+      validateAiModel: vi.fn().mockResolvedValue({
+        present: true,
+        embeddings: true,
+        canonical: "nomic-embed-text",
+        error: null,
+      }),
+    };
+    const { getByRole } = render(AiModelsPanel, { client: client as never });
+    await waitFor(() => expect(client.getLoadedModels).toHaveBeenCalled());
+    await (
+      await import("@testing-library/svelte")
+    ).fireEvent.click(getByRole("button", { name: /^Mount$/ }));
+    await waitFor(() =>
+      expect(mountAiModel).toHaveBeenCalledWith("nomic-embed-text", "embedding"),
+    );
+  });
+
+  it("shows a loaded model with an Unmount control", async () => {
+    const status = makeStatus();
+    status.config.embedding_provider = "ollama";
+    status.config.embedding_model = "nomic-embed-text";
+    const client = {
+      getAiStatus: vi.fn().mockResolvedValue(status),
+      listAiModels: vi.fn().mockResolvedValue({ models: [] }),
+      getLoadedModels: vi.fn().mockResolvedValue({
+        loaded: [
+          { name: "nomic-embed-text:latest", size_bytes: 3e8, size_vram_bytes: 0 },
+        ],
+        vram_budget_gb: 8,
+      }),
+      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+      validateAiModel: vi.fn().mockResolvedValue({
+        present: true,
+        embeddings: true,
+        canonical: "nomic-embed-text",
+        error: null,
+      }),
+    };
+    render(AiModelsPanel, { client: client as never });
+    await waitFor(() => expect(client.getLoadedModels).toHaveBeenCalled());
+    // The loaded-in-memory list renders the model name.
+    expect(await screen.findByText("nomic-embed-text:latest")).toBeTruthy();
+    // At least one Unmount button is present (loaded list + the card badge).
+    expect(screen.getAllByRole("button", { name: /Unmount/ }).length).toBeGreaterThan(0);
   });
 });
 

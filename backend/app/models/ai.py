@@ -102,6 +102,9 @@ class AIConfig(Base):
     # OCR languages in tesseract syntax (e.g. "eng" or "eng+spa"). NULL → Settings.ocr_language.
     ocr_language: Mapped[str | None] = mapped_column(String(128), nullable=True)
     ollama_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Admin-set VRAM/RAM budget (GB) for the Ollama host — the mount/unmount panel warns before
+    # loading a model whose estimate + already-loaded models would exceed it. NULL → no budget check.
+    vram_budget_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

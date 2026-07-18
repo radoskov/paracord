@@ -4,6 +4,7 @@ Lets an owner or admin choose the embedding/summary/topic providers and models, 
 or delete model weights, and reindex embeddings — all from the web UI rather than a config file.
 """
 
+import contextlib
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,8 +33,11 @@ from app.services.model_catalog import search_models
 from app.services.model_management import (
     delete_model,
     detect_providers,
+    list_loaded,
     list_models,
+    mount_model,
     probe_embedding_model,
+    unmount_model,
 )
 from app.services.semantic_search import reindex_status
 from app.workers.queue import enqueue_model_pull, enqueue_reindex
@@ -55,6 +59,7 @@ class AIConfigUpdate(BaseModel):
     ocr_backend: str | None = None
     ocr_language: str | None = None
     ollama_url: str | None = None
+    vram_budget_gb: float | None = None
 
 
 class ModelRef(BaseModel):
@@ -62,6 +67,14 @@ class ModelRef(BaseModel):
 
     provider: str
     model: str
+
+
+class MountRef(BaseModel):
+    """A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind)."""
+
+    provider: str = "ollama"
+    model: str
+    kind: str  # "summary" | "embedding"
 
 
 @router.get("/ai-config")
@@ -220,6 +233,110 @@ def delete_model_endpoint(payload: ModelRef, db: Session = DB_DEP, owner: User =
     )
     db.commit()
     return result
+
+
+@router.get("/ai/loaded")
+def ai_loaded_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
+    """Models currently held in the Ollama daemon's memory + the admin's VRAM budget (#5).
+
+    Powers the mount panel: what's loaded (and its VRAM), so the admin can free memory and so the
+    'will it fit?' warning can compare an estimate against the budget and what's already loaded."""
+    cfg = get_ai_config(db)
+    return {
+        "loaded": list_loaded(ollama_url=cfg.ollama_url),
+        "vram_budget_gb": cfg.vram_budget_gb,
+    }
+
+
+@router.post("/ai/models/mount")
+def mount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
+    """Load a model into memory AND make it the active model for its capability (#5).
+
+    Mount = load (keep_alive=-1) + select. One model per kind: the previously-active model of the
+    same kind is freed from memory. Selecting a different embedding model queues a reindex (its
+    vectors must match). Features that can't run degrade to their built-in baseline — never error."""
+    if payload.provider != "ollama":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only Ollama models can be mounted")
+    if payload.kind not in ("summary", "embedding"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be 'summary' or 'embedding'")
+    embedding = payload.kind == "embedding"
+    cfg = get_ai_config(db)
+    try:
+        mount_model(payload.model, embedding=embedding, ollama_url=cfg.ollama_url)
+    except Exception as exc:  # noqa: BLE001 - surface the daemon's reason as a 502
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    if embedding:
+        prev = cfg.embedding_model if cfg.embedding_provider == "ollama" else None
+        changes = {"embedding_provider": "ollama", "embedding_model": payload.model}
+    else:
+        prev = cfg.summary_model if cfg.summary_provider == "local_llm" else None
+        changes = {"summary_provider": "local_llm", "summary_model": payload.model}
+    config, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=owner.id)
+    # One-per-kind: free the previously-active model of this kind from memory (best-effort).
+    if prev and prev != payload.model:
+        with contextlib.suppress(Exception):
+            unmount_model(prev, embedding=embedding, ollama_url=cfg.ollama_url)
+    record_event(
+        db,
+        "ai.model_mounted",
+        actor_user_id=owner.id,
+        entity_type="ai_model",
+        details={"model": payload.model, "kind": payload.kind},
+    )
+    db.commit()
+    reindex_job_id = enqueue_reindex() if embedding_changed else None
+    return {
+        "config": config.as_dict(),
+        "reindex_job_id": reindex_job_id,
+        "loaded": list_loaded(ollama_url=cfg.ollama_url),
+    }
+
+
+@router.post("/ai/models/unmount")
+def unmount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
+    """Release a model from memory; if it was the active model for its kind, drop that capability to
+    its built-in baseline (hash-BOW / extractive) so features keep working (#5)."""
+    if payload.kind not in ("summary", "embedding"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be 'summary' or 'embedding'")
+    embedding = payload.kind == "embedding"
+    cfg = get_ai_config(db)
+    try:
+        unmount_model(payload.model, embedding=embedding, ollama_url=cfg.ollama_url)
+    except Exception as exc:  # noqa: BLE001 - surface the daemon's reason as a 502
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    # Only revert config if this model was the active one for its kind (don't clobber a different
+    # selection the admin loaded manually).
+    if embedding and cfg.embedding_provider == "ollama" and cfg.embedding_model == payload.model:
+        changes: dict | None = {"embedding_provider": "hash_bow", "embedding_model": ""}
+    elif (
+        not embedding
+        and cfg.summary_provider == "local_llm"
+        and cfg.summary_model == payload.model
+    ):
+        changes = {"summary_provider": "extractive", "summary_model": ""}
+    else:
+        changes = None
+    embedding_changed = False
+    if changes:
+        config, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=owner.id)
+    else:
+        config = get_ai_config(db)
+    record_event(
+        db,
+        "ai.model_unmounted",
+        actor_user_id=owner.id,
+        entity_type="ai_model",
+        details={"model": payload.model, "kind": payload.kind},
+    )
+    db.commit()
+    reindex_job_id = enqueue_reindex() if embedding_changed else None
+    return {
+        "config": config.as_dict(),
+        "reindex_job_id": reindex_job_id,
+        "loaded": list_loaded(ollama_url=cfg.ollama_url),
+    }
 
 
 @router.post("/ai/reindex", status_code=status.HTTP_202_ACCEPTED)

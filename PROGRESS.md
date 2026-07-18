@@ -9,6 +9,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI model mount/unmount — live VRAM control (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-ai-model-mount-unmount.md`. Owner's ask: mount/unmount a model
+live so a big model isn't stuck in VRAM (previously an SSH `docker` kill that took all LLM features
+down). Built on Ollama `keep_alive`. Decisions: **mount = load (`keep_alive:-1`) + make active**;
+**unmount = release (`keep_alive:0`) + drop to baseline** (hash-BOW / extractive); **admin-set
+`vram_budget_gb`** drives a pre-mount "will it fit?" warning (Ollama reports no total VRAM).
+
+- **Config + migration**: `AIConfig.vram_budget_gb` + `0080` (parity green, live DB 0079→0080).
+- **Runtime** (`services/model_management.py`): `list_loaded` (/api/ps), `mount_model`/`unmount_model`
+  (`/api/embed` for embeddings, `/api/generate` for LLMs); `list_models` gains estimated `vram_gb`.
+- **Endpoints** (`ai_admin.py`): `GET /ai/loaded`; `POST /ai/models/mount` (load → select → free
+  previous of kind → reindex if embedding changed); `POST /ai/models/unmount` (unload → revert to
+  baseline only if it was the active model of that kind).
+- **Frontend** (`AiModelsPanel.svelte`): Mount/Unmount on the semantic-search & summaries cards; a
+  "Memory budget (GB)" input; a "Loaded in memory" section (per-model VRAM + Unmount, total vs budget);
+  mount/unmount confirms warn on budget overflow + running AI jobs. Leans on the existing baseline
+  fallback so live unmount degrades gracefully.
+- Tests: backend mount/unmount/budget/loaded + parity; `make frontend-test` 341 passed (+2).
+
 ## AI model management — pull progress, error surfacing, search + VRAM (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-ai-model-pull-search-progress.md`. Fixes the owner's

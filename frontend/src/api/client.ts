@@ -1326,6 +1326,8 @@ export interface AiConfig {
   // OCR languages in tesseract syntax; supports multi like 'eng+spa'.
   ocr_language: string;
   ollama_url: string;
+  // Admin-set memory budget (GB) for the Ollama host; null → no mount VRAM warning (#5).
+  vram_budget_gb: number | null;
 }
 
 export interface AiProviderInfo {
@@ -1385,6 +1387,17 @@ export interface AiModel {
   provider: string;
   name: string;
   size_bytes: number | null;
+  // Estimated memory to run it (#5); null when the size can't be inferred from the tag.
+  vram_gb?: number | null;
+}
+
+// A model currently held in the Ollama daemon's memory (GET /admin/ai/loaded).
+export interface LoadedModel {
+  name: string;
+  size_bytes: number | null;
+  // Actual GPU VRAM in use; 0 on a CPU-only host.
+  size_vram_bytes: number | null;
+  expires_at?: string | null;
 }
 
 // A pullable model from the catalog/search (#5): Ollama has no search API or VRAM reporting, so
@@ -3005,6 +3018,39 @@ export class ApiClient {
     return this.request("/api/v1/admin/ai/models", {
       method: "DELETE",
       body: { provider, model },
+    });
+  }
+
+  /** Models currently loaded in the Ollama daemon's memory + the admin VRAM budget (#5). */
+  async getLoadedModels(): Promise<{
+    loaded: LoadedModel[];
+    vram_budget_gb: number | null;
+  }> {
+    return this.request("/api/v1/admin/ai/loaded");
+  }
+
+  /**
+   * Mount = load a model into memory AND make it the active model for its capability (#5). One model
+   * per kind; a different embedding model queues a reindex (returned as `reindex_job_id`).
+   */
+  async mountAiModel(
+    model: string,
+    kind: "summary" | "embedding",
+  ): Promise<{ config: AiConfig; reindex_job_id: string | null; loaded: LoadedModel[] }> {
+    return this.request("/api/v1/admin/ai/models/mount", {
+      method: "POST",
+      body: { provider: "ollama", model, kind },
+    });
+  }
+
+  /** Unmount = release from memory; if it was active for its kind, that capability drops to baseline. */
+  async unmountAiModel(
+    model: string,
+    kind: "summary" | "embedding",
+  ): Promise<{ config: AiConfig; reindex_job_id: string | null; loaded: LoadedModel[] }> {
+    return this.request("/api/v1/admin/ai/models/unmount", {
+      method: "POST",
+      body: { provider: "ollama", model, kind },
     });
   }
 

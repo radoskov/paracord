@@ -160,6 +160,129 @@ def test_models_search_is_owner_only(client, auth_headers):
     )
 
 
+# --- Model mount/unmount (VRAM control) ---
+
+
+def test_vram_budget_persists_and_rejects_negative(client, auth_headers, db):
+    owner = auth_headers("owner")
+    r = client.put("/api/v1/admin/ai-config", headers=owner, json={"vram_budget_gb": 8})
+    assert r.status_code == 200
+    assert client.get("/api/v1/admin/ai-config", headers=owner).json()["config"]["vram_budget_gb"] == 8
+    assert (
+        client.put("/api/v1/admin/ai-config", headers=owner, json={"vram_budget_gb": -1}).status_code
+        == 400
+    )
+
+
+def _stub_runtime(monkeypatch):
+    """Replace the Ollama load/unload/ps calls + reindex enqueue with in-memory stubs; return the
+    call log so a test can assert what was loaded/freed."""
+    import app.api.v1.endpoints.ai_admin as m
+
+    calls: list = []
+    monkeypatch.setattr(
+        m, "mount_model", lambda model, *, embedding, ollama_url: calls.append(("mount", model)) or {}
+    )
+    monkeypatch.setattr(
+        m,
+        "unmount_model",
+        lambda model, *, embedding, ollama_url: calls.append(("unmount", model)) or {},
+    )
+    monkeypatch.setattr(m, "list_loaded", lambda *, ollama_url: [])
+    monkeypatch.setattr(m, "enqueue_reindex", lambda: "reindex-job")
+    return calls
+
+
+def test_mount_selects_model_and_frees_previous_of_kind(client, auth_headers, db, monkeypatch):
+    calls = _stub_runtime(monkeypatch)
+    owner = auth_headers("owner")
+
+    # Mount a summary model → selects local_llm + that model.
+    r = client.post(
+        "/api/v1/admin/ai/models/mount",
+        headers=owner,
+        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
+    )
+    assert r.status_code == 200
+    cfg = r.json()["config"]
+    assert cfg["summary_provider"] == "local_llm" and cfg["summary_model"] == "qwen3:4b"
+    assert ("mount", "qwen3:4b") in calls
+
+    # Mount a different summary model → one-per-kind frees the previous one.
+    r2 = client.post(
+        "/api/v1/admin/ai/models/mount",
+        headers=owner,
+        json={"provider": "ollama", "model": "llama3.2:3b", "kind": "summary"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["config"]["summary_model"] == "llama3.2:3b"
+    assert ("unmount", "qwen3:4b") in calls  # previous summary model freed
+
+
+def test_mount_embedding_queues_reindex(client, auth_headers, db, monkeypatch):
+    _stub_runtime(monkeypatch)
+    owner = auth_headers("owner")
+    r = client.post(
+        "/api/v1/admin/ai/models/mount",
+        headers=owner,
+        json={"provider": "ollama", "model": "nomic-embed-text", "kind": "embedding"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["config"]["embedding_provider"] == "ollama"
+    assert body["config"]["embedding_model"] == "nomic-embed-text"
+    assert body["reindex_job_id"] == "reindex-job"  # embedding change → reindex
+
+
+def test_unmount_active_model_reverts_to_baseline(client, auth_headers, db, monkeypatch):
+    calls = _stub_runtime(monkeypatch)
+    owner = auth_headers("owner")
+    client.post(
+        "/api/v1/admin/ai/models/mount",
+        headers=owner,
+        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
+    )
+    r = client.post(
+        "/api/v1/admin/ai/models/unmount",
+        headers=owner,
+        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
+    )
+    assert r.status_code == 200
+    assert r.json()["config"]["summary_provider"] == "extractive"  # baseline
+    assert ("unmount", "qwen3:4b") in calls
+
+
+def test_mount_rejects_bad_kind_and_provider(client, auth_headers, monkeypatch):
+    _stub_runtime(monkeypatch)
+    owner = auth_headers("owner")
+    assert (
+        client.post(
+            "/api/v1/admin/ai/models/mount",
+            headers=owner,
+            json={"provider": "ollama", "model": "x", "kind": "bogus"},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/admin/ai/models/mount",
+            headers=owner,
+            json={"provider": "sentence_transformers", "model": "x", "kind": "summary"},
+        ).status_code
+        == 400
+    )
+
+
+def test_loaded_endpoint_owner_only(client, auth_headers, monkeypatch):
+    _stub_runtime(monkeypatch)
+    assert (
+        client.get("/api/v1/admin/ai/loaded", headers=auth_headers("editor")).status_code == 403
+    )
+    r = client.get("/api/v1/admin/ai/loaded", headers=auth_headers("owner"))
+    assert r.status_code == 200
+    assert "loaded" in r.json() and "vram_budget_gb" in r.json()
+
+
 # --- Phase B5: OCR / advanced-extraction backend ---
 
 

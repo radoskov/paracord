@@ -162,17 +162,96 @@ def probe_embedding_model(model: str, *, ollama_url: str) -> dict:
 
 
 def list_models(*, ollama_url: str) -> list[dict]:
-    """List locally-available downloadable models (currently Ollama; ST weights live in HF cache)."""
+    """List locally-available downloadable models (currently Ollama; ST weights live in HF cache).
+
+    Each row carries an *estimated* ``vram_gb`` (from the tag's reported parameter size + quant when
+    present, else parsed from the name) so the mount panel can warn before loading (#5)."""
+    from app.services.model_catalog import estimate_vram_gb, params_from_name
+
     models: list[dict] = []
     for entry in _ollama_tags(ollama_url) or []:
+        name = entry.get("name")
+        details = entry.get("details") or {}
+        # Newer Ollama tags report "parameter_size" ("4.0B") + "quantization_level" ("Q4_K_M").
+        params = params_from_name(details.get("parameter_size") or "") or params_from_name(name or "")
+        quant = details.get("quantization_level") or "Q4_K_M"
         models.append(
             {
                 "provider": "ollama",
-                "name": entry.get("name"),
+                "name": name,
                 "size_bytes": entry.get("size"),
+                "vram_gb": estimate_vram_gb(params, quant) if params else None,
             }
         )
     return models
+
+
+def list_loaded(*, ollama_url: str) -> list[dict]:
+    """Models currently held in the Ollama daemon's memory (GET /api/ps). Empty if unreachable.
+
+    ``size_vram_bytes`` is the actual GPU VRAM in use (0 on a CPU-only host); ``size_bytes`` is the
+    total resident size. Used by the mount panel to show what's loaded and free it."""
+    try:
+        with httpx.Client(timeout=5) as client:
+            resp = client.get(f"{ollama_url.rstrip('/')}/api/ps")
+            resp.raise_for_status()
+            return [
+                {
+                    "name": m.get("name"),
+                    "size_bytes": m.get("size"),
+                    "size_vram_bytes": m.get("size_vram"),
+                    "expires_at": m.get("expires_at"),
+                }
+                for m in (resp.json().get("models") or [])
+            ]
+    except Exception:  # noqa: BLE001 - unreachable daemon → nothing loaded, not an error
+        return []
+
+
+def _keep_alive(model: str, *, embedding: bool, ollama_url: str, keep_alive: int) -> None:
+    """Load (``keep_alive=-1``, pin) or unload (``keep_alive=0``) a model. Raises RuntimeError on
+    failure. Embedding-only models don't support /api/generate, so route by kind."""
+    base = ollama_url.rstrip("/")
+    # Loading a big model off disk can take a while; a short connect timeout still fails fast when
+    # the daemon is down.
+    timeout = httpx.Timeout(600.0, connect=15.0)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            if embedding:
+                resp = client.post(
+                    f"{base}/api/embed",
+                    json={"model": model, "input": "ping", "keep_alive": keep_alive},
+                )
+            else:
+                # No prompt → the daemon just loads (or, with keep_alive=0, unloads) the model.
+                resp = client.post(
+                    f"{base}/api/generate", json={"model": model, "keep_alive": keep_alive}
+                )
+            resp.raise_for_status()
+    except httpx.ConnectError as exc:
+        raise RuntimeError(
+            f"Ollama daemon unreachable at {ollama_url} — is the ollama service running?"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = (exc.response.text or "").strip()[:300]
+        raise RuntimeError(
+            f"Ollama could not {'load' if keep_alive else 'unload'} {model!r} "
+            f"(HTTP {exc.response.status_code}){f': {detail}' if detail else ''}."
+        ) from exc
+
+
+def mount_model(model: str, *, embedding: bool, ollama_url: str) -> dict:
+    """Load a model into the daemon's memory and pin it there (keep_alive=-1)."""
+    _keep_alive(model, embedding=embedding, ollama_url=ollama_url, keep_alive=-1)
+    return {"model": model, "status": "mounted"}
+
+
+def unmount_model(model: str, *, embedding: bool, ollama_url: str) -> dict:
+    """Release a model from the daemon's memory (keep_alive=0)."""
+    _keep_alive(model, embedding=embedding, ollama_url=ollama_url, keep_alive=0)
+    return {"model": model, "status": "unmounted"}
 
 
 def _pull_ollama(

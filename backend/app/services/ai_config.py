@@ -36,6 +36,7 @@ EDITABLE_FIELDS = (
     "ocr_backend",
     "ocr_language",
     "ollama_url",
+    "vram_budget_gb",
 )
 EMBEDDING_PROVIDERS = ("hash_bow", "sentence_transformers", "ollama")
 SUMMARY_PROVIDERS = ("extractive", "local_llm")
@@ -60,6 +61,8 @@ class EffectiveAIConfig:
     # OCR languages in tesseract syntax; supports multi like "eng+spa" (passed through verbatim).
     ocr_language: str
     ollama_url: str
+    # Admin-set memory budget (GB) for the Ollama host; None → no mount VRAM warning.
+    vram_budget_gb: float | None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -76,6 +79,7 @@ def _defaults(settings: Settings) -> EffectiveAIConfig:
         ocr_backend=settings.ocr_backend,
         ocr_language=settings.ocr_language,
         ollama_url=settings.ollama_url,
+        vram_budget_gb=None,
     )
 
 
@@ -186,3 +190,10 @@ def _validate(changes: dict, *, settings: Settings) -> None:
         raise ValueError(f"Unknown ocr_backend (allowed: {OCR_BACKENDS})")
     if "ollama_url" in changes:
         _validate_ollama_url(changes["ollama_url"], settings=settings)
+    if changes.get("vram_budget_gb") is not None:
+        try:
+            budget = float(changes["vram_budget_gb"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("vram_budget_gb must be a number of gigabytes") from exc
+        if budget < 0:
+            raise ValueError("vram_budget_gb must be non-negative")

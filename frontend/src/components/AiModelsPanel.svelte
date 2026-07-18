@@ -17,6 +17,7 @@
     type AiStatus,
     type CatalogModel,
     type EmbeddingModelInfo,
+    type LoadedModel,
   } from '../api/client';
   import { errorMessage } from '../lib/ui';
 
@@ -53,6 +54,9 @@
   let searching = false;
   let searchDone = false;
 
+  // Mount/unmount (#5): models currently loaded in the Ollama daemon's memory.
+  let loaded: LoadedModel[] = [];
+
   // Copy-to-clipboard confirmation for a clicked model name (#19).
   let copiedModel = '';
 
@@ -85,6 +89,12 @@
       } catch {
         embeddingModels = [];
         maxModels = 0;
+      }
+      // Loaded-in-memory models (#5); tolerate absence on older backends.
+      try {
+        loaded = (await client.getLoadedModels()).loaded;
+      } catch {
+        loaded = [];
       }
     });
     // Validate the current Ollama embedding model so the warning is present on load.
@@ -179,6 +189,113 @@
     pullProvider = 'ollama';
     pullModel = name;
     await pull();
+  }
+
+  // --- Mount / unmount (VRAM control, #5) --------------------------------------------------------
+
+  // Ollama /api/tags names carry ':latest'; treat an untagged name as its ':latest' tag.
+  function sameModel(a: string | null | undefined, b: string | null | undefined): boolean {
+    if (!a || !b) return false;
+    const norm = (s: string) => (s.includes(':') ? s : `${s}:latest`);
+    return norm(a) === norm(b);
+  }
+  function isLoaded(name: string | null | undefined): boolean {
+    return !!name && loaded.some((m) => sameModel(m.name, name));
+  }
+  // A loaded model's memory in GB: actual VRAM when on a GPU, else its resident size.
+  function loadedGb(m: LoadedModel): number {
+    const v = m.size_vram_bytes && m.size_vram_bytes > 0 ? m.size_vram_bytes : (m.size_bytes ?? 0);
+    return v / 1e9;
+  }
+  function loadedTotalGb(): number {
+    return loaded.reduce((s, m) => s + loadedGb(m), 0);
+  }
+  function loadedVramLabel(m: LoadedModel): string {
+    if (m.size_vram_bytes && m.size_vram_bytes > 0) return `${(m.size_vram_bytes / 1e9).toFixed(1)} GB VRAM`;
+    return m.size_bytes ? `${fmtSize(m.size_bytes)} in RAM` : '';
+  }
+  // Estimated GB to run a pulled model (from its list row's vram_gb).
+  function modelEstGb(name: string): number | null {
+    const m = models.find((x) => sameModel(x.name, name) || x.name === name);
+    return m?.vram_gb ?? null;
+  }
+
+  // Running/queued AI jobs whose task labels imply a model — mount/unmount may disrupt them.
+  async function runningAiJobs(): Promise<string[]> {
+    const q = await client.getJobs(50).catch(() => null);
+    if (!q) return [];
+    const AI = /embed|reindex|summar|recommend|keyword|topic|model-pull|lexical/i;
+    return q.jobs
+      .filter((j) => (j.status === 'started' || j.status === 'queued') && AI.test(j.task))
+      .map((j) => j.task);
+  }
+
+  // Confirm the mount/unmount is safe (VRAM budget headroom + running AI jobs), then run it.
+  async function mount(model: string | null, kind: 'summary' | 'embedding', estGb?: number | null): Promise<void> {
+    const name = (model ?? '').trim();
+    if (!name) return;
+    const budget = config?.vram_budget_gb ?? null;
+    const est = estGb ?? modelEstGb(name);
+    if (budget && est) {
+      const other = loaded.filter((m) => !sameModel(m.name, name)).reduce((s, m) => s + loadedGb(m), 0);
+      if (est + other > budget) {
+        const ok = window.confirm(
+          `Mounting ${name} needs ~${est.toFixed(1)} GB and ${other.toFixed(1)} GB is already loaded — ` +
+            `that may exceed your ${budget} GB budget. Mount anyway?`,
+        );
+        if (!ok) return;
+      }
+    }
+    const running = await runningAiJobs();
+    if (running.length) {
+      const ok = window.confirm(
+        `${running.length} AI job(s) are running (${running.join(', ')}). Mounting a different model ` +
+          `may cause them to fail or use the wrong model. Continue?`,
+      );
+      if (!ok) return;
+    }
+    await run(async () => {
+      const r = await client.mountAiModel(name, kind);
+      config = r.config;
+      loaded = r.loaded;
+      message = r.reindex_job_id
+        ? `Mounted ${name}. Embedding model changed — reindex queued (job ${r.reindex_job_id.slice(0, 8)}).`
+        : `Mounted ${name} — now the active ${kind} model.`;
+      await refresh();
+    });
+  }
+
+  async function unmount(model: string | null, kind: 'summary' | 'embedding'): Promise<void> {
+    const name = (model ?? '').trim();
+    if (!name) return;
+    const running = await runningAiJobs();
+    if (running.length) {
+      const ok = window.confirm(
+        `${running.length} AI job(s) are running (${running.join(', ')}). Unmounting will drop this ` +
+          `capability to its baseline and may fail those jobs. Continue?`,
+      );
+      if (!ok) return;
+    }
+    await run(async () => {
+      const r = await client.unmountAiModel(name, kind);
+      config = r.config;
+      loaded = r.loaded;
+      message = `Unmounted ${name} — this capability now uses its built-in baseline.`;
+      await refresh();
+    });
+  }
+
+  // Unmount a model shown in the "loaded" list: infer its kind from the active config, else its name.
+  async function unmountLoaded(m: LoadedModel): Promise<void> {
+    let kind: 'summary' | 'embedding';
+    if (config && config.embedding_provider === 'ollama' && sameModel(config.embedding_model, m.name)) {
+      kind = 'embedding';
+    } else if (config && config.summary_provider === 'local_llm' && sameModel(config.summary_model, m.name)) {
+      kind = 'summary';
+    } else {
+      kind = /embed/i.test(m.name) ? 'embedding' : 'summary';
+    }
+    await unmount(m.name, kind);
   }
 
   // Availability + how-to-enable note for a specific provider/backend option, read from the
@@ -384,6 +501,18 @@
             </select>
             <small class="hint">Pick a pulled Ollama model, or add one with “Pull model” below (e.g. nomic-embed-text).</small>
           </label>
+          <!-- #5: mount = load into memory + make active; unmount = free memory + baseline fallback. -->
+          <div class="mount-row">
+            {#if isLoaded(config.embedding_model)}
+              <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
+              <button type="button" class="secondary small" on:click={() => unmount(config.embedding_model, 'embedding')}
+                disabled={busy} title="Free this model from memory; semantic search falls back to hash-BOW">Unmount</button>
+            {:else}
+              <button type="button" class="small" on:click={() => mount(config.embedding_model, 'embedding')}
+                disabled={busy || !config.embedding_model?.trim()}
+                title={config.embedding_model?.trim() ? 'Load this model into memory and use it for semantic search' : 'Pick a model first'}>Mount</button>
+            {/if}
+          </div>
         {:else if config.embedding_provider === 'sentence_transformers'}
           <label>Embedding model
             <select disabled title="sentence-transformers is not installed in this image">
@@ -492,6 +621,18 @@
             </select>
             <small class="hint">Pick a pulled Ollama model, or add one with “Pull model” below.</small>
           </label>
+          <!-- #5: mount = load into memory + make active; unmount = free memory + baseline fallback. -->
+          <div class="mount-row">
+            {#if isLoaded(config.summary_model)}
+              <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
+              <button type="button" class="secondary small" on:click={() => unmount(config.summary_model, 'summary')}
+                disabled={busy} title="Free this model from memory; summaries fall back to the extractive baseline">Unmount</button>
+            {:else}
+              <button type="button" class="small" on:click={() => mount(config.summary_model, 'summary')}
+                disabled={busy || !config.summary_model?.trim()}
+                title={config.summary_model?.trim() ? 'Load this model into memory and use it for summaries' : 'Pick a model first'}>Mount</button>
+            {/if}
+          </div>
         {:else}
           <label>Summary model
             <select disabled title="No model needed for the built-in extractive summarizer">
@@ -554,8 +695,38 @@
         <input bind:value={config.ollama_url} placeholder="http://localhost:11434" disabled={busy}
           title="Base URL of the Ollama server used by the ollama / local_llm engines" />
       </label>
+      <label class="vram-budget">Memory budget (GB)
+        <input type="number" min="0" step="0.5" bind:value={config.vram_budget_gb} placeholder="e.g. 8" disabled={busy}
+          title="VRAM/RAM budget for the Ollama host; mounting warns before it would be exceeded. Save to persist." />
+      </label>
       <span class="muted">Ollama: {status.ollama_reachable ? 'reachable ✓' : 'not reachable'}</span>
     </div>
+
+    <!-- #5: models currently held in the Ollama daemon's memory. -->
+    <h3 class="section">Loaded in memory</h3>
+    <p class="muted small">
+      Mounting a model (from the cards above) pins it in the Ollama daemon's memory and makes it the
+      active model for its capability; unmounting frees the memory and that capability falls back to
+      its built-in baseline. Only one model per kind is active at a time.{config.vram_budget_gb
+        ? ` Budget ${config.vram_budget_gb} GB · loaded now ${loadedTotalGb().toFixed(1)} GB.`
+        : ''}
+    </p>
+    {#if loaded.length === 0}
+      <p class="empty">Nothing loaded. Mount a model from the “Semantic search” or “Scope summaries” card above.</p>
+    {:else}
+      <ul class="models">
+        {#each loaded as m (m.name)}
+          <li>
+            <span>
+              <strong>{m.name}</strong>
+              <small class="muted">{loadedVramLabel(m)}</small>
+            </span>
+            <button type="button" class="secondary small" on:click={() => unmountLoaded(m)} disabled={busy}
+              title="Free this model from memory">Unmount</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
 
     <h3 class="section">Models</h3>
     <p class="muted small">
@@ -795,6 +966,10 @@
   .row { align-items: flex-end; display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
   .row.shared { border-top: 1px solid var(--border-normal); padding-top: 0.75rem; }
   .ollama-url { flex: 1 1 16rem; }
+  .vram-budget { flex: 0 0 9rem; }
+  .mount-row { align-items: center; display: flex; gap: 0.5rem; margin-top: 0.1rem; }
+  .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
+  .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
   .hint { color: var(--status-warning); }
   .small { margin: 0.2rem 0 0.4rem; }
   .message { background: var(--status-success-bg); border-radius: 6px; padding: 0.4rem 0.6rem; }
