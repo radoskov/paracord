@@ -10,6 +10,12 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 COMPOSE ?= docker compose
+# Opt-in GPU passthrough for the Ollama container. Export OLLAMA_GPU=1 on a host with an NVIDIA GPU +
+# Container Toolkit so EVERY compose command (up-ai, up-all, ai-update, restart, …) keeps Ollama on
+# the GPU — otherwise it runs on the CPU (the portable default). See docker-compose.gpu.yml.
+ifeq ($(OLLAMA_GPU),1)
+COMPOSE += -f docker-compose.yml -f docker-compose.gpu.yml
+endif
 COMPOSE_PROD ?= docker compose -f docker-compose.yml -f docker-compose.prod.yml
 API_SERVICE ?= api
 AGENT_SERVICE ?= agent

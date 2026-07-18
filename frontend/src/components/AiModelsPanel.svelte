@@ -1166,8 +1166,10 @@
           Ollama decide; <em>Prefer GPU</em> offloads all layers to the GPU (if the container has GPU
           access); <em>Force CPU</em> keeps it in system RAM. After a mount, each loaded row shows
           whether it landed on <em>GPU (VRAM)</em> or <em>CPU (RAM)</em>. If you asked for GPU but it
-          loaded on CPU, the Ollama container has no GPU access — grant it (nvidia runtime /
-          <code>--gpus all</code>) to use the GPU.</p>
+          loaded on CPU, the Ollama container has no GPU access — on the host, install the NVIDIA
+          Container Toolkit, then <code>export OLLAMA_GPU=1</code> and re-run <code>make up-ai</code>
+          (this applies the <code>docker-compose.gpu.yml</code> overlay so every command keeps Ollama
+          on the GPU). CPU is fine for small models but much slower for embeddings/LLMs.</p>
       </details>
 
       <details>

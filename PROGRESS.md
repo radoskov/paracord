@@ -9,6 +9,17 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Ollama GPU passthrough (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-ollama-gpu-passthrough.md`. Owner's GPU host ran Ollama on
+CPU — the `ollama` compose service requested no GPU (host has an RTX 3090 Ti + NVIDIA Container
+Toolkit; Docker's nvidia runtime present but not default). Added **`docker-compose.gpu.yml`** (device
+reservation) and gated it in the Makefile so `OLLAMA_GPU=1` makes **every** compose target keep Ollama
+on the GPU (default stays CPU → portable to GPU-less hosts). Verified: container sees the GPU; a model
+loads fully into VRAM (`size_vram == size`); `embed_work_job` dropped from minutes to <6 s. Enable
+with `export OLLAMA_GPU=1 && make up-ai`. (e2e Journey 41 still exceeds its 45 s budget on this box
+because the live config uses the LLM ranker `qwen3.5:4b` — a config condition, not a regression.)
+
 ## Full battery run + e2e fix (2026-07-18)
 
 Ran the full pre-push battery after the AI-models work. `make ready-full` (lint + codespell + full

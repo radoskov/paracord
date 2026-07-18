@@ -1,0 +1,24 @@
+# GPU overlay for the Ollama container.
+#
+# The base compose runs Ollama on the CPU (portable: works on any host). This overlay reserves the
+# host's NVIDIA GPU(s) for the ollama service so models load into VRAM instead of RAM — far faster
+# embeddings/summaries/recommendations.
+#
+# Requires on the host: an NVIDIA GPU + driver, the NVIDIA Container Toolkit, and Docker's `nvidia`
+# runtime (check: `nvidia-smi` and `docker info | grep -i runtime`).
+#
+# Enable it for ALL make targets by exporting OLLAMA_GPU=1 (recommended, so `up`, `ai-update`, etc.
+# stay on the GPU consistently):
+#     export OLLAMA_GPU=1        # e.g. in your shell profile on a GPU host
+#     make up-ai                 # ollama now runs on the GPU
+# Or use it directly for one command:
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ai up -d ollama
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
