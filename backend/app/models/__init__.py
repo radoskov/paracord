@@ -31,6 +31,7 @@ from app.models.organization import (
     TagRow,
     TagShelf,
 )
+from app.models.recommendation import RecommendationRun
 from app.models.saved_filter import SavedFilter
 from app.models.session import UserSession
 from app.models.source import ImportBatch, Source
@@ -72,6 +73,7 @@ __all__ = [
     "Rack",
     "RackShelf",
     "RawTeiDocument",
+    "RecommendationRun",
     "Reference",
     "Row",
     "RowRack",
