@@ -34,7 +34,7 @@ LIBRARIAN_DEP = Depends(require_min_role(Role.LIBRARIAN))
 class ScopeSummaryRequest(BaseModel):
     """Request to (re)generate a scope-level summary."""
 
-    scope_type: Literal["library", "shelf", "rack"]
+    scope_type: Literal["library", "shelf", "rack", "row"]
     scope_id: uuid.UUID | None = None
     # 'local_llm' uses the configured Ollama model over the scope's abstracts, degrading to the
     # extractive engine when the LLM is disabled/unreachable (#10). Left unset (None), the endpoint
@@ -209,7 +209,7 @@ def create_scope_summary(
 class TopicRequest(BaseModel):
     """Request to run the topic model over a scope."""
 
-    scope_type: Literal["library", "shelf", "rack"]
+    scope_type: Literal["library", "shelf", "rack", "row"]
     scope_id: uuid.UUID | None = None
     max_topics: int = 5
     # 'tfidf' (default baseline) or 'embedding'/'bertopic' (richer, deterministic). None → config.
@@ -263,7 +263,7 @@ class TopicModelResponse(BaseModel):
 
 @router.get("/summaries/latest", response_model=ScopeSummaryResponse)
 def read_latest_scope_summary(
-    scope_type: Literal["library", "shelf", "rack"],
+    scope_type: Literal["library", "shelf", "rack", "row"],
     scope_id: uuid.UUID | None = None,
     detail: Literal["short", "detailed", "detailed_fast", "detailed_section", "detailed_deep"]
     | None = None,
@@ -333,7 +333,7 @@ class ScopeNoteRead(BaseModel):
 class ScopeNoteUpsert(BaseModel):
     """Create/replace payload for a scope note."""
 
-    scope_type: Literal["library", "shelf", "rack"]
+    scope_type: Literal["library", "shelf", "rack", "row"]
     scope_id: uuid.UUID | None = None
     text: str = ""
 
@@ -354,7 +354,7 @@ def _scope_note_read(db: Session, note) -> ScopeNoteRead:
 
 @router.get("/scope-notes/latest", response_model=ScopeNoteRead)
 def read_scope_note(
-    scope_type: Literal["library", "shelf", "rack"],
+    scope_type: Literal["library", "shelf", "rack", "row"],
     scope_id: uuid.UUID | None = None,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,
@@ -514,7 +514,7 @@ def _with_topic_titles(db: Session, response: TopicModelResponse) -> TopicModelR
 
 @router.get("/topics/latest", response_model=TopicModelResponse)
 def read_latest_topics(
-    scope_type: Literal["library", "shelf", "rack"],
+    scope_type: Literal["library", "shelf", "rack", "row"],
     scope_id: uuid.UUID | None = None,
     db: Session = DB_DEP,
     actor: User = EDITOR_DEP,

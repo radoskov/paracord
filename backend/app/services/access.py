@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import Role, role_at_least
 from app.models.group import GroupGrant, GroupMembership
-from app.models.organization import Rack, Shelf, ShelfWork
+from app.models.organization import Rack, Row, Shelf, ShelfWork
 from app.models.user import User
 from app.models.work import Work
 from app.utils.table_presence import table_present
@@ -149,6 +149,20 @@ def can_modify_shelf(db: Session, user: User, shelf: Shelf) -> bool:
     )
 
 
+def can_see_row(db: Session, user: User, row: Row) -> bool:
+    """True if the user may see this row."""
+    return _can_see_target(
+        db, user, access_level=row.access_level, target_id=row.id, target_type="row"
+    )
+
+
+def can_modify_row(db: Session, user: User, row: Row) -> bool:
+    """True if the user may modify this row's structure/metadata/membership."""
+    return _can_modify_target(
+        db, user, access_level=row.access_level, target_id=row.id, target_type="row"
+    )
+
+
 def can_modify_shelf_precomputed(user: User, shelf: Shelf, *, granted_shelf_ids: set) -> bool:
     """``can_modify_shelf`` using a pre-fetched grant set — no per-shelf query.
 
@@ -245,6 +259,18 @@ def visible_shelves_query(db: Session, user: User) -> Select:
     return stmt.where(cond)
 
 
+def visible_rows_query(db: Session, user: User) -> Select:
+    """Return a ``select(Row)`` filtered to the rows the user may see."""
+    stmt = select(Row)
+    if is_admin_or_owner(user):
+        return stmt
+    granted = granted_target_ids(db, user, "row")
+    cond = Row.access_level.in_(_OPEN_OR_VISIBLE)
+    if granted:
+        cond = or_(cond, Row.id.in_(granted))
+    return stmt.where(cond)
+
+
 def _visible_work_condition(db: Session, user: User):
     """Build the SQL predicate selecting works the user may see (used by the query + id helpers).
 
@@ -325,16 +351,16 @@ def can_see_file(db: Session, user: User, file_id: uuid.UUID) -> bool:
 def can_see_scope_container(
     db: Session, user: User, *, scope_type: str, scope_id: uuid.UUID | str | None
 ) -> bool:
-    """True if the user may see the container behind a ``library``/``shelf``/``rack`` scope.
+    """True if the user may see the container behind a ``library``/``shelf``/``rack``/``row`` scope.
 
     ``library`` (and any scope without an id) is always allowed — the actual works are still
-    filtered by ``visible_work_ids``. A ``shelf``/``rack`` scope additionally requires SEE on that
-    specific container; a missing/unparsable container resolves to allowed (the work filter then
+    filtered by ``visible_work_ids``. A ``shelf``/``rack``/``row`` scope additionally requires SEE on
+    that specific container; a missing/unparsable container resolves to allowed (the work filter then
     yields nothing).
     """
     if is_admin_or_owner(user):
         return True
-    if scope_id is None or scope_type not in ("shelf", "rack"):
+    if scope_id is None or scope_type not in ("shelf", "rack", "row"):
         return True
     if isinstance(scope_id, str):
         try:
@@ -344,6 +370,9 @@ def can_see_scope_container(
     if scope_type == "shelf":
         shelf = db.get(Shelf, scope_id)
         return shelf is None or can_see_shelf(db, user, shelf)
+    if scope_type == "row":
+        row = db.get(Row, scope_id)
+        return row is None or can_see_row(db, user, row)
     rack = db.get(Rack, scope_id)
     return rack is None or can_see_rack(db, user, rack)
 
@@ -381,14 +410,17 @@ __all__ = [
     "granted_target_ids",
     "can_see_rack",
     "can_see_shelf",
+    "can_see_row",
     "can_modify_rack",
     "can_modify_shelf",
+    "can_modify_row",
     "can_see_work",
     "can_modify_work",
     "can_see_scope_container",
     "can_see_file",
     "visible_racks_query",
     "visible_shelves_query",
+    "visible_rows_query",
     "visible_works_query",
     "visible_work_ids",
 ]

@@ -35,6 +35,7 @@ class GraphScope(BaseModel):
         "library",
         "shelf",
         "rack",
+        "row",
         "search_result",
         "selected_papers",
         "import_batch",
@@ -54,7 +55,7 @@ class CitationGraphRequest(BaseModel):
     # §8.9 depth: categorical node coloring from existing library data (SEE-clamped; external nodes
     # are never colored). Node *sizing* (degree/pagerank/betweenness) is a pure client re-style — all
     # three centrality metrics ship on every node, so the frontend switches size without a refetch.
-    color_by: Literal["none", "shelf", "rack", "tag", "topic", "status", "year"] = "none"
+    color_by: Literal["none", "shelf", "rack", "row", "tag", "topic", "status", "year"] = "none"
     # Separate caps (2026-07-16) on external REFERENCE nodes (cited-but-not-in-library) and external
     # CITING nodes (papers that cite the scope), each distributed across the scope papers.
     max_external: int = Field(default=50, ge=0, le=500)

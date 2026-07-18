@@ -27,7 +27,7 @@ from app.models.group import (
     GroupGrant,
     GroupMembership,
 )
-from app.models.organization import Rack, Shelf
+from app.models.organization import Rack, Row, Shelf
 from app.models.user import User
 from app.services.audit import record_event
 from app.utils.table_presence import table_present
@@ -49,7 +49,7 @@ def _groups_table_present(db: Session) -> bool:
 def _check_target(db: Session, target_type: str, target_id: uuid.UUID) -> None:
     if target_type not in GRANT_TARGET_TYPES:
         raise GroupError(f"Unknown target type {target_type!r} (allowed: {GRANT_TARGET_TYPES})")
-    model = Rack if target_type == "rack" else Shelf
+    model = {"rack": Rack, "shelf": Shelf, "row": Row}[target_type]
     if db.get(model, target_id) is None:
         raise GroupError(f"{target_type.capitalize()} {target_id} not found")
 

@@ -19,7 +19,16 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Row,
+    RowRack,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+)
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -29,19 +38,19 @@ NON_PRIVATE_LEVELS = ("open", "visible")
 
 # The color-by kinds this module resolves; other kinds (status/year/topic/…) read directly off
 # the work in each service.
-MEMBERSHIP_COLOR_KINDS = ("shelf", "rack", "tag")
+MEMBERSHIP_COLOR_KINDS = ("shelf", "rack", "row", "tag")
 
 # Default group when a paper has no (visible) membership of the requested kind.
-EMPTY_GROUP = {"shelf": "unshelved", "rack": "unracked", "tag": "untagged"}
+EMPTY_GROUP = {"shelf": "unshelved", "rack": "unracked", "row": "unrowed", "tag": "untagged"}
 
 
 def _visibility_condition(
-    db: Session, model: type[Shelf] | type[Rack], target_type: str, actor: User | None
+    db: Session, model: type[Shelf] | type[Rack] | type[Row], target_type: str, actor: User | None
 ) -> ColumnElement[bool] | None:
-    """Access filter limiting which shelves/racks may surface as a color-group NAME to ``actor``.
+    """Access filter limiting which shelves/racks/rows may surface as a color-group NAME to ``actor``.
 
-    Mirrors ``access.visible_racks_query`` / ``visible_shelves_query`` so a paper is coloured by the
-    same shelves/racks the viewer could see anywhere else:
+    Mirrors ``access.visible_racks_query`` / ``visible_shelves_query`` / ``visible_rows_query`` so a
+    paper is coloured by the same shelves/racks/rows the viewer could see anywhere else:
 
     * ``actor is None`` → conservative fallback: only non-private names (a private shelf/rack name
       never leaks to an unknown viewer). Trusted internal callers that want everything pass an
@@ -110,6 +119,28 @@ def membership_groups(
             stmt = stmt.where(shelf_cond)
         if rack_cond is not None:
             stmt = stmt.where(rack_cond)
+        rows = db.execute(stmt).all()
+    elif color_by == "row":
+        # A paper's rows are the rows of its shelves' racks (work→shelf→rack→row); the row name
+        # surfaces only if the viewer may see the shelf, the rack AND the row on that path.
+        shelf_cond = _visibility_condition(db, Shelf, "shelf", actor)
+        rack_cond = _visibility_condition(db, Rack, "rack", actor)
+        row_cond = _visibility_condition(db, Row, "row", actor)
+        stmt = (
+            select(ShelfWork.work_id, Row.name)
+            .join(Shelf, Shelf.id == ShelfWork.shelf_id)
+            .join(RackShelf, RackShelf.shelf_id == Shelf.id)
+            .join(Rack, Rack.id == RackShelf.rack_id)
+            .join(RowRack, RowRack.rack_id == Rack.id)
+            .join(Row, Row.id == RowRack.row_id)
+            .where(ShelfWork.work_id.in_(ids))
+        )
+        if shelf_cond is not None:
+            stmt = stmt.where(shelf_cond)
+        if rack_cond is not None:
+            stmt = stmt.where(rack_cond)
+        if row_cond is not None:
+            stmt = stmt.where(row_cond)
         rows = db.execute(stmt).all()
     else:  # tag
         rows = db.execute(

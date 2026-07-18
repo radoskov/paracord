@@ -44,6 +44,7 @@ _ScopeType = Literal[
     "library",
     "shelf",
     "rack",
+    "row",
     "search_result",
     "selected_papers",
     "import_batch",

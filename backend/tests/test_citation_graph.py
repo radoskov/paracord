@@ -8,7 +8,16 @@ from app.models.citation import Reference, ReferenceCitation
 from app.models.duplicate import DuplicateCandidate
 from app.models.external_citation import ExternalCitationLink, ExternalPaper
 from app.models.file import File, FileWorkLink
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork, Tag, TagLink
+from app.models.organization import (
+    Rack,
+    RackShelf,
+    Row,
+    RowRack,
+    Shelf,
+    ShelfWork,
+    Tag,
+    TagLink,
+)
 from app.models.source import ImportBatch
 from app.models.work import Work
 from app.services.citation_graph import (
@@ -36,6 +45,8 @@ def db_session(tmp_path: Path):
             ShelfWork.__table__,
             Rack.__table__,
             RackShelf.__table__,
+            Row.__table__,
+            RowRack.__table__,
             ImportBatch.__table__,
             Tag.__table__,
             TagLink.__table__,
@@ -948,6 +959,51 @@ def test_color_by_rack_owner_sees_private_rack(db_session) -> None:
         actor=reader,
     )
     assert by_rack_reader.nodes[0].color_group == "unracked"
+
+
+def test_color_by_row_infers_via_racks_and_respects_viewer(db_session) -> None:
+    """Colour-by row infers a paper's rows through work→shelf→rack→row; an owner sees their own
+    PRIVATE row, a reader without a grant does not, and a paper on no rack's row is 'unrowed'."""
+    from app.core.security import Role
+    from app.models.user import User
+    from app.services.graph_color import membership_groups
+
+    work = Work(canonical_title="Paper", normalized_title="paper")
+    bare = Work(canonical_title="Bare", normalized_title="bare")
+    db_session.add_all([work, bare])
+    shelf = Shelf(name="Open Shelf", access_level="open")
+    db_session.add(shelf)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    rack = Rack(name="Open Rack", access_level="open")
+    db_session.add(rack)
+    db_session.flush()
+    db_session.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    private_row = Row(name="Private Row", access_level="private")
+    db_session.add(private_row)
+    db_session.flush()
+    db_session.add(RowRack(row_id=private_row.id, rack_id=rack.id))
+    db_session.commit()
+
+    owner = User(username="owner", password_hash="x", role=Role.OWNER)
+    reader = User(username="reader", password_hash="x", role=Role.READER)
+
+    assert membership_groups(db_session, [work.id], "row", actor=owner)[work.id] == ["Private Row"]
+    assert membership_groups(db_session, [work.id], "row", actor=reader)[work.id] == ["unrowed"]
+    assert membership_groups(db_session, [work.id], "row")[work.id] == ["unrowed"]
+    # A paper on no shelf/rack/row is 'unrowed'.
+    assert membership_groups(db_session, [bare.id], "row", actor=owner)[bare.id] == ["unrowed"]
+
+    # End-to-end through the graph builder (owner sees the private row as the colour group).
+    graph = build_citation_graph(
+        db_session,
+        scope_type="selected_papers",
+        work_ids=[work.id],
+        compute_metrics=True,
+        color_by="row",
+        actor=owner,
+    )
+    assert graph.nodes[0].color_group == "Private Row"
 
 
 def test_membership_groups_defaults_and_tag_multi(db_session) -> None:

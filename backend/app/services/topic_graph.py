@@ -209,7 +209,8 @@ def _attach_memberships(db, nodes: list[TopicGraphNode], actor: User | None = No
 
     ids = [n.work_id for n in nodes]
     per_kind = {
-        kind: membership_groups(db, ids, kind, actor=actor) for kind in ("shelf", "rack", "tag")
+        kind: membership_groups(db, ids, kind, actor=actor)
+        for kind in ("shelf", "rack", "row", "tag")
     }
     for node in nodes:
         node.memberships = {kind: per_kind[kind][node.work_id] for kind in per_kind}

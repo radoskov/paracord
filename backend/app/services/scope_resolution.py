@@ -28,13 +28,14 @@ import uuid
 from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.orm import Session
 
-from app.models.organization import RackShelf, ShelfWork
+from app.models.organization import RackShelf, RowRack, ShelfWork
 from app.models.work import Work
 
 SCOPE_TYPES = (
     "library",
     "shelf",
     "rack",
+    "row",
     "search_result",
     "selected_papers",
     "import_batch",
@@ -87,6 +88,19 @@ def scope_works_query(
             .join(ShelfWork, ShelfWork.work_id == Work.id)
             .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
             .where(RackShelf.rack_id == scope_id)
+            .distinct()
+        )
+    elif scope_type == "row":
+        # A row's papers are inferred one hop further up than a rack's:
+        # work → shelf → rack → row.
+        if scope_id is None:
+            raise ValueError("scope id is required for a row scope")
+        stmt = (
+            select(Work)
+            .join(ShelfWork, ShelfWork.work_id == Work.id)
+            .join(RackShelf, RackShelf.shelf_id == ShelfWork.shelf_id)
+            .join(RowRack, RowRack.rack_id == RackShelf.rack_id)
+            .where(RowRack.row_id == scope_id)
             .distinct()
         )
     else:

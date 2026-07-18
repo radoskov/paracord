@@ -37,7 +37,8 @@ MAX_NEIGHBORHOOD_NODES = 500
 # ``work_ids`` list — the endpoint loads the filter (owned-by-actor 404) and passes the ids from
 # ``resolve_saved_filter_work_ids`` (already visibility-clamped) in, exactly like the explicit sets.
 ScopeType = Literal[
-    "library", "shelf", "rack", "search_result", "selected_papers", "import_batch", "saved_filter"
+    "library", "shelf", "rack", "row", "search_result", "selected_papers", "import_batch",
+    "saved_filter",
 ]
 NodeMode = Literal["local_only", "include_external"]
 # Node-size metric (§8.9). All three are computed server-side and shipped on every node (see
@@ -47,7 +48,7 @@ SizeBy = Literal["degree", "pagerank", "betweenness"]
 # Node-color grouping (§8.9). ``none`` leaves nodes uncolored; the others attach one categorical
 # ``color_group`` per local node from existing library data (SEE-clamped). External nodes are never
 # colored.
-ColorBy = Literal["none", "shelf", "rack", "tag", "topic", "status", "year"]
+ColorBy = Literal["none", "shelf", "rack", "row", "tag", "topic", "status", "year"]
 
 
 @dataclass

@@ -3,7 +3,7 @@
 import uuid
 
 import pytest
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
+from app.models.organization import Rack, RackShelf, Row, RowRack, Shelf, ShelfWork
 from app.models.work import Work
 from app.services.scope_resolution import (
     count_scope_works,
@@ -55,6 +55,28 @@ def test_shelf_and_rack_scopes(db) -> None:
         b.id,
     }
     assert c.id not in {w.id for w in resolve_scope_works(db, "rack", rack.id, visible_ids=None)}
+
+
+def test_row_scope_infers_via_shelves_and_racks(db) -> None:
+    """A row's papers = work → shelf → rack → row (one hop above a rack scope)."""
+    a, b, c = _work(db, "A"), _work(db, "B"), _work(db, "C")
+    shelf = _shelf_with(db, a, b)
+    rack = Rack(name="R")
+    db.add(rack)
+    db.flush()
+    db.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    row = Row(name="Row 1")
+    db.add(row)
+    db.flush()
+    db.add(RowRack(row_id=row.id, rack_id=rack.id))
+    db.flush()
+    assert {w.id for w in resolve_scope_works(db, "row", row.id, visible_ids=None)} == {a.id, b.id}
+    assert c.id not in {w.id for w in resolve_scope_works(db, "row", row.id, visible_ids=None)}
+    # A row with no racks resolves to no papers.
+    empty = Row(name="Empty")
+    db.add(empty)
+    db.flush()
+    assert resolve_scope_works(db, "row", empty.id, visible_ids=None) == []
 
 
 def test_visible_ids_clamp_is_applied_in_sql(db) -> None:

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 # Allowed grant/target entity types.
-GRANT_TARGET_TYPES = ("rack", "shelf")
+GRANT_TARGET_TYPES = ("rack", "shelf", "row")
 
 
 class Group(Base):

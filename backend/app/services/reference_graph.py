@@ -322,7 +322,7 @@ def build_reference_graph(
 
     membered_ids = [uuid.UUID(base_id), *work_to_ref_node.keys()]
     memberships: dict[str, dict[str, list[str]]] = {}
-    for kind in ("shelf", "rack", "tag"):
+    for kind in ("shelf", "rack", "row", "tag"):
         for wid, names in membership_groups(db, membered_ids, kind, actor=actor).items():
             memberships.setdefault(str(wid), {})[kind] = names
     node_by_work = {
