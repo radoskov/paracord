@@ -1328,6 +1328,12 @@ export interface AiConfig {
   ollama_url: string;
   // Admin-set memory budget (GB) for the Ollama host; null → no mount VRAM warning (#5).
   vram_budget_gb: number | null;
+  // Per-model query-embedding LRU cache size (0 disables); speeds up repeat/refined searches.
+  query_cache_size: number;
+  // Auto-unmount on-demand models after idle. false → models stay resident (keep_alive=-1) until
+  // manually unmounted; true → they unload after auto_unmount_minutes idle.
+  auto_unmount: boolean;
+  auto_unmount_minutes: number;
 }
 
 export interface AiProviderInfo {

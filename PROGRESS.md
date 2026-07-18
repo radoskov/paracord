@@ -9,6 +9,22 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reasoning-model summaries, query-embedding cache, auto-unmount, short history (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-summary-thinking-cache-autounmount.md`. Four owner items:
+(1) **Summaries broke after qwen3 → qwen3.5**: reasoning models leak chain-of-thought and blow the
+120 s timeout → extractive fallback shown but labeled as the LLM. Fix: `_ollama_generate` now sends
+`think:false` + strips `<think>…</think>` (also in the recommendation ranker); the UI's new
+`provenanceName` shows the real engine on fallback. Verified live: qwen3.5:4b summary in **2.8 s**, no
+`<think>`, no fallback. (2) **Query-embedding LRU cache** (`embed_query`, per-model, size =
+`query_cache_size`, default 2048) so refined/repeat searches skip re-embedding the query. (3) **Short-
+summary history** popup in `WorkDetail` (mirrors detailed). (4) **Auto-unmount** settings
+(`auto_unmount` + `auto_unmount_minutes`) → `keep_alive` on every on-demand summary/embedding call
+(`-1` pins when off; default on/5 min = today's behavior). New config fields threaded end-to-end
+(Settings → AIConfig → **alembic 0081** → ai_config/keep_alive_value → API → panel inputs + Help);
+falsy-overlay bug fixed so `False`/`0` persist. Live DB upgraded 0080→0081, worker restarted. Backend
+suites + `make frontend-test` (342) pass; ruff + openapi clean.
+
 ## AI panel job spinners stuck — poll by id (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-job-poll-by-id-fix.md`. Owner report: pull/mount/unmount

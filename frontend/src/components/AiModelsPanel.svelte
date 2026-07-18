@@ -815,6 +815,17 @@
         <input type="number" min="0" step="0.5" bind:value={config.vram_budget_gb} placeholder="e.g. 8" disabled={busy}
           title="VRAM/RAM budget for the Ollama host; mounting warns before it would be exceeded. Save to persist." />
       </label>
+      <label class="query-cache">Query cache
+        <input type="number" min="0" step="256" bind:value={config.query_cache_size} placeholder="2048" disabled={busy}
+          title="How many distinct (model, query) embedding vectors to keep in memory so repeated/refined searches skip re-embedding the query (a network round-trip per Ollama search). 0 disables it. Save to persist." />
+      </label>
+      <label class="auto-unmount" title="When on, an on-demand summary/embedding model unloads from memory after the idle minutes below. When off, models stay resident (pinned) until you unmount them. Manually Mounted models are pinned regardless. Save to persist.">
+        <input type="checkbox" bind:checked={config.auto_unmount} disabled={busy} />
+        Auto-unmount after
+        <input type="number" class="unmount-mins" min="1" step="1" bind:value={config.auto_unmount_minutes}
+          disabled={busy || !config.auto_unmount} title="Idle minutes before an on-demand model unloads." />
+        min idle
+      </label>
       <!-- #5: alive-and-reachable semaphore (green/red), like the Jobs-tab dot. Reflects the daemon
            at the configured Ollama URL; its tooltip carries the URL + version for quick debugging. -->
       <span class="ollama-sema"
@@ -837,6 +848,12 @@
       Only one model per kind is active at a time.{config.vram_budget_gb
         ? ` Budget ${config.vram_budget_gb} GB · loaded now ${loadedTotalGb().toFixed(1)} GB.`
         : ''}
+    </p>
+    <p class="muted small">
+      {config.auto_unmount
+        ? `Auto-unmount is on: models loaded on demand (by a summary/embedding job, not the Mount button) unload after ${config.auto_unmount_minutes} min idle.`
+        : 'Auto-unmount is off: models stay resident once loaded until you unmount them.'}
+      Set this under <em>Auto-unmount</em> in the settings row above.
     </p>
     <div class="row">
       <label class="compute">Compute for next mount
@@ -1162,9 +1179,18 @@
           <li><span class="pin-badge">mounted</span> — pinned by you; stays until you unmount it.</li>
           <li><span class="auto-badge">auto · frees in ~Nm</span> — loaded on demand to serve a request
             (for example, embedding a <em>search query</em> — the stored document vectors don't need
-            reloading, but the query itself must be embedded with the same model). Ollama frees these
-            automatically after a few idle minutes; this is <em>not</em> a mount and needs no action.</li>
+            reloading, but the query itself must be embedded with the same model). These are freed
+            automatically per the <strong>Auto-unmount</strong> setting below; this is <em>not</em> a
+            mount and needs no action.</li>
         </ul>
+        <p><strong>Auto-unmount</strong> controls how long an on-demand model lingers in memory after
+          it's used. <em>On</em> (the default, matching Ollama's built-in 5&nbsp;minutes) unloads it
+          after the idle minutes you set — good for freeing VRAM automatically. <em>Off</em> keeps
+          every model resident once loaded until you unmount it — good for a dedicated machine where
+          you want the model always hot. Models you <em>Mount</em> by hand are pinned and unaffected.
+          <strong>Query cache</strong> remembers recent search-query embeddings (per model) so
+          repeating or refining a search skips re-embedding the query — a network round-trip on every
+          Ollama search; set 0 to disable it.</p>
         <p><strong>Memory budget (GB)</strong>: set your machine's usable VRAM/RAM; mounting then warns
           before a load would exceed it. <strong>Compute for next mount</strong>: <em>Auto</em> lets
           Ollama decide; <em>Prefer GPU</em> offloads all layers to the GPU (if the container has GPU
@@ -1344,6 +1370,9 @@
   .row.shared { border-top: 1px solid var(--border-normal); padding-top: 0.75rem; }
   .ollama-url { flex: 1 1 16rem; }
   .vram-budget { flex: 0 0 9rem; }
+  .query-cache { flex: 0 0 8rem; }
+  .auto-unmount { align-items: center; display: flex; flex: 0 0 auto; gap: 0.35rem; }
+  .auto-unmount .unmount-mins { width: 4rem; }
   .mount-row { align-items: center; display: flex; gap: 0.5rem; margin-top: 0.1rem; }
   .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
   .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }

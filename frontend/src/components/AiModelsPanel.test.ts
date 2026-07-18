@@ -17,6 +17,9 @@ function makeStatus(overrides: Partial<AiStatus> = {}): AiStatus {
       ocr_backend: "ocrmypdf",
       ollama_url: "http://localhost:11434",
       vram_budget_gb: null,
+      query_cache_size: 2048,
+      auto_unmount: true,
+      auto_unmount_minutes: 5,
     },
     allowed: {
       embedding_provider: ["hash_bow", "sentence_transformers", "ollama"],
