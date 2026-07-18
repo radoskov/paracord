@@ -154,16 +154,20 @@ Read routes call `_guard_see_work` (404 if not see-able); mutations call `_guard
 ### sources — `/sources`
 `GET ``` (auth), `POST /server-folder` (**editor**).
 
-### shelves — `/shelves` · racks — `/racks`
-`GET ``` (auth, SEE, with `can_modify`/`is_default`), `POST` (**librarian**), `PATCH`/`DELETE`
-(librarian + per-object grant). Membership: `GET/POST/DELETE /{id}/works` (shelves) and
-`/{id}/shelves` (racks) — always via ACL-checked helpers; the default shelf can't be deleted.
+### shelves — `/shelves` · racks — `/racks` · rows — `/rows`
+`GET ``` (auth, SEE, with `can_modify`/`is_default` on shelves), `POST` (**librarian**),
+`PATCH`/`DELETE` (librarian + per-object grant). Membership: `GET/POST/DELETE /{id}/works` (shelves),
+`/{id}/shelves` (racks), `/{id}/racks` (rows) — always via ACL-checked helpers; the default shelf
+can't be deleted. Rows are the broadest layer (Row ⊃ Rack ⊃ Shelf ⊃ Paper); `DELETE /rows/{id}
+?delete_racks=` optionally cascade-deletes member racks (their shelves survive). All create/modify/
+delete emit audit events.
 
 ### tags — `/tags`
-`GET ``` (auth — **unscoped, no limit**), `GET /assignable` (contrib; scopes offered tags to
-global + the paper's own shelves/racks), `POST` (contrib, create-or-return), `PATCH` (contrib, 409
-on clash), `PUT /{id}/scope` (contrib; sets which shelves/racks a tag is offered for — empty =
-global), `DELETE` (**editor**), `POST/DELETE /{id}/links` (contrib + modify target).
+`GET ``` (auth — **unscoped, no limit**; optional `shelf_id`/`rack_id`/`row_id` filter), `GET
+/assignable` (contrib; scopes offered tags to global + the paper's own shelves/racks/rows), `POST`
+(contrib, create-or-return), `PATCH` (contrib, 409 on clash), `PUT /{id}/scope` (contrib; sets which
+shelves/racks/rows a tag is offered for — empty = global), `DELETE` (**editor**), `POST/DELETE
+/{id}/links` (contrib + modify target; `entity_type` ∈ work/shelf/rack/row).
 
 ### citations — `/citations`
 `GET /summary`, `/venue-author-summary`, `/external-preview`, `/worklist` (+`PUT`/`DELETE`),

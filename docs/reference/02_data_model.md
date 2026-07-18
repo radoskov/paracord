@@ -230,15 +230,20 @@ warning state); `WorkVersion` and `FileSegment` model multi-version and multi-wo
 |-------|-------|-------|
 | `shelves` | `Shelf` | `name`, `status`, **`access_level`** (`open`/`visible`/`private`), soft `created_by_user_id` |
 | `racks` | `Rack` | same shape as Shelf incl. `access_level` |
+| `rows` | `Row` | same shape as Rack; the **broadest** layer — a row contains racks (`0078`) |
 | `tags` | `Tag` | `name`/`normalized_name` (unique), `color`, **`parent_tag_id`** (soft, no self-FK) |
 | `shelf_works` | `ShelfWork` | PK `(shelf_id, work_id)`; `work_id` separately indexed for access filtering |
 | `rack_shelves` | `RackShelf` | PK `(rack_id, shelf_id)`; `shelf_id` separately indexed |
-| `tag_links` | `TagLink` | polymorphic PK `(tag_id, entity_type, entity_id)` |
+| `row_racks` | `RowRack` | PK `(row_id, rack_id)`; `rack_id` separately indexed (`0078`) |
+| `tag_links` | `TagLink` | polymorphic PK `(tag_id, entity_type, entity_id)`; `entity_type` ∈ work/shelf/rack/row |
 | `tag_shelves` | `TagShelf` | PK `(tag_id, shelf_id)`; restricts where a tag is *offered* (`0075`) |
 | `tag_racks` | `TagRack` | PK `(tag_id, rack_id)`; same, for racks (a paper qualifies via any shelf on that rack) |
+| `tag_rows` | `TagRow` | PK `(tag_id, row_id)`; same, for rows (a paper qualifies via any shelf→rack→row path) (`0078`) |
 
-Membership is many-to-many both ways: a work can be on many shelves; a shelf can be in many racks.
-The `access_level` on shelves/racks is the anchor of the whole access-control model (§2.4 Access).
+Membership is many-to-many at every level: a work can be on many shelves; a shelf can be in many
+racks; a rack can be in many rows. **Grouping hierarchy: Row ⊃ Rack ⊃ Shelf ⊃ Paper.** A paper's
+racks are inferred work→shelf→rack; its rows work→shelf→rack→row (rows/racks are never attached to a
+work directly). The `access_level` on rows/shelves/racks anchors the access-control model (§2.4).
 A tag with **no** `tag_shelves`/`tag_racks` rows is global (offered everywhere); one or more rows
 restrict where it is offered when tagging — distinct from `tag_links`, which records an actual
 tagging.
@@ -459,3 +464,5 @@ There are now **10 files** in `backend/alembic/versions/`, forming a single line
   single `_detailed` suffix to `_detailed_deep` (the level split into fast/section/deep).
 - `0075_tag_scope` — new `tag_shelves`/`tag_racks` join tables (tag-availability scoping).
 - `0076_notes` — `works.notes` column + new `scope_notes` table (per-Insights-scope notes).
+- `0078_rows` — new `rows`/`row_racks`/`tag_rows` tables: the "Rows" grouping layer (Row ⊃ Rack ⊃
+  Shelf ⊃ Paper), mirroring racks/rack_shelves/tag_racks one hop up.

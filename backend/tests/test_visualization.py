@@ -6,7 +6,7 @@ import pytest
 from app.db.base import Base
 from app.models.chunk import WorkChunk
 from app.models.citation import Reference, ReferenceCitation
-from app.models.organization import Rack, RackShelf, Shelf, ShelfWork
+from app.models.organization import Rack, RackShelf, Row, RowRack, Shelf, ShelfWork
 from app.models.source import ImportBatch
 from app.models.user import User
 from app.models.work import Work
@@ -38,6 +38,8 @@ def db_session(tmp_path: Path):
             ShelfWork.__table__,
             Rack.__table__,
             RackShelf.__table__,
+            Row.__table__,
+            RowRack.__table__,
             ImportBatch.__table__,
             User.__table__,
         ],
@@ -132,6 +134,33 @@ def test_temporal_map_color_by_rack_respects_viewer(db_session) -> None:
     assert owner_node.color_groups == ["Private Rack"]
 
     assert node(reader).color_group == "unracked"  # reader never sees the private rack name
+
+
+def test_temporal_map_color_by_row_infers_via_racks(db_session) -> None:
+    """color_by=row colours a paper by the rows of its shelves' racks (work→shelf→rack→row); the
+    owner sees a private row, a reader without a grant does not."""
+    owner = _owner(db_session)
+    reader = User(username="reader", password_hash="x", role="reader")
+    db_session.add(reader)
+    work = Work(canonical_title="P", normalized_title="p", year=2020)
+    shelf = Shelf(name="S", access_level="open")
+    rack = Rack(name="R", access_level="open")
+    row = Row(name="Private Row", access_level="private")
+    db_session.add_all([work, shelf, rack, row])
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.add(RackShelf(rack_id=rack.id, shelf_id=shelf.id))
+    db_session.add(RowRack(row_id=row.id, rack_id=rack.id))
+    db_session.commit()
+
+    def node(actor: User) -> dict:
+        payload = get_viz(
+            db_session, actor, "temporal_map", VizScope(type="library"), {"color_by": "row"}
+        )
+        return _node_by_id(payload, work.id)
+
+    assert node(owner).color_group == "Private Row"  # owner sees their own private row
+    assert node(reader).color_group == "unrowed"  # reader never sees the private row name
 
 
 def test_local_degree_axis_counts_incoming_citations(db_session, make_reference) -> None:

@@ -252,6 +252,37 @@ export async function apiArchiveRacksByName(
   }
 }
 
+/** Create a row via the API (setup shortcut); returns its id. */
+export async function apiCreateRow(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+  accessLevel = 'open',
+): Promise<string> {
+  const res = await request.post(`${API_URL}/api/v1/rows`, {
+    headers: auth(token),
+    data: { name, access_level: accessLevel },
+  });
+  expect(res.ok(), `createRow failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).id as string;
+}
+
+/** Hard-delete every row whose name exactly matches `name` (rows have a hard-delete endpoint). */
+export async function apiDeleteRowsByName(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+): Promise<void> {
+  const res = await request.get(`${API_URL}/api/v1/rows`, { headers: auth(token) });
+  if (!res.ok()) return;
+  const rows = (await res.json()) as Array<{ id: string; name: string }>;
+  for (const r of rows) {
+    if (r.name === name) {
+      await request.delete(`${API_URL}/api/v1/rows/${r.id}`, { headers: auth(token) });
+    }
+  }
+}
+
 /** Create a tag via the API (setup shortcut); returns its id. */
 export async function apiCreateTag(
   request: APIRequestContext,
