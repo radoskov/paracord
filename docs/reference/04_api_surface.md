@@ -162,6 +162,15 @@ can't be deleted. Rows are the broadest layer (Row ⊃ Rack ⊃ Shelf ⊃ Paper)
 ?delete_racks=` optionally cascade-deletes member racks (their shelves survive). All create/modify/
 delete emit audit events.
 
+### recommend — `/recommend`
+AI "Recommend categorization" (Insights sub-tab). `POST ``` (contributor+) resolves + caps the
+scope, then returns a fresh **per-creator cached** run for (scope + settings-hash + model) or creates
+one and enqueues the background job; body: `scope_type`/`scope_id`/`work_ids`, `mode`
+(tags|categorization), `k`, `scoring` (ranking|affinity), `parent_combine` (sum|median|max),
+`prefilter`, `cap` (≤500), `recompute`. `GET /{run_id}` (requester-gated) returns status + the cached
+result — the frontend polls it. Accepting a suggestion reuses `POST /shelves/{id}/works` /
+`POST /tags/{id}/links`. Degrades to embedding-cosine ranking when no generative model is configured.
+
 ### tags — `/tags`
 `GET ``` (auth — **unscoped, no limit**; optional `shelf_id`/`rack_id`/`row_id` filter), `GET
 /assignable` (contrib; scopes offered tags to global + the paper's own shelves/racks/rows), `POST`

@@ -466,3 +466,6 @@ There are now **10 files** in `backend/alembic/versions/`, forming a single line
 - `0076_notes` — `works.notes` column + new `scope_notes` table (per-Insights-scope notes).
 - `0078_rows` — new `rows`/`row_racks`/`tag_rows` tables: the "Rows" grouping layer (Row ⊃ Rack ⊃
   Shelf ⊃ Paper), mirroring racks/rack_shelves/tag_racks one hop up.
+- `0079_recommendation_runs` — new `recommendation_runs` table: cached AI "Recommend categorization"
+  runs, keyed by (scope + settings-hash + model) per creator; the per-paper suggestions + raw LLM
+  I/O live in a `result` JSON blob (mirrors the `Summary` provenance shape).
