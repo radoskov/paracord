@@ -1133,6 +1133,21 @@
       </details>
 
       <details>
+        <summary>Keeping Ollama up to date</summary>
+        <p>The Ollama daemon runs from the <code>ollama/ollama:latest</code> image. Updating it brings
+          bug fixes, GPU/performance improvements, and support for newer models (a brand-new model can
+          require a recent Ollama). It's worth doing every few weeks, and whenever a pull fails with an
+          “unsupported/unknown model” error. Your <strong>pulled models are safe</strong> — they live
+          in a Docker volume, not the image, so an update never re-downloads them.</p>
+        <p>Because it recreates a container, the update runs on the server, not from this page. On the
+          host run:</p>
+        <p><code>make ai-update</code></p>
+        <p>— which pulls the newest image, recreates the container, and prints the version before/after.
+          The current daemon version is shown by the Ollama semaphore's tooltip at the top of this
+          page.</p>
+      </details>
+
+      <details>
         <summary>Mounting, unmounting &amp; memory (VRAM)</summary>
         <p><strong>Mount</strong> = load the model into the Ollama daemon's memory <em>and</em> make it
           the active model for its capability. <strong>Unmount</strong> = free that memory <em>and</em>

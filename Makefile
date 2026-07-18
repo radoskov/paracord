@@ -164,6 +164,20 @@ down-ai: ## Stop Ollama AI profile.
 	$(COMPOSE) --profile ai stop ollama
 	$(COMPOSE) --profile ai rm -f ollama
 
+.PHONY: ai-update
+ai-update: ## Update Ollama: pull the newest ollama/ollama:latest image + recreate the container.
+	@echo "== Ollama version before =="; \
+	$(COMPOSE) exec -T ollama ollama --version 2>/dev/null || echo "  (ollama not running)"
+	$(COMPOSE) --profile ai pull ollama
+	$(COMPOSE) --profile ai up -d ollama
+	@echo "Waiting for Ollama to come back up..."; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if $(COMPOSE) exec -T ollama ollama --version >/dev/null 2>&1; then break; fi; sleep 2; \
+	done; \
+	echo "== Ollama version after =="; \
+	$(COMPOSE) exec -T ollama ollama --version 2>/dev/null || echo "  (still starting — check 'make smoke')"; \
+	echo "Pulled models persist in the paperracks_ollama volume — nothing to re-download."
+
 .PHONY: build-ml-extraction
 build-ml-extraction: ## Build the opt-in ML-extraction image (Nougat/Marker; torch, multi-GB). Enables ocr_backend=full_ml.
 	docker build -f backend/Dockerfile --target ml-extraction -t paracord-api:ml-extraction .

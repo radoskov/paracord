@@ -9,6 +9,15 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## `make ai-update` — update the Ollama daemon (2026-07-18)
+
+Owner request. New Makefile target `ai-update`: prints the current Ollama version, `docker compose
+pull ollama` (newest `ollama/ollama:latest`), recreates the container, waits, prints the new version.
+Pulled models persist (they live in the `paperracks_ollama` volume, not the image). The Help dialog
+gains a "Keeping Ollama up to date" section (why/when it matters, that models are safe, run
+`make ai-update` on the host; current version is in the semaphore tooltip). Verified: `make -n`
+syntax + `ollama --version` probe (0.31.1).
+
 ## AI & Models panel clarity + Help dialog (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-ai-panel-clarity-help.md`. Owner request to make the tab
