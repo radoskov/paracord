@@ -20,6 +20,7 @@
   import CitationGraph from '../components/CitationGraph.svelte';
   import ExportDialog from '../components/ExportDialog.svelte';
   import ScopePicker from '../components/ScopePicker.svelte';
+  import RecommendPanel from '../components/RecommendPanel.svelte';
   import { resolveScopeRequest } from '../lib/scope';
   import { renderSummaryMath } from '../lib/renderMath';
   import { pendingLibraryOpen, pendingLibrarySearch, selectedPaperIds, pendingIdentifierImport, pendingImportText } from '../lib/selection';
@@ -29,6 +30,9 @@
   // Whether the Insights tab is visible (#9). Forwarded to CitationGraph so it can resize the
   // chart after the tab is shown again (it mis-sizes while hidden).
   export let visible = true;
+
+  // Sub-tabs within Insights (like the Import tab): the analysis views, and AI recommendations.
+  let activeSubTab: 'analysis' | 'recommend' = 'analysis';
 
   // Scope state, bound into the shared ScopePicker (C3); readiness is computed there.
   let scopeType: GraphScopeType = 'library';
@@ -402,6 +406,21 @@
 </script>
 
 <section class="layout">
+  <nav class="insights-tabs" aria-label="Insights sections">
+    <button type="button" class="insights-tab" class:active={activeSubTab === 'analysis'}
+      on:click={() => (activeSubTab = 'analysis')} data-testid="insights-subtab-analysis">Analysis</button>
+    <button type="button" class="insights-tab" class:active={activeSubTab === 'recommend'}
+      on:click={() => (activeSubTab = 'recommend')} data-testid="insights-subtab-recommend">Recommend categorization</button>
+  </nav>
+
+  {#if activeSubTab === 'recommend'}
+    <div class="card">
+      <h2>Recommend categorization</h2>
+      <p class="muted">Let a model suggest tags, or rows/racks/shelves, for each paper in a scope
+        from its title, abstract, keywords and topics. Review and accept per paper.</p>
+      <RecommendPanel {client} />
+    </div>
+  {:else}
   {#if message}<p class="muted msg">{message}</p>{/if}
 
   <div class="card scope">
@@ -647,12 +666,33 @@
       </ul>
     {/if}
   </details>
+  {/if}
 </section>
 
 <style>
   .layout {
     display: grid;
     gap: 1rem;
+  }
+
+  .insights-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .insights-tab {
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-normal);
+    border-radius: 6px;
+    color: var(--accent-secondary);
+    font-weight: 600;
+  }
+
+  .insights-tab.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--ink-inverse);
   }
 
   /* Running-state buttons (UX batch 4): visibly "working" while the job runs. */

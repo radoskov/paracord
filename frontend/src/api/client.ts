@@ -620,6 +620,73 @@ export interface Row {
   updated_at: string;
 }
 
+// --- AI recommendation (Insights → Recommend categorization) ---
+export interface RecommendTagSuggestion {
+  tag_id: string;
+  name: string;
+  rank: number;
+  affinity: number | null;
+  base: number;
+}
+export interface RecommendCategoryPick {
+  id: string;
+  name: string;
+  rank: number;
+  affinity: number | null;
+  base: number;
+}
+export interface RecommendShelfResult {
+  shelf_id: string;
+  name: string;
+  score: number;
+  rank: number;
+  affinity: number | null;
+  base: number;
+  parent_boost: number;
+}
+export interface RecommendPaper {
+  work_id: string;
+  title: string | null;
+  suggestions?: RecommendTagSuggestion[]; // tags mode
+  per_kind?: { row: RecommendCategoryPick[]; rack: RecommendCategoryPick[]; shelf: RecommendCategoryPick[] };
+  shelves?: RecommendShelfResult[]; // categorization mode (final combined ranking)
+  raw?: Record<string, { input: string; output: string }>;
+}
+export interface RecommendResult {
+  mode: string;
+  papers: RecommendPaper[];
+  fallback: boolean;
+  provider_used: string;
+  affinity_requested: boolean;
+}
+export interface RecommendRun {
+  id: string;
+  scope_type: string;
+  mode: "tags" | "categorization";
+  status: "running" | "done" | "failed";
+  params: Record<string, unknown> | null;
+  model_name: string | null;
+  provider_used: string | null;
+  fallback: boolean;
+  error: string | null;
+  result: RecommendResult | null;
+  created_at: string;
+  updated_at: string;
+  job_id?: string | null;
+}
+export interface RecommendOptions {
+  scopeType: GraphScopeType;
+  scopeId?: string | null;
+  workIds?: string[] | null;
+  mode: "tags" | "categorization";
+  k: number;
+  scoring: "ranking" | "affinity";
+  parentCombine: "sum" | "median" | "max";
+  prefilter: boolean;
+  cap?: number;
+  recompute?: boolean;
+}
+
 export interface Tag {
   id: string;
   name: string;
@@ -2321,6 +2388,29 @@ export class ApiClient {
 
   async removeRackFromRow(rowId: string, rackId: string): Promise<void> {
     await this.request<void>(`/api/v1/rows/${rowId}/racks/${rackId}`, { method: "DELETE" });
+  }
+
+  // --- AI recommendation (Insights → Recommend categorization) ---
+  async createRecommendation(opts: RecommendOptions): Promise<RecommendRun> {
+    return this.request<RecommendRun>("/api/v1/recommend", {
+      method: "POST",
+      body: {
+        scope_type: opts.scopeType,
+        scope_id: opts.scopeId ?? null,
+        work_ids: opts.workIds ?? null,
+        mode: opts.mode,
+        k: opts.k,
+        scoring: opts.scoring,
+        parent_combine: opts.parentCombine,
+        prefilter: opts.prefilter,
+        cap: opts.cap ?? 100,
+        recompute: opts.recompute ?? false,
+      },
+    });
+  }
+
+  async getRecommendation(runId: string): Promise<RecommendRun> {
+    return this.request<RecommendRun>(`/api/v1/recommend/${runId}`);
   }
 
   async listTags(filter?: {
