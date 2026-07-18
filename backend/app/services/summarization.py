@@ -192,20 +192,53 @@ def classify_work_source(db: Session, work: Work) -> str:
     return _source_tier(_work_source(db, work)[1])
 
 
-def _ollama_generate(prompt: str, *, model: str, base_url: str) -> str:
-    """Raw single-shot generation against a local Ollama daemon. Raises on any failure."""
+# Reasoning ("thinking") models (qwen3, qwen3.5, deepseek-r1, …) emit a chain-of-thought before
+# the answer. We ask Ollama to disable it (``think: false``), but older daemons/models ignore that
+# flag and still stream the thoughts inline in ``response``, wrapped in <think>…</think>. Strip them
+# so a summary never starts "mid-thought". Belt-and-suspenders: the flag is the real fix, the strip
+# is the safety net.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    if not text:
+        return text
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    # An asymmetric/unclosed block (thoughts truncated, or only a closing tag survives): keep only
+    # what follows the last closing tag — that is the actual answer.
+    if "</think>" in cleaned:
+        cleaned = cleaned.rsplit("</think>", 1)[-1]
+    return cleaned.strip()
+
+
+def _ollama_generate(
+    prompt: str, *, model: str, base_url: str, keep_alive: int | None = None
+) -> str:
+    """Raw single-shot generation against a local Ollama daemon. Raises on any failure.
+
+    ``think: false`` disables reasoning models' chain-of-thought (unknown to old daemons, harmlessly
+    ignored); any leaked <think> block is stripped from the result. ``keep_alive`` (seconds; -1 pins)
+    controls how long the model lingers in memory after the call — the admin auto-unmount setting.
+    """
     import httpx2 as httpx
 
+    payload: dict = {"model": model, "prompt": prompt, "stream": False, "think": False}
+    if keep_alive is not None:
+        payload["keep_alive"] = keep_alive
     with httpx.Client(timeout=120) as client:
-        response = client.post(
-            f"{base_url.rstrip('/')}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
-        )
+        response = client.post(f"{base_url.rstrip('/')}/api/generate", json=payload)
         response.raise_for_status()
-        return (response.json().get("response") or "").strip()
+        return _strip_reasoning(response.json().get("response") or "")
 
 
-def _ollama_summarize(text: str, *, model: str, base_url: str, abstract_only: bool = False) -> str:
+def _ollama_summarize(
+    text: str,
+    *,
+    model: str,
+    base_url: str,
+    abstract_only: bool = False,
+    keep_alive: int | None = None,
+) -> str:
     """Per-PAPER SHORT abstractive summary (single-paragraph prompt). Raises on any failure.
 
     ``abstract_only`` (2026-07-16): the source is the paper's abstract, not its full text — tell the
@@ -227,7 +260,7 @@ def _ollama_summarize(text: str, *, model: str, base_url: str, abstract_only: bo
             + "\n\n"
             + text[:LLM_INPUT_CHAR_BUDGET]
         )
-    return _ollama_generate(prompt, model=model, base_url=base_url)
+    return _ollama_generate(prompt, model=model, base_url=base_url, keep_alive=keep_alive)
 
 
 def _detail_chunk_prompt(label: str | None) -> str:
@@ -281,6 +314,7 @@ def _detailed_llm_summary(
     base_url: str,
     progress_cb=None,
     cancel_cb=None,
+    keep_alive: int | None = None,
 ) -> str:
     """Per-PAPER DETAILED summary (UX batch 4): one paragraph PER SECTION, each headed by the
     section's name (from GROBID) so the reader sees which part of the paper it covers, plus a
@@ -306,7 +340,12 @@ def _detailed_llm_summary(
             continue
         pieces = _split_to_budget(text, LLM_INPUT_CHAR_BUDGET)
         parts = [
-            _ollama_generate(_detail_chunk_prompt(label) + piece, model=model, base_url=base_url)
+            _ollama_generate(
+                _detail_chunk_prompt(label) + piece,
+                model=model,
+                base_url=base_url,
+                keep_alive=keep_alive,
+            )
             for piece in pieces
         ]
         para = " ".join(p.strip() for p in parts if p.strip()).strip()
@@ -325,6 +364,7 @@ def _detailed_llm_summary(
         _DETAIL_INTRO_PROMPT + "\n\n".join(out)[:LLM_INPUT_CHAR_BUDGET],
         model=model,
         base_url=base_url,
+        keep_alive=keep_alive,
     )
     if progress_cb is not None:
         progress_cb(total, total)
@@ -443,7 +483,9 @@ def _heuristic_bucket(label: str | None) -> str:
     return "Other"
 
 
-def _categorize_sections(labels: list[str], *, model: str, base_url: str) -> dict[str, str]:
+def _categorize_sections(
+    labels: list[str], *, model: str, base_url: str, keep_alive: int | None = None
+) -> dict[str, str]:
     """Ask the LLM to map each section label to one of the 4 fast buckets; heuristic on failure.
 
     Returns a partial ``{label: bucket}``; callers fall back to :func:`_heuristic_bucket` for any
@@ -463,7 +505,7 @@ def _categorize_sections(labels: list[str], *, model: str, base_url: str) -> dic
         "Respond with one line per section as 'N: Category'.\n\n" + listing
     )
     try:
-        raw = _ollama_generate(prompt, model=model, base_url=base_url)
+        raw = _ollama_generate(prompt, model=model, base_url=base_url, keep_alive=keep_alive)
     except Exception as exc:  # noqa: BLE001 - heuristic fallback, never fail the summary
         from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
 
@@ -483,12 +525,16 @@ def _categorize_sections(labels: list[str], *, model: str, base_url: str) -> dic
     return mapping
 
 
-def _fast_bucket_sections(db: Session, work: Work, *, model: str, base_url: str):
+def _fast_bucket_sections(
+    db: Session, work: Work, *, model: str, base_url: str, keep_alive: int | None = None
+):
     """detailed_fast: fold the work's sections into ≤4 buckets, each summarized as one paragraph."""
     from app.services.chunking import iter_work_sections  # noqa: PLC0415 (cycle)
 
     secs = iter_work_sections(db, work)
-    mapping = _categorize_sections([lbl for lbl, _ in secs if lbl], model=model, base_url=base_url)
+    mapping = _categorize_sections(
+        [lbl for lbl, _ in secs if lbl], model=model, base_url=base_url, keep_alive=keep_alive
+    )
     grouped: dict[str, list[str]] = {b: [] for b in _FAST_BUCKETS}
     for label, text in secs:
         bucket = mapping.get(label) or _heuristic_bucket(label)
@@ -589,10 +635,20 @@ def _section_level_sections(db: Session, work: Work):
     return mains
 
 
-def _detail_sections(db: Session, work: Work, detail: str, *, model: str, base_url: str):
+def _detail_sections(
+    db: Session,
+    work: Work,
+    detail: str,
+    *,
+    model: str,
+    base_url: str,
+    keep_alive: int | None = None,
+):
     """The (label, text) sections that feed the detailed summary for a given effort level."""
     if detail == "detailed_fast":
-        return _fast_bucket_sections(db, work, model=model, base_url=base_url)
+        return _fast_bucket_sections(
+            db, work, model=model, base_url=base_url, keep_alive=keep_alive
+        )
     if detail == "detailed_section":
         return _section_level_sections(db, work)
     from app.services.chunking import iter_work_leaf_sections  # noqa: PLC0415 (cycle)
@@ -703,6 +759,9 @@ def summarize_work(
     from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
 
     ai_cfg = get_ai_config(db, settings=settings)
+    from app.services.ai_config import keep_alive_value  # noqa: PLC0415 (avoid import cycle)
+
+    keep_alive = keep_alive_value(ai_cfg)
     source_sections: list[str] = []
     prompt_version = PROMPT_VERSION
     # Provider provenance (Phase B2): what was requested vs actually used, and — when a requested
@@ -739,7 +798,12 @@ def summarize_work(
                     # have no body to section, so they take the abstract-framed short path below
                     # regardless of the requested detail.
                     sections = _detail_sections(
-                        db, work, detail, model=stored_model, base_url=ai_cfg.ollama_url
+                        db,
+                        work,
+                        detail,
+                        model=stored_model,
+                        base_url=ai_cfg.ollama_url,
+                        keep_alive=keep_alive,
                     )
                     text = _detailed_llm_summary(
                         sections,
@@ -747,6 +811,7 @@ def summarize_work(
                         base_url=ai_cfg.ollama_url,
                         progress_cb=progress_cb,
                         cancel_cb=cancel_cb,
+                        keep_alive=keep_alive,
                     )
                 else:
                     text = _ollama_summarize(
@@ -754,6 +819,7 @@ def summarize_work(
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
                         abstract_only=abstract_only,
+                        keep_alive=keep_alive,
                     )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)
@@ -948,7 +1014,9 @@ def _work_ref(work: Work) -> str:
     return f"{title} ({work.year})" if work.year else title
 
 
-def _abstract_only_paragraph(works: list[Work], *, use_llm: bool, model: str, base_url: str) -> str:
+def _abstract_only_paragraph(
+    works: list[Work], *, use_llm: bool, model: str, base_url: str, keep_alive: int | None = None
+) -> str:
     """2026-07-16: ONE grouped paragraph for papers available only as an abstract (no full text)."""
     entries = [f"{_work_ref(w)}: {(w.abstract or '').strip()}" for w in works]
     lead = (
@@ -964,6 +1032,7 @@ def _abstract_only_paragraph(works: list[Work], *, use_llm: bool, model: str, ba
                 "only.\n\n" + "\n".join(entries)[:LLM_INPUT_CHAR_BUDGET],
                 model=model,
                 base_url=base_url,
+                keep_alive=keep_alive,
             )
             if body.strip():
                 return f"{lead}. {body.strip()}"
@@ -1018,6 +1087,9 @@ def summarize_scope(
     from app.services.ai_config import get_ai_config  # noqa: PLC0415 (avoid import cycle)
 
     ai_cfg = get_ai_config(db, settings=settings)
+    from app.services.ai_config import keep_alive_value  # noqa: PLC0415 (avoid import cycle)
+
+    keep_alive = keep_alive_value(ai_cfg)
     works = _scope_works(db, scope_type=scope_type, scope_id=scope_id, visible_ids=visible_ids)
     entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
     # 2026-07-16 cache matrix: the scope summary's effort level (paper_detail) is folded into its
@@ -1118,6 +1190,7 @@ def summarize_scope(
                         ),
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
+                        keep_alive=keep_alive,
                     )
                 else:
                     partials = [
@@ -1125,6 +1198,7 @@ def summarize_scope(
                             _scope_chunk_prompt(scope_type, i + 1, len(chunks), chunk),
                             model=stored_model,
                             base_url=ai_cfg.ollama_url,
+                            keep_alive=keep_alive,
                         )
                         for i, chunk in enumerate(chunks)
                     ]
@@ -1135,6 +1209,7 @@ def summarize_scope(
                         ),
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
+                        keep_alive=keep_alive,
                     )
                 method = "map_reduce"
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
@@ -1165,6 +1240,7 @@ def summarize_scope(
                     use_llm=use_group_llm,
                     model=stored_model,
                     base_url=ai_cfg.ollama_url,
+                    keep_alive=keep_alive,
                 )
             )
         if title_only_works:

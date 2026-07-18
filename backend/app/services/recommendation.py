@@ -318,7 +318,15 @@ def ollama_generate_json(prompt: str, *, model: str, base_url: str) -> tuple[Any
     with httpx.Client(timeout=120) as client:
         response = client.post(
             f"{base_url.rstrip('/')}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
+            # think:false keeps a reasoning model (qwen3/qwen3.5/deepseek-r1) from prepending its
+            # chain-of-thought to the JSON payload (old daemons ignore the flag harmlessly).
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "think": False,
+            },
         )
         response.raise_for_status()
         raw = (response.json().get("response") or "").strip()

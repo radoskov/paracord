@@ -51,6 +51,55 @@ def db_session(tmp_path: Path):
         yield session
 
 
+# --- reasoning-model output cleanup + keep_alive -----------------------------
+
+
+def test_strip_reasoning_removes_think_blocks() -> None:
+    from app.services.summarization import _strip_reasoning
+
+    # A complete <think>…</think> block is removed; the answer survives.
+    assert (
+        _strip_reasoning("<think>Let me plan this out.</think>The paper studies X.")
+        == "The paper studies X."
+    )
+    # Case-insensitive + multiline reasoning is stripped.
+    assert _strip_reasoning("<THINK>\nline1\nline2\n</THINK>\n\nFinal answer.") == "Final answer."
+    # An asymmetric block (only a closing tag survived truncation) keeps what follows it.
+    assert (
+        _strip_reasoning("reasoning noise... </think> The actual summary.") == "The actual summary."
+    )
+    # Plain text (no thinking model) is returned untouched (just trimmed).
+    assert _strip_reasoning("  A normal summary.  ") == "A normal summary."
+
+
+def test_keep_alive_value_pins_or_times_out() -> None:
+    from app.services.ai_config import EffectiveAIConfig, keep_alive_value
+
+    def cfg(**over):
+        base = dict(
+            embedding_provider="ollama",
+            embedding_model="nomic-embed-text",
+            summary_provider="local_llm",
+            summary_model="qwen3.5:4b",
+            topic_backend="tfidf",
+            topic_embedding_model=None,
+            ocr_backend="none",
+            ocr_language="eng",
+            ollama_url="http://ollama:11434",
+            vram_budget_gb=None,
+            query_cache_size=2048,
+            auto_unmount=True,
+            auto_unmount_minutes=5.0,
+        )
+        base.update(over)
+        return EffectiveAIConfig(**base)
+
+    # Auto-unmount on → the idle timeout in seconds; off → -1 (pin, never auto-unload).
+    assert keep_alive_value(cfg(auto_unmount=True, auto_unmount_minutes=5.0)) == 300
+    assert keep_alive_value(cfg(auto_unmount=True, auto_unmount_minutes=0.5)) == 30
+    assert keep_alive_value(cfg(auto_unmount=False)) == -1
+
+
 # --- pure extractive summarizer ---------------------------------------------
 
 
@@ -174,7 +223,7 @@ def test_short_and_detailed_summaries_coexist_and_use_full_body(db, monkeypatch)
     db_session.commit()
     seen: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url):
+    def fake_generate(prompt, *, model, base_url, keep_alive=None):
         seen.append(prompt)
         if prompt.startswith(summ._DETAIL_INTRO_PROMPT[:30]):
             return "HIGH-LEVEL INTRO."
@@ -361,7 +410,7 @@ def test_detailed_effort_levels_coexist_and_fast_categorizes(db, monkeypatch) ->
     db.commit()
     calls: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url):
+    def fake_generate(prompt, *, model, base_url, keep_alive=None):
         calls.append(prompt)
         if prompt.startswith("Classify each academic-paper section"):
             # Categorize: sections 1..N -> Background/Methods/Results round-robin-ish.
@@ -1027,11 +1076,15 @@ def test_scope_summary_api_uses_configured_provider(client, auth_headers, db, mo
     update_ai_config(db, changes={"summary_provider": "local_llm", "summary_model": "llama3"})
     db.commit()
     monkeypatch.setattr(
-        summ, "_ollama_summarize", lambda text, *, model, base_url: f"LLM summary via {model}"
+        summ,
+        "_ollama_summarize",
+        lambda text, *, model, base_url, keep_alive=None: f"LLM summary via {model}",
     )
     # The scope reduce step (map-reduce, UX batch 4) goes through the raw generator.
     monkeypatch.setattr(
-        summ, "_ollama_generate", lambda prompt, *, model, base_url: f"LLM summary via {model}"
+        summ,
+        "_ollama_generate",
+        lambda prompt, *, model, base_url, keep_alive=None: f"LLM summary via {model}",
     )
 
     shelf = Shelf(name="cfg provider")
@@ -1070,7 +1123,7 @@ def test_scope_summary_map_reduce_prompts_and_chunking(db, monkeypatch) -> None:
     db.commit()
     prompts: list[str] = []
 
-    def fake_generate(prompt, *, model, base_url):
+    def fake_generate(prompt, *, model, base_url, keep_alive=None):
         prompts.append(prompt)
         if prompt.startswith("Summarize the following academic paper"):
             return "Digest sentence with several words in it. " * 8  # realistic-length digest
