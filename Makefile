@@ -341,6 +341,14 @@ e2e-install: ## Install the Playwright E2E deps + Chromium browser (needs networ
 
 .PHONY: e2e
 e2e: ## Run the Playwright end-to-end browser tests. Requires the dev stack up (make up).
+	@# Self-heal the dev server first: a prior `frontend-test`/`compose run` can leave a stale Vite
+	@# optimize cache that 504s ("Outdated Optimize Dep") and stops the SPA mounting during e2e.
+	$(COMPOSE) exec -T $(FRONTEND_SERVICE) rm -rf node_modules/.vite
+	$(COMPOSE) restart $(FRONTEND_SERVICE)
+	@# Wait for the restarted dev server to boot AND finish (re)optimizing deps by fetching the app
+	@# entry until it serves cleanly — otherwise the first journeys race the optimizer and go flaky.
+	@echo "Warming up the frontend dev server…"
+	@for i in $$(seq 1 60); do curl -sf -o /dev/null "$${E2E_BASE_URL:-http://127.0.0.1:5173}/src/main.ts" && break; sleep 1; done
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/ensure_e2e_user.py
 	$(COMPOSE) exec -T $(API_SERVICE) python scripts/configure_e2e_rate_limits.py enable
 	sleep 6
