@@ -1225,6 +1225,19 @@
       </details>
 
       <details>
+        <summary>Securing access (HTTPS)</summary>
+        <p>Sign-in uses a bearer token sent with every request. Over <code>localhost</code> that never
+          leaves your machine, but if other people reach this app over plain <strong>http://</strong>
+          on your network, that token travels in the clear and could be sniffed.</p>
+        <p>The production stack ships a TLS reverse proxy (Caddy). To turn on encryption for LAN users:
+          copy <code>config/Caddyfile.example</code> → <code>config/Caddyfile</code> (set your server's
+          LAN name), set <code>VITE_API_BASE_URL</code> to that same <code>https://</code> host in
+          <code>.env</code>, run <code>make prod-up</code>, and trust Caddy's local CA on each client.
+          For remote access, put it behind a VPN (WireGuard/Tailscale). Full reasoning + steps:
+          <code>docs/SECURITY_TLS.md</code>.</p>
+      </details>
+
+      <details>
         <summary>Glossary</summary>
         <dl>
           <dt>Embedding / vector</dt><dd>A list of numbers representing a text's meaning; similar texts have nearby vectors.</dd>

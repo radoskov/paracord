@@ -45,7 +45,11 @@ services:
       target: production
     environment:
       # VITE_API_BASE_URL is baked into the static bundle at build time, not runtime.
-      # Set it in .env before building: VITE_API_BASE_URL=https://your-server:8000
+      # Behind the Caddy TLS proxy, set it to the SAME https origin as the site (NO :8000) so the SPA
+      # calls the API same-origin and Caddy routes /api/* internally over TLS — e.g. in .env:
+      #   VITE_API_BASE_URL=https://paracord.lan
+      # (Pointing it at https://host:8000 would bypass Caddy and hit the API's plain port.)
+      # See docs/SECURITY_TLS.md.
       {}
     ports:
       - "127.0.0.1:80:80"

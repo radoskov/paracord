@@ -9,6 +9,18 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## HTTPS/TLS reasoning + guidance (2026-07-18)
+
+Owner question: the browser session is plain HTTP; how to encrypt it? Finding: auth is a **bearer
+token** in the `Authorization` header, so over LAN HTTP it's sniffable — but the **prod overlay
+already ships a Caddy TLS reverse proxy** (`make prod-up`, AUDIT D3); it just isn't on in dev.
+Deliverable is reasoning + guidance (`docs/SECURITY_TLS.md`): threat model, options (Caddy local-CA
+`tls internal` [recommended for LAN], real-domain Let's Encrypt, custom certs, WireGuard/Tailscale for
+remote, loopback-only fallback), a step-by-step for the recommended path, and owner config. Also fixed
+a **misleading prod comment** — `VITE_API_BASE_URL` must be the Caddy origin (no `:8000`) or API calls
+bypass TLS — and added a "Securing access (HTTPS)" section to the Help dialog. No new infra; opt-in,
+HTTP remains the safe default for single-user localhost.
+
 ## `make ai-update` — update the Ollama daemon (2026-07-18)
 
 Owner request. New Makefile target `ai-update`: prints the current Ollama version, `docker compose
