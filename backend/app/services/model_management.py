@@ -32,6 +32,17 @@ def _ollama_tags(ollama_url: str) -> list[dict] | None:
         return None
 
 
+def ollama_version(ollama_url: str) -> str | None:
+    """The Ollama daemon's version string, or None if unreachable — powers the reachability semaphore."""
+    try:
+        with httpx.Client(timeout=5) as client:
+            response = client.get(f"{ollama_url.rstrip('/')}/api/version")
+            response.raise_for_status()
+            return response.json().get("version")
+    except Exception:  # noqa: BLE001 - unreachable daemon → no version
+        return None
+
+
 def detect_providers(*, ollama_url: str) -> dict:
     """Report which providers can run here and how to enable the ones that can't."""
     ollama_models = _ollama_tags(ollama_url)

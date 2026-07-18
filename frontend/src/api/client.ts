@@ -1372,6 +1372,8 @@ export interface AiStatus {
     stale?: boolean | null;
   };
   ollama_reachable: boolean;
+  // Ollama daemon version (for the reachability semaphore tooltip); null when unreachable (#5).
+  ollama_version?: string | null;
   bertopic_installed: boolean;
   sentence_transformers_installed: boolean;
   active: {

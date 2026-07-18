@@ -98,6 +98,10 @@ services:
       DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       REDIS_URL: "redis://redis:6379/0"
       GROBID_URL: "http://grobid:8070"
+      # Reach Ollama by its compose-service name — inside a container `localhost` is the container
+      # itself, so the .env `localhost` default (fine for host-run tooling) would make model pulls
+      # and embeds fail here. Mirrors the api service (2026-07-18).
+      OLLAMA_URL: "http://ollama:11434"
       PARACORD_AUDIT_LOG_PATH: "/app/storage/audit/audit.jsonl"
     depends_on:
       postgres:

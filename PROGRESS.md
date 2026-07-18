@@ -9,6 +9,23 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Ollama worker-URL fix + reachability semaphore (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-ollama-worker-url-fix-semaphore.md`. The improved pull error
+exposed the real cause of the owner's failing pulls: the **worker** container resolved
+`OLLAMA_URL=http://localhost:11434` (from `.env`) — but pulls/embeds run in the worker, where
+`localhost` isn't Ollama. Only the **api** overrode it to `http://ollama:11434`, so the UI showed
+"reachable ✓" while the worker failed with connection-refused (`ai_config.ollama_url` is NULL → each
+container falls back to its own env).
+
+- **Fix** (`docker-compose.yml`): added `OLLAMA_URL: "http://ollama:11434"` to the **worker** service
+  (mirrors the api); recreated the worker → resolves `http://ollama:11434`, reaches Ollama (v0.31.1).
+  `.env` left as-is (localhost is right for host-run tooling).
+- **Semaphore** (owner request): `ollama_version()` + `ai_status.ollama_version`; the panel's plain
+  "reachable ✓" text is now a green/red dot (Jobs-tab style) with a URL+version tooltip that, when red,
+  flags that the worker must reach the URL too — surfacing exactly this bug class.
+- Tests: `test_ai_admin.py` 33 passed; `make frontend-test` 341 passed.
+
 ## AI model mount/unmount — live VRAM control (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-ai-model-mount-unmount.md`. Owner's ask: mount/unmount a model

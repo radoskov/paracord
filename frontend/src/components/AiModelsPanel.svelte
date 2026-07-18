@@ -699,7 +699,17 @@
         <input type="number" min="0" step="0.5" bind:value={config.vram_budget_gb} placeholder="e.g. 8" disabled={busy}
           title="VRAM/RAM budget for the Ollama host; mounting warns before it would be exceeded. Save to persist." />
       </label>
-      <span class="muted">Ollama: {status.ollama_reachable ? 'reachable ✓' : 'not reachable'}</span>
+      <!-- #5: alive-and-reachable semaphore (green/red), like the Jobs-tab dot. Reflects the daemon
+           at the configured Ollama URL; its tooltip carries the URL + version for quick debugging. -->
+      <span class="ollama-sema"
+        title={status.ollama_reachable
+          ? `Ollama reachable at ${config.ollama_url}${status.ollama_version ? ` (v${status.ollama_version})` : ''}`
+          : `Ollama unreachable at ${config.ollama_url} — start it (make up-ai) or fix the Ollama URL. Pulls/embeds run in the worker, which must reach this URL too.`}>
+        <span class="sema-dot sema-{status.ollama_reachable ? 'green' : 'red'}" aria-hidden="true"></span>
+        Ollama {status.ollama_reachable
+          ? `reachable${status.ollama_version ? ` · v${status.ollama_version}` : ''}`
+          : 'unreachable'}
+      </span>
     </div>
 
     <!-- #5: models currently held in the Ollama daemon's memory. -->
@@ -970,6 +980,22 @@
   .mount-row { align-items: center; display: flex; gap: 0.5rem; margin-top: 0.1rem; }
   .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
   .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+  .ollama-sema { align-items: center; color: var(--ink-muted); display: inline-flex; font-size: 0.8rem; gap: 0.35rem; white-space: nowrap; }
+  .sema-dot {
+    border-radius: 50%;
+    box-shadow: 0 0 5px 1px var(--dot-glow, transparent);
+    display: inline-block;
+    height: 0.62rem;
+    width: 0.62rem;
+  }
+  .sema-green {
+    background: color-mix(in srgb, var(--status-success) 72%, white);
+    --dot-glow: color-mix(in srgb, var(--status-success) 55%, transparent);
+  }
+  .sema-red {
+    background: color-mix(in srgb, var(--status-danger) 72%, white);
+    --dot-glow: color-mix(in srgb, var(--status-danger) 55%, transparent);
+  }
   .hint { color: var(--status-warning); }
   .small { margin: 0.2rem 0 0.4rem; }
   .message { background: var(--status-success-bg); border-radius: 6px; padding: 0.4rem 0.6rem; }

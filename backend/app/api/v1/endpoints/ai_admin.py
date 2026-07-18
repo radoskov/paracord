@@ -36,6 +36,7 @@ from app.services.model_management import (
     list_loaded,
     list_models,
     mount_model,
+    ollama_version,
     probe_embedding_model,
     unmount_model,
 )
@@ -511,6 +512,8 @@ def ai_status_endpoint(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
         "chunk_embeddings": chunk_embedding_status(db, provider=get_embedding_provider(db=db)),
         "lexical_index": lexical_cache_info(db),
         "ollama_reachable": providers["ollama_reachable"],
+        # Version powers the reachability semaphore's tooltip (#5); None when unreachable.
+        "ollama_version": ollama_version(config.ollama_url) if providers["ollama_reachable"] else None,
         "bertopic_installed": providers["bertopic_installed"],
         "sentence_transformers_installed": providers["sentence_transformers_installed"],
         "active": _active_capability_status(config_dict, providers),
