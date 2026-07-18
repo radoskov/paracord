@@ -5,17 +5,20 @@
 // lib/selection.ts.
 import { get, writable } from 'svelte/store';
 
-import type { ApiClient, Rack, Shelf, Tag } from '../api/client';
+import type { ApiClient, Rack, Row, Shelf, Tag } from '../api/client';
 
 export const shelves = writable<Shelf[]>([]);
 export const racks = writable<Rack[]>([]);
+export const rows = writable<Row[]>([]);
 export const tags = writable<Tag[]>([]);
 
 let shelvesLoaded = false;
 let racksLoaded = false;
+let rowsLoaded = false;
 let tagsLoaded = false;
 let shelvesInflight: Promise<Shelf[]> | null = null;
 let racksInflight: Promise<Rack[]> | null = null;
+let rowsInflight: Promise<Row[]> | null = null;
 let tagsInflight: Promise<Tag[]> | null = null;
 
 // Force a re-fetch and publish to subscribers. Call after any mutation (create / rename / delete /
@@ -32,6 +35,14 @@ export async function refreshRacks(client: ApiClient): Promise<Rack[]> {
   const list = await client.listRacks();
   racks.set(list);
   racksLoaded = true;
+  return list;
+}
+
+/** Force a re-fetch of rows and publish to subscribers; see {@link refreshShelves}. */
+export async function refreshRows(client: ApiClient): Promise<Row[]> {
+  const list = await client.listRows();
+  rows.set(list);
+  rowsLoaded = true;
   return list;
 }
 
@@ -67,6 +78,17 @@ export async function ensureRacks(client: ApiClient): Promise<Rack[]> {
   return racksInflight;
 }
 
+/** Fetch rows once (deduped), reusing the cache on later mounts; see {@link ensureShelves}. */
+export async function ensureRows(client: ApiClient): Promise<Row[]> {
+  if (rowsLoaded) return get(rows);
+  if (!rowsInflight) {
+    rowsInflight = refreshRows(client).finally(() => {
+      rowsInflight = null;
+    });
+  }
+  return rowsInflight;
+}
+
 /** Fetch tags once (deduped), reusing the cache on later mounts; see {@link ensureShelves}. */
 export async function ensureTags(client: ApiClient): Promise<Tag[]> {
   if (tagsLoaded) return get(tags);
@@ -83,7 +105,8 @@ export async function ensureTags(client: ApiClient): Promise<Tag[]> {
 export function resetCatalog(): void {
   shelves.set([]);
   racks.set([]);
+  rows.set([]);
   tags.set([]);
-  shelvesLoaded = racksLoaded = tagsLoaded = false;
-  shelvesInflight = racksInflight = tagsInflight = null;
+  shelvesLoaded = racksLoaded = rowsLoaded = tagsLoaded = false;
+  shelvesInflight = racksInflight = rowsInflight = tagsInflight = null;
 }

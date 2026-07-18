@@ -19,7 +19,7 @@
     type ImportBatch,
     type SavedFilter,
   } from '../api/client';
-  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
+  import { ensureRacks, ensureRows, ensureShelves, racks, rows, shelves } from '../lib/catalog';
   import { scopeSelectionReady } from '../lib/scope';
   import { selectedPaperIds } from '../lib/selection';
 
@@ -43,9 +43,10 @@
   onMount(async () => {
     // Prime the shared catalog stores so newly created shelves/racks appear live; batch/filter
     // lists are per-picker. Failures degrade to empty dropdowns rather than breaking the tab.
-    [, , batches, savedFilters] = await Promise.all([
+    [, , , batches, savedFilters] = await Promise.all([
       ensureShelves(client).catch(() => []),
       ensureRacks(client).catch(() => []),
+      ensureRows(client).catch(() => []),
       client.listImportBatches().catch(() => [] as ImportBatch[]),
       client.listSavedFilters().catch(() => [] as SavedFilter[]),
     ]);
@@ -76,6 +77,7 @@
       <option value="library">Whole library</option>
       <option value="shelf">A shelf</option>
       <option value="rack">A rack</option>
+      <option value="row">A row</option>
       <option value="search_result">Search result</option>
       <option value="selected_papers">Selected papers</option>
       <option value="import_batch">Import batch</option>
@@ -97,6 +99,14 @@
         title={`Choose the rack to ${verb}`}>
         <option value="">Choose a rack…</option>
         {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
+      </select>
+    </label>
+  {:else if scopeType === 'row'}
+    <label>Row
+      <select bind:value={scopeId} aria-label="Row" data-testid={`${testid}-scope-id`}
+        title={`Choose the row to ${verb}`}>
+        <option value="">Choose a row…</option>
+        {#each $rows as row (row.id)}<option value={row.id}>{row.name}</option>{/each}
       </select>
     </label>
   {:else if scopeType === 'search_result'}

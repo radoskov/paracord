@@ -90,12 +90,13 @@
     ['venue', 'Venue'], // 5d
     ['shelf', 'Shelf'], // membership kinds: multi-membership papers render as a color wheel
     ['rack', 'Rack'],
+    ['row', 'Row'],
     ['tag', 'Tag'],
     ['none', 'None'],
   ];
   // Membership colors are resolved server-side (privacy-filtered, ALL memberships) — meta has no
   // membership data, so unlike the other encodings they need a rebuild, not a client restyle.
-  const MEMBERSHIP_COLOR_KINDS = new Set(['shelf', 'rack', 'tag']);
+  const MEMBERSHIP_COLOR_KINDS = new Set(['shelf', 'rack', 'row', 'tag']);
   let lastColorBy = colorBy;
 
   // Axis choices come from the server payload (view-specific); before the first Build, fall back

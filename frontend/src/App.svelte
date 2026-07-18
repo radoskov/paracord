@@ -19,6 +19,7 @@
   import LibraryPage from './pages/LibraryPage.svelte';
   import ProfilePage from './pages/ProfilePage.svelte';
   import RacksPage from './pages/RacksPage.svelte';
+  import RowsPage from './pages/RowsPage.svelte';
   import SearchPage from './pages/SearchPage.svelte';
   import ShelvesPage from './pages/ShelvesPage.svelte';
   import TagsPage from './pages/TagsPage.svelte';
@@ -40,7 +41,8 @@
     { id: 'import', label: 'Import', hint: 'Add papers from a folder, a PDF upload, an arXiv/DOI identifier, or a bibliography file.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'shelves', label: 'Shelves', hint: 'Group related papers into shelves.' },
     { id: 'racks', label: 'Racks', hint: 'Group related shelves into racks.' },
-    { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves or racks.' },
+    { id: 'rows', label: 'Rows', hint: 'Group related racks into rows — the broadest layer.' },
+    { id: 'tags', label: 'Tags', hint: 'Create tags and apply them to papers, shelves, racks or rows.' },
     { id: 'duplicates', label: 'Duplicates', hint: 'Review and resolve duplicate / version candidates.', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'jobs', label: 'Jobs', hint: 'Background extraction & enrichment job status (and worker availability).', roles: ['owner', 'admin', 'librarian', 'editor', 'contributor'] },
     { id: 'insights', label: 'Insights', hint: 'Citation graph, topics and scope summaries.' },
@@ -321,6 +323,9 @@
     {/if}
     {#if visited.has('racks')}
       <div hidden={active !== 'racks'}><RacksPage {client} /></div>
+    {/if}
+    {#if visited.has('rows')}
+      <div hidden={active !== 'rows'}><RowsPage {client} /></div>
     {/if}
     {#if visited.has('tags')}
       <div hidden={active !== 'tags'}><TagsPage {client} visible={active === 'tags'} /></div>

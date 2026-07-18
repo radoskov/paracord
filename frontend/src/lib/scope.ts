@@ -25,6 +25,7 @@ export function scopeSelectionReady(selection: ScopeSelection, selectedCount: nu
       return true;
     case 'shelf':
     case 'rack':
+    case 'row':
       return !!selection.scopeId;
     case 'search_result':
       return !!selection.searchQuery.trim();
@@ -70,6 +71,7 @@ export async function resolveScopeRequest(
       return { scopeType: selection.scopeType, scopeId: selection.savedFilterId || null };
     case 'shelf':
     case 'rack':
+    case 'row':
       return { scopeType: selection.scopeType, scopeId: selection.scopeId || null };
     default:
       return { scopeType: selection.scopeType, scopeId: null };

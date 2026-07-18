@@ -227,7 +227,7 @@ const REF_KIND_LABEL: Record<string, string> = {
  * highlight/tooltip and the modal's legend chips so filtering/highlight use one definition. */
 export function referenceNodeGroups(n: ReferenceGraphNode, colorBy: string): string[] {
   if (colorBy === "venue") return [n.venue || "unknown"];
-  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag")
+  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "row" || colorBy === "tag")
     return n.memberships?.[colorBy] ?? [];
   return [REF_KIND_LABEL[n.kind] ?? n.kind];
 }
@@ -247,7 +247,7 @@ export function referenceColorGroups(
     const groups = [...new Set(graph.nodes.map((n) => n.venue || "unknown"))];
     return { groups, colors: groups.map((_, i) => wrap(i)) };
   }
-  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+  if (colorBy === "shelf" || colorBy === "rack" || colorBy === "row" || colorBy === "tag") {
     const groups = [
       ...new Set(graph.nodes.flatMap((n) => n.memberships?.[colorBy] ?? [])),
     ].sort((a, b) => a.localeCompare(b));
@@ -423,7 +423,7 @@ export function buildReferenceGraphOption(
       emphasis: { focus: "series" },
       z: 2,
     }));
-  } else if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+  } else if (colorBy === "shelf" || colorBy === "rack" || colorBy === "row" || colorBy === "tag") {
     // Membership coloring: one series (legend entry) per shelf/rack/tag name. Only the base +
     // in-library nodes carry memberships; everything else groups under "external / no data".
     // A node with SEVERAL memberships plots once (in its first group's series) but renders as a

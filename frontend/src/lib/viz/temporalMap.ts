@@ -161,7 +161,7 @@ export function restyleTemporalMap(
     // Membership kinds (shelf/rack/tag) are SERVER-computed (meta has no membership data):
     // preserve the node's existing groups so a size-only restyle can't wipe them. Switching the
     // color-by TO a membership kind goes through a server rebuild, not this restyle.
-    if (colorBy === "shelf" || colorBy === "rack" || colorBy === "tag") {
+    if (colorBy === "shelf" || colorBy === "rack" || colorBy === "row" || colorBy === "tag") {
       return { ...n, size };
     }
     let colorGroup: string | null;

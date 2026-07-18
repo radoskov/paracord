@@ -11,7 +11,16 @@
   import { onMount } from 'svelte';
 
   import { ApiClient, type Tag } from '../api/client';
-  import { ensureRacks, ensureShelves, racks, refreshTags, shelves, tags } from '../lib/catalog';
+  import {
+    ensureRacks,
+    ensureRows,
+    ensureShelves,
+    racks,
+    refreshTags,
+    rows,
+    shelves,
+    tags,
+  } from '../lib/catalog';
   import { canEdit, isEditor, INSUFFICIENT_ROLE } from '../lib/session';
   import { errorMessage } from '../lib/ui';
 
@@ -42,26 +51,31 @@
   // 2026-07-16 tag scoping: the shelves/racks the edited tag is offered for (empty = global).
   let editShelfIds = new Set<string>();
   let editRackIds = new Set<string>();
+  let editRowIds = new Set<string>();
 
-  // Filter the list to tags offered for a shelf/rack (global tags always shown).
+  // Filter the list to tags offered for a shelf/rack/row (global tags always shown).
   let filterShelf = '';
   let filterRack = '';
+  let filterRow = '';
   $: filteredTags = $tags.filter((t) => {
-    if (!filterShelf && !filterRack) return true;
-    const isGlobal = !(t.shelf_ids?.length || t.rack_ids?.length);
+    if (!filterShelf && !filterRack && !filterRow) return true;
+    const isGlobal = !(t.shelf_ids?.length || t.rack_ids?.length || t.row_ids?.length);
     const matches =
       (filterShelf && t.shelf_ids?.includes(filterShelf)) ||
-      (filterRack && t.rack_ids?.includes(filterRack));
+      (filterRack && t.rack_ids?.includes(filterRack)) ||
+      (filterRow && t.row_ids?.includes(filterRow));
     return isGlobal || matches;
   });
 
   function scopeLabel(t: Tag): string {
     const s = t.shelf_ids?.length ?? 0;
     const r = t.rack_ids?.length ?? 0;
-    if (!s && !r) return 'global';
+    const w = t.row_ids?.length ?? 0;
+    if (!s && !r && !w) return 'global';
     const parts: string[] = [];
     if (s) parts.push(`${s} shelf${s === 1 ? '' : 'ves'}`);
     if (r) parts.push(`${r} rack${r === 1 ? '' : 's'}`);
+    if (w) parts.push(`${w} row${w === 1 ? '' : 's'}`);
     return parts.join(', ');
   }
 
@@ -82,7 +96,12 @@
 
   async function load(): Promise<void> {
     await run(async () => {
-      await Promise.all([refreshTags(client), ensureShelves(client), ensureRacks(client)]);
+      await Promise.all([
+        refreshTags(client),
+        ensureShelves(client),
+        ensureRacks(client),
+        ensureRows(client),
+      ]);
     });
   }
 
@@ -107,6 +126,7 @@
     editDescription = tag.description ?? '';
     editShelfIds = new Set(tag.shelf_ids ?? []);
     editRackIds = new Set(tag.rack_ids ?? []);
+    editRowIds = new Set(tag.row_ids ?? []);
   }
 
   function cancelEdit(): void {
@@ -133,6 +153,7 @@
       await client.setTagScope?.(id, {
         shelfIds: [...editShelfIds],
         rackIds: [...editRackIds],
+        rowIds: [...editRowIds],
       });
       editingId = null;
       await refreshTags(client);
@@ -182,6 +203,10 @@
           <option value="">Any rack</option>
           {#each $racks as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
         </select>
+        <select bind:value={filterRow} aria-label="Filter tags by row" title="Show tags offered for a row (plus global)">
+          <option value="">Any row</option>
+          {#each $rows as r (r.id)}<option value={r.id}>{r.name}</option>{/each}
+        </select>
         <span class="muted">{filteredTags.length}/{$tags.length}</span>
       </div>
     </div>
@@ -213,6 +238,13 @@
                       {#each $racks as r (r.id)}
                         <label><input type="checkbox" checked={editRackIds.has(r.id)}
                           on:change={() => (editRackIds = toggleSet(editRackIds, r.id))} /> {r.name}</label>
+                      {/each}
+                    </fieldset>
+                    <fieldset>
+                      <legend>Rows</legend>
+                      {#each $rows as r (r.id)}
+                        <label><input type="checkbox" checked={editRowIds.has(r.id)}
+                          on:change={() => (editRowIds = toggleSet(editRowIds, r.id))} /> {r.name}</label>
                       {/each}
                     </fieldset>
                   </div>

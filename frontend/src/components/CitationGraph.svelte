@@ -112,7 +112,7 @@
   // Topic-graph encodings (UX batch 4): its own selects — the citation metrics (pagerank etc.)
   // don't exist on similarity nodes, but citation count and year do.
   let topicSizeBy: 'degree' | 'citations' = 'degree';
-  let topicColorBy: 'none' | 'year' | 'shelf' | 'rack' | 'tag' = 'none';
+  let topicColorBy: 'none' | 'year' | 'shelf' | 'rack' | 'row' | 'tag' = 'none';
   type REdge = { source: string; target: string; weight: number; resolution?: string; relation?: string };
 
   $: rNodes = (() => {
@@ -637,6 +637,7 @@
           <option value="status">Color: reading status</option>
           <option value="shelf">Color: shelf</option>
           <option value="rack">Color: rack</option>
+          <option value="row">Color: row</option>
           <option value="tag">Color: tag</option>
           <option value="topic">Color: topic</option>
           <option value="year">Color: year</option>
@@ -654,6 +655,7 @@
           <option value="year">Color: year</option>
           <option value="shelf">Color: shelf</option>
           <option value="rack">Color: rack</option>
+          <option value="row">Color: row</option>
           <option value="tag">Color: tag</option>
         </select>
       {/if}

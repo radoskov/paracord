@@ -1662,10 +1662,11 @@
     {:else}
       <ul class="locations">
         {#each locations as shelf (shelf.id)}
+          {@const rowPrefix = (shelf.rows ?? []).map((r) => r.name).join(', ')}
           {#if shelf.racks.length}
             {#each shelf.racks as rack (rack.id)}
               <li class="entry-card location-row">
-                <span class="loc-path"><span class="loc-rack">{rack.name}</span> › <span class="loc-shelf">{shelf.name}</span></span>
+                <span class="loc-path">{#if rowPrefix}<span class="loc-row">{rowPrefix}</span> › {/if}<span class="loc-rack">{rack.name}</span> › <span class="loc-shelf">{shelf.name}</span></span>
                 <button type="button" class="secondary small" on:click={() => removeFromShelf(shelf.id)}
                   disabled={loading || !shelf.can_modify}
                   title={shelf.can_modify ? 'Remove this paper from the shelf' : INSUFFICIENT_ROLE}>Remove</button>
@@ -1673,7 +1674,7 @@
             {/each}
           {:else}
             <li class="entry-card location-row">
-              <span class="loc-path"><span class="loc-shelf">{shelf.name}</span></span>
+              <span class="loc-path">{#if rowPrefix}<span class="loc-row">{rowPrefix}</span> › {/if}<span class="loc-shelf">{shelf.name}</span></span>
               <button type="button" class="secondary small" on:click={() => removeFromShelf(shelf.id)}
                 disabled={loading || !shelf.can_modify}
                 title={shelf.can_modify ? 'Remove this paper from the shelf' : INSUFFICIENT_ROLE}>Remove</button>

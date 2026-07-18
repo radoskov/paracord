@@ -59,9 +59,10 @@ export interface Work {
   // the Unmerge button).
   merged_into_id?: string | null;
   has_reversible_shadow?: boolean;
-  // SEE-filtered shelves/racks for the Library columns (D32); only populated by listWorks.
+  // SEE-filtered shelves/racks/rows for the Library columns (D32); only populated by listWorks.
   shelves?: WorkRef[];
   racks?: WorkRef[];
+  rows?: WorkRef[];
   // Library columns (batch10); only populated by listWorks. file_count = attached files;
   // tags = applied tags (with colour); badges = status tokens (extracted / extract_failed /
   // not_extracted / text_poor / text_none / ocr_added / conflicts) mapped to chips by the table.
@@ -234,6 +235,7 @@ export type GraphScopeType =
   | "library"
   | "shelf"
   | "rack"
+  | "row"
   | "search_result"
   | "selected_papers"
   | "import_batch"
@@ -245,6 +247,7 @@ export type GraphColorBy =
   | "none"
   | "shelf"
   | "rack"
+  | "row"
   | "tag"
   | "topic"
   | "status"
@@ -583,7 +586,7 @@ export interface WorkShelfRackRef {
   name: string;
 }
 
-// A shelf a paper belongs to, with the caller's modify flag and the racks that contain it.
+// A shelf a paper belongs to, with the caller's modify flag and the racks/rows that contain it.
 export interface WorkShelfMembership {
   id: string;
   name: string;
@@ -592,9 +595,22 @@ export interface WorkShelfMembership {
   // per-shelf Remove button alongside the canManageStructure store.
   can_modify: boolean;
   racks: WorkShelfRackRef[];
+  // Rows containing this shelf's racks (work→shelf→rack→row), SEE-filtered.
+  rows: WorkShelfRackRef[];
 }
 
 export interface Rack {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  access_level: AccessLevel;
+  created_at: string;
+  updated_at: string;
+}
+
+// A Row is the broadest grouping layer — it contains racks (Row ⊃ Rack ⊃ Shelf ⊃ Paper).
+export interface Row {
   id: string;
   name: string;
   description: string | null;
@@ -611,9 +627,10 @@ export interface Tag {
   color: string | null;
   description: string | null;
   created_at: string;
-  // 2026-07-16: shelves/racks this tag is OFFERED for. Both empty = global (offered everywhere).
+  // 2026-07-16: shelves/racks/rows this tag is OFFERED for. All empty = global (offered everywhere).
   shelf_ids?: string[];
   rack_ids?: string[];
+  row_ids?: string[];
 }
 
 // A tag applied to a paper (from GET /works/{id}/tags): just what the chip needs to render.
@@ -1324,7 +1341,7 @@ export interface GroupMember {
   display_name: string | null;
 }
 
-export type GrantTargetType = "rack" | "shelf";
+export type GrantTargetType = "rack" | "shelf" | "row";
 
 export interface Grant {
   id: string;
@@ -2267,27 +2284,71 @@ export class ApiClient {
     });
   }
 
-  async listTags(filter?: { shelfId?: string | null; rackId?: string | null }): Promise<Tag[]> {
+  // --- Rows (broadest grouping layer; a row contains racks) ---
+  async listRows(): Promise<Row[]> {
+    return this.request<Row[]>("/api/v1/rows");
+  }
+
+  async createRow(payload: {
+    name: string;
+    description?: string;
+    access_level?: AccessLevel;
+  }): Promise<Row> {
+    return this.request<Row>("/api/v1/rows", { method: "POST", body: payload });
+  }
+
+  async updateRow(id: string, payload: Partial<Row>): Promise<Row> {
+    return this.request<Row>(`/api/v1/rows/${id}`, { method: "PATCH", body: payload });
+  }
+
+  async deleteRow(id: string, deleteRacks = false): Promise<void> {
+    // Hard delete. When deleteRacks is true, associated racks the caller may modify are also
+    // hard-deleted (their shelves survive); otherwise the racks just leave this row.
+    const suffix = deleteRacks ? "?delete_racks=true" : "";
+    await this.request<void>(`/api/v1/rows/${id}${suffix}`, { method: "DELETE" });
+  }
+
+  async listRowRacks(rowId: string): Promise<Rack[]> {
+    return this.request<Rack[]>(`/api/v1/rows/${rowId}/racks`);
+  }
+
+  async addRackToRow(rowId: string, rackId: string): Promise<void> {
+    await this.request<void>(`/api/v1/rows/${rowId}/racks`, {
+      method: "POST",
+      body: { rack_id: rackId },
+    });
+  }
+
+  async removeRackFromRow(rowId: string, rackId: string): Promise<void> {
+    await this.request<void>(`/api/v1/rows/${rowId}/racks/${rackId}`, { method: "DELETE" });
+  }
+
+  async listTags(filter?: {
+    shelfId?: string | null;
+    rackId?: string | null;
+    rowId?: string | null;
+  }): Promise<Tag[]> {
     const q = new URLSearchParams();
     if (filter?.shelfId) q.set("shelf_id", filter.shelfId);
     if (filter?.rackId) q.set("rack_id", filter.rackId);
+    if (filter?.rowId) q.set("row_id", filter.rowId);
     const qs = q.toString();
     return this.request<Tag[]>(`/api/v1/tags${qs ? `?${qs}` : ""}`);
   }
 
-  /** Tags offered for a paper: global + those scoped to its shelves/racks (2026-07-16). */
+  /** Tags offered for a paper: global + those scoped to its shelves/racks/rows (2026-07-16). */
   async listAssignableTags(workId: string): Promise<Tag[]> {
     return this.request<Tag[]>(`/api/v1/tags/assignable?work_id=${workId}`);
   }
 
-  /** Replace a tag's shelf/rack scope (empty arrays → global). */
+  /** Replace a tag's shelf/rack/row scope (empty arrays → global). */
   async setTagScope(
     tagId: string,
-    scope: { shelfIds: string[]; rackIds: string[] },
+    scope: { shelfIds: string[]; rackIds: string[]; rowIds?: string[] },
   ): Promise<Tag> {
     return this.request<Tag>(`/api/v1/tags/${tagId}/scope`, {
       method: "PUT",
-      body: { shelf_ids: scope.shelfIds, rack_ids: scope.rackIds },
+      body: { shelf_ids: scope.shelfIds, rack_ids: scope.rackIds, row_ids: scope.rowIds ?? [] },
     });
   }
 

@@ -32,7 +32,7 @@
   import { get } from 'svelte/store';
 
   import Modal from '../components/Modal.svelte';
-  import { ensureRacks, ensureShelves, racks, shelves } from '../lib/catalog';
+  import { ensureRacks, ensureRows, ensureShelves, racks, rows, shelves } from '../lib/catalog';
   import { canManageUsers, currentUser, isOwner } from '../lib/session';
   import { loadCustomThemes } from '../lib/theme/store';
   import { bundledThemes, bundledThemeYaml } from '../lib/theme/themes.generated';
@@ -203,7 +203,7 @@
 
   // Target label lookup for grant rows (rack/shelf name from the loaded lists).
   function targetLabel(type: GrantTargetType, id: string): string {
-    const list = type === 'rack' ? $racks : $shelves;
+    const list = type === 'rack' ? $racks : type === 'row' ? $rows : $shelves;
     return list.find((t) => t.id === id)?.name ?? `${type} ${id.slice(0, 8)}`;
   }
 
@@ -238,10 +238,11 @@
       // Groups, racks/shelves (for grant pickers) and default settings are admin-or-owner.
       if (get(canManageUsers)) {
         // Prime the shared catalog stores so newly created shelves/racks appear in the grant pickers live.
-        [groups, , , defaultGrants] = await Promise.all([
+        [groups, , , , defaultGrants] = await Promise.all([
           client.listGroups(),
           ensureRacks(client),
           ensureShelves(client),
+          ensureRows(client),
           client.listDefaultGrants(),
         ]);
         defaultAccessLevel = (await client.getAccessSettings()).default_access_level;
@@ -1570,13 +1571,14 @@
                   <div class="subgroup">
                     <h4>Access grants ({groupGrants.length})</h4>
                     <div class="picker">
-                      <select bind:value={grantTargetType} aria-label="Grant target type" title="Grant access to a rack or a shelf">
+                      <select bind:value={grantTargetType} aria-label="Grant target type" title="Grant access to a row, rack or shelf">
                         <option value="shelf">Shelf</option>
                         <option value="rack">Rack</option>
+                        <option value="row">Row</option>
                       </select>
                       <select bind:value={pickGrantTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant">
                         <option value="">Choose a {grantTargetType}…</option>
-                        {#each (grantTargetType === 'rack' ? $racks : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+                        {#each (grantTargetType === 'rack' ? $racks : grantTargetType === 'row' ? $rows : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
                       </select>
                       <button type="button" on:click={addGrant} disabled={loading || !pickGrantTargetId}
                         title={pickGrantTargetId ? 'Grant this group access' : 'Choose a target first'}>Add grant</button>
@@ -1626,13 +1628,14 @@
 
         <h4>Default grants ({defaultGrants.length})</h4>
         <div class="picker">
-          <select bind:value={defaultGrantType} aria-label="Default grant target type" title="A rack or a shelf">
+          <select bind:value={defaultGrantType} aria-label="Default grant target type" title="A row, rack or shelf">
             <option value="shelf">Shelf</option>
             <option value="rack">Rack</option>
+            <option value="row">Row</option>
           </select>
           <select bind:value={pickDefaultTargetId} aria-label="Choose a rack or shelf" title="Choose the rack or shelf to grant to new users">
             <option value="">Choose a {defaultGrantType}…</option>
-            {#each (defaultGrantType === 'rack' ? $racks : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
+            {#each (defaultGrantType === 'rack' ? $racks : defaultGrantType === 'row' ? $rows : $shelves) as t (t.id)}<option value={t.id}>{t.name}</option>{/each}
           </select>
           <button type="button" on:click={addDefaultGrant} disabled={loading || !pickDefaultTargetId}
             title={pickDefaultTargetId ? 'Add this default grant' : 'Choose a target first'}>Add default grant</button>

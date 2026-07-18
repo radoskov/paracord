@@ -441,6 +441,7 @@
         <option value="venue">Venue</option>
         <option value="shelf">Shelf</option>
         <option value="rack">Rack</option>
+        <option value="row">Row</option>
         <option value="tag">Tag</option>
       </select>
     </label>

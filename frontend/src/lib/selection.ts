@@ -5,6 +5,7 @@ import { writable } from 'svelte/store';
 export const selectedWorkId = writable<string | null>(null);
 export const selectedShelfId = writable<string | null>(null);
 export const selectedRackId = writable<string | null>(null);
+export const selectedRowId = writable<string | null>(null);
 
 // The library multi-selection (ids of checked papers), mirrored from LibraryPage so other tabs
 // (e.g. the Insights "Selected papers" graph scope) can operate on the current selection.
