@@ -66,6 +66,33 @@ class Rack(Base):
     )
 
 
+class Row(Base):
+    """Collection of racks — the broadest grouping layer (a "row of book racks"). A rack can
+    appear in multiple rows. A paper's row membership is inferred work→shelf→rack→row."""
+
+    __tablename__ = "rows"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    # Access level (Phase H): one of ``open`` / ``visible`` / ``private``. See app.services.access.
+    access_level: Mapped[str] = mapped_column(String(16), default="open")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class Tag(Base):
     """Tag applicable to multiple entity types."""
 
@@ -138,6 +165,33 @@ class RackShelf(Base):
     position: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class RowRack(Base):
+    """Membership of a rack in a row (mirrors RackShelf one hop up)."""
+
+    __tablename__ = "row_racks"
+
+    row_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("rows.id", ondelete="CASCADE"), primary_key=True
+    )
+    rack_id: Mapped[uuid.UUID] = mapped_column(
+        # index=True: row-scope joins filter by rack_id, which the (row_id, rack_id) PK can't serve
+        # leading-column-wise. (Mirrors rack_shelves.shelf_id.)
+        Uuid(as_uuid=True),
+        ForeignKey("racks.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    added_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class TagLink(Base):
     """A tag attached to any supported entity type."""
 
@@ -188,6 +242,22 @@ class TagRack(Base):
     rack_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("racks.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+
+class TagRow(Base):
+    """Restricts a tag's availability to a row (a paper qualifies via any shelf→rack→row path)."""
+
+    __tablename__ = "tag_rows"
+
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    row_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("rows.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
     )

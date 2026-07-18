@@ -21,11 +21,14 @@ from app.models.metadata import MetadataAssertion
 from app.models.organization import (
     Rack,
     RackShelf,
+    Row,
+    RowRack,
     Shelf,
     ShelfWork,
     Tag,
     TagLink,
     TagRack,
+    TagRow,
     TagShelf,
 )
 from app.models.saved_filter import SavedFilter
@@ -70,6 +73,8 @@ __all__ = [
     "RackShelf",
     "RawTeiDocument",
     "Reference",
+    "Row",
+    "RowRack",
     "SavedFilter",
     "ScopeNote",
     "Shelf",
@@ -79,6 +84,7 @@ __all__ = [
     "Tag",
     "TagLink",
     "TagRack",
+    "TagRow",
     "TagShelf",
     "TopicAssignment",
     "User",
