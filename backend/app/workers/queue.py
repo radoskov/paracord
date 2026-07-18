@@ -22,6 +22,8 @@ CHUNK_JOB = "app.workers.jobs.chunk_work_job"
 DEDUP_JOB = "app.workers.jobs.scan_duplicates_job"
 REINDEX_JOB = "app.workers.jobs.reindex_embeddings_job"
 PULL_MODEL_JOB = "app.workers.jobs.pull_model_job"
+MOUNT_MODEL_JOB = "app.workers.jobs.mount_model_job"
+UNMOUNT_MODEL_JOB = "app.workers.jobs.unmount_model_job"
 TOPIC_JOB = "app.workers.jobs.topic_work_job"
 KEYWORDS_JOB = "app.workers.jobs.keywords_work_job"
 CITING_FETCH_JOB = "app.workers.jobs.fetch_citing_work_job"
@@ -458,6 +460,29 @@ def enqueue_model_pull(provider: str, model: str) -> str | None:
         return None
 
 
+def enqueue_model_mount(
+    model: str, kind: str, compute: str, actor_user_id: str | None
+) -> str | None:
+    """Best-effort enqueue of a model mount (load into memory + make active). Runs in the worker so
+    a slow load never blocks the API/UI (#5)."""
+    try:
+        return get_queue().enqueue(
+            MOUNT_MODEL_JOB, model, kind, compute, actor_user_id, job_timeout=1800
+        ).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue model mount %s (%s): %s", model, kind, exc)
+        return None
+
+
+def enqueue_model_unmount(model: str, kind: str, actor_user_id: str | None) -> str | None:
+    """Best-effort enqueue of a model unmount (release memory + revert to baseline) (#5)."""
+    try:
+        return get_queue().enqueue(UNMOUNT_MODEL_JOB, model, kind, actor_user_id, job_timeout=300).id
+    except Exception as exc:  # noqa: BLE001 - best effort; log and continue
+        logger.warning("Could not enqueue model unmount %s (%s): %s", model, kind, exc)
+        return None
+
+
 def _enqueue_scope_job(
     job_func: str, prefix: str, scope_type: str, scope_id, **kwargs
 ) -> str | None:
@@ -548,6 +573,8 @@ _FUNC_LABELS = {
     DEDUP_JOB: "dedup-scan",
     REINDEX_JOB: "reindex",
     PULL_MODEL_JOB: "model-pull",
+    MOUNT_MODEL_JOB: "model-mount",
+    UNMOUNT_MODEL_JOB: "model-unmount",
     BM25_REBUILD_JOB: "bm25-rebuild",
 }
 

@@ -24,7 +24,7 @@ def _module_available(name: str) -> bool:
 def _ollama_tags(ollama_url: str) -> list[dict] | None:
     """Return the Ollama daemon's local models, or None if it is unreachable."""
     try:
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=3) as client:
             response = client.get(f"{ollama_url.rstrip('/')}/api/tags")
             response.raise_for_status()
             return response.json().get("models", [])
@@ -35,7 +35,7 @@ def _ollama_tags(ollama_url: str) -> list[dict] | None:
 def ollama_version(ollama_url: str) -> str | None:
     """The Ollama daemon's version string, or None if unreachable — powers the reachability semaphore."""
     try:
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=3) as client:
             response = client.get(f"{ollama_url.rstrip('/')}/api/version")
             response.raise_for_status()
             return response.json().get("version")
@@ -203,7 +203,7 @@ def list_loaded(*, ollama_url: str) -> list[dict]:
     ``size_vram_bytes`` is the actual GPU VRAM in use (0 on a CPU-only host); ``size_bytes`` is the
     total resident size. Used by the mount panel to show what's loaded and free it."""
     try:
-        with httpx.Client(timeout=5) as client:
+        with httpx.Client(timeout=3) as client:
             resp = client.get(f"{ollama_url.rstrip('/')}/api/ps")
             resp.raise_for_status()
             return [
@@ -219,25 +219,40 @@ def list_loaded(*, ollama_url: str) -> list[dict]:
         return []
 
 
-def _keep_alive(model: str, *, embedding: bool, ollama_url: str, keep_alive: int) -> None:
-    """Load (``keep_alive=-1``, pin) or unload (``keep_alive=0``) a model. Raises RuntimeError on
-    failure. Embedding-only models don't support /api/generate, so route by kind."""
+# Ollama's per-request ``num_gpu`` = number of model layers to offload to the GPU. 0 forces CPU;
+# a large value offloads everything (the daemon caps it at the model's layer count); None lets the
+# daemon auto-decide (its default). "compute" strings from the UI map here.
+_COMPUTE_NUM_GPU = {"cpu": 0, "gpu": 999, "auto": None}
+
+
+def _load_call(
+    client: httpx.Client, base: str, model: str, *, embedding: bool, keep_alive: int, num_gpu: int | None
+) -> httpx.Response:
+    """One load/unload request, routed by kind (embedding-only models reject /api/generate)."""
+    payload: dict = {"model": model, "keep_alive": keep_alive}
+    if num_gpu is not None:
+        payload["options"] = {"num_gpu": num_gpu}
+    if embedding:
+        payload["input"] = "ping"
+        return client.post(f"{base}/api/embed", json=payload)
+    # No prompt → the daemon just loads (or, with keep_alive=0, unloads) the model.
+    return client.post(f"{base}/api/generate", json=payload)
+
+
+def mount_model(
+    model: str, *, embedding: bool, ollama_url: str, compute: str = "auto"
+) -> dict:
+    """Load a model into memory and pin it (keep_alive=-1). ``compute`` ∈ auto|gpu|cpu selects the
+    Ollama ``num_gpu`` offload. Raises RuntimeError (actionable) on failure."""
     base = ollama_url.rstrip("/")
+    num_gpu = _COMPUTE_NUM_GPU.get(compute, None)
     # Loading a big model off disk can take a while; a short connect timeout still fails fast when
     # the daemon is down.
-    timeout = httpx.Timeout(600.0, connect=15.0)
     try:
-        with httpx.Client(timeout=timeout) as client:
-            if embedding:
-                resp = client.post(
-                    f"{base}/api/embed",
-                    json={"model": model, "input": "ping", "keep_alive": keep_alive},
-                )
-            else:
-                # No prompt → the daemon just loads (or, with keep_alive=0, unloads) the model.
-                resp = client.post(
-                    f"{base}/api/generate", json={"model": model, "keep_alive": keep_alive}
-                )
+        with httpx.Client(timeout=httpx.Timeout(1800.0, connect=15.0)) as client:
+            resp = _load_call(
+                client, base, model, embedding=embedding, keep_alive=-1, num_gpu=num_gpu
+            )
             resp.raise_for_status()
     except httpx.ConnectError as exc:
         raise RuntimeError(
@@ -248,21 +263,34 @@ def _keep_alive(model: str, *, embedding: bool, ollama_url: str, keep_alive: int
         with contextlib.suppress(Exception):
             detail = (exc.response.text or "").strip()[:300]
         raise RuntimeError(
-            f"Ollama could not {'load' if keep_alive else 'unload'} {model!r} "
-            f"(HTTP {exc.response.status_code}){f': {detail}' if detail else ''}."
+            f"Ollama could not load {model!r} (HTTP {exc.response.status_code})"
+            f"{f': {detail}' if detail else ''}."
         ) from exc
-
-
-def mount_model(model: str, *, embedding: bool, ollama_url: str) -> dict:
-    """Load a model into the daemon's memory and pin it there (keep_alive=-1)."""
-    _keep_alive(model, embedding=embedding, ollama_url=ollama_url, keep_alive=-1)
     return {"model": model, "status": "mounted"}
 
 
 def unmount_model(model: str, *, embedding: bool, ollama_url: str) -> dict:
-    """Release a model from the daemon's memory (keep_alive=0)."""
-    _keep_alive(model, embedding=embedding, ollama_url=ollama_url, keep_alive=0)
-    return {"model": model, "status": "unmounted"}
+    """Release a model from memory (keep_alive=0). Robust to a wrong ``embedding`` guess: tries the
+    expected modality first, then the other, so a mis-inferred kind can never leave a model stuck
+    loaded (the bug that previously forced a full Ollama restart)."""
+    base = ollama_url.rstrip("/")
+    errors: list[str] = []
+    try:
+        with httpx.Client(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
+            for emb in (embedding, not embedding):
+                try:
+                    resp = _load_call(
+                        client, base, model, embedding=emb, keep_alive=0, num_gpu=None
+                    )
+                    resp.raise_for_status()
+                    return {"model": model, "status": "unmounted"}
+                except httpx.HTTPStatusError as exc:
+                    errors.append(f"HTTP {exc.response.status_code}")
+    except httpx.ConnectError as exc:
+        raise RuntimeError(
+            f"Ollama daemon unreachable at {ollama_url} — is the ollama service running?"
+        ) from exc
+    raise RuntimeError(f"Ollama could not unload {model!r} ({'; '.join(errors) or 'unknown error'}).")
 
 
 def _pull_ollama(

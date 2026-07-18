@@ -3032,24 +3032,30 @@ export class ApiClient {
   }
 
   /**
-   * Mount = load a model into memory AND make it the active model for its capability (#5). One model
-   * per kind; a different embedding model queues a reindex (returned as `reindex_job_id`).
+   * Mount = load a model into memory AND make it the active model for its capability (#5). Runs as a
+   * background job (the load can be slow) — poll the returned `job_id` via getJobs. One model per
+   * kind; a different embedding model queues a reindex when the job completes. `compute` selects the
+   * Ollama GPU offload: 'auto' (daemon decides), 'gpu' (all layers), or 'cpu' (force CPU/RAM).
    */
   async mountAiModel(
     model: string,
     kind: "summary" | "embedding",
-  ): Promise<{ config: AiConfig; reindex_job_id: string | null; loaded: LoadedModel[] }> {
+    compute: "auto" | "gpu" | "cpu" = "auto",
+  ): Promise<{ job_id: string; status: string }> {
     return this.request("/api/v1/admin/ai/models/mount", {
       method: "POST",
-      body: { provider: "ollama", model, kind },
+      body: { provider: "ollama", model, kind, compute },
     });
   }
 
-  /** Unmount = release from memory; if it was active for its kind, that capability drops to baseline. */
+  /**
+   * Unmount = release from memory; if it was active for its kind, that capability drops to baseline.
+   * Background job — poll the returned `job_id` via getJobs.
+   */
   async unmountAiModel(
     model: string,
     kind: "summary" | "embedding",
-  ): Promise<{ config: AiConfig; reindex_job_id: string | null; loaded: LoadedModel[] }> {
+  ): Promise<{ job_id: string; status: string }> {
     return this.request("/api/v1/admin/ai/models/unmount", {
       method: "POST",
       body: { provider: "ollama", model, kind },

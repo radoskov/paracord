@@ -9,6 +9,26 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Mount/unmount robustness + GPU/CPU control (2026-07-18)
+
+Handoff: `docs/agent_handoffs/2026-07-18-mount-robustness-gpu-cpu.md`. Fixes field reports on the
+mount feature: flaky/stuck unmount, tab freezing on a big load, no auto-refresh, a "phantom remount",
+plus GPU/CPU control.
+
+- **Mount/unmount are now background jobs** (`mount_model_job`/`unmount_model_job`; `enqueue_model_*` +
+  labels) → the tab never blocks; config flips *in the job after the load succeeds* (failed mount keeps
+  the prior selection). Endpoints return 202 + `job_id`; the panel polls.
+- **Robust unmount**: tries both modalities (`/api/generate` ⇄ `/api/embed`, `keep_alive:0`) so a
+  wrong-kind guess can't leave a model stuck (no more `make down-ai`).
+- **GPU/CPU control**: `compute` ∈ auto|gpu|cpu → Ollama `num_gpu` (0=CPU, 999=all-GPU); a "Compute for
+  next mount" selector; **placement reporting** from `/api/ps` `size_vram` (GPU/VRAM vs CPU/RAM) with a
+  clear note when a GPU mount lands on CPU (container has no GPU access).
+- **Pinned vs auto**: loaded rows show `mounted` vs `auto · frees in ~Nm`, so a model auto-loaded to
+  embed a search query (transient) no longer looks like a phantom self-mount.
+- **Auto-refresh**: 8 s poll of reachability + loaded while the tab is visible + immediate recheck on
+  tab focus/visibility (doesn't touch `config`). Metadata reads dropped 5s→3s.
+- Tests: `test_ai_admin.py` 33 passed (endpoints enqueue + jobs flip config); `make frontend-test` 341.
+
 ## Ollama worker-URL fix + reachability semaphore (2026-07-18)
 
 Handoff: `docs/agent_handoffs/2026-07-18-ollama-worker-url-fix-semaphore.md`. The improved pull error

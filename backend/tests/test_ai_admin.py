@@ -174,113 +174,123 @@ def test_vram_budget_persists_and_rejects_negative(client, auth_headers, db):
     )
 
 
-def _stub_runtime(monkeypatch):
-    """Replace the Ollama load/unload/ps calls + reindex enqueue with in-memory stubs; return the
-    call log so a test can assert what was loaded/freed."""
+# --- mount/unmount ENDPOINTS: enqueue a background job (the load runs in the worker) ---
+
+
+def test_mount_endpoint_enqueues_and_validates(client, auth_headers, monkeypatch):
     import app.api.v1.endpoints.ai_admin as m
 
-    calls: list = []
-    monkeypatch.setattr(
-        m, "mount_model", lambda model, *, embedding, ollama_url: calls.append(("mount", model)) or {}
-    )
+    seen: list = []
     monkeypatch.setattr(
         m,
-        "unmount_model",
-        lambda model, *, embedding, ollama_url: calls.append(("unmount", model)) or {},
+        "enqueue_model_mount",
+        lambda model, kind, compute, actor: seen.append((model, kind, compute)) or "mount-job",
     )
-    monkeypatch.setattr(m, "list_loaded", lambda *, ollama_url: [])
-    monkeypatch.setattr(m, "enqueue_reindex", lambda: "reindex-job")
-    return calls
-
-
-def test_mount_selects_model_and_frees_previous_of_kind(client, auth_headers, db, monkeypatch):
-    calls = _stub_runtime(monkeypatch)
-    owner = auth_headers("owner")
-
-    # Mount a summary model → selects local_llm + that model.
-    r = client.post(
-        "/api/v1/admin/ai/models/mount",
-        headers=owner,
-        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
-    )
-    assert r.status_code == 200
-    cfg = r.json()["config"]
-    assert cfg["summary_provider"] == "local_llm" and cfg["summary_model"] == "qwen3:4b"
-    assert ("mount", "qwen3:4b") in calls
-
-    # Mount a different summary model → one-per-kind frees the previous one.
-    r2 = client.post(
-        "/api/v1/admin/ai/models/mount",
-        headers=owner,
-        json={"provider": "ollama", "model": "llama3.2:3b", "kind": "summary"},
-    )
-    assert r2.status_code == 200
-    assert r2.json()["config"]["summary_model"] == "llama3.2:3b"
-    assert ("unmount", "qwen3:4b") in calls  # previous summary model freed
-
-
-def test_mount_embedding_queues_reindex(client, auth_headers, db, monkeypatch):
-    _stub_runtime(monkeypatch)
     owner = auth_headers("owner")
     r = client.post(
         "/api/v1/admin/ai/models/mount",
         headers=owner,
-        json={"provider": "ollama", "model": "nomic-embed-text", "kind": "embedding"},
+        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary", "compute": "gpu"},
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["config"]["embedding_provider"] == "ollama"
-    assert body["config"]["embedding_model"] == "nomic-embed-text"
-    assert body["reindex_job_id"] == "reindex-job"  # embedding change → reindex
+    assert r.status_code == 202 and r.json()["job_id"] == "mount-job"
+    assert seen == [("qwen3:4b", "summary", "gpu")]
+    # Validation: bad kind, bad compute, non-ollama provider → 400.
+    for bad in (
+        {"provider": "ollama", "model": "x", "kind": "bogus"},
+        {"provider": "ollama", "model": "x", "kind": "summary", "compute": "quantum"},
+        {"provider": "sentence_transformers", "model": "x", "kind": "summary"},
+    ):
+        assert client.post("/api/v1/admin/ai/models/mount", headers=owner, json=bad).status_code == 400
 
 
-def test_unmount_active_model_reverts_to_baseline(client, auth_headers, db, monkeypatch):
-    calls = _stub_runtime(monkeypatch)
+def test_unmount_endpoint_enqueues(client, auth_headers, monkeypatch):
+    import app.api.v1.endpoints.ai_admin as m
+
+    monkeypatch.setattr(m, "enqueue_model_unmount", lambda model, kind, actor: "unmount-job")
     owner = auth_headers("owner")
-    client.post(
-        "/api/v1/admin/ai/models/mount",
-        headers=owner,
-        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
-    )
     r = client.post(
         "/api/v1/admin/ai/models/unmount",
         headers=owner,
         json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary"},
     )
-    assert r.status_code == 200
-    assert r.json()["config"]["summary_provider"] == "extractive"  # baseline
-    assert ("unmount", "qwen3:4b") in calls
-
-
-def test_mount_rejects_bad_kind_and_provider(client, auth_headers, monkeypatch):
-    _stub_runtime(monkeypatch)
-    owner = auth_headers("owner")
-    assert (
-        client.post(
-            "/api/v1/admin/ai/models/mount",
-            headers=owner,
-            json={"provider": "ollama", "model": "x", "kind": "bogus"},
-        ).status_code
-        == 400
-    )
-    assert (
-        client.post(
-            "/api/v1/admin/ai/models/mount",
-            headers=owner,
-            json={"provider": "sentence_transformers", "model": "x", "kind": "summary"},
-        ).status_code
-        == 400
-    )
+    assert r.status_code == 202 and r.json()["job_id"] == "unmount-job"
 
 
 def test_loaded_endpoint_owner_only(client, auth_headers, monkeypatch):
-    _stub_runtime(monkeypatch)
+    import app.api.v1.endpoints.ai_admin as m
+
+    monkeypatch.setattr(m, "list_loaded", lambda *, ollama_url: [])
     assert (
         client.get("/api/v1/admin/ai/loaded", headers=auth_headers("editor")).status_code == 403
     )
     r = client.get("/api/v1/admin/ai/loaded", headers=auth_headers("owner"))
     assert r.status_code == 200
     assert "loaded" in r.json() and "vram_budget_gb" in r.json()
+
+
+# --- mount/unmount JOBS: the worker loads/unloads, then flips the active config ---
+
+
+def _use_test_db(monkeypatch, db):
+    """Point the jobs' own ``SessionLocal`` at the test session so their config writes are visible
+    (the ``db`` fixture is a fresh per-test DB, so committing/reusing it is safe)."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _sl():
+        yield db  # reuse the test session; the fixture owns closing it
+
+    monkeypatch.setattr("app.db.session.SessionLocal", _sl)
+
+
+def _owner_row(db):
+    from app.core.security import Role
+    from app.models.user import User
+
+    return db.query(User).filter(User.role == Role.OWNER).first()
+
+
+def test_mount_job_selects_and_frees_previous(client, auth_headers, db, monkeypatch):
+    from app.services.ai_config import get_ai_config
+    from app.workers import jobs
+
+    _use_test_db(monkeypatch, db)
+    calls: list = []
+    # The job imports mount_model/unmount_model from model_management at call time, so patch there.
+    monkeypatch.setattr(
+        "app.services.model_management.mount_model",
+        lambda model, **k: calls.append(("mount", model)) or {},
+    )
+    monkeypatch.setattr(
+        "app.services.model_management.unmount_model",
+        lambda model, **k: calls.append(("unmount", model)) or {},
+    )
+    auth_headers("owner")  # ensure an owner row exists
+    owner = _owner_row(db)
+
+    jobs.mount_model_job("qwen3:4b", "summary", "auto", str(owner.id))
+    assert get_ai_config(db).summary_model == "qwen3:4b"
+    assert ("mount", "qwen3:4b") in calls
+
+    jobs.mount_model_job("llama3.2:3b", "summary", "auto", str(owner.id))
+    assert get_ai_config(db).summary_model == "llama3.2:3b"
+    assert ("unmount", "qwen3:4b") in calls  # one-per-kind freed the previous
+
+
+def test_unmount_job_reverts_active_to_baseline(client, auth_headers, db, monkeypatch):
+    from app.services.ai_config import get_ai_config
+    from app.workers import jobs
+
+    _use_test_db(monkeypatch, db)
+    monkeypatch.setattr("app.services.model_management.mount_model", lambda model, **k: {})
+    monkeypatch.setattr("app.services.model_management.unmount_model", lambda model, **k: {})
+    auth_headers("owner")
+    owner = _owner_row(db)
+
+    jobs.mount_model_job("qwen3:4b", "summary", "auto", str(owner.id))
+    assert get_ai_config(db).summary_provider == "local_llm"
+    jobs.unmount_model_job("qwen3:4b", "summary", str(owner.id))
+    assert get_ai_config(db).summary_provider == "extractive"  # dropped to baseline
 
 
 # --- Phase B5: OCR / advanced-extraction backend ---

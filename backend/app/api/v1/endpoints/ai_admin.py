@@ -4,7 +4,6 @@ Lets an owner or admin choose the embedding/summary/topic providers and models, 
 or delete model weights, and reindex embeddings — all from the web UI rather than a config file.
 """
 
-import contextlib
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,13 +34,16 @@ from app.services.model_management import (
     detect_providers,
     list_loaded,
     list_models,
-    mount_model,
     ollama_version,
     probe_embedding_model,
-    unmount_model,
 )
 from app.services.semantic_search import reindex_status
-from app.workers.queue import enqueue_model_pull, enqueue_reindex
+from app.workers.queue import (
+    enqueue_model_mount,
+    enqueue_model_pull,
+    enqueue_model_unmount,
+    enqueue_reindex,
+)
 
 router = APIRouter()
 DB_DEP = Depends(get_db)
@@ -71,11 +73,15 @@ class ModelRef(BaseModel):
 
 
 class MountRef(BaseModel):
-    """A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind)."""
+    """A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind).
+
+    ``compute`` (mount only) selects Ollama's GPU offload: auto (daemon decides), gpu (offload all
+    layers), or cpu (force CPU / RAM)."""
 
     provider: str = "ollama"
     model: str
     kind: str  # "summary" | "embedding"
+    compute: str = "auto"  # "auto" | "gpu" | "cpu"
 
 
 @router.get("/ai-config")
@@ -249,95 +255,51 @@ def ai_loaded_models(db: Session = DB_DEP, _: User = ADMIN_DEP) -> dict:
     }
 
 
-@router.post("/ai/models/mount")
+@router.post("/ai/models/mount", status_code=status.HTTP_202_ACCEPTED)
 def mount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
-    """Load a model into memory AND make it the active model for its capability (#5).
-
-    Mount = load (keep_alive=-1) + select. One model per kind: the previously-active model of the
-    same kind is freed from memory. Selecting a different embedding model queues a reindex (its
-    vectors must match). Features that can't run degrade to their built-in baseline — never error."""
+    """Queue a model mount (#5): the worker loads it (keep_alive=-1) and makes it the active model
+    for its capability — one per kind, freeing the previous; a changed embedding model queues a
+    reindex. Runs as a background job so a slow load never blocks the API/UI; poll the job for status.
+    Config only changes after the load succeeds, so a failed mount leaves the prior selection intact."""
     if payload.provider != "ollama":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only Ollama models can be mounted")
     if payload.kind not in ("summary", "embedding"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be 'summary' or 'embedding'")
-    embedding = payload.kind == "embedding"
-    cfg = get_ai_config(db)
-    try:
-        mount_model(payload.model, embedding=embedding, ollama_url=cfg.ollama_url)
-    except Exception as exc:  # noqa: BLE001 - surface the daemon's reason as a 502
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
-
-    if embedding:
-        prev = cfg.embedding_model if cfg.embedding_provider == "ollama" else None
-        changes = {"embedding_provider": "ollama", "embedding_model": payload.model}
-    else:
-        prev = cfg.summary_model if cfg.summary_provider == "local_llm" else None
-        changes = {"summary_provider": "local_llm", "summary_model": payload.model}
-    config, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=owner.id)
-    # One-per-kind: free the previously-active model of this kind from memory (best-effort).
-    if prev and prev != payload.model:
-        with contextlib.suppress(Exception):
-            unmount_model(prev, embedding=embedding, ollama_url=cfg.ollama_url)
+    if payload.compute not in ("auto", "gpu", "cpu"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "compute must be 'auto', 'gpu' or 'cpu'")
+    job_id = enqueue_model_mount(payload.model, payload.kind, payload.compute, str(owner.id))
+    if job_id is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model-mount queue unavailable")
     record_event(
         db,
-        "ai.model_mounted",
+        "ai.model_mount_requested",
         actor_user_id=owner.id,
         entity_type="ai_model",
-        details={"model": payload.model, "kind": payload.kind},
+        details={"model": payload.model, "kind": payload.kind, "compute": payload.compute},
     )
     db.commit()
-    reindex_job_id = enqueue_reindex() if embedding_changed else None
-    return {
-        "config": config.as_dict(),
-        "reindex_job_id": reindex_job_id,
-        "loaded": list_loaded(ollama_url=cfg.ollama_url),
-    }
+    return {"job_id": job_id, "status": "queued"}
 
 
-@router.post("/ai/models/unmount")
+@router.post("/ai/models/unmount", status_code=status.HTTP_202_ACCEPTED)
 def unmount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = ADMIN_DEP) -> dict:
-    """Release a model from memory; if it was the active model for its kind, drop that capability to
-    its built-in baseline (hash-BOW / extractive) so features keep working (#5)."""
+    """Queue a model unmount (#5): the worker releases it from memory (keep_alive=0) and, if it was
+    the active model for its kind, drops that capability to its baseline (hash-BOW / extractive) so
+    features keep working. Background job (poll for status); the unload is robust to a wrong kind."""
     if payload.kind not in ("summary", "embedding"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be 'summary' or 'embedding'")
-    embedding = payload.kind == "embedding"
-    cfg = get_ai_config(db)
-    try:
-        unmount_model(payload.model, embedding=embedding, ollama_url=cfg.ollama_url)
-    except Exception as exc:  # noqa: BLE001 - surface the daemon's reason as a 502
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
-
-    # Only revert config if this model was the active one for its kind (don't clobber a different
-    # selection the admin loaded manually).
-    if embedding and cfg.embedding_provider == "ollama" and cfg.embedding_model == payload.model:
-        changes: dict | None = {"embedding_provider": "hash_bow", "embedding_model": ""}
-    elif (
-        not embedding
-        and cfg.summary_provider == "local_llm"
-        and cfg.summary_model == payload.model
-    ):
-        changes = {"summary_provider": "extractive", "summary_model": ""}
-    else:
-        changes = None
-    embedding_changed = False
-    if changes:
-        config, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=owner.id)
-    else:
-        config = get_ai_config(db)
+    job_id = enqueue_model_unmount(payload.model, payload.kind, str(owner.id))
+    if job_id is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model-unmount queue unavailable")
     record_event(
         db,
-        "ai.model_unmounted",
+        "ai.model_unmount_requested",
         actor_user_id=owner.id,
         entity_type="ai_model",
         details={"model": payload.model, "kind": payload.kind},
     )
     db.commit()
-    reindex_job_id = enqueue_reindex() if embedding_changed else None
-    return {
-        "config": config.as_dict(),
-        "reindex_job_id": reindex_job_id,
-        "loaded": list_loaded(ollama_url=cfg.ollama_url),
-    }
+    return {"job_id": job_id, "status": "queued"}
 
 
 @router.post("/ai/reindex", status_code=status.HTTP_202_ACCEPTED)

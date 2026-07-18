@@ -180,20 +180,21 @@ describe("AiModelsPanel", () => {
 });
 
 describe("AiModelsPanel mount/unmount (#5)", () => {
-  it("mounts the selected embedding model (load + make active)", async () => {
+  it("mounts the selected embedding model as a background job (with compute)", async () => {
     const status = makeStatus();
     status.config.embedding_provider = "ollama";
     status.config.embedding_model = "nomic-embed-text";
-    const mountAiModel = vi
-      .fn()
-      .mockResolvedValue({ config: status.config, reindex_job_id: null, loaded: [] });
+    const mountAiModel = vi.fn().mockResolvedValue({ job_id: "mount-job", status: "queued" });
     const client = {
       getAiStatus: vi.fn().mockResolvedValue(status),
       listAiModels: vi.fn().mockResolvedValue({
         models: [{ provider: "ollama", name: "nomic-embed-text", size_bytes: null, vram_gb: 1 }],
       }),
       getLoadedModels: vi.fn().mockResolvedValue({ loaded: [], vram_budget_gb: null }),
-      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+      // pollModelJob + runningAiJobs both read this; a finished non-AI-status job lets the poll end.
+      getJobs: vi.fn().mockResolvedValue({
+        jobs: [{ id: "mount-job", status: "finished", task: "model-mount", error: null }],
+      }),
       mountAiModel,
       validateAiModel: vi.fn().mockResolvedValue({
         present: true,
@@ -207,8 +208,9 @@ describe("AiModelsPanel mount/unmount (#5)", () => {
     await (
       await import("@testing-library/svelte")
     ).fireEvent.click(getByRole("button", { name: /^Mount$/ }));
+    // Enqueued with the default 'auto' compute.
     await waitFor(() =>
-      expect(mountAiModel).toHaveBeenCalledWith("nomic-embed-text", "embedding"),
+      expect(mountAiModel).toHaveBeenCalledWith("nomic-embed-text", "embedding", "auto"),
     );
   });
 

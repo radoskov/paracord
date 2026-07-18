@@ -4,6 +4,7 @@ Workers should be idempotent: retrying a failed extraction or summary job must n
 canonical records without review.
 """
 
+import contextlib
 import functools
 import logging
 from collections.abc import Callable
@@ -756,6 +757,89 @@ def pull_model_job(provider: str, model: str) -> None:
         ollama_url=ollama_url,
         on_progress=lambda completed, total, _status: job_report_progress(completed, total),
     )
+
+
+@_audited_job
+def mount_model_job(model: str, kind: str, compute: str, actor_user_id: str | None) -> None:
+    """Load a model into Ollama's memory (keep_alive=-1) and make it the active model for its
+    capability (#5). Runs in the worker so a slow load never blocks the API/UI. On success: set the
+    capability's config, free the previously-active model of that kind, and queue a reindex if the
+    embedding model changed. Raises (with an actionable message) on load failure — config is only
+    changed after the load succeeds, so a failed mount leaves the previous selection intact."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.services.ai_config import get_ai_config, update_ai_config
+    from app.services.model_management import mount_model, unmount_model
+
+    embedding = kind == "embedding"
+    with SessionLocal() as db:
+        cfg = get_ai_config(db)
+        ollama_url = cfg.ollama_url
+        prev = None
+        if embedding:
+            prev = cfg.embedding_model if cfg.embedding_provider == "ollama" else None
+        else:
+            prev = cfg.summary_model if cfg.summary_provider == "local_llm" else None
+
+    # Load first (may take a while for a large model) — outside the DB session.
+    mount_model(model, embedding=embedding, ollama_url=ollama_url, compute=compute)
+
+    actor = uuid.UUID(actor_user_id) if actor_user_id else None
+    with SessionLocal() as db:
+        changes = (
+            {"embedding_provider": "ollama", "embedding_model": model}
+            if embedding
+            else {"summary_provider": "local_llm", "summary_model": model}
+        )
+        _, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=actor)
+        db.commit()
+    # One-per-kind: free the previously-active model of this kind (best-effort).
+    if prev and prev != model:
+        with contextlib.suppress(Exception):
+            unmount_model(prev, embedding=embedding, ollama_url=ollama_url)
+    if embedding_changed:
+        from app.workers.queue import enqueue_reindex
+
+        enqueue_reindex()
+
+
+@_audited_job
+def unmount_model_job(model: str, kind: str, actor_user_id: str | None) -> None:
+    """Release a model from Ollama's memory (keep_alive=0); if it was the active model for its kind,
+    drop that capability to its built-in baseline so features keep working (#5)."""
+    import uuid
+
+    from app.db.session import SessionLocal
+    from app.services.ai_config import get_ai_config, update_ai_config
+    from app.services.model_management import unmount_model
+
+    embedding = kind == "embedding"
+    with SessionLocal() as db:
+        cfg = get_ai_config(db)
+        ollama_url = cfg.ollama_url
+        is_active = (
+            embedding and cfg.embedding_provider == "ollama" and cfg.embedding_model == model
+        ) or (
+            not embedding and cfg.summary_provider == "local_llm" and cfg.summary_model == model
+        )
+
+    unmount_model(model, embedding=embedding, ollama_url=ollama_url)
+
+    if is_active:
+        actor = uuid.UUID(actor_user_id) if actor_user_id else None
+        changes = (
+            {"embedding_provider": "hash_bow", "embedding_model": ""}
+            if embedding
+            else {"summary_provider": "extractive", "summary_model": ""}
+        )
+        with SessionLocal() as db:
+            _, embedding_changed = update_ai_config(db, changes=changes, actor_user_id=actor)
+            db.commit()
+        if embedding_changed:
+            from app.workers.queue import enqueue_reindex
+
+            enqueue_reindex()
 
 
 @_audited_job

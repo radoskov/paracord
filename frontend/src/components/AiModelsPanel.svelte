@@ -8,7 +8,7 @@
      `pollPull`; per-card availability badges are recomputed in a reactive block keyed off
      status/config because the markup can't use {@const} directly under a plain <article>. -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
 
   import {
     ApiClient,
@@ -56,11 +56,55 @@
 
   // Mount/unmount (#5): models currently loaded in the Ollama daemon's memory.
   let loaded: LoadedModel[] = [];
+  // GPU/CPU offload preference applied to the next mount.
+  let mountCompute: 'auto' | 'gpu' | 'cpu' = 'auto';
+  // Mount/unmount run as background jobs (a load can be slow) — track the job so the UI never blocks.
+  let modelJobId: string | null = null;
+  let modelJobVerb = ''; // 'Mounting' | 'Unmounting'
+  let modelJobStatus = '';
+  let modelJobError = '';
+  let modelJobPolling = false;
 
   // Copy-to-clipboard confirmation for a clicked model name (#19).
   let copiedModel = '';
 
-  onMount(refresh);
+  // #5: keep the Ollama semaphore + loaded-models list live — poll while the tab is visible, and
+  // re-check immediately when the tab/window regains focus (so re-opening it shows the true state).
+  let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+  async function refreshLive(): Promise<void> {
+    // Lightweight: refresh reachability + loaded only. Deliberately does NOT touch `config` so an
+    // in-progress edit isn't clobbered by a background tick.
+    try {
+      status = await client.getAiStatus();
+    } catch {
+      /* leave the last-known status */
+    }
+    try {
+      loaded = (await client.getLoadedModels()).loaded;
+    } catch {
+      /* tolerate */
+    }
+  }
+
+  function onVisible(): void {
+    if (document.visibilityState === 'visible' && !busy) void refreshLive();
+  }
+
+  onMount(() => {
+    void refresh();
+    refreshTimer = setInterval(() => {
+      if (document.visibilityState === 'visible' && !busy && !modelJobPolling) void refreshLive();
+    }, 8000);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+  });
+
+  onDestroy(() => {
+    if (refreshTimer) clearInterval(refreshTimer);
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('focus', onVisible);
+  });
 
   async function run(fn: () => Promise<void>, ok?: string): Promise<void> {
     busy = true;
@@ -210,10 +254,6 @@
   function loadedTotalGb(): number {
     return loaded.reduce((s, m) => s + loadedGb(m), 0);
   }
-  function loadedVramLabel(m: LoadedModel): string {
-    if (m.size_vram_bytes && m.size_vram_bytes > 0) return `${(m.size_vram_bytes / 1e9).toFixed(1)} GB VRAM`;
-    return m.size_bytes ? `${fmtSize(m.size_bytes)} in RAM` : '';
-  }
   // Estimated GB to run a pulled model (from its list row's vram_gb).
   function modelEstGb(name: string): number | null {
     const m = models.find((x) => sameModel(x.name, name) || x.name === name);
@@ -230,10 +270,59 @@
       .map((j) => j.task);
   }
 
-  // Confirm the mount/unmount is safe (VRAM budget headroom + running AI jobs), then run it.
+  // True while a mount/unmount job is queued/running — used to disable the mount controls.
+  $: modelJobActive = modelJobPolling;
+
+  // Poll the mount/unmount background job to completion, then refresh the true state. On a GPU mount
+  // that landed on CPU, explain why (the usual cause is the Ollama container lacking GPU access).
+  async function pollModelJob(
+    jobId: string,
+    verb: string,
+    model: string,
+    kind: 'summary' | 'embedding',
+    compute: 'auto' | 'gpu' | 'cpu',
+  ): Promise<void> {
+    modelJobPolling = true;
+    modelJobId = jobId;
+    modelJobVerb = verb;
+    modelJobStatus = 'queued';
+    modelJobError = '';
+    try {
+      for (let i = 0; i < 900; i += 1) {
+        const q = await client.getJobs(50).catch(() => null);
+        const job = q?.jobs.find((j) => j.id === jobId);
+        if (job) {
+          modelJobStatus = job.status;
+          if (job.status === 'finished' || job.status === 'failed') {
+            if (job.status === 'failed') modelJobError = job.error ?? `${verb} failed.`;
+            await refreshLive();
+            if (verb === 'Mounting' && job.status === 'finished') {
+              const m = loaded.find((x) => sameModel(x.name, model));
+              const onGpu = !!(m && m.size_vram_bytes && m.size_vram_bytes > 0);
+              if (compute === 'gpu' && !onGpu) {
+                message =
+                  `Mounted ${model} on CPU — GPU was requested but no VRAM is in use. The Ollama ` +
+                  `container likely has no GPU access; grant it (nvidia runtime / --gpus all) to use the GPU.`;
+              } else {
+                message = `Mounted ${model} — active ${kind} model (${m ? placementLabel(m) : 'loaded'}).`;
+              }
+            } else if (verb === 'Unmounting' && job.status === 'finished') {
+              message = `Unmounted ${model} — this capability now uses its built-in baseline.`;
+            }
+            return;
+          }
+        }
+        await new Promise((r) => window.setTimeout(r, 2000));
+      }
+    } finally {
+      modelJobPolling = false;
+    }
+  }
+
+  // Confirm the mount is safe (VRAM budget headroom + running AI jobs), then enqueue it (background).
   async function mount(model: string | null, kind: 'summary' | 'embedding', estGb?: number | null): Promise<void> {
     const name = (model ?? '').trim();
-    if (!name) return;
+    if (!name || modelJobPolling) return;
     const budget = config?.vram_budget_gb ?? null;
     const est = estGb ?? modelEstGb(name);
     if (budget && est) {
@@ -255,19 +344,15 @@
       if (!ok) return;
     }
     await run(async () => {
-      const r = await client.mountAiModel(name, kind);
-      config = r.config;
-      loaded = r.loaded;
-      message = r.reindex_job_id
-        ? `Mounted ${name}. Embedding model changed — reindex queued (job ${r.reindex_job_id.slice(0, 8)}).`
-        : `Mounted ${name} — now the active ${kind} model.`;
-      await refresh();
+      const r = await client.mountAiModel(name, kind, mountCompute);
+      message = `Mount queued for ${name} (${mountCompute}).`;
+      void pollModelJob(r.job_id, 'Mounting', name, kind, mountCompute);
     });
   }
 
   async function unmount(model: string | null, kind: 'summary' | 'embedding'): Promise<void> {
     const name = (model ?? '').trim();
-    if (!name) return;
+    if (!name || modelJobPolling) return;
     const running = await runningAiJobs();
     if (running.length) {
       const ok = window.confirm(
@@ -278,10 +363,8 @@
     }
     await run(async () => {
       const r = await client.unmountAiModel(name, kind);
-      config = r.config;
-      loaded = r.loaded;
-      message = `Unmounted ${name} — this capability now uses its built-in baseline.`;
-      await refresh();
+      message = `Unmount queued for ${name}.`;
+      void pollModelJob(r.job_id, 'Unmounting', name, kind, 'auto');
     });
   }
 
@@ -296,6 +379,27 @@
       kind = /embed/i.test(m.name) ? 'embedding' : 'summary';
     }
     await unmount(m.name, kind);
+  }
+
+  // A loaded model is "pinned" (mounted with keep_alive=-1) when its expiry is far in the future; a
+  // model auto-loaded to serve a request expires within minutes.
+  function isPinned(m: LoadedModel): boolean {
+    if (!m.expires_at) return false;
+    const t = Date.parse(m.expires_at);
+    return !Number.isNaN(t) && t - Date.now() > 24 * 3600 * 1000;
+  }
+  function autoExpiresLabel(m: LoadedModel): string {
+    if (!m.expires_at) return 'auto';
+    const mins = Math.max(0, Math.round((Date.parse(m.expires_at) - Date.now()) / 60000));
+    return Number.isNaN(mins) ? 'auto' : `auto · frees in ~${mins}m`;
+  }
+  // GPU vs CPU placement from the actual VRAM in use (size_vram > 0 ⇒ on GPU).
+  function placementLabel(m: LoadedModel): string {
+    if (m.size_vram_bytes && m.size_vram_bytes > 0) {
+      const partial = m.size_bytes && m.size_vram_bytes < m.size_bytes;
+      return `GPU${partial ? ' (partial)' : ''} · ${(m.size_vram_bytes / 1e9).toFixed(1)} GB VRAM`;
+    }
+    return `CPU${m.size_bytes ? ` · ${fmtSize(m.size_bytes)} RAM` : ''}`;
   }
 
   // Availability + how-to-enable note for a specific provider/backend option, read from the
@@ -506,11 +610,11 @@
             {#if isLoaded(config.embedding_model)}
               <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
               <button type="button" class="secondary small" on:click={() => unmount(config.embedding_model, 'embedding')}
-                disabled={busy} title="Free this model from memory; semantic search falls back to hash-BOW">Unmount</button>
+                disabled={busy || modelJobActive} title="Free this model from memory; semantic search falls back to hash-BOW">Unmount</button>
             {:else}
               <button type="button" class="small" on:click={() => mount(config.embedding_model, 'embedding')}
-                disabled={busy || !config.embedding_model?.trim()}
-                title={config.embedding_model?.trim() ? 'Load this model into memory and use it for semantic search' : 'Pick a model first'}>Mount</button>
+                disabled={busy || modelJobActive || !config.embedding_model?.trim()}
+                title={config.embedding_model?.trim() ? 'Load this model into memory (using the Compute choice below) and use it for semantic search' : 'Pick a model first'}>Mount</button>
             {/if}
           </div>
         {:else if config.embedding_provider === 'sentence_transformers'}
@@ -626,11 +730,11 @@
             {#if isLoaded(config.summary_model)}
               <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
               <button type="button" class="secondary small" on:click={() => unmount(config.summary_model, 'summary')}
-                disabled={busy} title="Free this model from memory; summaries fall back to the extractive baseline">Unmount</button>
+                disabled={busy || modelJobActive} title="Free this model from memory; summaries fall back to the extractive baseline">Unmount</button>
             {:else}
               <button type="button" class="small" on:click={() => mount(config.summary_model, 'summary')}
-                disabled={busy || !config.summary_model?.trim()}
-                title={config.summary_model?.trim() ? 'Load this model into memory and use it for summaries' : 'Pick a model first'}>Mount</button>
+                disabled={busy || modelJobActive || !config.summary_model?.trim()}
+                title={config.summary_model?.trim() ? 'Load this model into memory (using the Compute choice below) and use it for summaries' : 'Pick a model first'}>Mount</button>
             {/if}
           </div>
         {:else}
@@ -715,12 +819,35 @@
     <!-- #5: models currently held in the Ollama daemon's memory. -->
     <h3 class="section">Loaded in memory</h3>
     <p class="muted small">
-      Mounting a model (from the cards above) pins it in the Ollama daemon's memory and makes it the
-      active model for its capability; unmounting frees the memory and that capability falls back to
-      its built-in baseline. Only one model per kind is active at a time.{config.vram_budget_gb
+      Mounting a model (via the <em>Mount</em> button on the “Semantic search” or “Scope summaries”
+      card above) pins it in the Ollama daemon's memory and makes it the active model for its
+      capability; unmounting frees the memory and that capability falls back to its built-in baseline.
+      Only one model per kind is active at a time.{config.vram_budget_gb
         ? ` Budget ${config.vram_budget_gb} GB · loaded now ${loadedTotalGb().toFixed(1)} GB.`
         : ''}
     </p>
+    <div class="row">
+      <label class="compute">Compute for next mount
+        <select bind:value={mountCompute} disabled={busy || modelJobActive}
+          title="How Ollama loads the model: Auto lets the daemon decide; GPU offloads all layers to the GPU (if one is available to the container); CPU forces it into system RAM.">
+          <option value="auto">Auto (daemon decides)</option>
+          <option value="gpu">Prefer GPU</option>
+          <option value="cpu">Force CPU (RAM)</option>
+        </select>
+      </label>
+    </div>
+    <!-- #5: mount/unmount run as background jobs; show live status + real error. -->
+    {#if modelJobId}
+      <div class="pull-status" class:failed={modelJobStatus === 'failed'} role="status">
+        <p class="pull-line">
+          {#if modelJobPolling}<span class="spinner" aria-hidden="true"></span>{/if}
+          {modelJobVerb} {modelJobStatus || 'queued'}
+          {#if modelJobStatus === 'finished'}✓{:else if modelJobStatus === 'failed'}✗{/if}
+          <small class="muted">(job {modelJobId.slice(0, 8)})</small>
+        </p>
+        {#if modelJobError}<p class="pull-err">{modelJobError}</p>{/if}
+      </div>
+    {/if}
     {#if loaded.length === 0}
       <p class="empty">Nothing loaded. Mount a model from the “Semantic search” or “Scope summaries” card above.</p>
     {:else}
@@ -729,10 +856,15 @@
           <li>
             <span>
               <strong>{m.name}</strong>
-              <small class="muted">{loadedVramLabel(m)}</small>
+              <small class="muted">{placementLabel(m)}</small>
+              {#if isPinned(m)}
+                <span class="pin-badge" title="Pinned in memory (mounted). Stays until you unmount it.">mounted</span>
+              {:else}
+                <span class="auto-badge" title="Loaded on demand to serve a request (e.g. embedding a search query). Not pinned — Ollama frees it automatically after a few idle minutes. This is not a mount.">{autoExpiresLabel(m)}</span>
+              {/if}
             </span>
-            <button type="button" class="secondary small" on:click={() => unmountLoaded(m)} disabled={busy}
-              title="Free this model from memory">Unmount</button>
+            <button type="button" class="secondary small" on:click={() => unmountLoaded(m)} disabled={busy || modelJobActive}
+              title="Free this model from memory now">Unmount</button>
           </li>
         {/each}
       </ul>
@@ -980,6 +1112,17 @@
   .mount-row { align-items: center; display: flex; gap: 0.5rem; margin-top: 0.1rem; }
   .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
   .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+  .compute { flex: 0 0 15rem; }
+  .pin-badge, .auto-badge {
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.45rem;
+    white-space: nowrap;
+  }
+  .pin-badge { background: var(--status-success-bg); color: var(--status-success); }
+  .auto-badge { background: var(--surface-sunken); border: 1px solid var(--border-normal); color: var(--ink-muted); }
   .ollama-sema { align-items: center; color: var(--ink-muted); display: inline-flex; font-size: 0.8rem; gap: 0.35rem; white-space: nowrap; }
   .sema-dot {
     border-radius: 50%;
