@@ -9,6 +9,32 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI "Recommend categorization" — COMPLETE (Part B) (2026-07-18)
+
+Second half of `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md`. For a paper scope, recommend
+TAGS or CATEGORIES (rows/racks/shelves) per paper from its features (title/abstract/keywords/topics),
+reviewed + accepted in a new Insights sub-tab. Landed & verified:
+
+- **Cache model + migration** (`e246e78`): `RecommendationRun` (per scope+settings+model+creator) +
+  `0079` (parity green). Applied to the live DB.
+- **Service** (`e246e78`) `services/recommendation.py`: injectable rankers — a JSON-output Ollama
+  call (C7, free-text-parse fallback) or embedding-cosine fallback (C10, flagged); pure scoring
+  (base `K−p+1` or affinity; 0.5 down-hierarchy boost with sum|median|max combine) → final shelf
+  ranking; access-filtered candidates; optional embedding prefilter. Tests: scoring math + fallback.
+- **Job + endpoints** (`db00064`): `recommend_job` (progress/cancel) + `enqueue_recommend`; `POST
+  /recommend` (create-or-cache, capped, requester-scoped) + `GET /recommend/{id}` (requester-gated) +
+  recompute. Tests: create/cache/recompute/gating/validation.
+- **Frontend** (`a395c90`): Insights sub-tab bar (Analysis / Recommend categorization) +
+  RecommendPanel — scope, pre-run options (mode/K/scoring/parent-combine/prefilter), run→poll→render,
+  tag checkboxes → addTagLink, top-K shelves → addWorkToShelf, two per-paper popups (raw scores; raw
+  LLM I/O), fallback banner.
+- **e2e + docs** (`df1e409`): Journey 41 (run categorization over a shelf); reference docs.
+- **Live end-to-end smoke**: created a shelf-scope categorization run via the API → worker computed
+  it → 5 papers ranked by combined shelf score, `fallback=True` (embedding:hash_bow, no LLM
+  configured), raw LLM I/O captured. Recommend endpoint + service + job + frontend all green.
+
+Handoff: `docs/agent_handoffs/2026-07-18-ai-recommend.md`.
+
 ## Rows grouping layer — COMPLETE (Part A) (2026-07-18)
 
 Big feature per `docs/WORKPLAN_2026-07-18_rows-and-ai-recommend.md`. New broadest grouping layer
