@@ -4294,12 +4294,19 @@
           "sort": {
             "anyOf": [
               {
+                "items": {
+                  "$ref": "#/components/schemas/LibraryColumnSort"
+                },
+                "type": "array"
+              },
+              {
                 "$ref": "#/components/schemas/LibraryColumnSort"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Sort"
           },
           "visible": {
             "default": [],
@@ -6679,6 +6686,38 @@
         "title": "ScopeNoteUpsert",
         "type": "object"
       },
+      "ScopePromoteRequest": {
+        "description": "Identify which scope a summary belongs to, so promotion is access-checked against it.",
+        "properties": {
+          "scope_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_type": {
+            "enum": [
+              "library",
+              "shelf",
+              "rack",
+              "row"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type"
+        ],
+        "title": "ScopePromoteRequest",
+        "type": "object"
+      },
       "ScopeSummaryRequest": {
         "description": "Request to (re)generate a scope-level summary.",
         "properties": {
@@ -6816,6 +6855,17 @@
             ],
             "title": "Generated At"
           },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
           "job_id": {
             "anyOf": [
               {
@@ -6848,6 +6898,17 @@
               }
             ],
             "title": "Model Name"
+          },
+          "promoted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promoted At"
           },
           "prompt_version": {
             "anyOf": [
@@ -15929,9 +15990,95 @@
         ]
       }
     },
+    "/api/v1/ai/summaries/history": {
+      "get": {
+        "description": "All stored summaries for a scope, current-first (#22 scope history). Every effort/model/\nreasoning variant coexists as the cache matrix; the promoted one (\"set as current\") sorts first.\nMirrors GET /works/{id}/summaries.",
+        "operationId": "list_scope_summary_history_api_v1_ai_summaries_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": true,
+            "schema": {
+              "enum": [
+                "library",
+                "shelf",
+                "rack",
+                "row"
+              ],
+              "title": "Scope Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScopeSummaryResponse"
+                  },
+                  "title": "Response List Scope Summary History Api V1 Ai Summaries History Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Scope Summary History",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
     "/api/v1/ai/summaries/latest": {
       "get": {
-        "description": "Return the most recent stored summary for a scope (the S15 async-completion read path).\n\nWhen ``detail`` is given, the lookup targets that specific cache-matrix cell — the effort level\nfor the current model/provider (2026-07-16). Without it, the newest summary of any kind is\nreturned (back-compat).",
+        "description": "Return the most recent stored summary for a scope (the S15 async-completion read path).\n\nWhen ``detail`` is given, the lookup targets that effort level and returns the CURRENT version —\nthe one the user promoted (\"set as current\", #22), else the newest — across any model/reasoning\nvariant. Without ``detail``, the current summary of any kind is returned (back-compat).",
         "operationId": "read_latest_scope_summary_api_v1_ai_summaries_latest_get",
         "parameters": [
           {
@@ -16049,6 +16196,76 @@
           }
         },
         "summary": "Read Latest Scope Summary",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/ai/summaries/{summary_id}/promote": {
+      "post": {
+        "description": "Mark a stored scope summary as the current one (\"set as current\", #22) — it then leads the\nhistory and is returned by GET /ai/summaries/latest. Mirrors the per-work promote endpoint.",
+        "operationId": "promote_scope_summary_endpoint_api_v1_ai_summaries__summary_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Summary Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopePromoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Scope Summary Endpoint",
         "tags": [
           "ai"
         ]

@@ -305,11 +305,19 @@ def test_promote_scope_summary_makes_a_version_current(db_session) -> None:
     # "local_llm" keeps the requested model_name as the stored label (the extractive scope path
     # collapses everything under one tier name); abstract-only works need no live LLM here.
     a, _ = summarize_scope(
-        db_session, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-a"
+        db_session,
+        scope_type="shelf",
+        scope_id=shelf.id,
+        summary_type="local_llm",
+        model_name="m-a",
     )
     db_session.commit()
     b, _ = summarize_scope(
-        db_session, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-b"
+        db_session,
+        scope_type="shelf",
+        scope_id=shelf.id,
+        summary_type="local_llm",
+        model_name="m-b",
     )
     db_session.commit()
     assert a.model_name == "m-a" and b.model_name == "m-b"
