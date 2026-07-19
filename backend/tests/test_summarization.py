@@ -51,6 +51,63 @@ def db_session(tmp_path: Path):
         yield session
 
 
+def test_ollama_generate_streams_and_supports_midstream_cancel(monkeypatch) -> None:
+    """_ollama_generate streams the response (so a cancel takes effect mid-generation): it joins the
+    'response' chunks, and a cancel probe that returns True aborts with JobCancelled before finishing."""
+    import httpx2
+
+    import app.services.summarization as summ
+    from app.workers.queue import JobCancelled
+
+    lines = [
+        '{"response": "Hello "}',
+        '{"response": "world.", "done": true, "done_reason": "stop"}',
+    ]
+
+    class _Resp:
+        status_code = 200
+
+        def read(self):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield from lines
+
+    class _Stream:
+        def __enter__(self):
+            return _Resp()
+
+        def __exit__(self, *_a):
+            return False
+
+    class _Client:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def stream(self, *_a, **_k):
+            return _Stream()
+
+    monkeypatch.setattr(httpx2, "Client", _Client)
+
+    assert (
+        summ._ollama_generate("p", model="m", base_url="http://x", opts=summ._LlmOpts())
+        == "Hello world."
+    )
+    with pytest.raises(JobCancelled):
+        summ._ollama_generate(
+            "p", model="m", base_url="http://x", opts=summ._LlmOpts(cancel_cb=lambda: True)
+        )
+
+
 # --- reasoning-model output cleanup + keep_alive -----------------------------
 
 

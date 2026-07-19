@@ -11,10 +11,13 @@ Every summary is persisted with provenance (``model_name`` + ``prompt_version``)
 """
 
 import hashlib
+import json
 import logging
 import math
 import re
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -238,12 +241,15 @@ class _LlmOpts:
     # Ollama options.num_ctx to send; None → use the daemon default. Raised for reasoning so the
     # chain-of-thought doesn't exhaust the context before the answer is produced.
     num_ctx: int | None = None
+    # Cooperative-stop probe: called periodically WHILE a generation streams so a cancel takes effect
+    # mid-call (a single reasoning call runs for minutes; without this a Stop waits for it to finish).
+    cancel_cb: Callable[[], bool] | None = None
 
 
 _DEFAULT_LLM_OPTS = _LlmOpts()
 
 
-def _llm_opts_for(ai_cfg, model: str) -> _LlmOpts:
+def _llm_opts_for(ai_cfg, model: str, *, cancel_cb: Callable[[], bool] | None = None) -> _LlmOpts:
     """Resolve the per-call LLM knobs from the AI config for a specific model.
 
     Auto-detects whether ``model`` is a reasoning model (Ollama 'thinking' capability): only then is
@@ -266,7 +272,11 @@ def _llm_opts_for(ai_cfg, model: str) -> _LlmOpts:
         timeout = max(timeout, REASONING_MIN_TIMEOUT_S)
         num_ctx = REASONING_NUM_CTX
     return _LlmOpts(
-        keep_alive=keep_alive_value(ai_cfg), think=think, timeout=timeout, num_ctx=num_ctx
+        keep_alive=keep_alive_value(ai_cfg),
+        think=think,
+        timeout=timeout,
+        num_ctx=num_ctx,
+        cancel_cb=cancel_cb,
     )
 
 
@@ -276,25 +286,57 @@ def _ollama_generate(
     """Raw single-shot generation against a local Ollama daemon. Raises on any transport failure;
     returns ``""`` when the model produced no answer (callers treat that as "skip"/"degrade").
 
-    ``opts`` (see :class:`_LlmOpts`) carries keep_alive, the reasoning ``think`` flag, the timeout and
-    the context size. Any leaked <think> block is stripped from the result.
+    ``opts`` (see :class:`_LlmOpts`) carries keep_alive, the reasoning ``think`` flag, the timeout, the
+    context size and a cooperative ``cancel_cb``. The response is STREAMED so a cancel takes effect
+    mid-generation: on cancel the stream is closed (which makes Ollama stop) and ``JobCancelled`` is
+    raised. Any leaked <think> block is stripped from the joined answer.
     """
     import httpx2 as httpx
 
     opts = opts or _DEFAULT_LLM_OPTS
-    payload: dict = {"model": model, "prompt": prompt, "stream": False}
+    payload: dict = {"model": model, "prompt": prompt, "stream": True}
     if opts.think is not None:
         payload["think"] = opts.think
     if opts.keep_alive is not None:
         payload["keep_alive"] = opts.keep_alive
     if opts.num_ctx is not None:
         payload["options"] = {"num_ctx": opts.num_ctx}
-    with httpx.Client(timeout=opts.timeout) as client:
-        response = client.post(f"{base_url.rstrip('/')}/api/generate", json=payload)
-        response.raise_for_status()
-        data = response.json()
-    answer = _strip_reasoning(data.get("response") or "")
-    if not answer and data.get("done_reason") == "length":
+
+    def _cancelled() -> bool:
+        return opts.cancel_cb is not None and opts.cancel_cb()
+
+    parts: list[str] = []
+    done_reason: str | None = None
+    next_check = 0.0
+    with (
+        httpx.Client(timeout=opts.timeout) as client,
+        client.stream("POST", f"{base_url.rstrip('/')}/api/generate", json=payload) as response,
+    ):
+        if response.status_code >= 400:
+            response.read()  # a streamed error body must be read before raise_for_status
+            response.raise_for_status()
+        for line in response.iter_lines():
+            # Probe the cooperative-stop flag at most ~once/second (each probe is a Redis read):
+            # exiting the `with` closes the connection, which makes Ollama abort the generation.
+            now = time.monotonic()
+            if now >= next_check:
+                next_check = now + 1.0
+                if _cancelled():
+                    from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+
+                    raise JobCancelled("summary generation cancelled mid-stream")
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            parts.append(obj.get("response") or "")
+            if obj.get("done"):
+                done_reason = obj.get("done_reason")
+                break
+    answer = _strip_reasoning("".join(parts))
+    if not answer and done_reason == "length":
         # The model hit its context/token budget with no answer — with reasoning on, the thinking
         # crowded out the answer. Log it so the empty-summary degrade can be explained.
         logger.warning(
@@ -937,7 +979,7 @@ def summarize_work(
         if abstract_only:
             source_sections.append("abstract-only")
         text = ""
-        opts = _llm_opts_for(ai_cfg, call_model)
+        opts = _llm_opts_for(ai_cfg, call_model, cancel_cb=cancel_cb)
         # …vs the provenance label stored/keyed on: reasoning and normal runs of the SAME model are
         # kept as distinct history versions (the model reasons very differently), so the paper view
         # can show both and switch between them (#18). Only when the model actually reasoned.
@@ -1322,7 +1364,7 @@ def summarize_scope(
         # Scope summaries are read back by (effort, configured-model), so — unlike the per-work view —
         # the stored label must stay the plain model name; the call model equals it (no reasoning tag).
         call_model = stored_model
-        opts = _llm_opts_for(ai_cfg, stored_model)
+        opts = _llm_opts_for(ai_cfg, stored_model, cancel_cb=cancel_cb)
         prompt_version = LLM_PROMPT_VERSION
         # Map step (UX batch 4): build one digest line per FULL-TEXT paper. When the LLM is on,
         # per-paper summaries are generated through summarize_work — so they are also PERSISTED and
