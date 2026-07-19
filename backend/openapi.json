@@ -4659,7 +4659,7 @@
         "type": "object"
       },
       "MountRef": {
-        "description": "A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind).\n\n``compute`` (mount only) selects Ollama's GPU offload: auto (daemon decides), gpu (offload all\nlayers), or cpu (force CPU / RAM).",
+        "description": "A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind).\n\n``compute`` (mount only) selects Ollama's GPU offload: auto (daemon decides), gpu (offload all\nlayers), or cpu (force CPU / RAM). ``num_ctx`` (mount only) optionally pins the context window\n(clipped to the model's max); None → the daemon default.",
         "properties": {
           "compute": {
             "default": "auto",
@@ -4673,6 +4673,17 @@
           "model": {
             "title": "Model",
             "type": "string"
+          },
+          "num_ctx": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Ctx"
           },
           "provider": {
             "default": "ollama",
@@ -26453,6 +26464,76 @@
           }
         },
         "summary": "Summarize Work Job Endpoint",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/summaries/{summary_id}/promote": {
+      "post": {
+        "description": "Set a stored summary version as the current one for its work (#22).",
+        "operationId": "promote_summary_api_v1_works__work_id__summaries__summary_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "summary_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Summary Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Summary",
         "tags": [
           "works"
         ]

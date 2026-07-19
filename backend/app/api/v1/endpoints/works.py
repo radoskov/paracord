@@ -2516,6 +2516,28 @@ def list_summaries(work_id: uuid.UUID, db: Session = DB_DEP, actor: User = AUTH_
     return list_work_summaries(db, work_id)
 
 
+@router.post("/{work_id}/summaries/{summary_id}/promote", response_model=SummaryRead)
+def promote_summary(
+    work_id: uuid.UUID,
+    summary_id: uuid.UUID,
+    db: Session = DB_DEP,
+    actor: User = CONTRIBUTOR_DEP,
+) -> object:
+    """Set a stored summary version as the current one for its work (#22)."""
+    from app.services.summarization import promote_work_summary
+
+    work = db.get(Work, work_id)
+    if work is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    _guard_modify_work(db, actor, work)
+    summary = promote_work_summary(db, work_id, summary_id)
+    if summary is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Summary not found")
+    result = SummaryRead.model_validate(summary)
+    db.commit()
+    return result
+
+
 @router.post(
     "/{work_id}/summaries",
     response_model=SummaryRead,

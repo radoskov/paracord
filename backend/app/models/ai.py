@@ -48,6 +48,10 @@ class Summary(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
+    # When the user explicitly "set this version as current" (#22). Summaries are ordered by
+    # COALESCE(promoted_at, created_at) desc, so a promoted historical version becomes the shown one
+    # WITHOUT rewriting its original creation time. NULL for versions that were never promoted.
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Embedding(Base):

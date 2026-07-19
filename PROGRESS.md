@@ -9,6 +9,19 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI panel context window + separate summary cards + set-as-current history (2026-07-19)
+
+Batch of owner UI asks. **Context window**: `/api/show` now yields capabilities + max context in one
+cached probe; the pulled-model and loaded lists show each model's max context, and mounting takes an
+optional context length (num_ctx, clipped to the model's max) via a new panel input. **Separate cards**:
+the paper view's single "Summaries" section is split into distinct "Short summary" and "Detailed
+summaries" cards. **Reasoning vs normal history** (earlier commit): coexist as distinct versions.
+**Explanatory fallback**: the extractive-fallback note now shows the persisted reason. **Set as
+current** (#22): each history entry has a "Set as current" action → `POST
+/works/{id}/summaries/{sid}/promote` stamps `promoted_at` (migration 0084); `list_work_summaries`
+orders by COALESCE(promoted_at, created_at) desc so the chosen version becomes the shown one without
+rewriting its creation time. Backend 89 + `make frontend-test` 347 pass; live DB at 0084.
+
 ## Length-safe summaries: map-reduce long papers instead of truncating (2026-07-19)
 
 Owner: an LLM summary should never fail when a paper is too long for the context — chunk it. The short

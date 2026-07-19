@@ -191,6 +191,40 @@ def test_reasoning_summary_stored_as_distinct_model_version(db, monkeypatch) -> 
     assert sent_models and all(m == "qwen3.5:4b" for m in sent_models)
 
 
+def test_promote_summary_makes_a_version_current(db_session) -> None:
+    """Promoting a stored version makes it sort first (current) via COALESCE(promoted_at, created_at),
+    without rewriting its created_at."""
+    from app.services.summarization import (
+        list_work_summaries,
+        promote_work_summary,
+        summarize_work,
+    )
+
+    work = Work(canonical_title="t", normalized_title="t", abstract="One. Two. Three. Four. Five.")
+    db_session.add(work)
+    db_session.commit()
+
+    # Two short versions under distinct model names so both persist as history.
+    a = summarize_work(db_session, work, summary_type="local_llm", detail="short", model_name="m-a")
+    db_session.commit()
+    b = summarize_work(db_session, work, summary_type="local_llm", detail="short", model_name="m-b")
+    db_session.commit()
+    a_id, a_created = a.id, a.created_at
+    # Newest (b) is current initially.
+    assert list_work_summaries(db_session, work.id)[0].id == b.id
+
+    promoted = promote_work_summary(db_session, work.id, a_id)
+    db_session.commit()
+    assert promoted is not None and promoted.id == a_id
+    # a is now current, and its original creation time is untouched.
+    current = list_work_summaries(db_session, work.id)[0]
+    assert current.id == a_id
+    assert current.created_at == a_created
+
+    # A summary that doesn't belong to the work → None (not promoted).
+    assert promote_work_summary(db_session, uuid.uuid4(), a_id) is None
+
+
 def test_short_summary_map_reduces_a_long_paper(monkeypatch) -> None:
     """A paper longer than the per-call budget is summarized in chunks (map-reduce) — several LLM
     calls, never a single truncated call — so long papers are covered and never overflow the context."""

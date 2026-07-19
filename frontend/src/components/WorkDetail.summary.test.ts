@@ -69,7 +69,7 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     render(WorkDetail, { client: client as never, work: makeWork() });
     expect(
       await screen.findByText(
-        "Summarized with the extractive fallback (LLM unavailable).",
+        /Summarized with the extractive fallback/,
       ),
     ).toBeTruthy();
   });
@@ -83,7 +83,7 @@ describe("WorkDetail summary provider-fallback indicator (Phase B2)", () => {
     await screen.findByText("A short summary.");
     expect(
       screen.queryByText(
-        "Summarized with the extractive fallback (LLM unavailable).",
+        /Summarized with the extractive fallback/,
       ),
     ).toBeNull();
   });

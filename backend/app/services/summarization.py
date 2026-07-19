@@ -16,6 +16,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -1054,14 +1055,27 @@ def summarize_work(
 
 
 def list_work_summaries(db: Session, work_id: uuid.UUID) -> list[Summary]:
-    """Return stored summaries for a work, newest first."""
+    """Return stored summaries for a work, current-first. A version the user promoted ("set as
+    current", #22) sorts ahead of newer ones via COALESCE(promoted_at, created_at)."""
     return list(
         db.scalars(
             select(Summary)
             .where(Summary.entity_type == "work", Summary.entity_id == work_id)
-            .order_by(Summary.created_at.desc())
+            .order_by(func.coalesce(Summary.promoted_at, Summary.created_at).desc())
         ).all()
     )
+
+
+def promote_work_summary(db: Session, work_id: uuid.UUID, summary_id: uuid.UUID) -> Summary | None:
+    """Mark a stored summary as the current one for its work (#22): stamp ``promoted_at`` = now so it
+    sorts ahead of its siblings (same type/effort) in :func:`list_work_summaries`. Returns the row, or
+    None if it doesn't exist / doesn't belong to the work."""
+    summary = db.get(Summary, summary_id)
+    if summary is None or summary.entity_type != "work" or summary.entity_id != work_id:
+        return None
+    summary.promoted_at = datetime.now(UTC)
+    db.flush()
+    return summary
 
 
 # Scope resolution is shared now (S1/S2) — one query-returning resolver, required
