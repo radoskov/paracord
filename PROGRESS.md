@@ -9,6 +9,18 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Responsive summary-job cancellation (stream + mid-call stop) + busy semaphore (2026-07-19)
+
+Owner: cancelling a reasoning summary job took forever — the Stop only landed after the model finished
+the current paper. Cause: a single reasoning `/api/generate` call blocks for minutes (stream=False) and
+`cancel_cb` was only checked BETWEEN calls. Fix: `_ollama_generate` now **streams** the response and
+probes the cooperative-stop flag (~once/second) between chunks; on cancel it closes the stream (Ollama
+aborts the generation) and raises `JobCancelled`. `cancel_cb` is carried on `_LlmOpts` and threaded
+from `summarize_work`/`summarize_scope` (via `job_cancel_requested`). Verified live: a reasoning call
+cancels in ~3 s instead of minutes; normal generation still works (streamed + joined). Also: the AI &
+Models **Ollama semaphore now shows amber ("busy")** when an AI job is running (green=idle,
+amber=busy, red=unreachable), from the live jobs poll. Backend + frontend tests pass.
+
 ## Scanned-PDF re-extract: retry with OCR when GROBID 500s (2026-07-19)
 
 Owner traceback: re-extract of a scanned PDF hit GROBID 500 (`ocr_and_fetch_tei` line 92 — OCR was

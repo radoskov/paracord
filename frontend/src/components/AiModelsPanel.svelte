@@ -57,6 +57,8 @@
 
   // Mount/unmount (#5): models currently loaded in the Ollama daemon's memory.
   let loaded: LoadedModel[] = [];
+  // True while an AI job is running → the Ollama semaphore shows amber ("busy") instead of green.
+  let aiBusy = false;
   // GPU/CPU offload preference applied to the next mount.
   let mountCompute: 'auto' | 'gpu' | 'cpu' = 'auto';
   // Optional context length (tokens) for the next mount; blank → the daemon default. Clipped to the
@@ -91,6 +93,12 @@
       loaded = (await client.getLoadedModels()).loaded;
     } catch {
       /* tolerate */
+    }
+    // Busy = an AI job is running → the semaphore goes amber (Ollama is likely mid-generation).
+    try {
+      aiBusy = (await runningAiJobs()).length > 0;
+    } catch {
+      aiBusy = false;
     }
   }
 
@@ -850,15 +858,16 @@
           <span class="reason-warn" title="Reasoning is slow (seconds→minutes per call). Each call automatically gets at least 600s so it isn't cut short; raise the LLM timeout above for even longer detailed summaries.">⚠ slow</span>
         {/if}
       </label>
-      <!-- #5: alive-and-reachable semaphore (green/red), like the Jobs-tab dot. Reflects the daemon
-           at the configured Ollama URL; its tooltip carries the URL + version for quick debugging. -->
+      <!-- #5: reachability semaphore (green/amber/red), like the Jobs-tab dot. Green = reachable &
+           idle, amber = reachable & an AI job is running (likely mid-generation), red = unreachable.
+           Its tooltip carries the URL + version for quick debugging. -->
       <span class="ollama-sema"
         title={status.ollama_reachable
-          ? `Ollama reachable at ${config.ollama_url}${status.ollama_version ? ` (v${status.ollama_version})` : ''}`
+          ? `Ollama ${aiBusy ? 'busy — an AI job is running' : 'reachable'} at ${config.ollama_url}${status.ollama_version ? ` (v${status.ollama_version})` : ''}`
           : `Ollama unreachable at ${config.ollama_url} — start it (make up-ai) or fix the Ollama URL. Pulls/embeds run in the worker, which must reach this URL too.`}>
-        <span class="sema-dot sema-{status.ollama_reachable ? 'green' : 'red'}" aria-hidden="true"></span>
+        <span class="sema-dot sema-{status.ollama_reachable ? (aiBusy ? 'yellow' : 'green') : 'red'}" aria-hidden="true"></span>
         Ollama {status.ollama_reachable
-          ? `reachable${status.ollama_version ? ` · v${status.ollama_version}` : ''}`
+          ? `${aiBusy ? 'busy' : 'reachable'}${status.ollama_version ? ` · v${status.ollama_version}` : ''}`
           : 'unreachable'}
       </span>
     </div>
@@ -1474,6 +1483,10 @@
   .sema-red {
     background: color-mix(in srgb, var(--status-danger) 72%, white);
     --dot-glow: color-mix(in srgb, var(--status-danger) 55%, transparent);
+  }
+  .sema-yellow {
+    background: color-mix(in srgb, var(--status-warning) 78%, white);
+    --dot-glow: color-mix(in srgb, var(--status-warning) 55%, transparent);
   }
   .hint { color: var(--status-warning); }
   .small { margin: 0.2rem 0 0.4rem; }
