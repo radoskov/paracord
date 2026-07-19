@@ -1276,6 +1276,9 @@
     font-size: 0.8rem !important;
     min-height: 0 !important;
     background: transparent;
+    /* Default (unselected) chips must use normal ink — without this they inherit the global
+       button's light text and vanish on the panel until a coloured state sets a colour. */
+    color: var(--ink-normal);
     cursor: pointer;
   }
   .tag-chip .tc-state { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; }
