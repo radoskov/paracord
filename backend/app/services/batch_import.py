@@ -248,18 +248,22 @@ def _preview_lookup(lines: list[str], *, settings: Settings, fetchers: dict | No
                 )
             )
         else:
+            # No confident external match — but still salvage an explicit DOI/year the line carries
+            # (e.g. "Title (2021) doi:10.…") and strip them from the title instead of dumping the
+            # whole string in the title field.
+            title, year, doi = _augment_citation_fields(line, title=None, year=None, doi=None)
             drafts.append(
                 ParsedDraft(
                     line_index=index,
                     raw_line=line,
                     engine="lookup",
-                    suggested_title=line,
+                    suggested_title=title,
                     suggested_authors=[],
-                    suggested_year=None,
-                    suggested_doi=None,
+                    suggested_year=year,
+                    suggested_doi=doi,
                     suggested_venue=None,
                     suggested_abstract=None,
-                    match_status="title_only",
+                    match_status="matched" if doi else "title_only",
                     candidates=candidates,
                 )
             )

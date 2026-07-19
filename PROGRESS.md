@@ -9,6 +9,23 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Scanned-PDF re-extract: retry with OCR when GROBID 500s (2026-07-19)
+
+Owner traceback: re-extract of a scanned PDF hit GROBID 500 (`ocr_and_fetch_tei` line 92 — OCR was
+skipped), while Force OCR worked. Root cause: after a prior OCR run the file's `text_layer_quality` is
+`ocr_added`/`good`, so `needs_ocr` is False → OCR pre-step skipped → but the content-addressed original
+is still an image scan GROBID 500s on. Fix (the owner's own suggestion): `ocr_and_fetch_tei` now, when
+no OCR engine was chosen and GROBID fails, **forces OCR once and retries** before giving up — verified
+live (re-extract now self-heals: GROBID 500 → forced OCR → success). Regression test added.
+
+## Citation import: also parse year/DOI in the default "lookup" engine + e2e (2026-07-19)
+
+The earlier year/DOI recovery was only wired into the GROBID engine, but the Citations tab defaults to
+**lookup** — so the owner still saw everything in the title. Applied `_augment_citation_fields` to the
+lookup engine's no-match fallback too. Added the requested **e2e Journey 43** (Import → Citations,
+GROBID engine): pastes `Title (2021) doi:…` and asserts the draft's Year/DOI fields are filled and the
+title is clean. Unit tests cover both engines.
+
 ## Citation summary: bulk "Clear queue" for the import worklist (2026-07-19)
 
 Owner: un-queuing frequently-cited-missing papers one-by-one was tedious. Added

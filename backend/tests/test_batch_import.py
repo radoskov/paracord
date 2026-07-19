@@ -154,6 +154,22 @@ def test_preview_lookup_matched_and_title_only():
     assert p1.drafts[0].suggested_doi is None
 
 
+def test_preview_lookup_salvages_year_and_doi_when_no_match():
+    """The default 'lookup' engine: when no external match is found, an explicit DOI/year in the
+    line is still recovered and stripped from the title (owner-reported: default tab left it all in
+    the title)."""
+    p = batch_import.preview_lines(
+        ["Knowledge Graph Embedding via Dynamic Mapping Matrix (2015) doi:10.3115/v1/p15-1067"],
+        engine="lookup",
+        settings=Settings(),
+        fetchers={"crossref": lambda: [], "openalex": lambda: [], "semanticscholar": lambda: []},
+    )
+    d = p.drafts[0]
+    assert d.suggested_year == 2015
+    assert d.suggested_doi == "10.3115/v1/p15-1067"
+    assert d.suggested_title == "Knowledge Graph Embedding via Dynamic Mapping Matrix"
+
+
 def test_preview_lookup_degraded_when_budget_exhausted(monkeypatch):
     """A zero wall-clock budget skips every line => title_only + degraded flag."""
     settings = Settings()
