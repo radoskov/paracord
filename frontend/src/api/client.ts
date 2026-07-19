@@ -1296,6 +1296,10 @@ export interface ScopeNote {
 }
 
 export interface ScopeSummaryResponse {
+  // #22 scope history: the row id (to promote it) and when it was promoted ("set as current").
+  // Null on the queued variant (no summary row yet).
+  id?: string | null;
+  promoted_at?: string | null;
   // Nullable because a large scope is answered with a queued job instead (S15).
   entity_type: string | null;
   entity_id: string | null;
@@ -2852,6 +2856,29 @@ export class ApiClient {
     if (scopeId) params.set("scope_id", scopeId);
     if (detail) params.set("detail", detail);
     return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/latest?${params}`);
+  }
+
+  /** All stored summaries for a scope, current-first (#22 scope history — every effort/model/
+   * reasoning variant, promoted one first). Mirrors listSummaries() for a work. */
+  async listScopeSummaries(
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+  ): Promise<ScopeSummaryResponse[]> {
+    const params = new URLSearchParams({ scope_type: scopeType });
+    if (scopeId) params.set("scope_id", scopeId);
+    return this.request<ScopeSummaryResponse[]>(`/api/v1/ai/summaries/history?${params}`);
+  }
+
+  /** Mark a stored scope summary as the current one ("set as current", #22). */
+  async promoteScopeSummary(
+    summaryId: string,
+    scopeType: "library" | "shelf" | "rack",
+    scopeId: string | null,
+  ): Promise<ScopeSummaryResponse> {
+    return this.request<ScopeSummaryResponse>(`/api/v1/ai/summaries/${summaryId}/promote`, {
+      method: "POST",
+      body: { scope_type: scopeType, scope_id: scopeId ?? null },
+    });
   }
 
   /** The note for an Insights scope (empty text when none exists yet; 2026-07-16). */

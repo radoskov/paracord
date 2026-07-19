@@ -19,7 +19,12 @@ from app.services import access
 from app.services.access_settings import get_default_access_level
 from app.services.app_config import effective_ai_scope_job_threshold
 from app.services.scope_resolution import count_scope_works
-from app.services.summarization import latest_scope_summary, summarize_scope
+from app.services.summarization import (
+    latest_scope_summary,
+    list_scope_summaries,
+    promote_scope_summary,
+    summarize_scope,
+)
 from app.services.topic_modeling import model_topics
 from app.utils.normalization import normalize_title
 
@@ -61,6 +66,7 @@ class ScopeSummaryResponse(BaseModel):
 
     # Optional-with-defaults so the queued variant (S15: no summary yet, just a job id) validates;
     # the inline path always fills them.
+    id: str | None = None
     entity_type: str | None = None
     entity_id: str | None = None
     summary_type: str | None = None
@@ -85,12 +91,15 @@ class ScopeSummaryResponse(BaseModel):
     # ({full_text, abstract_only, title_only}) + when this summary was generated, for the footer.
     source_breakdown: dict[str, int] | None = None
     generated_at: str | None = None
+    # #22 scope history: the row id (to promote it) and when it was promoted ("set as current").
+    promoted_at: str | None = None
 
 
 def _scope_summary_response(summary, *, work_count: int | None = None) -> "ScopeSummaryResponse":
     """Build the API response from a stored scope Summary row (shared by create/latest/cache-hit)."""
     params = summary.params or {}
     return ScopeSummaryResponse(
+        id=str(summary.id),
         entity_type=summary.entity_type,
         entity_id=str(summary.entity_id),
         summary_type=summary.summary_type,
@@ -106,6 +115,9 @@ def _scope_summary_response(summary, *, work_count: int | None = None) -> "Scope
         method=params.get("method"),
         source_breakdown=params.get("source_breakdown"),
         generated_at=summary.created_at.isoformat() if summary.created_at else None,
+        promoted_at=summary.promoted_at.isoformat()
+        if getattr(summary, "promoted_at", None)
+        else None,
     )
 
 
@@ -143,17 +155,12 @@ def create_scope_summary(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    # 2026-07-16 cache matrix: unless Regenerate was pressed, return the cached summary for this
-    # (scope, effort, current model) if it exists — no recompute.
+    # 2026-07-16 cache matrix: unless Regenerate was pressed, return the current summary for this
+    # (scope, effort) if one exists — no recompute. Effort-level (not model-specific) so it matches
+    # the read path and honors a "set as current" promotion across model/reasoning variants (#22).
     if not payload.force:
-        from app.services.ai_config import get_ai_config
         from app.services.summarization import stored_summary_type
 
-        cache_model = payload.model_name or (
-            get_ai_config(db).summary_model
-            if summary_type == "local_llm"
-            else "tier1-extractive-frequency-scope"
-        )
         cache_type = (
             stored_summary_type(summary_type, payload.paper_detail)
             if summary_type == "local_llm"
@@ -164,7 +171,6 @@ def create_scope_summary(
             scope_type=payload.scope_type,
             scope_id=payload.scope_id,
             summary_type=cache_type,
-            model_name=cache_model,
         )
         if cached is not None:
             return _scope_summary_response(cached)
@@ -273,13 +279,15 @@ def read_latest_scope_summary(
 ) -> ScopeSummaryResponse:
     """Return the most recent stored summary for a scope (the S15 async-completion read path).
 
-    When ``detail`` is given, the lookup targets that specific cache-matrix cell — the effort level
-    for the current model/provider (2026-07-16). Without it, the newest summary of any kind is
-    returned (back-compat)."""
+    When ``detail`` is given, the lookup targets that effort level and returns the CURRENT version —
+    the one the user promoted ("set as current", #22), else the newest — across any model/reasoning
+    variant. Without ``detail``, the current summary of any kind is returned (back-compat)."""
     if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    # Resolve the effort into its stored_type, but NOT a specific model: the current version for an
+    # effort is the promoted-or-newest one regardless of which model/reasoning variant produced it,
+    # so a "set as current" on any history entry takes effect here (#22).
     cache_type: str | None = None
-    cache_model: str | None = None
     if detail is not None:
         from app.services.ai_config import get_ai_config
         from app.services.summarization import stored_summary_type
@@ -288,30 +296,59 @@ def read_latest_scope_summary(
         resolved = summary_type or (
             "local_llm" if ai_cfg.summary_provider == "local_llm" else "extractive"
         )
-        if resolved == "local_llm":
-            cache_type = stored_summary_type(resolved, detail)
-            cache_model = ai_cfg.summary_model
-        else:
-            cache_type = resolved
-            cache_model = "tier1-extractive-frequency-scope"
+        cache_type = stored_summary_type(resolved, detail) if resolved == "local_llm" else resolved
     summary = latest_scope_summary(
-        db,
-        scope_type=scope_type,
-        scope_id=scope_id,
-        summary_type=cache_type,
-        model_name=cache_model,
+        db, scope_type=scope_type, scope_id=scope_id, summary_type=cache_type
     )
-    # Fall back to the newest summary of this effort under ANY model when the exact (effort, model)
-    # cell is empty — e.g. a run made under a different model, so a just-finished job's result is
-    # still shown rather than a spurious 404 (2026-07-16).
-    if summary is None and cache_type is not None:
-        summary = latest_scope_summary(
-            db, scope_type=scope_type, scope_id=scope_id, summary_type=cache_type
-        )
     if summary is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No summary for this scope yet"
         )
+    return _scope_summary_response(summary)
+
+
+@router.get("/summaries/history", response_model=list[ScopeSummaryResponse])
+def list_scope_summary_history(
+    scope_type: Literal["library", "shelf", "rack", "row"],
+    scope_id: uuid.UUID | None = None,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> list[ScopeSummaryResponse]:
+    """All stored summaries for a scope, current-first (#22 scope history). Every effort/model/
+    reasoning variant coexists as the cache matrix; the promoted one ("set as current") sorts first.
+    Mirrors GET /works/{id}/summaries."""
+    if not access.can_see_scope_container(db, actor, scope_type=scope_type, scope_id=scope_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    rows = list_scope_summaries(db, scope_type=scope_type, scope_id=scope_id)
+    return [_scope_summary_response(s) for s in rows]
+
+
+class ScopePromoteRequest(BaseModel):
+    """Identify which scope a summary belongs to, so promotion is access-checked against it."""
+
+    scope_type: Literal["library", "shelf", "rack", "row"]
+    scope_id: uuid.UUID | None = None
+
+
+@router.post("/summaries/{summary_id}/promote", response_model=ScopeSummaryResponse)
+def promote_scope_summary_endpoint(
+    summary_id: uuid.UUID,
+    payload: ScopePromoteRequest,
+    db: Session = DB_DEP,
+    actor: User = EDITOR_DEP,
+) -> ScopeSummaryResponse:
+    """Mark a stored scope summary as the current one ("set as current", #22) — it then leads the
+    history and is returned by GET /ai/summaries/latest. Mirrors the per-work promote endpoint."""
+    if not access.can_see_scope_container(
+        db, actor, scope_type=payload.scope_type, scope_id=payload.scope_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scope not found")
+    summary = promote_scope_summary(
+        db, summary_id, scope_type=payload.scope_type, scope_id=payload.scope_id
+    )
+    if summary is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Summary not found")
+    db.commit()
     return _scope_summary_response(summary)
 
 

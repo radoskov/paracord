@@ -9,6 +9,21 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Scope/Insights summary history + "set as current" (#22) (2026-07-19)
+
+Handoff: `docs/agent_handoffs/2026-07-19-scope-summary-history.md`. Owner: per-work summaries have a
+history popup + "Set as current", but the collective scope/Insights summary didn't. Scope summaries
+already stored one row per (scope, effort, model) — the history material — so this exposes it. Backend:
+`list_scope_summaries` + `promote_scope_summary` (mirror the per-work fns), `latest_scope_summary`
+now orders by `COALESCE(promoted_at, created_at)`, `summarize_scope` tags reasoning runs
+`"<model> (reasoning)"` so they coexist with the normal version, `GET /ai/summaries/history` +
+`POST /ai/summaries/{id}/promote` endpoints, and `id`+`promoted_at` on `ScopeSummaryResponse`.
+`GET /ai/summaries/latest` now returns the CURRENT (promoted-or-newest) version for an effort across
+any model, so a promotion takes effect in the reactive view. Frontend: `listScopeSummaries`/
+`promoteScopeSummary` client methods + a **History (N)** popup with **Set as current** on the Insights
+scope-summary card (mirrors WorkDetail). No migration (reuses `Summary.promoted_at` from 0084). Tests:
+2 new (service + endpoint); `test_summarization.py`+`test_ai_admin.py` = 92 passed, ruff clean.
+
 ## Responsive summary-job cancellation (stream + mid-call stop) + busy semaphore (2026-07-19)
 
 Owner: cancelling a reasoning summary job took forever — the Stop only landed after the model finished

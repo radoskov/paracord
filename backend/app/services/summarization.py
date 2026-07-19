@@ -1229,9 +1229,51 @@ def latest_scope_summary(
         conditions.append(Summary.summary_type == summary_type)
     if model_name is not None:
         conditions.append(Summary.model_name == model_name)
+    # A version the user promoted ("set as current", #22) sorts ahead of newer ones — same
+    # COALESCE(promoted_at, created_at) ordering as the per-work history.
     return db.scalars(
-        select(Summary).where(*conditions).order_by(Summary.created_at.desc())
+        select(Summary)
+        .where(*conditions)
+        .order_by(func.coalesce(Summary.promoted_at, Summary.created_at).desc())
     ).first()
+
+
+def list_scope_summaries(
+    db: Session,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+) -> list[Summary]:
+    """Return the stored summaries for a scope, current-first (#22 scope history). All efforts and
+    models coexist as the cache matrix; a promoted version sorts ahead via
+    COALESCE(promoted_at, created_at) — mirrors :func:`list_work_summaries`."""
+    entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    return list(
+        db.scalars(
+            select(Summary)
+            .where(Summary.entity_type == scope_type, Summary.entity_id == entity_id)
+            .order_by(func.coalesce(Summary.promoted_at, Summary.created_at).desc())
+        ).all()
+    )
+
+
+def promote_scope_summary(
+    db: Session,
+    summary_id: uuid.UUID,
+    *,
+    scope_type: str,
+    scope_id: uuid.UUID | None,
+) -> Summary | None:
+    """Mark a stored scope summary as the current one (#22): stamp ``promoted_at`` = now so it sorts
+    ahead of its siblings in :func:`latest_scope_summary` / :func:`list_scope_summaries`. Returns the
+    row, or None if it doesn't exist / doesn't belong to this scope."""
+    entity_id = scope_id if scope_id is not None else _LIBRARY_SCOPE_ID
+    summary = db.get(Summary, summary_id)
+    if summary is None or summary.entity_type != scope_type or summary.entity_id != entity_id:
+        return None
+    summary.promoted_at = datetime.now(UTC)
+    db.flush()
+    return summary
 
 
 _TITLE_ONLY_LIST_CAP = 30  # keep the title-only paragraph readable in a huge scope
@@ -1360,11 +1402,12 @@ def summarize_scope(
     }
 
     if summary_type == "local_llm":
-        stored_model = model_name or ai_cfg.summary_model
-        # Scope summaries are read back by (effort, configured-model), so — unlike the per-work view —
-        # the stored label must stay the plain model name; the call model equals it (no reasoning tag).
-        call_model = stored_model
-        opts = _llm_opts_for(ai_cfg, stored_model, cancel_cb=cancel_cb)
+        call_model = model_name or ai_cfg.summary_model
+        opts = _llm_opts_for(ai_cfg, call_model, cancel_cb=cancel_cb)
+        # Reasoning runs are stored under a "<model> (reasoning)" label so they coexist with the
+        # plain-model version in the scope history instead of overwriting it (#22 parity with the
+        # per-work view). ``call_model`` stays the real model name for the Ollama/per-paper calls.
+        stored_model = f"{call_model} (reasoning)" if opts.think else call_model
         prompt_version = LLM_PROMPT_VERSION
         # Map step (UX batch 4): build one digest line per FULL-TEXT paper. When the LLM is on,
         # per-paper summaries are generated through summarize_work — so they are also PERSISTED and
@@ -1386,7 +1429,7 @@ def summarize_scope(
                 db,
                 work,
                 use_llm=llm_ok and fallback_reason is None,
-                model_name=stored_model,
+                model_name=call_model,
                 created_by_user_id=created_by_user_id,
                 settings=settings,
                 detail=paper_detail,

@@ -44,6 +44,10 @@
 
   let topics: Topic[] = [];
   let summary: ScopeSummaryResponse | null = null;
+  // #22 scope history: every stored version for this scope (all efforts/models/reasoning variants),
+  // current-first — feeds the "History" popup + "Set as current", mirroring the per-work view.
+  let scopeHistory: ScopeSummaryResponse[] = [];
+  let historyOpen = false;
   let loading = false;
   let message = '';
 
@@ -381,11 +385,13 @@
         message = `Summarizing ${response.work_count} papers in the background…`;
         void pollJob(response.job_id, async () => {
           summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId, summaryDetail);
+          void loadHistory();
           message = 'Summary ready.';
         }).finally(() => (summaryBusy = false));
         return;
       }
       summary = response;
+      void loadHistory();
     }, 'Summary generated');
     if (!backgrounded) summaryBusy = false;
   }
@@ -399,7 +405,46 @@
     } catch {
       summary = null; // 404 → nothing cached for this cell yet
     }
+    void loadHistory();
   }
+
+  // #22: all stored versions for this scope (any effort/model/reasoning), current-first. Powers the
+  // History popup + "Set as current". Silently empties on error so it never blocks the summary view.
+  async function loadHistory(): Promise<void> {
+    if (!scopeReady || !isClassicScope) {
+      scopeHistory = [];
+      return;
+    }
+    try {
+      scopeHistory = await client.listScopeSummaries(scope.scopeType, scope.scopeId);
+    } catch {
+      scopeHistory = [];
+    }
+  }
+
+  // The other stored versions, excluding whichever one is currently shown (matched by id) — the
+  // "history" the popup lists, mirroring the per-work view.
+  $: scopeHistoryOthers = scopeHistory.filter((s) => !summary?.id || s.id !== summary.id);
+
+  // #22: promote a historical version to "current", then reload so it leads the list + the view.
+  async function promoteScopeVersion(summaryId: string | null | undefined): Promise<void> {
+    if (!summaryId) return;
+    await run(async () => {
+      await client.promoteScopeSummary(summaryId, scope.scopeType, scope.scopeId);
+      summary = await client.getLatestScopeSummary(scope.scopeType, scope.scopeId, summaryDetail);
+      await loadHistory();
+      historyOpen = false;
+    }, 'Set as the current version');
+  }
+
+  // Provenance label for a stored version — the engine that actually produced the text on a
+  // fallback, else the model name (mirrors WorkDetail.provenanceName).
+  const scopeProvenance = (s: ScopeSummaryResponse) =>
+    s.fallback ? (s.provider_used ?? 'extractive') : (s.model_name ?? s.provider_used ?? 'local');
+  // Short effort label from a stored_type e.g. 'local_llm_detailed_section' → 'detailed section'.
+  const scopeEffortLabel = (s: ScopeSummaryResponse) =>
+    (s.summary_type ?? '').replace(/^local_llm_?/, '').replace(/_/g, ' ') || 'short';
+
   // Re-fetch when the scope or the selected effort/source changes.
   $: void (scope.scopeType, scope.scopeId, summaryDetail, loadCachedSummary());
 
@@ -570,7 +615,37 @@
             on:click={() => (mathMode = mathMode === 'fancy' ? 'plain' : 'fancy')}
             title="Toggle LaTeX math rendering (switch to plain if equations look garbled)"
             >{mathMode === 'fancy' ? '𝑓𝑥 fancy' : 'plain text'}</button>
+          {#if scopeHistoryOthers.length}
+            <button type="button" class="linkish" on:click={() => (historyOpen = !historyOpen)}
+              title="View previously generated scope summaries (other efforts / models / reasoning)"
+              >History ({scopeHistoryOthers.length})</button>
+          {/if}
         </div>
+        {#if historyOpen && scopeHistoryOthers.length}
+          <ul class="history-list">
+            {#each scopeHistoryOthers as h (h.id)}
+              <li class="history-item">
+                <div class="history-meta">
+                  {scopeEffortLabel(h)} · {scopeProvenance(h)}{#if h.promoted_at} · was current{/if}{#if h.generated_at} · {fmtGenerated(h.generated_at)}{/if}
+                  <button type="button" class="linkish small" on:click={() => promoteScopeVersion(h.id)}
+                    title="Show this version as the current scope summary for its effort level">Set as current</button>
+                </div>
+                <div class="history-text">
+                  {#each formatSummary(h.text) as sec}
+                    {#if sec.heading}<p class="summary-heading">{sec.heading}</p>{/if}
+                    {#if sec.bullets}
+                      <ul class="summary-bullets">{#each sec.bullets as b}<li>{#if mathMode === 'fancy'}{@html renderSummaryMath(b)}{:else}{b}{/if}</li>{/each}</ul>
+                    {:else if mathMode === 'fancy'}
+                      <p class="summary-text">{@html renderSummaryMath(sec.body ?? '')}</p>
+                    {:else}
+                      <p class="summary-text">{sec.body}</p>
+                    {/if}
+                  {/each}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
         <div class="summary-body">
           {#each formatSummary(summary.text) as sec}
             {#if sec.heading}<p class="summary-heading">{sec.heading}</p>{/if}
@@ -751,10 +826,38 @@
   .summary-toolbar {
     display: flex;
     justify-content: flex-end;
+    gap: 0.6rem;
     margin-bottom: 0.2rem;
   }
   .summary-toolbar .active {
     font-weight: 700;
+  }
+
+  /* #22 scope-summary history popup (mirrors WorkDetail's history list). */
+  .history-list {
+    list-style: none;
+    margin: 0 0 0.6rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--surface-2, rgba(127, 127, 127, 0.06));
+  }
+  .history-item + .history-item {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--border);
+  }
+  .history-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--muted, #888);
+    margin-bottom: 0.2rem;
+  }
+  .history-text {
+    font-size: 0.9rem;
   }
 
   /* 2026-07-16 detailed-summary effort selector */

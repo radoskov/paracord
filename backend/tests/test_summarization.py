@@ -54,9 +54,8 @@ def db_session(tmp_path: Path):
 def test_ollama_generate_streams_and_supports_midstream_cancel(monkeypatch) -> None:
     """_ollama_generate streams the response (so a cancel takes effect mid-generation): it joins the
     'response' chunks, and a cancel probe that returns True aborts with JobCancelled before finishing."""
-    import httpx2
-
     import app.services.summarization as summ
+    import httpx2
     from app.workers.queue import JobCancelled
 
     lines = [
@@ -280,6 +279,63 @@ def test_promote_summary_makes_a_version_current(db_session) -> None:
 
     # A summary that doesn't belong to the work → None (not promoted).
     assert promote_work_summary(db_session, uuid.uuid4(), a_id) is None
+
+
+def test_promote_scope_summary_makes_a_version_current(db_session) -> None:
+    """#22: scope summaries accumulate one row per model as history; promoting a version makes it
+    the current one (leads list_scope_summaries + latest_scope_summary) without rewriting created_at."""
+    from app.models.organization import Shelf, ShelfWork
+    from app.services.summarization import (
+        latest_scope_summary,
+        list_scope_summaries,
+        promote_scope_summary,
+        summarize_scope,
+    )
+
+    shelf = Shelf(name="Hist")
+    db_session.add(shelf)
+    db_session.flush()
+    work = Work(canonical_title="w", normalized_title="w", abstract="One. Two. Three. Four. Five.")
+    db_session.add(work)
+    db_session.flush()
+    db_session.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db_session.commit()
+
+    # Two scope summaries under distinct model names so both persist as history. summary_type
+    # "local_llm" keeps the requested model_name as the stored label (the extractive scope path
+    # collapses everything under one tier name); abstract-only works need no live LLM here.
+    a, _ = summarize_scope(
+        db_session, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-a"
+    )
+    db_session.commit()
+    b, _ = summarize_scope(
+        db_session, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-b"
+    )
+    db_session.commit()
+    assert a.model_name == "m-a" and b.model_name == "m-b"
+    a_id, a_created = a.id, a.created_at
+
+    history = list_scope_summaries(db_session, scope_type="shelf", scope_id=shelf.id)
+    assert {h.id for h in history} == {a.id, b.id}
+    # Newest (b) is current initially.
+    assert history[0].id == b.id
+    assert latest_scope_summary(db_session, scope_type="shelf", scope_id=shelf.id).id == b.id
+
+    promoted = promote_scope_summary(db_session, a_id, scope_type="shelf", scope_id=shelf.id)
+    db_session.commit()
+    assert promoted is not None and promoted.id == a_id
+    # a is now current (leads the history + the latest read), created_at untouched.
+    current = list_scope_summaries(db_session, scope_type="shelf", scope_id=shelf.id)[0]
+    assert current.id == a_id
+    assert current.created_at == a_created
+    assert latest_scope_summary(db_session, scope_type="shelf", scope_id=shelf.id).id == a_id
+
+    # Wrong scope / unknown id → None (not promoted).
+    assert promote_scope_summary(db_session, a_id, scope_type="rack", scope_id=shelf.id) is None
+    assert (
+        promote_scope_summary(db_session, uuid.uuid4(), scope_type="shelf", scope_id=shelf.id)
+        is None
+    )
 
 
 def test_short_summary_map_reduces_a_long_paper(monkeypatch) -> None:
@@ -1201,6 +1257,58 @@ def test_scope_summary_api_creates_and_returns(client, auth_headers, db) -> None
     assert body["work_count"] == 2
     assert body["model_name"] == "tier1-extractive-frequency-scope"
     assert len(body["text"]) > 10
+
+
+def test_scope_summary_history_and_promote_api(client, auth_headers, db) -> None:
+    """#22: GET /ai/summaries/history lists a scope's stored versions current-first, and POST
+    /ai/summaries/{id}/promote makes one the current version — reflected in GET .../latest."""
+    from app.models.organization import Shelf, ShelfWork
+
+    shelf = Shelf(name="Hist API")
+    db.add(shelf)
+    db.flush()
+    work = Work(canonical_title="w", normalized_title="w", abstract="One. Two. Three. Four.")
+    db.add(work)
+    db.flush()
+    db.add(ShelfWork(shelf_id=shelf.id, work_id=work.id))
+    db.commit()
+
+    # Seed two versions under distinct model names (local_llm keeps the requested model as the label).
+    a, _ = summarize_scope(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-a"
+    )
+    b, _ = summarize_scope(
+        db, scope_type="shelf", scope_id=shelf.id, summary_type="local_llm", model_name="m-b"
+    )
+    db.commit()
+    a_id = str(a.id)
+
+    hist = client.get(
+        f"/api/v1/ai/summaries/history?scope_type=shelf&scope_id={shelf.id}",
+        headers=auth_headers("editor"),
+    )
+    assert hist.status_code == 200
+    rows = hist.json()
+    assert {r["id"] for r in rows} == {str(a.id), str(b.id)}
+    assert rows[0]["id"] == str(b.id)  # newest is current initially
+    assert rows[0]["promoted_at"] is None
+
+    promote = client.post(
+        f"/api/v1/ai/summaries/{a_id}/promote",
+        headers=auth_headers("editor"),
+        json={"scope_type": "shelf", "scope_id": str(shelf.id)},
+    )
+    assert promote.status_code == 200
+    assert promote.json()["id"] == a_id
+    assert promote.json()["promoted_at"] is not None
+
+    latest = client.get(
+        f"/api/v1/ai/summaries/latest?scope_type=shelf&scope_id={shelf.id}"
+        "&detail=short&summary_type=local_llm",
+        headers=auth_headers("editor"),
+    )
+    assert latest.status_code == 200
+    assert latest.json()["id"] == a_id  # promoted version now leads the read
 
 
 def test_scope_summary_api_empty_scope_returns_400(client, auth_headers, db) -> None:
