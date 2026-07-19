@@ -255,6 +255,65 @@ describe("AiModelsPanel mount/unmount (#5)", () => {
     // At least one Unmount button is present (loaded list + the card badge).
     expect(screen.getAllByRole("button", { name: /Unmount/ }).length).toBeGreaterThan(0);
   });
+
+  it("flips the card's Mount button to Unmount once the mount job updates the loaded list", async () => {
+    // Regression: the card button read isLoaded(config.x) — a function call Svelte only re-evaluated
+    // when config changed, so after a mount job finished (which updates `loaded`, not `config`) the
+    // button stayed "Mount" until the model dropdown was touched. It must now react to `loaded`.
+    const status = makeStatus();
+    status.config.embedding_provider = "ollama";
+    status.config.embedding_model = "nomic-embed-text";
+    const getLoadedModels = vi
+      .fn()
+      .mockResolvedValueOnce({ loaded: [], vram_budget_gb: null }) // initial load: not mounted
+      .mockResolvedValue({
+        loaded: [{ name: "nomic-embed-text:latest", size_bytes: 3e8, size_vram_bytes: 3e8 }],
+        vram_budget_gb: null,
+      }); // after the mount job's refreshLive: mounted
+    const client = {
+      getAiStatus: vi.fn().mockResolvedValue(status),
+      listAiModels: vi.fn().mockResolvedValue({
+        models: [{ provider: "ollama", name: "nomic-embed-text", size_bytes: null, vram_gb: 1 }],
+      }),
+      getLoadedModels,
+      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+      getJobResult: vi.fn().mockResolvedValue({ status: "finished" }),
+      mountAiModel: vi.fn().mockResolvedValue({ job_id: "mount-job", status: "queued" }),
+      validateAiModel: vi.fn().mockResolvedValue({
+        present: true,
+        embeddings: true,
+        canonical: "nomic-embed-text",
+        error: null,
+      }),
+    };
+    const { getByRole } = render(AiModelsPanel, { client: client as never });
+    // Initially not mounted → the card shows Mount, no Unmount.
+    await waitFor(() => expect(getByRole("button", { name: /^Mount$/ })).toBeTruthy());
+    await (
+      await import("@testing-library/svelte")
+    ).fireEvent.click(getByRole("button", { name: /^Mount$/ }));
+    // After the job completes and refreshLive re-reads the loaded list, the button reacts and flips.
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /Unmount/ }).length).toBeGreaterThan(0),
+    );
+  });
+
+  it("disables the summary model selector (showing no model) for the extractive provider", async () => {
+    const status = makeStatus();
+    status.config.summary_provider = "extractive";
+    status.config.summary_model = "qwen3.5:4b"; // a stale stored model must NOT be shown as in-use
+    const client = {
+      getAiStatus: vi.fn().mockResolvedValue(status),
+      listAiModels: vi.fn().mockResolvedValue({ models: [] }),
+      getLoadedModels: vi.fn().mockResolvedValue({ loaded: [], vram_budget_gb: null }),
+      getJobs: vi.fn().mockResolvedValue({ jobs: [] }),
+    };
+    render(AiModelsPanel, { client: client as never });
+    await waitFor(() => expect(client.getAiStatus).toHaveBeenCalled());
+    // The confusing model name is gone; the extractive summarizer shows it uses no model.
+    expect(await screen.findByText(/the extractive summarizer uses no LLM/i)).toBeTruthy();
+    expect(screen.queryByText("qwen3.5:4b")).toBeNull();
+  });
 });
 
 describe("AiModelsPanel lexical index (B5)", () => {

@@ -9,6 +9,17 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## AI panel mount-button reactivity + extractive model-select fix (2026-07-19)
+
+Two small AI & Models UI fixes. (1) The card Mount/Unmount button stayed stale after a mount/unmount
+job finished (you had to toggle the model dropdown to refresh it): the template called
+`isLoaded(config.x)`, which Svelte only re-evaluates when `config` changes — but the job updates
+`loaded`, not `config`. Replaced with reactive `embeddingMounted`/`summaryMounted` declarations that
+reference `loaded` directly, so `refreshLive()` (and the 8 s / focus polls) now flip the button live.
+(2) With the extractive summary provider selected, the (disabled) model selector still displayed the
+stored LLM name — confusing. It now shows `—` with "the extractive summarizer uses no LLM". Two
+regression tests added; `make frontend-test` 344.
+
 ## Configurable LLM timeout + opt-in reasoning mode with auto-detect (2026-07-18)
 
 Same handoff (follow-up section). Owner: the LLM timeout wasn't a setting, and a reasoning model

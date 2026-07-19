@@ -249,9 +249,6 @@
     const norm = (s: string) => (s.includes(':') ? s : `${s}:latest`);
     return norm(a) === norm(b);
   }
-  function isLoaded(name: string | null | undefined): boolean {
-    return !!name && loaded.some((m) => sameModel(m.name, name));
-  }
   // A loaded model's memory in GB: actual VRAM when on a GPU, else its resident size.
   function loadedGb(m: LoadedModel): number {
     const v = m.size_vram_bytes && m.size_vram_bytes > 0 ? m.size_vram_bytes : (m.size_bytes ?? 0);
@@ -564,6 +561,11 @@
     ollamaModelNames,
     config?.summary_provider === 'local_llm' ? config?.summary_model : '',
   );
+  // Mounted state must react to `loaded` (refreshLive updates it after a mount/unmount job), not only
+  // to `config`. A bare isLoaded(config.x) call in the template re-runs only when config changes, so
+  // the Mount/Unmount button stayed stale after a job finished until the model dropdown was touched.
+  $: embeddingMounted = !!config && loaded.some((m) => sameModel(m.name, config?.embedding_model));
+  $: summaryMounted = !!config && loaded.some((m) => sameModel(m.name, config?.summary_model));
 </script>
 
 <section class="card">
@@ -619,7 +621,7 @@
           </label>
           <!-- #5: mount = load into memory + make active; unmount = free memory + baseline fallback. -->
           <div class="mount-row">
-            {#if isLoaded(config.embedding_model)}
+            {#if embeddingMounted}
               <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
               <button type="button" class="secondary small" on:click={() => unmount(config.embedding_model, 'embedding')}
                 disabled={busy || modelJobActive} title="Free this model from memory; semantic search falls back to hash-BOW">Unmount</button>
@@ -739,7 +741,7 @@
           </label>
           <!-- #5: mount = load into memory + make active; unmount = free memory + baseline fallback. -->
           <div class="mount-row">
-            {#if isLoaded(config.summary_model)}
+            {#if summaryMounted}
               <span class="loaded-dot" title="Loaded in the Ollama daemon's memory">● loaded</span>
               <button type="button" class="secondary small" on:click={() => unmount(config.summary_model, 'summary')}
                 disabled={busy || modelJobActive} title="Free this model from memory; summaries fall back to the extractive baseline">Unmount</button>
@@ -752,9 +754,9 @@
         {:else}
           <label>Summary model
             <select disabled title="No model needed for the built-in extractive summarizer">
-              <option>{config.summary_model || '—'}</option>
+              <option>—</option>
             </select>
-            <small class="hint">No model needed for this provider.</small>
+            <small class="hint">No model needed — the extractive summarizer uses no LLM.</small>
           </label>
         {/if}
       </article>
