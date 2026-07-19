@@ -836,7 +836,7 @@
         <input type="checkbox" bind:checked={config.summary_reasoning} disabled={busy} />
         Reasoning mode
         {#if config.summary_reasoning}
-          <span class="reason-warn" title="Reasoning is slow — make sure the LLM timeout above is generous (e.g. 600s+), especially for detailed summaries.">⚠ slow</span>
+          <span class="reason-warn" title="Reasoning is slow (seconds→minutes per call). Each call automatically gets at least 600s so it isn't cut short; raise the LLM timeout above for even longer detailed summaries.">⚠ slow</span>
         {/if}
       </label>
       <!-- #5: alive-and-reachable semaphore (green/red), like the Jobs-tab dot. Reflects the daemon
@@ -1180,8 +1180,9 @@
           flag is only ever sent to models that support it).</p>
         <p><strong>LLM timeout (s)</strong> is the per-call budget for one generation. If a call exceeds
           it, that summary safely degrades to the fast extractive fallback (and the card says so). The
-          default 120&nbsp;s suits non-reasoning models; for reasoning mode set it generously
-          (600&nbsp;s+), especially for detailed summaries.</p>
+          default 120&nbsp;s suits non-reasoning models. With reasoning on, each call automatically gets
+          <em>at least 600&nbsp;s</em> (so slow thinking is never cut short) — raise this value if your
+          detailed summaries need even longer.</p>
         <p class="note">Whatever the model, its internal “thinking” is always stripped from the stored
           summary, so a summary never starts mid-thought.</p>
       </details>

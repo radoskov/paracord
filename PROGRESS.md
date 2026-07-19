@@ -9,6 +9,22 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reasoning summary timeout floor + paren-wrapped-equation rendering (2026-07-19)
+
+Owner: thinking (reasoning) summaries still fell back to extractive even after raising the limit
+("canceled after 120s"); and a non-thinking summary showed a raw, uncompiled equation
+`(FM = \frac{1}{T}\sum_{q=1}^{T} …)`. Verified the timeout plumbing is correct (config 300 → opts
+timeout 300 → httpx), and there is no other 120s cap in the summary path — so a ~120s cancel means the
+raised value wasn't in effect (the config Save must be applied; live DB was still at the 120 default).
+To make reasoning robust regardless, `_llm_opts_for` now **floors the per-call timeout at 600s
+(`REASONING_MIN_TIMEOUT_S`) whenever thinking is on**, so a low/default timeout can't strangle slow
+reasoning; the admin value only raises it. Equation: the model wrapped the whole thing in bare `( … )`
+(not `$…$`), and the token heuristic bailed because other `$` existed, so it rendered raw. Added
+`wrapDelimitedLatex` — normalizes `\(…\)`, `\[…\]`, and bare `(…)`/`[…]` spans that contain a LaTeX
+command into `$…$`/`$$…$$`, applied only OUTSIDE existing `$…$` spans so authored math is untouched
+(prose parentheticals lack a backslash-command, so low risk). UI hint/Help updated to note the 600s
+floor. Tests added; backend 51 + `make frontend-test` 347 pass.
+
 ## AI panel mount-button reactivity + extractive model-select fix (2026-07-19)
 
 Two small AI & Models UI fixes. (1) The card Mount/Unmount button stayed stale after a mount/unmount
