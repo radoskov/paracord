@@ -921,7 +921,8 @@ def summarize_work(
         text = (work.abstract or "").strip()
         stored_model = "tier0-abstract"
     elif summary_type == "local_llm":
-        stored_model = model_name or ai_cfg.summary_model
+        # The model actually sent to Ollama…
+        call_model = model_name or ai_cfg.summary_model
         prompt_version = LLM_PROMPT_VERSION
         source_text, source_sections = _work_source(db, work)
         tier = _source_tier(source_sections)
@@ -935,7 +936,11 @@ def summarize_work(
         if abstract_only:
             source_sections.append("abstract-only")
         text = ""
-        opts = _llm_opts_for(ai_cfg, stored_model)
+        opts = _llm_opts_for(ai_cfg, call_model)
+        # …vs the provenance label stored/keyed on: reasoning and normal runs of the SAME model are
+        # kept as distinct history versions (the model reasons very differently), so the paper view
+        # can show both and switch between them (#18). Only when the model actually reasoned.
+        stored_model = f"{call_model} (reasoning)" if opts.think else call_model
         # The LLM is attempted only when the owner has selected it (ai_config) — otherwise we go
         # straight to the deterministic fallback, so disabled/CI installs never hit the network.
         if ai_cfg.summary_provider == "local_llm" and source_text:
@@ -949,13 +954,13 @@ def summarize_work(
                         db,
                         work,
                         detail,
-                        model=stored_model,
+                        model=call_model,
                         base_url=ai_cfg.ollama_url,
                         opts=opts,
                     )
                     text = _detailed_llm_summary(
                         sections,
-                        model=stored_model,
+                        model=call_model,
                         base_url=ai_cfg.ollama_url,
                         progress_cb=progress_cb,
                         cancel_cb=cancel_cb,
@@ -966,7 +971,7 @@ def summarize_work(
                     # it's covered in full and never overflows the context into an empty answer.
                     text = _short_summary_llm(
                         source_text,
-                        model=stored_model,
+                        model=call_model,
                         base_url=ai_cfg.ollama_url,
                         abstract_only=abstract_only,
                         opts=opts,
@@ -1300,6 +1305,9 @@ def summarize_scope(
 
     if summary_type == "local_llm":
         stored_model = model_name or ai_cfg.summary_model
+        # Scope summaries are read back by (effort, configured-model), so — unlike the per-work view —
+        # the stored label must stay the plain model name; the call model equals it (no reasoning tag).
+        call_model = stored_model
         opts = _llm_opts_for(ai_cfg, stored_model)
         prompt_version = LLM_PROMPT_VERSION
         # Map step (UX batch 4): build one digest line per FULL-TEXT paper. When the LLM is on,
@@ -1353,7 +1361,7 @@ def summarize_scope(
                         _scope_final_prompt(
                             scope_type, len(full_text_works), chunks[0], from_parts=False
                         ),
-                        model=stored_model,
+                        model=call_model,
                         base_url=ai_cfg.ollama_url,
                         opts=opts,
                     )
@@ -1361,7 +1369,7 @@ def summarize_scope(
                     partials = [
                         _ollama_generate(
                             _scope_chunk_prompt(scope_type, i + 1, len(chunks), chunk),
-                            model=stored_model,
+                            model=call_model,
                             base_url=ai_cfg.ollama_url,
                             opts=opts,
                         )
@@ -1372,7 +1380,7 @@ def summarize_scope(
                         _scope_final_prompt(
                             scope_type, len(full_text_works), final_notes, from_parts=True
                         ),
-                        model=stored_model,
+                        model=call_model,
                         base_url=ai_cfg.ollama_url,
                         opts=opts,
                     )
@@ -1403,7 +1411,7 @@ def summarize_scope(
                 _abstract_only_paragraph(
                     abstract_only_works,
                     use_llm=use_group_llm,
-                    model=stored_model,
+                    model=call_model,
                     base_url=ai_cfg.ollama_url,
                     opts=opts,
                 )

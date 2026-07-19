@@ -149,6 +149,48 @@ def test_llm_opts_reasoning_only_for_capable_models(monkeypatch) -> None:
     assert opts.think is None
 
 
+def test_reasoning_summary_stored_as_distinct_model_version(db, monkeypatch) -> None:
+    """A reasoning-mode summary is saved under a distinct provenance label ('<model> (reasoning)') so
+    it coexists with the normal version as its own history entry — while the model actually sent to
+    Ollama stays the real name."""
+    import app.services.model_management as mm
+    import app.services.summarization as summ
+    from app.models.work import Work
+    from app.services.ai_config import update_ai_config
+
+    monkeypatch.setattr(mm, "model_supports_thinking", lambda model, *, ollama_url: True)
+    sent_models: list[str] = []
+
+    def fake_gen(prompt, *, model, base_url, opts=None):
+        sent_models.append(model)
+        return "An LLM summary sentence."
+
+    monkeypatch.setattr(summ, "_ollama_generate", fake_gen)
+    update_ai_config(
+        db,
+        changes={
+            "summary_provider": "local_llm",
+            "summary_model": "qwen3.5:4b",
+            "summary_reasoning": True,
+        },
+    )
+    db.commit()
+    work = Work(
+        canonical_title="t",
+        normalized_title="t",
+        abstract="A sufficiently wordy abstract to sum up.",
+    )
+    db.add(work)
+    db.commit()
+
+    s = summ.summarize_work(db, work, summary_type="local_llm", detail="short")
+    db.commit()
+    # Stored under the reasoning label, but Ollama was called with the real model name.
+    assert s.model_name == "qwen3.5:4b (reasoning)"
+    assert s.provider_used == "local_llm"
+    assert sent_models and all(m == "qwen3.5:4b" for m in sent_models)
+
+
 def test_short_summary_map_reduces_a_long_paper(monkeypatch) -> None:
     """A paper longer than the per-call budget is summarized in chunks (map-reduce) — several LLM
     calls, never a single truncated call — so long papers are covered and never overflow the context."""
