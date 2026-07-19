@@ -228,6 +228,17 @@
     }
   }
 
+  // Empty the whole import queue at once instead of un-queuing each paper individually.
+  async function clearQueue(): Promise<void> {
+    if (!queuedCount) return;
+    if (!window.confirm(`Clear all ${queuedCount} paper(s) queued for import?`)) return;
+    try {
+      decisions = await client.clearWorklistDecisions('import');
+    } catch (error) {
+      message = errorMessage(error);
+    }
+  }
+
   // Full import via the Import tab (like clicking an external graph node): identifier form
   // when the reference carries a DOI/arXiv id, else the citations box with a lookup line.
   function importViaImportTab(missing: MissingWork): void {
@@ -446,6 +457,13 @@
                     data-testid="summary-send-queued"
                     title="Prefill the Import tab's citation box with the queued works">
                     Send {queuedCount} queued to Import</button>
+                  <button
+                    class="ghost"
+                    type="button"
+                    on:click={clearQueue}
+                    data-testid="summary-clear-queue"
+                    title="Un-queue every paper in the import queue at once">
+                    Clear queue</button>
                 {/if}
                 <button
                   class="ghost"

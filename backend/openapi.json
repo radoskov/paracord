@@ -17257,6 +17257,74 @@
         ]
       }
     },
+    "/api/v1/citations/worklist/all": {
+      "delete": {
+        "description": "Bulk-clear the caller's worklist — e.g. empty the import queue in one action instead of\nun-queuing each paper individually (``?decision=import``).",
+        "operationId": "clear_worklist_decisions_api_v1_citations_worklist_all_delete",
+        "parameters": [
+          {
+            "description": "Only clear decisions with this value (e.g. 'import'); omit to clear all.",
+            "in": "query",
+            "name": "decision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only clear decisions with this value (e.g. 'import'); omit to clear all.",
+              "title": "Decision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Worklist Decisions",
+        "tags": [
+          "citations"
+        ]
+      }
+    },
     "/api/v1/duplicates": {
       "get": {
         "description": "List duplicate/version candidates for review (hiding candidates that touch a hidden work).",

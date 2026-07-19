@@ -171,6 +171,26 @@ def test_worklist_rejects_unknown_decision(db_session) -> None:
         citation_worklist.set_decision(db_session, actor.id, "doi:10.1/x", "maybe")
 
 
+def test_worklist_bulk_clear_by_decision(db_session) -> None:
+    """clear_decisions empties the queue in one call — all, or just one decision value."""
+    actor = _owner(db_session)
+    citation_worklist.set_decision(db_session, actor.id, "doi:10.1/a", "import")
+    citation_worklist.set_decision(db_session, actor.id, "doi:10.1/b", "import")
+    citation_worklist.set_decision(db_session, actor.id, "doi:10.1/c", "ignore")
+    db_session.commit()
+
+    # Clearing only 'import' empties the queue but keeps the 'ignore' decision.
+    removed = citation_worklist.clear_decisions(db_session, actor.id, decision="import")
+    db_session.commit()
+    assert removed == 2
+    assert citation_worklist.list_decisions(db_session, actor.id) == {"doi:10.1/c": "ignore"}
+
+    # Clearing with no filter removes everything that remains.
+    assert citation_worklist.clear_decisions(db_session, actor.id) == 1
+    db_session.commit()
+    assert citation_worklist.list_decisions(db_session, actor.id) == {}
+
+
 # --- C3b: missing-list export -------------------------------------------------------------------
 
 

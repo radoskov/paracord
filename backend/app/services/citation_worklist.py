@@ -62,4 +62,21 @@ def clear_decision(db: Session, user_id: uuid.UUID, missing_key: str) -> bool:
     return bool(result.rowcount)
 
 
-__all__ = ["DECISIONS", "list_decisions", "set_decision", "clear_decision"]
+def clear_decisions(db: Session, user_id: uuid.UUID, *, decision: str | None = None) -> int:
+    """Bulk-clear a user's decisions — all of them, or only those with a given ``decision`` value
+    (e.g. ``"import"`` to empty the import queue in one go). Returns how many were removed."""
+    stmt = delete(MissingWorkDecision).where(MissingWorkDecision.user_id == user_id)
+    if decision is not None:
+        stmt = stmt.where(MissingWorkDecision.decision == decision)
+    result = db.execute(stmt)
+    db.flush()
+    return int(result.rowcount or 0)
+
+
+__all__ = [
+    "DECISIONS",
+    "list_decisions",
+    "set_decision",
+    "clear_decision",
+    "clear_decisions",
+]

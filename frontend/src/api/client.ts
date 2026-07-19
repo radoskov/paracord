@@ -3759,6 +3759,17 @@ export class ApiClient {
     return body.decisions;
   }
 
+  /** Bulk-clear worklist decisions — all, or just one value (e.g. 'import' to empty the queue). */
+  async clearWorklistDecisions(
+    decision?: MissingDecision,
+  ): Promise<Record<string, MissingDecision>> {
+    const query = decision ? `?${new URLSearchParams({ decision })}` : "";
+    const body = await this.request<{
+      decisions: Record<string, MissingDecision>;
+    }>(`/api/v1/citations/worklist/all${query}`, { method: "DELETE" });
+    return body.decisions;
+  }
+
   /** Export the scope's frequently-cited-but-missing list as BibTeX or CSV (Track C C3b). */
   async exportMissingWorks(params: {
     scopeType?: GraphScopeType;

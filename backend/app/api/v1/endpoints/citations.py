@@ -381,6 +381,21 @@ def delete_worklist_decision(
     return WorklistResponse(decisions=citation_worklist.list_decisions(db, actor.id))
 
 
+@router.delete("/worklist/all", response_model=WorklistResponse)
+def clear_worklist_decisions(
+    decision: str | None = Query(
+        None, description="Only clear decisions with this value (e.g. 'import'); omit to clear all."
+    ),
+    db: Session = DB_DEP,
+    actor: User = AUTH_DEP,
+) -> WorklistResponse:
+    """Bulk-clear the caller's worklist — e.g. empty the import queue in one action instead of
+    un-queuing each paper individually (``?decision=import``)."""
+    citation_worklist.clear_decisions(db, actor.id, decision=decision)
+    db.commit()
+    return WorklistResponse(decisions=citation_worklist.list_decisions(db, actor.id))
+
+
 # --- missing-list export (Track C C3b) ---------------------------------------------------------
 
 

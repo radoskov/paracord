@@ -9,6 +9,13 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Citation summary: bulk "Clear queue" for the import worklist (2026-07-19)
+
+Owner: un-queuing frequently-cited-missing papers one-by-one was tedious. Added
+`citation_worklist.clear_decisions(user, decision=None)` + `DELETE /citations/worklist/all
+[?decision=import]`, `client.clearWorklistDecisions`, and a **Clear queue** button next to "Send N
+queued to Import" in the citation summary. Empties the whole import queue in one action. Tests added.
+
 ## Citation summary "frequently cited but missing": stronger in-library + dedup checks (2026-07-19)
 
 Owner: the column kept suggesting papers already in the library, and duplicate suggestions. Added two
