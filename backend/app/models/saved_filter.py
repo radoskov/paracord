@@ -39,7 +39,8 @@ class SavedFilter(Base):
     # structured params only — see services.saved_filters).
     search_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="metadata")
     query_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # {reading_status, shelf_id, rack_id, tag_id, has_pdf, has_references, missing: [...]}.
+    # {reading_status, shelf_id, rack_id, tag_id, has_pdf, has_references, missing: [...],
+    #  tag_any: [...], tag_all: [...], tag_none: [...]}  (the advanced multi-tag filter; all optional).
     params: Mapped[dict] = mapped_column(_JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

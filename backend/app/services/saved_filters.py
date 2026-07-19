@@ -42,6 +42,9 @@ def resolve_saved_filter_work_ids(
         rack_id=_as_uuid(params.get("rack_id")),
         row_id=_as_uuid(params.get("row_id")),
         tag_id=_as_uuid(params.get("tag_id")),
+        tag_any=_as_uuid_list(params.get("tag_any")),
+        tag_all=_as_uuid_list(params.get("tag_all")),
+        tag_none=_as_uuid_list(params.get("tag_none")),
         has_pdf=params.get("has_pdf"),
         has_references=params.get("has_references"),
         missing=",".join(missing) if isinstance(missing, list) else missing,
@@ -57,6 +60,13 @@ def _as_uuid(value: object) -> uuid.UUID | None:
         return uuid.UUID(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _as_uuid_list(value: object) -> list[uuid.UUID]:
+    """Coerce a stored list of ids into UUIDs, dropping any that don't parse."""
+    if not isinstance(value, list):
+        return []
+    return [u for u in (_as_uuid(v) for v in value) if u is not None]
 
 
 # --------------------------------------------------------------------------------------------------

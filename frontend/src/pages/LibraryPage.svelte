@@ -80,8 +80,33 @@
   let statusFilter = '';
   let shelfFilter = '';
   let rackFilter = '';
-  let tagFilter = '';
   let pdfFilter = ''; // '' | 'yes' | 'no'
+
+  // Advanced multi-tag filter: per-tag condition. Absent = ignore; 'any' = has (≥1 of these must
+  // match); 'all' = must have (strict, all required); 'none' = excludes (strict, none may match).
+  type TagCond = 'any' | 'all' | 'none';
+  let tagCond: Record<string, TagCond> = {};
+  $: tagAny = Object.entries(tagCond).filter(([, v]) => v === 'any').map(([id]) => id);
+  $: tagAll = Object.entries(tagCond).filter(([, v]) => v === 'all').map(([id]) => id);
+  $: tagNone = Object.entries(tagCond).filter(([, v]) => v === 'none').map(([id]) => id);
+  $: tagCondCount = tagAny.length + tagAll.length + tagNone.length;
+  const TAG_STATE_LABEL: Record<TagCond, string> = { any: 'has', all: 'must', none: 'excl' };
+
+  function cycleTag(id: string): void {
+    const order: (TagCond | '')[] = ['', 'any', 'all', 'none'];
+    const next = order[(order.indexOf(tagCond[id] ?? '') + 1) % order.length];
+    if (next === '') {
+      const { [id]: _drop, ...rest } = tagCond;
+      tagCond = rest;
+    } else {
+      tagCond = { ...tagCond, [id]: next };
+    }
+    reload();
+  }
+  function clearTagCond(): void {
+    tagCond = {};
+    reload();
+  }
 
   // 2026-07-16: when a shelf/rack is chosen, the tag filter offers only tags scoped to it (+ global
   // tags). Uses the scope fields already on each Tag; no extra request.
@@ -96,9 +121,13 @@
           return isGlobal || matches;
         });
 
-  // Changing the shelf/rack filter clears a now-invalid tag selection, then reloads.
+  // Changing the shelf/rack filter drops any tag conditions no longer offered, then reloads.
   function onScopeFilterChange(): void {
-    if (tagFilter && !tagFilterOptions.some((t) => t.id === tagFilter)) tagFilter = '';
+    const allowed = new Set(tagFilterOptions.map((t) => t.id));
+    const pruned = Object.fromEntries(
+      Object.entries(tagCond).filter(([id]) => allowed.has(id)),
+    ) as Record<string, TagCond>;
+    if (Object.keys(pruned).length !== Object.keys(tagCond).length) tagCond = pruned;
     reload();
   }
   let refsFilter = ''; // '' | 'yes' | 'no'
@@ -337,7 +366,9 @@
       readingStatus: statusFilter,
       shelfId: shelfFilter,
       rackId: rackFilter,
-      tagId: tagFilter,
+      tagAny: tagAny.length ? tagAny : undefined,
+      tagAll: tagAll.length ? tagAll : undefined,
+      tagNone: tagNone.length ? tagNone : undefined,
       hasPdf: pdfFilter ? pdfFilter === 'yes' : undefined,
       hasReferences: refsFilter ? refsFilter === 'yes' : undefined,
       missing: missing.length ? missing : undefined,
@@ -350,7 +381,9 @@
       reading_status: statusFilter || null,
       shelf_id: shelfFilter || null,
       rack_id: rackFilter || null,
-      tag_id: tagFilter || null,
+      tag_any: tagAny,
+      tag_all: tagAll,
+      tag_none: tagNone,
       has_pdf: pdfFilter ? pdfFilter === 'yes' : null,
       has_references: refsFilter ? refsFilter === 'yes' : null,
       missing: [...missing],
@@ -379,7 +412,13 @@
     statusFilter = p.reading_status ?? '';
     shelfFilter = p.shelf_id ?? '';
     rackFilter = p.rack_id ?? '';
-    tagFilter = p.tag_id ?? '';
+    // Rebuild the per-tag conditions; tolerate old filters that stored a single tag_id (→ "has").
+    const cond: Record<string, TagCond> = {};
+    for (const id of p.tag_any ?? []) cond[id] = 'any';
+    for (const id of p.tag_all ?? []) cond[id] = 'all';
+    for (const id of p.tag_none ?? []) cond[id] = 'none';
+    if (p.tag_id) cond[p.tag_id] = 'any';
+    tagCond = cond;
     pdfFilter = p.has_pdf === true ? 'yes' : p.has_pdf === false ? 'no' : '';
     refsFilter = p.has_references === true ? 'yes' : p.has_references === false ? 'no' : '';
     missing = [...(p.missing ?? [])];
@@ -519,7 +558,8 @@
   }
 
   function resetFilters(): void {
-    statusFilter = shelfFilter = rackFilter = tagFilter = pdfFilter = refsFilter = '';
+    statusFilter = shelfFilter = rackFilter = pdfFilter = refsFilter = '';
+    tagCond = {};
     missing = [];
     search = '';
     reload();
@@ -796,11 +836,35 @@
             <option value="">Any rack</option>
             {#each $racks as rack (rack.id)}<option value={rack.id}>{rack.name}</option>{/each}
           </select>
-          <select bind:value={tagFilter} on:change={reload} aria-label="Tag"
-            title={shelfFilter || rackFilter ? 'Tags offered for the chosen shelf/rack (plus global)' : 'Filter the list by tag'}>
-            <option value="">Any tag</option>
-            {#each tagFilterOptions as tag (tag.id)}<option value={tag.id}>{tag.name}</option>{/each}
-          </select>
+          <details class="tag-filter">
+            <summary title="Filter by one or more tags. Click a tag to cycle: has (any) → must have (all) → excludes. Papers must have ALL 'must have' tags, NONE of the 'excludes' tags, and — if any 'has' tags are set — at least one of them.">
+              Tags{tagCondCount ? ` (${tagCondCount})` : ''} ▾
+            </summary>
+            <div class="tag-filter-panel">
+              <div class="tag-filter-head">
+                <span class="muted small">Click to cycle: <em>has</em> → <em>must</em> → <em>excl</em></span>
+                {#if tagCondCount}
+                  <button type="button" class="linkish small" on:click={clearTagCond}>Clear</button>
+                {/if}
+              </div>
+              {#if tagFilterOptions.length === 0}
+                <p class="muted small">No tags{shelfFilter || rackFilter ? ' offered for this shelf/rack' : ''} yet.</p>
+              {:else}
+                <ul class="tag-cond-list">
+                  {#each tagFilterOptions as tag (tag.id)}
+                    <li>
+                      <button type="button" class="tag-chip st-{tagCond[tag.id] ?? 'off'}"
+                        on:click={() => cycleTag(tag.id)}
+                        title="Currently: {tagCond[tag.id] ? TAG_STATE_LABEL[tagCond[tag.id]] : 'ignored'}. Click to change.">
+                        <span class="tc-name">{tag.name}</span>
+                        {#if tagCond[tag.id]}<span class="tc-state">{TAG_STATE_LABEL[tagCond[tag.id]]}</span>{/if}
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          </details>
           <button type="button" class="secondary" on:click={() => (showMoreFilters = !showMoreFilters)}
             title="Filter by extraction / metadata completeness">
             {showMoreFilters ? 'Fewer filters' : 'More filters'}
@@ -1170,6 +1234,60 @@
     min-height: 1.9rem;
     padding: 0.28rem 0.55rem;
     font-size: 0.85rem;
+  }
+
+  /* Advanced multi-tag filter dropdown (#23). */
+  .tag-filter { position: relative; display: inline-block; }
+  .tag-filter > summary {
+    cursor: pointer;
+    list-style: none;
+    min-height: 1.9rem;
+    padding: 0.28rem 0.55rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--border-normal);
+    border-radius: 0.35rem;
+    background: var(--surface-raised, transparent);
+    white-space: nowrap;
+  }
+  .tag-filter > summary::-webkit-details-marker { display: none; }
+  .tag-filter-panel {
+    position: absolute;
+    z-index: 30;
+    margin-top: 0.25rem;
+    max-height: 22rem;
+    overflow-y: auto;
+    min-width: 15rem;
+    max-width: 24rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border-normal);
+    border-radius: 0.4rem;
+    background: var(--surface-overlay, var(--surface-raised, #fff));
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  }
+  .tag-filter-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .tag-cond-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid var(--border-normal);
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem !important;
+    font-size: 0.8rem !important;
+    min-height: 0 !important;
+    background: transparent;
+    cursor: pointer;
+  }
+  .tag-chip .tc-state { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; }
+  .tag-chip.st-any, .tag-chip.st-all {
+    border-color: var(--status-success, #2e7d32);
+    color: var(--status-success, #2e7d32);
+  }
+  .tag-chip.st-all { font-weight: 700; }
+  .tag-chip.st-none {
+    border-color: var(--status-error, #c62828);
+    color: var(--status-error, #c62828);
+    text-decoration: line-through;
   }
 
   .search-row {

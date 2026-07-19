@@ -73,6 +73,9 @@ def build_works_query(
     rack_id: uuid.UUID | None = None,
     row_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    tag_any: list[uuid.UUID] | None = None,
+    tag_all: list[uuid.UUID] | None = None,
+    tag_none: list[uuid.UUID] | None = None,
     has_pdf: bool | None = None,
     has_references: bool | None = None,
     missing: str | None = None,
@@ -320,6 +323,30 @@ def build_works_query(
             TagLink,
             (TagLink.entity_id == Work.id) & (TagLink.entity_type == "work"),
         ).where(TagLink.tag_id == tag_id)
+
+    # Advanced multi-tag filter (per-tag has/must-have/excludes). Uses EXISTS subqueries — not JOINs —
+    # so multiple tag conditions never multiply rows (no reliance on distinct) and each is independent:
+    #   tag_all  → the paper MUST have every one of these (AND of EXISTS);
+    #   tag_none → the paper must have NONE of these (AND of NOT EXISTS) — always strict;
+    #   tag_any  → when non-empty, the paper must have AT LEAST ONE (OR of EXISTS); skipped if empty.
+    # Applied in that order, so tag_any narrows the set already constrained by tag_all/tag_none.
+    def _has_tag(tid: uuid.UUID):
+        return (
+            select(TagLink.tag_id)
+            .where(
+                TagLink.entity_type == "work",
+                TagLink.entity_id == Work.id,
+                TagLink.tag_id == tid,
+            )
+            .exists()
+        )
+
+    for tid in tag_all or ():
+        stmt = stmt.where(_has_tag(tid))
+    for tid in tag_none or ():
+        stmt = stmt.where(~_has_tag(tid))
+    if tag_any:
+        stmt = stmt.where(or_(*[_has_tag(tid) for tid in tag_any]))
     if has_pdf is not None:
         has_file = select(FileWorkLink.work_id).where(FileWorkLink.work_id == Work.id).exists()
         stmt = stmt.where(has_file if has_pdf else ~has_file)

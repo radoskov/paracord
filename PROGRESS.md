@@ -9,6 +9,18 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Advanced multi-tag library filter (2026-07-19)
+
+Owner: filter the library by multiple tags with per-tag intent. Each tag can be set to **has** (any),
+**must have** (all/strict), or **excludes** (none/strict). Algorithm: keep papers that have ALL
+"must have" tags and NONE of the "excludes" tags, then — if any "has" tags are set — keep those with at
+least one; if no "has" tags, the set is just the must-have/excludes result. Backend: `build_works_query`
+gains `tag_any`/`tag_all`/`tag_none` (EXISTS/NOT-EXISTS subqueries, no row multiplication), exposed as
+repeated query params on `GET /works`, and threaded through the saved-filter resolver (+ params doc).
+Frontend: the single tag dropdown is replaced by a "Tags (N)" dropdown of cycle-chips
+(ignore → has → must → excludes, colour-coded); `structuredQuery`/`savedFilterParams`/`applySavedFilter`
+carry the three lists (old saved filters' single `tag_id` maps to "has"). Backend 28 + frontend 348 pass.
+
 ## AI panel context window + separate summary cards + set-as-current history (2026-07-19)
 
 Batch of owner UI asks. **Context window**: `/api/show` now yields capabilities + max context in one

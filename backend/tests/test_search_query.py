@@ -97,6 +97,54 @@ def _make(client, headers, **kw):
     return client.post("/api/v1/works", headers=headers, json=kw).json()
 
 
+def test_list_works_advanced_tag_filter(client, auth_headers, db):
+    """tag_all (must have all) + tag_none (excludes, strict) + tag_any (≥1 of)."""
+    from app.models.organization import Tag, TagLink
+
+    h = auth_headers("editor")
+    wa = _make(client, h, canonical_title="Adv Paper A")
+    wb = _make(client, h, canonical_title="Adv Paper B")
+    wc = _make(client, h, canonical_title="Adv Paper C")
+    ml = Tag(name="adv-ml", normalized_name="adv-ml")
+    nlp = Tag(name="adv-nlp", normalized_name="adv-nlp")
+    old = Tag(name="adv-old", normalized_name="adv-old")
+    db.add_all([ml, nlp, old])
+    db.flush()
+
+    def link(work, tag):
+        db.add(TagLink(tag_id=tag.id, entity_type="work", entity_id=uuid.UUID(work["id"])))
+
+    # A: ml+nlp ; B: ml+old ; C: nlp
+    link(wa, ml)
+    link(wa, nlp)
+    link(wb, ml)
+    link(wb, old)
+    link(wc, nlp)
+    db.commit()
+
+    def titles(params):
+        return {
+            w["canonical_title"]
+            for w in client.get(f"/api/v1/works?{params}", headers=h).json()["items"]
+        }
+
+    a, b, c = "Adv Paper A", "Adv Paper B", "Adv Paper C"
+    # has ANY of ml/nlp → all three
+    assert titles(f"tag_any={ml.id}&tag_any={nlp.id}") >= {a, b, c}
+    # must have ml AND nlp → only A
+    got = titles(f"tag_all={ml.id}&tag_all={nlp.id}")
+    assert a in got and b not in got and c not in got
+    # ANY of ml/nlp but exclude old → A and C (B dropped by old)
+    got = titles(f"tag_any={ml.id}&tag_any={nlp.id}&tag_none={old.id}")
+    assert got.issuperset({a, c}) and b not in got
+    # must have ml, exclude old → only A (B has old)
+    got = titles(f"tag_all={ml.id}&tag_none={old.id}")
+    assert a in got and b not in got
+    # exclude old only (no tag_any) → A and C present, B absent
+    got = titles(f"tag_none={old.id}")
+    assert a in got and c in got and b not in got
+
+
 def test_list_works_year_and_title_operators(client, auth_headers):
     h = auth_headers("editor")
     _make(client, h, canonical_title="Old transformer paper", year=2015)

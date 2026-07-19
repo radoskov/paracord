@@ -1108,6 +1108,10 @@ export interface WorkQuery {
   shelfId?: string;
   rackId?: string;
   tagId?: string;
+  // Advanced multi-tag filter: has ≥1 of tagAny; has ALL of tagAll; has NONE of tagNone.
+  tagAny?: string[];
+  tagAll?: string[];
+  tagNone?: string[];
   hasPdf?: boolean;
   hasReferences?: boolean;
   missing?: string[];
@@ -1124,6 +1128,10 @@ export interface SavedFilterParams {
   shelf_id?: string | null;
   rack_id?: string | null;
   tag_id?: string | null;
+  // Advanced multi-tag filter (all optional; old saved filters simply lack these keys).
+  tag_any?: string[] | null;
+  tag_all?: string[] | null;
+  tag_none?: string[] | null;
   has_pdf?: boolean | null;
   has_references?: boolean | null;
   missing?: string[];
@@ -1713,6 +1721,9 @@ export class ApiClient {
     if (query.shelfId) params.set("shelf_id", query.shelfId);
     if (query.rackId) params.set("rack_id", query.rackId);
     if (query.tagId) params.set("tag_id", query.tagId);
+    for (const id of query.tagAny ?? []) params.append("tag_any", id);
+    for (const id of query.tagAll ?? []) params.append("tag_all", id);
+    for (const id of query.tagNone ?? []) params.append("tag_none", id);
     if (query.hasPdf !== undefined) params.set("has_pdf", String(query.hasPdf));
     if (query.hasReferences !== undefined)
       params.set("has_references", String(query.hasReferences));

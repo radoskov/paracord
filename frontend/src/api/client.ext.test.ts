@@ -59,6 +59,23 @@ describe('ApiClient request contracts', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-123');
   });
 
+  it('serializes the advanced multi-tag filter as repeated params', async () => {
+    fetchMock().mockResolvedValue(
+      jsonResponse({ items: [], total: 0, page: 1, pages: 0, per_page: 50 }),
+    );
+    const client = new ApiClient('http://api.example', 'token-123');
+    await client.listWorks({
+      tagAny: ['ml', 'nlp'],
+      tagAll: ['must'],
+      tagNone: ['old'],
+    });
+    const [url] = fetchMock().mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url);
+    expect(parsed.searchParams.getAll('tag_any')).toEqual(['ml', 'nlp']);
+    expect(parsed.searchParams.getAll('tag_all')).toEqual(['must']);
+    expect(parsed.searchParams.getAll('tag_none')).toEqual(['old']);
+  });
+
   it('does not attach stale bearer auth to login', async () => {
     fetchMock().mockResolvedValue(jsonResponse({ access_token: 'new-token' }));
 

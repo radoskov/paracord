@@ -22893,6 +22893,48 @@
           },
           {
             "in": "query",
+            "name": "tag_any",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Tag Any",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_all",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Tag All",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag_none",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Tag None",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
             "name": "has_pdf",
             "required": false,
             "schema": {
