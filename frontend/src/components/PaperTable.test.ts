@@ -53,3 +53,36 @@ describe('PaperTable batch10 columns (issue 5)', () => {
     expect(screen.getByText(/processing failed/)).toBeTruthy();
   });
 });
+
+describe('PaperTable shelves/racks/rows columns + multi-column sort', () => {
+  const CONTAINER_COLUMNS = LIBRARY_COLUMNS.filter((c) =>
+    ['shelves', 'racks', 'rows'].includes(c.id),
+  );
+
+  it('renders shelf, rack, and row names (rows is a real column now)', () => {
+    const work = makeWork({
+      shelves: [{ id: 's1', name: 'Deep Learning' }],
+      racks: [{ id: 'r1', name: 'ML Rack' }],
+      rows: [{ id: 'ro1', name: 'AI Row' }],
+    });
+    render(PaperTable, { works: [work], columns: CONTAINER_COLUMNS } as never);
+    expect(screen.getByText('Deep Learning')).toBeTruthy();
+    expect(screen.getByText('ML Rack')).toBeTruthy();
+    expect(screen.getByText('AI Row')).toBeTruthy();
+  });
+
+  it('shows a 1-based priority number on each header when >1 column is sorted', () => {
+    const cols = LIBRARY_COLUMNS.filter((c) => ['title', 'year'].includes(c.id));
+    render(PaperTable, {
+      works: [makeWork({ year: 2020 })],
+      columns: cols,
+      sortable: true,
+      sorts: [
+        { key: 'year', order: 'desc' },
+        { key: 'title', order: 'asc' },
+      ],
+    } as never);
+    expect(screen.getByText('1')).toBeTruthy(); // primary (year)
+    expect(screen.getByText('2')).toBeTruthy(); // secondary (title)
+  });
+});

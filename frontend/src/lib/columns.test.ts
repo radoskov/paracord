@@ -50,7 +50,7 @@ describe('column prefs registry + validation', () => {
 
   it('falls back to default sort for an unknown sort key', () => {
     const prefs = normalizeColumnPrefs({ sort: { key: 'nonsense', order: 'asc' } });
-    expect(prefs.sort).toEqual({ key: 'updated_at', order: 'desc' });
+    expect(prefs.sort).toEqual([{ key: 'updated_at', order: 'desc' }]);
   });
 
   it('registers the batch-12 count columns as sortable, opt-in extras', () => {
@@ -73,8 +73,36 @@ describe('column prefs registry + validation', () => {
       'local_reference_count',
       'local_citation_count',
     ] as const) {
-      expect(normalizeColumnPrefs({ sort: { key, order: 'desc' } }).sort.key).toBe(key);
+      // A v1 single-object sort is still accepted (back-compat) and becomes a one-element list.
+      expect(normalizeColumnPrefs({ sort: { key, order: 'desc' } }).sort[0].key).toBe(key);
     }
+  });
+
+  it('accepts the doi / shelves / racks / rows columns as sortable keys', () => {
+    for (const key of ['doi', 'shelves', 'racks', 'rows'] as const) {
+      expect(normalizeColumnPrefs({ sort: { key, order: 'asc' } }).sort[0].key).toBe(key);
+    }
+  });
+
+  it('registers a rows column (opt-in) in the registry', () => {
+    const prefs = normalizeColumnPrefs({});
+    expect(prefs.order).toContain('rows');
+    expect(prefs.visible).not.toContain('rows');
+  });
+
+  it('normalizes a multi-column sort list, deduping keys and clamping directions', () => {
+    const prefs = normalizeColumnPrefs({
+      sort: [
+        { key: 'year', order: 'desc' },
+        { key: 'title', order: 'asc' },
+        { key: 'year', order: 'asc' }, // duplicate key → dropped (first wins)
+        { key: 'bogus', order: 'asc' }, // unknown key → dropped
+      ],
+    });
+    expect(prefs.sort).toEqual([
+      { key: 'year', order: 'desc' },
+      { key: 'title', order: 'asc' },
+    ]);
   });
 
   it('returns defaults for garbage input', () => {

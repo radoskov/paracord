@@ -1,7 +1,7 @@
 <!-- PaperTable — configurable table of works (library list, shelf/rack contents, search results).
      Props: works, selectedWorkId (highlights the row), flashWorkId (row-flash affordance),
      columns (ordered visible ColumnDef[], default = LIBRARY_COLUMNS.default set), compact (hides
-     the Venue column), sortable/sortKey/sortOrder/onSort (clickable-header sorting, off by default),
+     the Venue column), sortable/sorts/onSort (clickable-header multi-column sorting, off by default),
      selectable/selectedIds/allSelected/onToggleSelect/onToggleAll (checkbox column, off by default),
      onSelect (row click/Enter), onStatusChange (reading-status select).
      Events/callbacks: none dispatched — all via the exported callback props above.
@@ -12,6 +12,7 @@
   import {
     type ColumnDef,
     type ColumnId,
+    type ColumnSort,
     columnWidthPercents,
     defaultColumnWidths,
     LIBRARY_COLUMNS,
@@ -32,10 +33,10 @@
   export let columns: ColumnDef[] = LIBRARY_COLUMNS.filter((c) => c.default);
 
   // Optional sorting (clickable headers). Off by default so other callers are unaffected.
+  // `sorts` is the active multi-column sort in priority order; Shift-click adds a level (additive).
   export let sortable = false;
-  export let sortKey: WorkSortKey | null = null;
-  export let sortOrder: 'asc' | 'desc' = 'desc';
-  export let onSort: (key: WorkSortKey) => void = () => {};
+  export let sorts: ColumnSort[] = [];
+  export let onSort: (key: WorkSortKey, additive: boolean) => void = () => {};
 
   // Optional multi-select (checkbox column). Off by default so other callers are unaffected.
   export let selectable = false;
@@ -95,8 +96,12 @@
     return BADGE_META[token] ?? { label: token.replaceAll('_', ' '), state: 'muted' };
   }
 
-  function isActive(col: ColumnDef): boolean {
-    return sortable && !!col.sortKey && col.sortKey === sortKey;
+  // The active sort level for a column (its position + direction), or null when it isn't sorted.
+  // `rank` is 1-based; shown as a small badge only when more than one column is sorted.
+  function sortState(col: ColumnDef): { order: 'asc' | 'desc'; rank: number } | null {
+    if (!sortable || !col.sortKey) return null;
+    const idx = sorts.findIndex((s) => s.key === col.sortKey);
+    return idx === -1 ? null : { order: sorts[idx].order, rank: idx + 1 };
   }
 </script>
 
@@ -123,17 +128,22 @@
         </th>
       {/if}
       {#each shownColumns as col (col.id)}
+        {@const state = sortState(col)}
         <th>
           {#if sortable && col.sortKey}
             <button
               type="button"
               class="sort"
-              class:active={isActive(col)}
-              on:click={() => onSort(col.sortKey as WorkSortKey)}
-              title="Sort by {col.label.toLowerCase()}"
+              class:active={!!state}
+              on:click={(e) => onSort(col.sortKey as WorkSortKey, e.shiftKey)}
+              title="Sort by {col.label.toLowerCase()} — Shift-click to add as another sort level"
             >
               {col.label}
-              {#if isActive(col)}<span class="indicator">{sortOrder === 'asc' ? '▲' : '▼'}</span>{/if}
+              {#if state}<span class="indicator"
+                  >{state.order === 'asc' ? '▲' : '▼'}{#if sorts.length > 1}<span class="rank"
+                      >{state.rank}</span
+                    >{/if}</span
+                >{/if}
             </button>
           {:else}
             {col.label}
@@ -224,6 +234,8 @@
               <td>{work.shelves?.length ? work.shelves.map((s) => s.name).join(', ') : '-'}</td>
             {:else if col.id === 'racks'}
               <td>{work.racks?.length ? work.racks.map((r) => r.name).join(', ') : '-'}</td>
+            {:else if col.id === 'rows'}
+              <td>{work.rows?.length ? work.rows.map((r) => r.name).join(', ') : '-'}</td>
             {:else if col.id === 'file_count'}
               <td class="num">{work.file_count ?? 0}</td>
             {:else if col.id === 'topics'}
@@ -326,6 +338,13 @@
   .indicator {
     font-size: 0.7rem;
     margin-left: 0.15rem;
+  }
+
+  /* Priority number for a multi-column sort (1 = primary), shown only when >1 column is sorted. */
+  .rank {
+    font-size: 0.6rem;
+    vertical-align: super;
+    margin-left: 0.05rem;
   }
 
   tr {

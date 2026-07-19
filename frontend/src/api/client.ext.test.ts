@@ -59,6 +59,26 @@ describe('ApiClient request contracts', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-123');
   });
 
+  it('serializes a multi-column sort as one comma-joined key:order param', async () => {
+    fetchMock().mockResolvedValue(
+      jsonResponse({ items: [], total: 0, page: 1, pages: 0, per_page: 50 }),
+    );
+    const client = new ApiClient('http://api.example', 'token-123');
+    await client.listWorks({
+      sorts: [
+        { key: 'year', order: 'desc' },
+        { key: 'title', order: 'asc' },
+      ],
+      // `sort`/`order` are ignored when `sorts` is present.
+      sort: 'updated_at',
+      order: 'desc',
+    });
+    const [url] = fetchMock().mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get('sort')).toBe('year:desc,title:asc');
+    expect(parsed.searchParams.get('order')).toBeNull();
+  });
+
   it('serializes the advanced multi-tag filter as repeated params', async () => {
     fetchMock().mockResolvedValue(
       jsonResponse({ items: [], total: 0, page: 1, pages: 0, per_page: 50 }),

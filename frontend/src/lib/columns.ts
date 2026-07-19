@@ -5,7 +5,7 @@
 //
 // Columns are limited to what WorkRead actually returns per row. `has_pdf` is a filter (not a
 // per-row field) so it is omitted; `file_count` (batch10) covers the "does it have files" need.
-// `keywords`/`topics`/`badges`/`tags`/`shelves`/`racks` are opt-in extras (off by default).
+// `keywords`/`topics`/`badges`/`tags`/`shelves`/`racks`/`rows` are opt-in extras (off by default).
 
 import type { WorkSortKey } from '../api/client';
 
@@ -20,6 +20,7 @@ export type ColumnId =
   | 'keywords'
   | 'shelves'
   | 'racks'
+  | 'rows'
   | 'file_count'
   | 'reference_count'
   | 'citation_count'
@@ -51,11 +52,12 @@ export const LIBRARY_COLUMNS: ColumnDef[] = [
   { id: 'venue', label: 'Venue', sortKey: 'venue', default: true, width: 14 },
   { id: 'status', label: 'Status', sortKey: 'reading_status', default: true, width: 9 },
   { id: 'added_at', label: 'Added', sortKey: 'added_at', default: true, width: 9 },
-  { id: 'doi', label: 'DOI', default: true, width: 13 },
+  { id: 'doi', label: 'DOI', sortKey: 'doi', default: true, width: 13 },
   { id: 'arxiv_id', label: 'arXiv ID', default: false, width: 10 },
   { id: 'keywords', label: 'Keywords', default: false, width: 16 },
-  { id: 'shelves', label: 'Shelves', default: false, width: 14 },
-  { id: 'racks', label: 'Racks', default: false, width: 14 },
+  { id: 'shelves', label: 'Shelves', sortKey: 'shelves', default: false, width: 14 },
+  { id: 'racks', label: 'Racks', sortKey: 'racks', default: false, width: 14 },
+  { id: 'rows', label: 'Rows', sortKey: 'rows', default: false, width: 14 },
   // batch10 columns — all opt-in (hidden by default so they don't push past the soft cap).
   { id: 'file_count', label: 'Files', sortKey: 'file_count', default: false, width: 5 },
   // batch12 reference/citation count columns — opt-in, all sortable server-side.
@@ -110,7 +112,8 @@ export interface ColumnPrefs {
   version: number;
   order: ColumnId[];
   visible: ColumnId[];
-  sort: ColumnSort;
+  // Multi-column sort in priority order (index 0 = primary). Always ≥1 entry after normalize.
+  sort: ColumnSort[];
   // Per-column width ratios (relative weights; see ColumnDef.width). Always fully populated
   // after normalizeColumnPrefs.
   widths: Record<ColumnId, number>;
@@ -118,7 +121,9 @@ export interface ColumnPrefs {
   dividers: boolean;
 }
 
-export const COLUMN_PREFS_VERSION = 1;
+// v2: `sort` became an ordered list (multi-column sort). normalizeColumnPrefs still reads the v1
+// single-object shape, so a bump doesn't discard a user's other prefs.
+export const COLUMN_PREFS_VERSION = 2;
 export const COLUMN_PREFS_STORAGE_KEY = 'paracord.library.columns';
 
 const VALID_SORT_KEYS = new Set<string>(
@@ -139,7 +144,7 @@ export function defaultColumnPrefs(): ColumnPrefs {
     version: COLUMN_PREFS_VERSION,
     order: [...DEFAULT_ORDER],
     visible: [...DEFAULT_VISIBLE],
-    sort: { key: 'updated_at', order: 'desc' },
+    sort: [{ key: 'updated_at', order: 'desc' }],
     widths: defaultColumnWidths(),
     dividers: true,
   };
@@ -184,15 +189,24 @@ export function normalizeColumnPrefs(raw: unknown): ColumnPrefs {
   // Preserve the order's sequence for the visible list.
   const visible = order.filter((id) => visibleSet.has(id));
 
-  // Sort: known sortable key, valid direction; otherwise fall back to default.
-  let sort: ColumnSort = base.sort;
-  const rawSort = input.sort as Partial<ColumnSort> | undefined;
-  if (rawSort && VALID_SORT_KEYS.has(String(rawSort.key))) {
-    sort = {
-      key: rawSort.key as WorkSortKey,
-      order: rawSort.order === 'asc' ? 'asc' : 'desc',
-    };
+  // Sort: an ordered list of known sortable keys (deduped, each with a valid direction). Accepts
+  // both the v2 array shape and the v1 single-object shape. Empty/invalid → the default.
+  const rawSortList: unknown[] = Array.isArray(input.sort)
+    ? input.sort
+    : input.sort
+      ? [input.sort]
+      : [];
+  const sortSeen = new Set<string>();
+  const sort: ColumnSort[] = [];
+  for (const entry of rawSortList) {
+    const e = entry as Partial<ColumnSort> | undefined;
+    const key = String(e?.key);
+    if (e && VALID_SORT_KEYS.has(key) && !sortSeen.has(key)) {
+      sortSeen.add(key);
+      sort.push({ key: e.key as WorkSortKey, order: e.order === 'asc' ? 'asc' : 'desc' });
+    }
   }
+  if (sort.length === 0) sort.push(...base.sort);
 
   // Widths: known ids with finite, clamped ratios; anything missing/invalid falls back to the
   // registry default, so the map is always fully populated.

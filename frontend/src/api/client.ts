@@ -1096,11 +1096,21 @@ export type WorkSortKey =
   | "added_at"
   | "updated_at"
   | "reading_status"
+  | "doi"
+  | "shelves"
+  | "racks"
+  | "rows"
   | "file_count"
   | "reference_count"
   | "citation_count"
   | "local_reference_count"
   | "local_citation_count";
+
+// One level of a (possibly multi-column) sort. Priority is the array position in WorkQuery.sorts.
+export interface WorkSortSpec {
+  key: WorkSortKey;
+  order: "asc" | "desc";
+}
 
 export interface WorkQuery {
   q?: string;
@@ -1115,8 +1125,11 @@ export interface WorkQuery {
   hasPdf?: boolean;
   hasReferences?: boolean;
   missing?: string[];
+  // Single-column sort (legacy/simple callers). Ignored when `sorts` is provided.
   sort?: WorkSortKey;
   order?: "asc" | "desc";
+  // Multi-column sort (priority order). Encoded as a comma-separated "key:order" list.
+  sorts?: WorkSortSpec[];
   // Server-controlled pagination (D18). `perPage` overrides the user's saved preference.
   page?: number;
   perPage?: number;
@@ -1732,8 +1745,13 @@ export class ApiClient {
     if (query.hasReferences !== undefined)
       params.set("has_references", String(query.hasReferences));
     if (query.missing?.length) params.set("missing", query.missing.join(","));
-    if (query.sort) params.set("sort", query.sort);
-    if (query.order) params.set("order", query.order);
+    if (query.sorts?.length) {
+      // Multi-column: "key:order,key:order,…" in priority order (backend parses per entry).
+      params.set("sort", query.sorts.map((s) => `${s.key}:${s.order}`).join(","));
+    } else {
+      if (query.sort) params.set("sort", query.sort);
+      if (query.order) params.set("order", query.order);
+    }
     if (query.page !== undefined) params.set("page", String(query.page));
     if (query.perPage !== undefined)
       params.set("per_page", String(query.perPage));

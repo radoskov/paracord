@@ -27,6 +27,7 @@
   import {
     type ColumnId,
     type ColumnPrefs,
+    type ColumnSort,
     loadColumnPrefs,
     normalizeColumnPrefs,
     saveColumnPrefs,
@@ -181,8 +182,6 @@
   let columnPrefs: ColumnPrefs = loadColumnPrefs();
   let showColumns = false;
   let savePrefsTimer: ReturnType<typeof setTimeout> | null = null;
-  $: sortKey = columnPrefs.sort.key;
-  $: sortOrder = columnPrefs.sort.order;
   $: visibleColumns = visibleColumnDefs(columnPrefs);
 
   // Draggable divider between the paper list and paper view columns, persisted per-browser (the
@@ -294,16 +293,28 @@
     persistColumnPrefs();
   }
 
-  function handleSort(key: WorkSortKey): void {
-    const order: 'asc' | 'desc' =
-      key === columnPrefs.sort.key
-        ? columnPrefs.sort.order === 'asc'
-          ? 'desc'
-          : 'asc'
-        : DESC_FIRST.includes(key)
-          ? 'desc'
-          : 'asc';
-    columnPrefs = { ...columnPrefs, sort: { key, order } };
+  const defaultDir = (key: WorkSortKey): 'asc' | 'desc' => (DESC_FIRST.includes(key) ? 'desc' : 'asc');
+
+  // Click a header to sort by that column; Shift-click to add it as an additional (lower-priority)
+  // sort level — multi-column sort. Clicking a column already in the sort flips its direction.
+  function handleSort(key: WorkSortKey, additive = false): void {
+    const current = columnPrefs.sort;
+    let next: ColumnSort[];
+    if (additive) {
+      const existing = current.find((s) => s.key === key);
+      next = existing
+        ? // Flip this level's direction in place, keeping its priority position.
+          current.map((s) => (s.key === key ? { key, order: s.order === 'asc' ? 'desc' : 'asc' } : s))
+        : // Append as the lowest-priority level.
+          [...current, { key, order: defaultDir(key) }];
+    } else if (current.length === 1 && current[0].key === key) {
+      // Sole sort on this column → flip direction.
+      next = [{ key, order: current[0].order === 'asc' ? 'desc' : 'asc' }];
+    } else {
+      // Replace the whole multi-sort with a single-column sort on this column.
+      next = [{ key, order: defaultDir(key) }];
+    }
+    columnPrefs = { ...columnPrefs, sort: next };
     persistColumnPrefs();
     reload();
   }
@@ -443,9 +454,11 @@
   // Re-sort an already-loaded set by the active column (used for the semantic-ranked set, which
   // can't be sorted server-side without losing the similarity ranking).
   function sortWorksClientSide(items: Work[]): Work[] {
-    const { key, order } = columnPrefs.sort;
-    const dir = order === 'asc' ? 1 : -1;
-    const value = (w: Work): string | number => {
+    // Alphabetically-first name among a work's shelves/racks/rows (mirrors the backend min-name
+    // aggregate); '' when none, so container-less works sort last on these keys.
+    const minName = (refs?: { name: string }[]): string =>
+      refs?.length ? refs.reduce((m, r) => (r.name < m ? r.name : m), refs[0].name).toLowerCase() : '';
+    const value = (w: Work, key: WorkSortKey): string | number => {
       switch (key) {
         case 'title':
           return (w.canonical_title ?? '').toLowerCase();
@@ -457,6 +470,14 @@
           return w.reading_status;
         case 'added_at':
           return w.created_at ?? '';
+        case 'doi':
+          return (w.doi ?? '').toLowerCase();
+        case 'shelves':
+          return minName(w.shelves);
+        case 'racks':
+          return minName(w.racks);
+        case 'rows':
+          return minName(w.rows);
         case 'file_count':
           return w.file_count ?? 0;
         case 'reference_count':
@@ -472,11 +493,15 @@
           return w.updated_at ?? '';
       }
     };
+    // Multi-column: compare each sort level in priority order until one breaks the tie.
     return [...items].sort((a, b) => {
-      const av = value(a);
-      const bv = value(b);
-      if (av < bv) return -1 * dir;
-      if (av > bv) return 1 * dir;
+      for (const { key, order } of columnPrefs.sort) {
+        const dir = order === 'asc' ? 1 : -1;
+        const av = value(a, key);
+        const bv = value(b, key);
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+      }
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // stable id tiebreaker (mirrors backend)
     });
   }
@@ -514,8 +539,7 @@
         const result = await client.listWorks({
           q: effectiveSearchQuery(),
           ...structuredQuery(),
-          sort: columnPrefs.sort.key,
-          order: columnPrefs.sort.order,
+          sorts: columnPrefs.sort,
           page,
         });
         works = result.items;
@@ -1031,8 +1055,7 @@
           widths={columnPrefs.widths}
           dividers={columnPrefs.dividers}
           sortable
-          {sortKey}
-          {sortOrder}
+          sorts={columnPrefs.sort}
           onSort={handleSort}
           selectedWorkId={selected?.id ?? null}
           onSelect={selectWork}
