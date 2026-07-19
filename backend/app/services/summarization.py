@@ -43,6 +43,11 @@ LLM_INPUT_CHAR_BUDGET = 11000
 # slow, so a low configured timeout is floored to this to keep it from prematurely failing over to
 # the extractive fallback. The admin's summary_llm_timeout can raise it, but not below this.
 REASONING_MIN_TIMEOUT_S = 600.0
+# Context window (tokens) for reasoning calls. A reasoning model writes a long chain-of-thought
+# BEFORE its answer; with the daemon's small default context (~4k) the thinking fills the window and
+# the model stops (done_reason=length) before emitting any answer → an empty response that silently
+# degraded to the extractive fallback. A generous context leaves room for prompt + thinking + answer.
+REASONING_NUM_CTX = 16384
 
 # A deliberately small English stop-word set; enough to bias scoring toward content words
 # without pulling in an NLP dependency.
@@ -229,6 +234,9 @@ class _LlmOpts:
     keep_alive: int | None = None
     think: bool | None = None
     timeout: float = 120.0
+    # Ollama options.num_ctx to send; None → use the daemon default. Raised for reasoning so the
+    # chain-of-thought doesn't exhaust the context before the answer is produced.
+    num_ctx: int | None = None
 
 
 _DEFAULT_LLM_OPTS = _LlmOpts()
@@ -248,21 +256,27 @@ def _llm_opts_for(ai_cfg, model: str) -> _LlmOpts:
     if model_supports_thinking(model, ollama_url=ai_cfg.ollama_url):
         think = bool(ai_cfg.summary_reasoning)
     timeout = float(ai_cfg.summary_llm_timeout)
+    num_ctx: int | None = None
     # Reasoning is inherently slow (a model thinks for seconds→minutes per call); never let a low/
     # default timeout strangle it and force the extractive fallback. Enforce a generous floor when
-    # thinking is on — the admin can raise it further, but not below what reasoning realistically needs.
+    # thinking is on — the admin can raise it further, but not below what reasoning realistically
+    # needs — and widen the context so the thinking doesn't crowd out the actual answer.
     if think:
         timeout = max(timeout, REASONING_MIN_TIMEOUT_S)
-    return _LlmOpts(keep_alive=keep_alive_value(ai_cfg), think=think, timeout=timeout)
+        num_ctx = REASONING_NUM_CTX
+    return _LlmOpts(
+        keep_alive=keep_alive_value(ai_cfg), think=think, timeout=timeout, num_ctx=num_ctx
+    )
 
 
 def _ollama_generate(
     prompt: str, *, model: str, base_url: str, opts: _LlmOpts | None = None
 ) -> str:
-    """Raw single-shot generation against a local Ollama daemon. Raises on any failure.
+    """Raw single-shot generation against a local Ollama daemon. Raises on any transport failure;
+    returns ``""`` when the model produced no answer (callers treat that as "skip"/"degrade").
 
-    ``opts`` (see :class:`_LlmOpts`) carries keep_alive, the reasoning ``think`` flag, and the
-    timeout. Any leaked <think> block is stripped from the result.
+    ``opts`` (see :class:`_LlmOpts`) carries keep_alive, the reasoning ``think`` flag, the timeout and
+    the context size. Any leaked <think> block is stripped from the result.
     """
     import httpx2 as httpx
 
@@ -272,10 +286,23 @@ def _ollama_generate(
         payload["think"] = opts.think
     if opts.keep_alive is not None:
         payload["keep_alive"] = opts.keep_alive
+    if opts.num_ctx is not None:
+        payload["options"] = {"num_ctx": opts.num_ctx}
     with httpx.Client(timeout=opts.timeout) as client:
         response = client.post(f"{base_url.rstrip('/')}/api/generate", json=payload)
         response.raise_for_status()
-        return _strip_reasoning(response.json().get("response") or "")
+        data = response.json()
+    answer = _strip_reasoning(data.get("response") or "")
+    if not answer and data.get("done_reason") == "length":
+        # The model hit its context/token budget with no answer — with reasoning on, the thinking
+        # crowded out the answer. Log it so the empty-summary degrade can be explained.
+        logger.warning(
+            "Ollama returned no answer (done_reason=length) for model=%s — context likely exhausted "
+            "by reasoning; num_ctx=%s",
+            model,
+            opts.num_ctx,
+        )
+    return answer
 
 
 def _ollama_summarize(
@@ -870,9 +897,25 @@ def summarize_work(
                 if is_abort_exception(exc):
                     raise  # user Stop / RQ timeout must abort the job, not silently degrade
                 logger.warning("local_llm summary unavailable (%s); using extractive fallback", exc)
-                fallback_reason = str(exc) or "the local LLM is unavailable"
+                fallback_reason = (
+                    f"the AI model errored: {exc}" if str(exc) else ("the local LLM call failed")
+                )
+            # No exception, but the model produced nothing usable (e.g. done_reason=length: with
+            # Reasoning mode on, the chain-of-thought can fill the context before an answer).
+            if not text and fallback_reason is None:
+                fallback_reason = (
+                    "the AI model returned no summary. With Reasoning mode on this usually means its "
+                    "thinking filled the context before answering — a larger context is used "
+                    "automatically now; if it persists, turn Reasoning mode off or raise the LLM "
+                    "timeout for this model in AI & Models."
+                )
+        elif ai_cfg.summary_provider == "local_llm":
+            # local_llm selected but the paper has no extractable source text to send.
+            fallback_reason = "the paper has no extractable text to summarize with the AI model"
         else:
-            fallback_reason = "the local LLM is not enabled"
+            fallback_reason = (
+                "the AI summary model is not enabled (summary provider is not 'local_llm')"
+            )
         if not text:
             text = summarize_extractive(source_text, max_sentences=eff_sentences)
             provider_used = "extractive"
@@ -906,6 +949,7 @@ def summarize_work(
         provider_requested=provider_requested,
         provider_used=provider_used,
         fallback=fallback,
+        fallback_reason=fallback_reason if fallback else None,
         source_sections=source_sections,
         content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         created_by_user_id=created_by_user_id,
@@ -919,8 +963,6 @@ def summarize_work(
     db.add(summary)
     db.flush()
     _evict_stale_models(db, "work", work.id, stored_type)
-    # A ``fallback_reason`` is transient (not a column): the UI shows it only on a fresh degrade.
-    summary.fallback_reason = fallback_reason if fallback else None
     return summary
 
 
@@ -1324,6 +1366,7 @@ def summarize_scope(
         provider_requested=provider_requested,
         provider_used=provider_used,
         fallback=fallback,
+        fallback_reason=fallback_reason if fallback else None,
         content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         created_by_user_id=created_by_user_id,
         params={
@@ -1347,6 +1390,4 @@ def summarize_scope(
     db.add(summary)
     db.flush()
     _evict_stale_models(db, scope_type, entity_id, stored_type)
-    # A ``fallback_reason`` is transient (not a column): shown only on a fresh degrade.
-    summary.fallback_reason = fallback_reason if fallback else None
     return summary, len(works)

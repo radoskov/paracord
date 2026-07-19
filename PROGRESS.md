@@ -9,6 +9,18 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Reasoning summaries: fix empty-response fallback (num_ctx) + persisted fallback reasons (2026-07-19)
+
+Owner: reasoning summaries still fell back to extractive — but at *variable* times (short ~38s, detailed
+minutes), ruling out a timeout. Diagnosed live: a reasoning `/api/generate` returned `done_reason=length`,
+`len(response)=0`, `len(thinking)=9604` — the model spent the **whole default ~4k context on thinking and
+never emitted an answer**, so the empty response silently degraded to extractive. Fix: `_llm_opts_for`
+now sets `options.num_ctx = REASONING_NUM_CTX (16384)` for reasoning calls (verified live: `done_reason=stop`,
+739-char answer). Also made the fallback honest: `summaries.fallback_reason` is now a **persisted column**
+(alembic 0083, exposed via the existing SummaryRead), and `summarize_work` sets a specific reason for
+each degrade path (model errored / returned nothing / no source text / provider not local_llm) instead of
+the blanket "(LLM unavailable)". The paper view shows the actual reason (`fallbackNote`). Backend 86 pass.
+
 ## Reasoning summary timeout floor + paren-wrapped-equation rendering (2026-07-19)
 
 Owner: thinking (reasoning) summaries still fell back to extractive even after raising the limit

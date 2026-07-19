@@ -38,6 +38,9 @@ class Summary(Base):
     provider_requested: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Human-readable reason the summary degraded to the extractive fallback (why the AI model didn't
+    # produce it), persisted so the paper view can explain it even for stored/re-listed summaries.
+    fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_sections: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)

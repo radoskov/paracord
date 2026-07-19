@@ -131,15 +131,17 @@ def test_llm_opts_reasoning_only_for_capable_models(monkeypatch) -> None:
         return EffectiveAIConfig(**base)
 
     monkeypatch.setattr(mm, "model_supports_thinking", lambda model, *, ollama_url: True)
-    # Reasoning on + a high timeout passes through unchanged.
+    # Reasoning on + a high timeout passes through unchanged; the context is widened so the
+    # chain-of-thought can't crowd out the answer (the empty-response → extractive-fallback bug).
     opts = summ._llm_opts_for(cfg(summary_reasoning=True, summary_llm_timeout=900.0), "qwen3.5:4b")
     assert opts.think is True and opts.timeout == 900.0
+    assert opts.num_ctx == summ.REASONING_NUM_CTX
     # Reasoning on + a low timeout is floored so slow reasoning isn't prematurely cancelled.
     opts = summ._llm_opts_for(cfg(summary_reasoning=True, summary_llm_timeout=120.0), "qwen3.5:4b")
     assert opts.think is True and opts.timeout == summ.REASONING_MIN_TIMEOUT_S
-    # Opted out → suppress thinking; the low timeout is respected as-is (no floor when not reasoning).
+    # Opted out → suppress thinking; the low timeout is respected as-is; no context widening.
     opts = summ._llm_opts_for(cfg(summary_reasoning=False, summary_llm_timeout=120.0), "qwen3.5:4b")
-    assert opts.think is False and opts.timeout == 120.0
+    assert opts.think is False and opts.timeout == 120.0 and opts.num_ctx is None
 
     # A non-reasoning model never gets the think flag, regardless of the setting.
     monkeypatch.setattr(mm, "model_supports_thinking", lambda model, *, ollama_url: False)
