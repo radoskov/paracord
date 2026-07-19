@@ -442,6 +442,42 @@ def test_extract_skips_ocr_on_good_text_layer(db_session, tmp_path: Path, monkey
     assert summary["ocr_ran"] is False
 
 
+def test_extract_retries_ocr_when_grobid_fails_without_ocr(
+    db_session, tmp_path: Path, monkeypatch
+) -> None:
+    """Re-extract of a scanned PDF whose text_layer_quality no longer flags OCR (e.g. 'good'/'ocr_added'
+    from a prior run): GROBID 500s on the raw scan, so extraction self-heals by forcing OCR and
+    retrying instead of dead-ending (owner-reported re-extract failure)."""
+    from app.services import ocr as ocr_service
+
+    # A non-OCR-flagged text layer → the OCR pre-step is skipped and GROBID gets the raw scan first.
+    work, file, pdf, settings = _make_extractable_file(db_session, tmp_path, quality="good")
+    ocr_pdf = tmp_path / "paper.ocr.pdf"
+    ocr_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    monkeypatch.setattr(ocr_service, "ocrmypdf_available", lambda: True)
+    monkeypatch.setattr(
+        ocr_service,
+        "maybe_ocr",
+        lambda path, **_kw: ocr_service.OcrResult(
+            ocr_pdf, ran=True, engine="ocrmypdf", text_layer_quality="ocr_added", error=None
+        ),
+    )
+
+    calls: list[Path] = []
+
+    def fake_fetch(path: Path) -> str:
+        calls.append(path)
+        if path == pdf.resolve():  # raw scan → GROBID 500 (the reported failure)
+            raise RuntimeError("Server error '500 Server Error'")
+        return FIXTURE  # the OCR'd copy parses fine
+
+    summary = extract_and_store(db_session, file=file, fetch_tei=fake_fetch, settings=settings)
+    db_session.commit()
+
+    assert calls == [pdf.resolve(), ocr_pdf]  # raw first (500), then the OCR'd copy on retry
+    assert summary["ocr_ran"] is True and summary["ocr_engine"] == "ocrmypdf"
+
+
 def test_extract_ocr_failure_does_not_fail_extraction(
     db_session, tmp_path: Path, monkeypatch
 ) -> None:

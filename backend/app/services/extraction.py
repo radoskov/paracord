@@ -5,6 +5,7 @@ every value is recorded as a MetadataAssertion, and canonical fields are only pr
 the work has not been user-confirmed and the field is empty or filename-derived.
 """
 
+import logging
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -32,6 +33,8 @@ from app.services.reference_matching import (
 )
 from app.services.tei_parser import ParsedPaper, extract_body_text, extract_sections, parse_tei
 from app.utils.normalization import normalize_doi, normalize_title
+
+logger = logging.getLogger(__name__)
 
 # fetch_tei takes the PDF path and returns raw TEI XML (the GROBID call, injected for testing).
 TeiFetcher = Callable[[Path], str]
@@ -85,35 +88,58 @@ def ocr_and_fetch_tei(
     settings = settings or get_settings()
     pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
     ai_config = get_ai_config(db, settings=settings)
+
+    def _ocr_then_fetch(engine: str) -> tuple[str, "ocr_service.OcrResult"]:
+        with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
+            if engine == "pymupdf":
+                ocr_result = ocr_service.pymupdf_ocr(
+                    pdf_path,
+                    out_dir=Path(scratch),
+                    language=ai_config.ocr_language,
+                    timeout=settings.ocr_timeout_seconds,
+                )
+            else:
+                ocr_result = ocr_service.maybe_ocr(
+                    pdf_path,
+                    text_layer_quality=file.text_layer_quality,
+                    out_dir=Path(scratch),
+                    timeout=settings.ocr_timeout_seconds,
+                    language=ai_config.ocr_language,
+                    skip_if_good=False,  # we've decided to OCR — never skip inside this block
+                )
+            tei_source_path = ocr_result.output_pdf_path
+            tei_xml = fetch_tei(tei_source_path)
+            # Persist the searchable OCR'd copy to a DERIVED location so the reader can serve
+            # selectable text (never mutate the content-addressed original). Inside the temp block.
+            if ocr_result.ran and tei_source_path != pdf_path:
+                save_derived_ocr_pdf(settings, file.sha256, tei_source_path)
+        return tei_xml, ocr_result
+
     ocr_engine = _resolve_ocr_engine(
         ai_config.ocr_backend, text_layer_quality=file.text_layer_quality, force_ocr=force_ocr
     )
-    if ocr_engine is None:
+    if ocr_engine is not None:
+        return _ocr_then_fetch(ocr_engine)
+
+    # No OCR pre-step was chosen (the text layer looks fine / OCR off). Try GROBID on the original;
+    # if GROBID FAILS — the classic scanned-PDF case where the stored text_layer_quality no longer
+    # flags it (e.g. re-extract after a prior OCR set it to 'ocr_added', but the content-addressed
+    # original is still an image scan GROBID 500s on) — self-heal by forcing OCR once and retrying,
+    # so a re-extract can't dead-end on a raw scan.
+    try:
         return fetch_tei(pdf_path), None
-    with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
-        if ocr_engine == "pymupdf":
-            ocr_result = ocr_service.pymupdf_ocr(
-                pdf_path,
-                out_dir=Path(scratch),
-                language=ai_config.ocr_language,
-                timeout=settings.ocr_timeout_seconds,
-            )
-        else:
-            ocr_result = ocr_service.maybe_ocr(
-                pdf_path,
-                text_layer_quality=file.text_layer_quality,
-                out_dir=Path(scratch),
-                timeout=settings.ocr_timeout_seconds,
-                language=ai_config.ocr_language,
-                skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
-            )
-        tei_source_path = ocr_result.output_pdf_path
-        tei_xml = fetch_tei(tei_source_path)
-        # Persist the searchable OCR'd copy to a DERIVED location so the reader can serve selectable
-        # text (never mutate the content-addressed original). Must happen inside the temp block.
-        if ocr_result.ran and tei_source_path != pdf_path:
-            save_derived_ocr_pdf(settings, file.sha256, tei_source_path)
-    return tei_xml, ocr_result
+    except Exception as exc:  # noqa: BLE001 - retry with forced OCR before giving up
+        retry_engine = _resolve_ocr_engine(
+            ai_config.ocr_backend, text_layer_quality=file.text_layer_quality, force_ocr=True
+        )
+        if retry_engine is None:
+            raise  # OCR unavailable / disabled → nothing to retry with; surface the original error
+        logger.warning(
+            "GROBID failed for %s without OCR (%s); retrying with forced OCR",
+            file.sha256[:8] if file.sha256 else "?",
+            exc,
+        )
+        return _ocr_then_fetch(retry_engine)
 
 
 def store_parsed_extraction(
