@@ -760,12 +760,15 @@ def pull_model_job(provider: str, model: str) -> None:
 
 
 @_audited_job
-def mount_model_job(model: str, kind: str, compute: str, actor_user_id: str | None) -> None:
+def mount_model_job(
+    model: str, kind: str, compute: str, actor_user_id: str | None, num_ctx: int | None = None
+) -> None:
     """Load a model into Ollama's memory (keep_alive=-1) and make it the active model for its
     capability (#5). Runs in the worker so a slow load never blocks the API/UI. On success: set the
     capability's config, free the previously-active model of that kind, and queue a reindex if the
     embedding model changed. Raises (with an actionable message) on load failure — config is only
-    changed after the load succeeds, so a failed mount leaves the previous selection intact."""
+    changed after the load succeeds, so a failed mount leaves the previous selection intact.
+    ``num_ctx`` (optional) pins the model's context window at load (clipped to the model's max)."""
     import uuid
 
     from app.db.session import SessionLocal
@@ -783,7 +786,7 @@ def mount_model_job(model: str, kind: str, compute: str, actor_user_id: str | No
             prev = cfg.summary_model if cfg.summary_provider == "local_llm" else None
 
     # Load first (may take a while for a large model) — outside the DB session.
-    mount_model(model, embedding=embedding, ollama_url=ollama_url, compute=compute)
+    mount_model(model, embedding=embedding, ollama_url=ollama_url, compute=compute, num_ctx=num_ctx)
 
     actor = uuid.UUID(actor_user_id) if actor_user_id else None
     with SessionLocal() as db:

@@ -59,6 +59,9 @@
   let loaded: LoadedModel[] = [];
   // GPU/CPU offload preference applied to the next mount.
   let mountCompute: 'auto' | 'gpu' | 'cpu' = 'auto';
+  // Optional context length (tokens) for the next mount; blank → the daemon default. Clipped to the
+  // model's max server-side. A bigger context needs more memory but fits longer inputs (#20).
+  let mountNumCtx: number | null = null;
   // Mount/unmount run as background jobs (a load can be slow) — track the job so the UI never blocks.
   let modelJobId: string | null = null;
   let modelJobVerb = ''; // 'Mounting' | 'Unmounting'
@@ -262,6 +265,14 @@
     const m = models.find((x) => sameModel(x.name, name) || x.name === name);
     return m?.vram_gb ?? null;
   }
+  // Compact context-window label: 262144 → "256K", 8192 → "8K"; blank when unknown.
+  function formatCtx(tokens: number | null | undefined): string {
+    if (!tokens || tokens <= 0) return '';
+    return tokens >= 1024 ? `${Math.round(tokens / 1024)}K` : `${tokens}`;
+  }
+  // The selected summary model's max context (for the mount ctx input hint / clip), if known.
+  $: summaryModelMax =
+    models.find((x) => sameModel(x.name, config?.summary_model))?.max_context ?? null;
 
   // Running/queued AI jobs whose task labels imply a model — mount/unmount may disrupt them.
   async function runningAiJobs(): Promise<string[]> {
@@ -349,8 +360,8 @@
       if (!ok) return;
     }
     await run(async () => {
-      const r = await client.mountAiModel(name, kind, mountCompute);
-      message = `Mount queued for ${name} (${mountCompute}).`;
+      const r = await client.mountAiModel(name, kind, mountCompute, mountNumCtx);
+      message = `Mount queued for ${name} (${mountCompute}${mountNumCtx ? `, ctx ${mountNumCtx}` : ''}).`;
       void pollModelJob(r.job_id, 'Mounting', name, kind, mountCompute);
     });
   }
@@ -890,6 +901,14 @@
           <option value="cpu">Force CPU (RAM)</option>
         </select>
       </label>
+      <label class="mount-ctx">Context (tokens)
+        <input type="number" min="512" step="1024" bind:value={mountNumCtx}
+          max={summaryModelMax ?? undefined} placeholder="default" disabled={busy || modelJobActive}
+          title="Optional context window to load the next mounted model with (clipped to the model's max). A larger context fits longer inputs but uses more memory. Blank = the daemon default." />
+      </label>
+      {#if summaryModelMax}
+        <span class="ctx-hint muted small">Summary model max: {formatCtx(summaryModelMax)} ({summaryModelMax.toLocaleString()})</span>
+      {/if}
     </div>
     <!-- #5: mount/unmount run as background jobs; show live status + real error. -->
     {#if modelJobId}
@@ -912,6 +931,7 @@
             <span>
               <strong>{m.name}</strong>
               <small class="muted">{placementLabel(m)}</small>
+              {#if m.max_context}<small class="muted" title="Model's maximum context window">· ctx {formatCtx(m.max_context)}</small>{/if}
               {#if isPinned(m)}
                 <span class="pin-badge" title="Pinned in memory (mounted). Stays until you unmount it.">mounted</span>
               {:else}
@@ -1033,7 +1053,7 @@
               <button type="button" class="copy-name" on:click={() => copyModelName(m.name)}
                 title="Click to copy this model name">{m.name}</button>
               {#if copiedModel === m.name}<span class="copied">copied ✓</span>{/if}
-              <small class="muted">{m.provider} {fmtSize(m.size_bytes)}{m.vram_gb != null ? ` · ~${m.vram_gb} GB to run` : ''}</small>
+              <small class="muted">{m.provider} {fmtSize(m.size_bytes)}{m.vram_gb != null ? ` · ~${m.vram_gb} GB to run` : ''}{m.max_context ? ` · ctx ${formatCtx(m.max_context)}` : ''}</small>
             </span>
             <button type="button" class="secondary small" on:click={() => remove(m)} disabled={busy} title="Delete this downloaded model (also drops its embedding registration)">Delete</button>
           </li>
@@ -1427,6 +1447,8 @@
   .mount-row button { min-height: 1.9rem; padding: 0.2rem 0.7rem; }
   .loaded-dot { color: var(--status-success); font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
   .compute { flex: 0 0 15rem; }
+  .mount-ctx { flex: 0 0 9rem; }
+  .ctx-hint { align-self: center; }
   .pin-badge, .auto-badge {
     border-radius: 999px;
     font-size: 0.66rem;

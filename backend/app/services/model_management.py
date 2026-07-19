@@ -34,38 +34,56 @@ def _ollama_tags(ollama_url: str) -> list[dict] | None:
         return None
 
 
-# Model capabilities (from /api/show) rarely change, but the call isn't free; cache per (model, url).
-# A reasoning summary can issue one generate per section, so we must not /api/show on every call.
-_CAPS_CACHE = BoundedTTLCache(maxsize=64, ttl_seconds=300)
-_CAPS_MISS = object()
+# A model's /api/show info (capabilities + max context) rarely changes, but the call isn't free;
+# cache the whole summary per (model, url). A reasoning summary can issue one generate per section, so
+# we must not /api/show on every call, and the model lists probe several models at once.
+_SHOW_CACHE = BoundedTTLCache(maxsize=64, ttl_seconds=300)
+_SHOW_MISS = object()
 
 
-def model_capabilities(model: str, *, ollama_url: str) -> list[str]:
-    """The Ollama model's declared capabilities (e.g. 'completion', 'thinking', 'vision', 'tools'),
-    or ``[]`` if the daemon is unreachable / too old to report them. Cached per (model, url)."""
+def model_show_info(model: str, *, ollama_url: str) -> dict:
+    """Cached summary of Ollama ``/api/show`` for ``model``: ``{"capabilities": [...],
+    "max_context": int|None}``. Empty/None when the daemon is unreachable or too old to report."""
+    default: dict = {"capabilities": [], "max_context": None}
     if not model:
-        return []
+        return default
     key = (model, ollama_url)
-    cached = _CAPS_CACHE.get(key, _CAPS_MISS)
-    if cached is not _CAPS_MISS:
+    cached = _SHOW_CACHE.get(key, _SHOW_MISS)
+    if cached is not _SHOW_MISS:
         return cached
-    caps: list[str] = []
+    info = dict(default)
     try:
         with httpx.Client(timeout=5) as client:
             response = client.post(f"{ollama_url.rstrip('/')}/api/show", json={"model": model})
             response.raise_for_status()
-            raw = response.json().get("capabilities")
-            if isinstance(raw, list):
-                caps = [str(c) for c in raw]
-    except Exception:  # noqa: BLE001 - unreachable/old daemon → treat as "no known capabilities"
-        caps = []
-    _CAPS_CACHE.set(key, caps)
-    return caps
+            data = response.json()
+        caps = data.get("capabilities")
+        if isinstance(caps, list):
+            info["capabilities"] = [str(c) for c in caps]
+        # model_info holds an architecture-prefixed context length, e.g. "qwen35.context_length".
+        for k, v in (data.get("model_info") or {}).items():
+            if k.endswith(".context_length") and isinstance(v, (int, float)):
+                info["max_context"] = int(v)
+                break
+    except Exception:  # noqa: BLE001 - unreachable/old daemon → treat as "unknown"
+        info = dict(default)
+    _SHOW_CACHE.set(key, info)
+    return info
+
+
+def model_capabilities(model: str, *, ollama_url: str) -> list[str]:
+    """The Ollama model's declared capabilities (e.g. 'completion', 'thinking', 'vision', 'tools')."""
+    return model_show_info(model, ollama_url=ollama_url)["capabilities"]
 
 
 def model_supports_thinking(model: str, *, ollama_url: str) -> bool:
     """Whether the model is a reasoning model (advertises the 'thinking' capability)."""
     return "thinking" in model_capabilities(model, ollama_url=ollama_url)
+
+
+def model_max_context(model: str, *, ollama_url: str) -> int | None:
+    """The model's maximum context length (tokens), or None if unknown."""
+    return model_show_info(model, ollama_url=ollama_url)["max_context"]
 
 
 def ollama_version(ollama_url: str) -> str | None:
@@ -230,6 +248,8 @@ def list_models(*, ollama_url: str) -> list[dict]:
                 "name": name,
                 "size_bytes": entry.get("size"),
                 "vram_gb": estimate_vram_gb(params, quant) if params else None,
+                # Max context window (tokens) so the panel can show it + clip a chosen mount context.
+                "max_context": model_max_context(name, ollama_url=ollama_url) if name else None,
             }
         )
     return models
@@ -250,6 +270,9 @@ def list_loaded(*, ollama_url: str) -> list[dict]:
                     "size_bytes": m.get("size"),
                     "size_vram_bytes": m.get("size_vram"),
                     "expires_at": m.get("expires_at"),
+                    "max_context": model_max_context(m.get("name"), ollama_url=ollama_url)
+                    if m.get("name")
+                    else None,
                 }
                 for m in (resp.json().get("models") or [])
             ]
@@ -271,11 +294,17 @@ def _load_call(
     embedding: bool,
     keep_alive: int,
     num_gpu: int | None,
+    num_ctx: int | None = None,
 ) -> httpx.Response:
     """One load/unload request, routed by kind (embedding-only models reject /api/generate)."""
     payload: dict = {"model": model, "keep_alive": keep_alive}
+    options = {}
     if num_gpu is not None:
-        payload["options"] = {"num_gpu": num_gpu}
+        options["num_gpu"] = num_gpu
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
+    if options:
+        payload["options"] = options
     if embedding:
         payload["input"] = "ping"
         return client.post(f"{base}/api/embed", json=payload)
@@ -283,17 +312,36 @@ def _load_call(
     return client.post(f"{base}/api/generate", json=payload)
 
 
-def mount_model(model: str, *, embedding: bool, ollama_url: str, compute: str = "auto") -> dict:
+def mount_model(
+    model: str,
+    *,
+    embedding: bool,
+    ollama_url: str,
+    compute: str = "auto",
+    num_ctx: int | None = None,
+) -> dict:
     """Load a model into memory and pin it (keep_alive=-1). ``compute`` ∈ auto|gpu|cpu selects the
-    Ollama ``num_gpu`` offload. Raises RuntimeError (actionable) on failure."""
+    Ollama ``num_gpu`` offload; ``num_ctx`` (optional) pins the context window at load time. Raises
+    RuntimeError (actionable) on failure."""
     base = ollama_url.rstrip("/")
     num_gpu = _COMPUTE_NUM_GPU.get(compute)
+    # Clip a requested context to the model's maximum so an over-large value can't fail the load.
+    if num_ctx is not None:
+        max_ctx = model_max_context(model, ollama_url=ollama_url)
+        if max_ctx:
+            num_ctx = min(num_ctx, max_ctx)
     # Loading a big model off disk can take a while; a short connect timeout still fails fast when
     # the daemon is down.
     try:
         with httpx.Client(timeout=httpx.Timeout(1800.0, connect=15.0)) as client:
             resp = _load_call(
-                client, base, model, embedding=embedding, keep_alive=-1, num_gpu=num_gpu
+                client,
+                base,
+                model,
+                embedding=embedding,
+                keep_alive=-1,
+                num_gpu=num_gpu,
+                num_ctx=num_ctx,
             )
             resp.raise_for_status()
     except httpx.ConnectError as exc:

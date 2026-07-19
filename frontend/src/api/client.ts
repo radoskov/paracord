@@ -1405,6 +1405,8 @@ export interface AiModel {
   size_bytes: number | null;
   // Estimated memory to run it (#5); null when the size can't be inferred from the tag.
   vram_gb?: number | null;
+  // Max context window (tokens) reported by the model; null when unknown.
+  max_context?: number | null;
 }
 
 // A model currently held in the Ollama daemon's memory (GET /admin/ai/loaded).
@@ -1414,6 +1416,8 @@ export interface LoadedModel {
   // Actual GPU VRAM in use; 0 on a CPU-only host.
   size_vram_bytes: number | null;
   expires_at?: string | null;
+  // Max context window (tokens) reported by the model; null when unknown.
+  max_context?: number | null;
 }
 
 // A pullable model from the catalog/search (#5): Ollama has no search API or VRAM reporting, so
@@ -3055,10 +3059,11 @@ export class ApiClient {
     model: string,
     kind: "summary" | "embedding",
     compute: "auto" | "gpu" | "cpu" = "auto",
+    numCtx?: number | null,
   ): Promise<{ job_id: string; status: string }> {
     return this.request("/api/v1/admin/ai/models/mount", {
       method: "POST",
-      body: { provider: "ollama", model, kind, compute },
+      body: { provider: "ollama", model, kind, compute, num_ctx: numCtx ?? null },
     });
   }
 
@@ -3517,6 +3522,14 @@ export class ApiClient {
 
   async listSummaries(workId: string): Promise<Summary[]> {
     return this.request<Summary[]>(`/api/v1/works/${workId}/summaries`);
+  }
+
+  /** Set a stored summary version as the current one for its work (#22). */
+  async promoteSummary(workId: string, summaryId: string): Promise<Summary> {
+    return this.request<Summary>(
+      `/api/v1/works/${workId}/summaries/${summaryId}/promote`,
+      { method: "POST" },
+    );
   }
 
   async createSummary(

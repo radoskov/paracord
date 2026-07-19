@@ -221,9 +221,9 @@ describe("AiModelsPanel mount/unmount (#5)", () => {
     await (
       await import("@testing-library/svelte")
     ).fireEvent.click(getByRole("button", { name: /^Mount$/ }));
-    // Enqueued with the default 'auto' compute.
+    // Enqueued with the default 'auto' compute and no explicit context length (daemon default).
     await waitFor(() =>
-      expect(mountAiModel).toHaveBeenCalledWith("nomic-embed-text", "embedding", "auto"),
+      expect(mountAiModel).toHaveBeenCalledWith("nomic-embed-text", "embedding", "auto", null),
     );
   });
 

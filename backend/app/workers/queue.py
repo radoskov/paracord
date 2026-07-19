@@ -467,14 +467,16 @@ def enqueue_model_pull(provider: str, model: str) -> str | None:
 
 
 def enqueue_model_mount(
-    model: str, kind: str, compute: str, actor_user_id: str | None
+    model: str, kind: str, compute: str, actor_user_id: str | None, num_ctx: int | None = None
 ) -> str | None:
     """Best-effort enqueue of a model mount (load into memory + make active). Runs in the worker so
-    a slow load never blocks the API/UI (#5)."""
+    a slow load never blocks the API/UI (#5). ``num_ctx`` optionally pins the context window."""
     try:
         return (
             get_queue()
-            .enqueue(MOUNT_MODEL_JOB, model, kind, compute, actor_user_id, job_timeout=1800)
+            .enqueue(
+                MOUNT_MODEL_JOB, model, kind, compute, actor_user_id, num_ctx, job_timeout=1800
+            )
             .id
         )
     except Exception as exc:  # noqa: BLE001 - best effort; log and continue

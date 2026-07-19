@@ -82,12 +82,14 @@ class MountRef(BaseModel):
     """A model to mount/unmount into a capability slot: ``kind`` picks the slot (one model per kind).
 
     ``compute`` (mount only) selects Ollama's GPU offload: auto (daemon decides), gpu (offload all
-    layers), or cpu (force CPU / RAM)."""
+    layers), or cpu (force CPU / RAM). ``num_ctx`` (mount only) optionally pins the context window
+    (clipped to the model's max); None → the daemon default."""
 
     provider: str = "ollama"
     model: str
     kind: str  # "summary" | "embedding"
     compute: str = "auto"  # "auto" | "gpu" | "cpu"
+    num_ctx: int | None = None
 
 
 @router.get("/ai-config")
@@ -271,7 +273,11 @@ def mount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = 
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be 'summary' or 'embedding'")
     if payload.compute not in ("auto", "gpu", "cpu"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "compute must be 'auto', 'gpu' or 'cpu'")
-    job_id = enqueue_model_mount(payload.model, payload.kind, payload.compute, str(owner.id))
+    if payload.num_ctx is not None and payload.num_ctx < 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "num_ctx must be a positive integer")
+    job_id = enqueue_model_mount(
+        payload.model, payload.kind, payload.compute, str(owner.id), payload.num_ctx
+    )
     if job_id is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Model-mount queue unavailable")
     record_event(
@@ -279,7 +285,12 @@ def mount_model_endpoint(payload: MountRef, db: Session = DB_DEP, owner: User = 
         "ai.model_mount_requested",
         actor_user_id=owner.id,
         entity_type="ai_model",
-        details={"model": payload.model, "kind": payload.kind, "compute": payload.compute},
+        details={
+            "model": payload.model,
+            "kind": payload.kind,
+            "compute": payload.compute,
+            "num_ctx": payload.num_ctx,
+        },
     )
     db.commit()
     return {"job_id": job_id, "status": "queued"}

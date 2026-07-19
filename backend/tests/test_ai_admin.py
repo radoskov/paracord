@@ -256,16 +256,25 @@ def test_mount_endpoint_enqueues_and_validates(client, auth_headers, monkeypatch
     monkeypatch.setattr(
         m,
         "enqueue_model_mount",
-        lambda model, kind, compute, actor: seen.append((model, kind, compute)) or "mount-job",
+        lambda model, kind, compute, actor, num_ctx=None: seen.append(
+            (model, kind, compute, num_ctx)
+        )
+        or "mount-job",
     )
     owner = auth_headers("owner")
     r = client.post(
         "/api/v1/admin/ai/models/mount",
         headers=owner,
-        json={"provider": "ollama", "model": "qwen3:4b", "kind": "summary", "compute": "gpu"},
+        json={
+            "provider": "ollama",
+            "model": "qwen3:4b",
+            "kind": "summary",
+            "compute": "gpu",
+            "num_ctx": 8192,
+        },
     )
     assert r.status_code == 202 and r.json()["job_id"] == "mount-job"
-    assert seen == [("qwen3:4b", "summary", "gpu")]
+    assert seen == [("qwen3:4b", "summary", "gpu", 8192)]
     # Validation: bad kind, bad compute, non-ollama provider → 400.
     for bad in (
         {"provider": "ollama", "model": "x", "kind": "bogus"},
