@@ -112,6 +112,31 @@ export async function apiSetPapersPerPage(
   expect(res.ok(), `set papers_per_page failed: ${res.status()}`).toBeTruthy();
 }
 
+/** The admin AI config object (owner/admin). */
+export async function apiGetAiConfig(
+  request: APIRequestContext,
+  token: string,
+): Promise<Record<string, unknown>> {
+  const res = await request.get(`${API_URL}/api/v1/admin/ai-config`, { headers: auth(token) });
+  expect(res.ok(), `get ai-config failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).config as Record<string, unknown>;
+}
+
+/** Patch the admin AI config. Journey 41 uses this to force the baseline providers (extractive +
+ * hash_bow) so the recommendation runs the fast, deterministic embedding-cosine path it targets,
+ * instead of a slow local LLM / Ollama embedder that can run for minutes over a large library. */
+export async function apiSetAiConfig(
+  request: APIRequestContext,
+  token: string,
+  changes: Record<string, unknown>,
+): Promise<void> {
+  const res = await request.put(`${API_URL}/api/v1/admin/ai-config`, {
+    headers: auth(token),
+    data: changes,
+  });
+  expect(res.ok(), `set ai-config failed: ${res.status()}`).toBeTruthy();
+}
+
 /** Set (or reset, with null) the signed-in user's persisted theme id (Theming P3, via /auth/me). */
 export async function apiSetUserTheme(
   request: APIRequestContext,

@@ -6,7 +6,9 @@ import {
   apiCreateWork,
   apiDeleteShelvesByName,
   apiDeleteWorksByTitleContains,
+  apiGetAiConfig,
   apiLogin,
+  apiSetAiConfig,
   expectSignedIn,
   uniqueName,
 } from '../helpers';
@@ -23,6 +25,14 @@ test('Journey 41 — run a categorization recommendation over a shelf and see pe
   const shelfName = uniqueName('rec-shelf');
   const title = uniqueName('rec-paper');
   const token = await apiLogin(request);
+  // Force the fast, deterministic path this journey targets: extractive summary (no LLM ranker) +
+  // the in-process hash_bow embedder (the cosine fallback embeds every candidate on the fly, so an
+  // Ollama embedder over a large library runs for minutes). Save + restore the owner's real config.
+  const prior = await apiGetAiConfig(request, token);
+  await apiSetAiConfig(request, token, {
+    summary_provider: 'extractive',
+    embedding_provider: 'hash_bow',
+  });
   const shelfId = await apiCreateShelf(request, token, shelfName);
   const workId = await apiCreateWork(request, token, title);
   await apiAddWorkToShelf(request, token, shelfId, workId);
@@ -43,6 +53,11 @@ test('Journey 41 — run a categorization recommendation over a shelf and see pe
     // The per-paper popups are present (raw scores + raw LLM I/O).
     await expect(paper.getByRole('button', { name: 'Scores' })).toBeVisible();
   } finally {
+    await apiSetAiConfig(request, token, {
+      summary_provider: prior.summary_provider,
+      embedding_provider: prior.embedding_provider,
+      embedding_model: prior.embedding_model,
+    });
     await apiDeleteWorksByTitleContains(request, token, title);
     await apiDeleteShelvesByName(request, token, shelfName);
   }
