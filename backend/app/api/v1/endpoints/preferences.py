@@ -32,7 +32,9 @@ class LibraryColumnSort(BaseModel):
 class LibraryColumnPrefs(BaseModel):
     order: list[str] = []
     visible: list[str] = []
-    sort: LibraryColumnSort | None = None
+    # Multi-column sort (priority order). A single object is still accepted for back-compat with
+    # prefs written by an older client; the current client always writes a list.
+    sort: list[LibraryColumnSort] | LibraryColumnSort | None = None
     # Per-column width RATIOS (relative weights; the client divides the list width by their sum)
     # and the row-divider-lines toggle. Validated/clamped client-side (normalizeColumnPrefs).
     widths: dict[str, float] | None = None

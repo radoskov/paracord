@@ -410,24 +410,34 @@ _SORT_COLUMNS = {
     "added_at": Work.created_at,
     "updated_at": Work.updated_at,
     "reading_status": Work.reading_status,
+    "doi": Work.doi,
     "file_count": _FILE_COUNT_SORT,
     "reference_count": _REFERENCE_COUNT_SORT,
     "citation_count": Work.citation_count,
     "local_reference_count": _LOCAL_REFERENCE_COUNT_SORT,
     "local_citation_count": _LOCAL_CITATION_COUNT_SORT,
 }
-# These sorts can carry NULL (Work.citation_count) — order NULLs last regardless of direction so
-# "unknown" never floats to the top. The count subqueries are 0-based, so this is a harmless no-op.
+# Container-name sorts (shelves/racks/rows) are correlated subqueries that depend on the actor's SEE
+# filter, so they can't be module constants — they're built per request and merged into the sort map
+# by _resolve_sort_columns. This maps the client sort key → the container kind for that builder.
+_CONTAINER_NAME_SORTS = {"shelves": "shelf", "racks": "rack", "rows": "row"}
+# These sorts can carry NULL (Work.citation_count, Work.doi, an empty container set) — order NULLs
+# last regardless of direction so "unknown" never floats to the top. The count subqueries are
+# 0-based, so this is a harmless no-op for them.
 _NULLS_LAST_SORTS = {
+    "doi",
     "file_count",
     "reference_count",
     "citation_count",
     "local_reference_count",
     "local_citation_count",
+    "shelves",
+    "racks",
+    "rows",
 }
 # Sorts backed by correlated scalar subqueries (not Work columns). The works query is SELECT
 # DISTINCT and Postgres requires DISTINCT ORDER BY expressions to appear in the select list, so
-# these are selected as a labelled extra column and ordered by the label. The count is
+# these are selected as a labelled extra column and ordered by the label. The value is
 # deterministic per work, so DISTINCT semantics are unchanged. (SQLite tolerates the bare
 # subquery ORDER BY, which is why only the Postgres deployment surfaced this.)
 _SUBQUERY_SORTS = {
@@ -435,8 +445,87 @@ _SUBQUERY_SORTS = {
     "reference_count",
     "local_reference_count",
     "local_citation_count",
+    "shelves",
+    "racks",
+    "rows",
 }
 _DEFAULT_SORT_COLUMN = Work.updated_at
+
+
+def _visible_container_name_sort(db: Session, actor: User, kind: str):
+    """Correlated scalar subquery: the alphabetically-first *SEE-able* container name for a work — its
+    shelves, its racks (work→shelf→rack), or its rows (work→shelf→rack→row). NULL when the work is in
+    no visible container of that kind, so these sorts order such works last. Actor-dependent (SEE
+    filter), built per request. Mirrors the visibility chain of :func:`_batch_shelf_rack_refs` so the
+    sort key matches the names actually shown in the column."""
+    shelf_sub = access.visible_shelves_query(db, actor).subquery()
+    if kind == "shelf":
+        return (
+            select(func.min(shelf_sub.c.name))
+            .select_from(ShelfWork)
+            .join(shelf_sub, shelf_sub.c.id == ShelfWork.shelf_id)
+            .where(ShelfWork.work_id == Work.id)
+            .correlate(Work)
+            .scalar_subquery()
+        )
+    rack_sub = access.visible_racks_query(db, actor).subquery()
+    if kind == "rack":
+        return (
+            select(func.min(rack_sub.c.name))
+            .select_from(ShelfWork)
+            .join(shelf_sub, shelf_sub.c.id == ShelfWork.shelf_id)
+            .join(RackShelf, RackShelf.shelf_id == shelf_sub.c.id)
+            .join(rack_sub, rack_sub.c.id == RackShelf.rack_id)
+            .where(ShelfWork.work_id == Work.id)
+            .correlate(Work)
+            .scalar_subquery()
+        )
+    row_sub = access.visible_rows_query(db, actor).subquery()
+    return (
+        select(func.min(row_sub.c.name))
+        .select_from(ShelfWork)
+        .join(shelf_sub, shelf_sub.c.id == ShelfWork.shelf_id)
+        .join(RackShelf, RackShelf.shelf_id == shelf_sub.c.id)
+        .join(rack_sub, rack_sub.c.id == RackShelf.rack_id)
+        .join(RowRack, RowRack.rack_id == rack_sub.c.id)
+        .join(row_sub, row_sub.c.id == RowRack.row_id)
+        .where(ShelfWork.work_id == Work.id)
+        .correlate(Work)
+        .scalar_subquery()
+    )
+
+
+def _resolve_sort_columns(db: Session, actor: User) -> dict:
+    """The full sort allowlist for a request: the static Work columns / count subqueries plus the
+    actor-visibility-filtered shelf/rack/row name aggregates."""
+    columns = dict(_SORT_COLUMNS)
+    for key, kind in _CONTAINER_NAME_SORTS.items():
+        columns[key] = _visible_container_name_sort(db, actor, kind)
+    return columns
+
+
+def _parse_sort_specs(sort: str | None, order: str) -> list[tuple[str, str]]:
+    """Parse the (possibly multi-column) sort spec into ordered (key, direction) pairs.
+
+    ``sort`` is a comma-separated list where each entry is ``key`` or ``key:asc|desc``; an entry
+    without its own direction uses the shared ``order`` fallback. List order is the sort priority.
+    A bare legacy ``sort=title`` (single key) is a one-element list, so old callers are unaffected."""
+    specs: list[tuple[str, str]] = []
+    if not isinstance(sort, str):
+        return specs  # None, or an unresolved Query marker from a direct (non-HTTP) call
+    order = order if order in ("asc", "desc") else "desc"
+    for raw in sort.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        key, _, dir_token = token.partition(":")
+        key = key.strip()
+        direction = dir_token.strip().lower()
+        if direction not in ("asc", "desc"):
+            direction = order
+        if key:
+            specs.append((key, direction))
+    return specs
 
 
 def _batch_shelf_rack_refs(
@@ -761,21 +850,35 @@ def list_works(
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     pages = max(1, math.ceil(total / effective_per_page))
     page = min(max(page, 1), pages)
-    # SAFE sort: look the key up in the allowlist (never interpolate the raw string); fall back to
-    # the default column for None/unknown keys. Work.id is a stable tiebreaker for a deterministic
-    # order when the sort column has ties.
-    sort_key = sort or ""
-    sort_column = _SORT_COLUMNS.get(sort_key, _DEFAULT_SORT_COLUMN)
-    if sort_key in _SUBQUERY_SORTS:
-        # Select the correlated count as a labelled column so the DISTINCT query may ORDER BY it
-        # on Postgres; ``db.scalars`` below still yields only the Work entities.
-        sort_column = sort_column.label("sort_value")
-        stmt = stmt.add_columns(sort_column)
-    base_direction = sort_column.asc() if order == "asc" else sort_column.desc()
-    # NULL-carrying sorts (citation_count) order NULLs last regardless of direction.
-    direction = base_direction.nullslast() if sort_key in _NULLS_LAST_SORTS else base_direction
+    # SAFE multi-column sort: parse the spec, look each key up in the (per-request) allowlist — the
+    # raw string is NEVER interpolated — and build the ORDER BY list in priority order. Unknown keys
+    # are skipped; if nothing valid remains, fall back to the default column. Work.id is the final
+    # stable tiebreaker for a deterministic order when the sort columns tie.
+    sort_columns = _resolve_sort_columns(db, actor)
+    directions = []
+    subquery_index = 0
+    for sort_key, spec_order in _parse_sort_specs(sort, order):
+        sort_column = sort_columns.get(sort_key)
+        if sort_column is None:
+            continue
+        if sort_key in _SUBQUERY_SORTS:
+            # Select the correlated subquery as a labelled column so the DISTINCT query may ORDER BY
+            # it on Postgres; ``db.scalars`` below still yields only the Work entities. Each needs a
+            # unique label when several subquery sorts are combined.
+            sort_column = sort_column.label(f"sort_value_{subquery_index}")
+            subquery_index += 1
+            stmt = stmt.add_columns(sort_column)
+        base_direction = sort_column.asc() if spec_order == "asc" else sort_column.desc()
+        # NULL-carrying sorts (citation_count, doi, empty container sets) order NULLs last regardless
+        # of direction so "unknown" never floats to the top.
+        directions.append(
+            base_direction.nullslast() if sort_key in _NULLS_LAST_SORTS else base_direction
+        )
+    if not directions:
+        base = _DEFAULT_SORT_COLUMN.asc() if order == "asc" else _DEFAULT_SORT_COLUMN.desc()
+        directions.append(base)
     stmt = (
-        stmt.order_by(direction, Work.id)
+        stmt.order_by(*directions, Work.id)
         .offset((page - 1) * effective_per_page)
         .limit(effective_per_page)
     )

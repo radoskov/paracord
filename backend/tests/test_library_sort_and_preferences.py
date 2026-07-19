@@ -108,6 +108,29 @@ def test_preferences_put_then_get_roundtrip(client, auth_headers, prefs_tmp_path
     assert list((prefs_tmp_path.parent / "preferences.d").glob("*.yaml"))
 
 
+def test_preferences_accepts_multi_column_sort(client, auth_headers, prefs_tmp_path):
+    """The current client stores `sort` as an ordered list (multi-column sort); the schema accepts
+    it (and still accepts a legacy single object)."""
+    h = auth_headers("reader")
+    payload = {
+        "library_columns": {
+            "order": ["title", "year", "shelves"],
+            "visible": ["title", "year", "shelves"],
+            "sort": [
+                {"key": "year", "order": "desc"},
+                {"key": "title", "order": "asc"},
+            ],
+        }
+    }
+    put = client.put("/api/v1/preferences", headers=h, json=payload)
+    assert put.status_code == 200, put.text
+    got = client.get("/api/v1/preferences", headers=h).json()
+    assert got["library_columns"]["sort"] == [
+        {"key": "year", "order": "desc"},
+        {"key": "title", "order": "asc"},
+    ]
+
+
 def test_preferences_are_per_user_isolated(client, auth_headers, prefs_tmp_path):
     alice = auth_headers("editor", username="alice")
     bob = auth_headers("editor", username="bob")
