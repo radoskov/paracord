@@ -9,6 +9,22 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Multi-column library sort + DOI/shelves/racks/rows columns (2026-07-19)
+
+Handoff: `docs/agent_handoffs/2026-07-19-multi-column-sort.md`. Owner: add multi-column sorting to the
+library table, sort by DOI/shelves/racks/rows, and add a Rows column (was missing though the data was
+returned). Backend: `list_works` now parses a comma-separated `sort` spec (`key` or `key:asc|desc`,
+priority = order; legacy single `sort`+`order` still works); new sort keys — `doi` (lexical, NULLs
+last) and `shelves`/`racks`/`rows` (correlated SEE-filtered `min(name)` subqueries mirroring the
+display chain, NULLs last), each added as a uniquely-labelled select column for the Postgres
+DISTINCT-ORDER-BY rule; prefs schema accepts a `sort` list. Frontend: Rows column + DOI/shelves/racks/
+rows made sortable; `ColumnPrefs.sort` became an ordered list (v2, reads v1 shape); Shift-click a
+header to add a lower-priority sort level (priority number shown); client encodes the list as one
+`key:order,…` param; `sortWorksClientSide` does a multi-key compare. Tests: 6 backend sort tests +
+prefs round-trip (30 green, ruff clean); 28 frontend unit tests (columns/PaperTable/client). Full
+frontend suite deferred to `make ready-full` (katex/echarts not in host node_modules; container npm
+would disrupt the live dev server).
+
 ## Scope/Insights summary history + "set as current" (#22) (2026-07-19)
 
 Handoff: `docs/agent_handoffs/2026-07-19-scope-summary-history.md`. Owner: per-work summaries have a
