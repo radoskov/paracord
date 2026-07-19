@@ -9,6 +9,17 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Scanned-PDF import: OCR the staging preview too (2026-07-19)
+
+Owner: importing an old scanned PDF (no text layer) failed — GROBID got nothing and there was no OCR
+retry. Root cause: the multi-PDF **staging preview** extraction (`extract_staging_item`) fed the raw
+PDF straight to GROBID, unlike the full `/upload` extraction which runs an OCR pre-step. So a scanned
+paper produced an empty/failed preview. Fix: extracted the OCR-pre-step + TEI-fetch into a shared
+`extraction.ocr_and_fetch_tei` and used it in BOTH `extract_and_store` and `extract_staging_item`, so a
+scanned/textless PDF gets a searchable layer before GROBID in every import path. Verified live on the
+owner's test PDF (`test_data/1-s2.0-S1042814383710083-main.pdf`): staging preview now extracts the real
+title + a 1334-char abstract (was empty). 141 extraction/import/staging tests pass (+ a new wiring test).
+
 ## Advanced multi-tag library filter (2026-07-19)
 
 Owner: filter the library by multiple tags with per-tag intent. Each tag can be set to **has** (any),

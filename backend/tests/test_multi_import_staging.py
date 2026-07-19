@@ -54,6 +54,31 @@ def _stub_grobid(monkeypatch, tei: str) -> None:
 # --------------------------------------------------------------------------- service
 
 
+def test_staging_preview_runs_the_shared_ocr_prestep(db, make_user, managed_root, monkeypatch):
+    """A scanned/textless PDF must get the SAME OCR pre-step in staging preview as in the full
+    extraction — regression for scanned imports that previously fed the raw scan to GROBID."""
+    from app.services import extraction
+
+    actor = make_user("stager", role="editor")
+    batch = import_staging.stage_pdfs(
+        db, actor=actor, uploads=[("scan.pdf", _pdf())], mode="preview"
+    )
+    db.commit()
+    item = db.scalars(select(ImportStagingItem).where(ImportStagingItem.batch_id == batch.id)).one()
+
+    calls: list[str] = []
+
+    def fake_ocr(db, *, file, fetch_tei, settings=None, force_ocr=False):
+        calls.append(file.sha256)
+        return TEI, None  # pretend OCR ran and GROBID returned the fixture TEI
+
+    monkeypatch.setattr(extraction, "ocr_and_fetch_tei", fake_ocr)
+    import_staging.extract_staging_item(db, item=item, fetch_tei=lambda _p: "<unused/>")
+    assert calls, "staging preview should route TEI fetch through the shared OCR pre-step"
+    assert item.status == "extracted"
+    assert item.parsed["title"] == "Attention Is All You Need"
+
+
 def test_stage_extract_commit_creates_paper(db, make_user, managed_root):
     actor = make_user("stager", role="editor")
     batch = import_staging.stage_pdfs(

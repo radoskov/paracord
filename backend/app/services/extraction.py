@@ -67,6 +67,55 @@ def _resolve_ocr_engine(
     return None
 
 
+def ocr_and_fetch_tei(
+    db: Session,
+    *,
+    file: File,
+    fetch_tei: TeiFetcher,
+    settings: Settings | None = None,
+    force_ocr: bool = False,
+) -> tuple[str, "ocr_service.OcrResult | None"]:
+    """Resolve the PDF, run the OCR pre-step (per the admin backend + text-layer need), then fetch
+    TEI from the possibly-OCR'd copy. Returns ``(tei_xml, ocr_result_or_None)``.
+
+    Shared by the full extraction AND the staging preview so a scanned/textless PDF gets a searchable
+    layer before GROBID in EVERY import path (previously the staging preview fed the raw scan to
+    GROBID and got nothing back). OCR failures degrade to the original PDF (never raise).
+    """
+    settings = settings or get_settings()
+    pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
+    ai_config = get_ai_config(db, settings=settings)
+    ocr_engine = _resolve_ocr_engine(
+        ai_config.ocr_backend, text_layer_quality=file.text_layer_quality, force_ocr=force_ocr
+    )
+    if ocr_engine is None:
+        return fetch_tei(pdf_path), None
+    with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
+        if ocr_engine == "pymupdf":
+            ocr_result = ocr_service.pymupdf_ocr(
+                pdf_path,
+                out_dir=Path(scratch),
+                language=ai_config.ocr_language,
+                timeout=settings.ocr_timeout_seconds,
+            )
+        else:
+            ocr_result = ocr_service.maybe_ocr(
+                pdf_path,
+                text_layer_quality=file.text_layer_quality,
+                out_dir=Path(scratch),
+                timeout=settings.ocr_timeout_seconds,
+                language=ai_config.ocr_language,
+                skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
+            )
+        tei_source_path = ocr_result.output_pdf_path
+        tei_xml = fetch_tei(tei_source_path)
+        # Persist the searchable OCR'd copy to a DERIVED location so the reader can serve selectable
+        # text (never mutate the content-addressed original). Must happen inside the temp block.
+        if ocr_result.ran and tei_source_path != pdf_path:
+            save_derived_ocr_pdf(settings, file.sha256, tei_source_path)
+    return tei_xml, ocr_result
+
+
 def store_parsed_extraction(
     db: Session,
     *,
@@ -341,53 +390,14 @@ def extract_and_store(
     if work is None:
         raise ValueError("Linked work not found")
 
-    pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
-
-    # Effective OCR/advanced-extraction backend + languages: DB row (runtime toggle) overlaid on
-    # Settings, honouring the admin's choice like the topic job does. ocr_language is tesseract
-    # syntax and may be multi like "eng+spa".
+    # OCR pre-step + TEI fetch (shared with the staging preview): when an OCR backend is selected and
+    # the text layer is poor/none/unknown, a searchable layer is added to a transient copy before
+    # GROBID. OCR never fails the extraction (the helpers degrade to the original PDF).
     ai_config = get_ai_config(db, settings=settings)
     ocr_backend = ai_config.ocr_backend
-    ocr_language = ai_config.ocr_language
-
-    # OCR pre-step: when an OCR backend is selected and the text layer is poor/none/unknown, add a
-    # searchable text layer to a *transient* copy and feed that to GROBID. OCR never fails the
-    # extraction (the OCR helpers swallow errors and return the original path on failure/skip).
-    ocr_result: ocr_service.OcrResult | None = None
-    tei_source_path = pdf_path
-    # Pick the OCR engine to run (or None): ocrmypdf or pymupdf, gated on availability + the
-    # text-layer-quality/#22-force rule. force_ocr uses the selected OCR engine (pymupdf when that
-    # backend is chosen, else ocrmypdf) regardless of the current quality.
-    ocr_engine = _resolve_ocr_engine(
-        ocr_backend, text_layer_quality=file.text_layer_quality, force_ocr=force_ocr
+    tei_xml, ocr_result = ocr_and_fetch_tei(
+        db, file=file, fetch_tei=fetch_tei, settings=settings, force_ocr=force_ocr
     )
-    if ocr_engine is not None:
-        with tempfile.TemporaryDirectory(prefix="paracord-ocr-") as scratch:
-            if ocr_engine == "pymupdf":
-                ocr_result = ocr_service.pymupdf_ocr(
-                    pdf_path,
-                    out_dir=Path(scratch),
-                    language=ocr_language,
-                    timeout=settings.ocr_timeout_seconds,
-                )
-            else:
-                ocr_result = ocr_service.maybe_ocr(
-                    pdf_path,
-                    text_layer_quality=file.text_layer_quality,
-                    out_dir=Path(scratch),
-                    timeout=settings.ocr_timeout_seconds,
-                    language=ocr_language,
-                    skip_if_good=settings.ocr_skip_if_text_layer_good and not force_ocr,
-                )
-            tei_source_path = ocr_result.output_pdf_path
-            tei_xml = fetch_tei(tei_source_path)
-            # Persist the searchable OCR'd copy to a DERIVED location so the reader can serve
-            # selectable text (never mutate the content-addressed original). Best-effort; the temp
-            # copy is about to be deleted, so it must be persisted inside this block.
-            if ocr_result.ran and tei_source_path != pdf_path:
-                save_derived_ocr_pdf(settings, file.sha256, tei_source_path)
-    else:
-        tei_xml = fetch_tei(pdf_path)
 
     parsed = parse_tei(tei_xml)
     summary = store_parsed_extraction(db, work=work, parsed=parsed, file=file, raw_tei_xml=tei_xml)

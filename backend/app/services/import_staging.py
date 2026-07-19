@@ -30,7 +30,6 @@ from app.models.work import Work
 from app.services import access
 from app.services.audit import record_event
 from app.services.extraction import store_parsed_extraction
-from app.services.file_paths import resolve_backend_readable_pdf_path
 from app.services.identifiers import arxiv_base_id
 from app.services.shelf_membership import add_work_to_shelf_checked
 from app.services.storage import mark_extraction_requested, probe_pdf_openable, stage_managed_file
@@ -184,8 +183,11 @@ def extract_staging_item(
         item.error = "Staged file is missing"
         return
     try:
-        pdf_path = resolve_backend_readable_pdf_path(db, file=file, settings=settings)
-        tei_xml = fetch_tei(pdf_path)
+        # OCR pre-step + TEI fetch (shared with the full extraction): a scanned/textless PDF gets a
+        # searchable layer before GROBID, so the preview isn't empty for such papers.
+        from app.services.extraction import ocr_and_fetch_tei  # noqa: PLC0415 (avoid import cycle)
+
+        tei_xml, _ocr = ocr_and_fetch_tei(db, file=file, fetch_tei=fetch_tei, settings=settings)
         parsed = parse_tei(tei_xml)
         item.tei_xml = tei_xml
         item.parsed = {
