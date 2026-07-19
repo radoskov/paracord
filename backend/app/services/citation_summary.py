@@ -30,7 +30,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.citation import Reference, ReferenceCitation
@@ -470,6 +470,78 @@ def _missing_works(
                 agg.arxiv_id = reference.arxiv_id
             if agg.year is None and reference.year is not None:
                 agg.year = reference.year
+
+    def _nt(title: str | None) -> str:
+        return normalize_title(title) if title else ""
+
+    # --- Already-in-library (stronger check): the citation-graph resolution can miss a library work
+    # that actually holds a candidate's DOI / arXiv id / normalized title (e.g. it was never linked).
+    # A direct DB lookup over just the candidate identifiers drops those so the column stops
+    # suggesting papers the library already has. Restricted to visible works so it can't leak hidden
+    # ones (unlike graph resolution, which holds hidden works, this new check never reveals them).
+    cand_dois = {a.doi for a in aggregates.values() if a.doi}
+    cand_arxiv = {a.arxiv_id.strip().lower() for a in aggregates.values() if a.arxiv_id}
+    cand_titles = {_nt(a.title) for a in aggregates.values() if _nt(a.title)}
+    have_dois: set[str] = set()
+    have_arxiv: set[str] = set()
+    have_titles: set[str] = set()
+    match_conds = []
+    if cand_dois:
+        match_conds.append(Work.doi.in_(cand_dois))
+    if cand_arxiv:
+        match_conds.append(Work.arxiv_base_id.in_(cand_arxiv))
+        match_conds.append(Work.arxiv_id.in_(cand_arxiv))
+    if cand_titles:
+        match_conds.append(Work.normalized_title.in_(cand_titles))
+    if match_conds:
+        stmt = select(
+            Work.id, Work.doi, Work.arxiv_id, Work.arxiv_base_id, Work.normalized_title
+        ).where(Work.merged_into_id.is_(None), or_(*match_conds))
+        if visible is not None:
+            stmt = stmt.where(Work.id.in_(visible))
+        for wid, wdoi, waxv, waxvbase, wntitle in db.execute(stmt).all():
+            if wdoi:
+                have_dois.add(wdoi)
+            for a in (waxv, waxvbase):
+                if a:
+                    have_arxiv.add(a.strip().lower())
+            if wntitle:
+                have_titles.add(wntitle)
+            held_local_ids.add(wid)
+
+    def _in_library(a: _Agg) -> bool:
+        return bool(
+            (a.doi and a.doi in have_dois)
+            or (a.arxiv_id and a.arxiv_id.strip().lower() in have_arxiv)
+            or (_nt(a.title) and _nt(a.title) in have_titles)
+        )
+
+    # --- Deduplicate suggestions: the same paper cited both with a DOI and title-only lands under two
+    # different keys. Collapse aggregates that share a normalized title into one suggestion (summing
+    # their citing works + mentions, keeping the richest identifiers).
+    deduped: dict[str, _Agg] = {}
+    by_title: dict[str, str] = {}
+    for key, agg in aggregates.items():
+        if _in_library(agg):
+            continue
+        nt = _nt(agg.title)
+        if nt and nt in by_title:
+            tgt = deduped[by_title[nt]]
+            tgt.citing.update(agg.citing)
+            tgt.mentions += agg.mentions
+            if not tgt.has_doi and agg.has_doi:
+                tgt.has_doi, tgt.doi, tgt.reference_id = True, agg.doi, agg.reference_id
+            elif tgt.doi is None and agg.doi:
+                tgt.doi = agg.doi
+            if tgt.year is None:
+                tgt.year = agg.year
+            if tgt.arxiv_id is None:
+                tgt.arxiv_id = agg.arxiv_id
+            continue
+        deduped[key] = agg
+        if nt:
+            by_title[nt] = key
+    aggregates = deduped
 
     missing = [
         MissingWork(

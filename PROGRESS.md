@@ -9,6 +9,15 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Citation summary "frequently cited but missing": stronger in-library + dedup checks (2026-07-19)
+
+Owner: the column kept suggesting papers already in the library, and duplicate suggestions. Added two
+post-aggregation passes in `_missing_works`: (1) **already-in-library** — a direct DB lookup over the
+candidate DOIs / arXiv ids / normalized titles (visible works only, so no hidden-work leak) drops any
+missing candidate the library actually holds but the citation graph didn't link; (2) **dedup** —
+aggregates sharing a normalized title collapse into one suggestion (summed citations, richest
+identifiers), so the same paper cited with-DOI and title-only no longer shows twice. Tests added.
+
 ## Citation import: recover year + DOI from "Title (YYYY) doi:…" lines (2026-07-19)
 
 Owner: pasting citations like `SceneGraphFusion: … RGB-D Sequences (2021) doi:10.1109/cvpr46437.2021.00743`

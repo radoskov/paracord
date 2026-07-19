@@ -142,6 +142,37 @@ def test_likely_local_suggestion_is_not_missing(db_session, make_reference) -> N
     assert "Not That Paper" in titles
 
 
+def test_missing_excludes_work_already_in_library_by_title(db_session, make_reference) -> None:
+    """A reference to a paper the library already holds (matched by normalized title, even if the
+    citation graph didn't link it) must not be surfaced as missing."""
+    actor = _owner(db_session)
+    citing = _work(db_session, "Citing", doi="10.1/citing")
+    _work(db_session, "Already Held Title")  # in the library; no DOI/link to the reference
+    make_reference(db_session, citing_work_id=citing.id, title="Already Held Title")
+    db_session.commit()
+
+    summary = citation_summary(db_session, actor, SummaryScope(type="library"))
+    titles = [m.title for m in summary.frequently_cited_missing]
+    assert "Already Held Title" not in titles
+
+
+def test_missing_dedupes_doi_and_title_only_of_same_paper(db_session, make_reference) -> None:
+    """The same missing paper cited once with a DOI and once title-only collapses to ONE suggestion
+    (summed citations, richest identifiers kept) instead of two duplicate rows."""
+    actor = _owner(db_session)
+    a = _work(db_session, "A", doi="10.1/a")
+    b = _work(db_session, "B", doi="10.1/b")
+    make_reference(db_session, citing_work_id=a.id, doi="10.9/same", title="Same Missing Paper")
+    make_reference(db_session, citing_work_id=b.id, title="Same Missing Paper")  # title-only dup
+    db_session.commit()
+
+    summary = citation_summary(db_session, actor, SummaryScope(type="library"))
+    same = [m for m in summary.frequently_cited_missing if m.title == "Same Missing Paper"]
+    assert len(same) == 1
+    assert same[0].cited_by_count == 2
+    assert same[0].doi == "10.9/same"
+
+
 def test_isolated_papers_detected(db_session, make_reference) -> None:
     actor = _owner(db_session)
     citing = _work(db_session, "Citing", doi="10.1/citing")
