@@ -9,6 +9,23 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Full test battery green after the recent AI/tag work (2026-07-19)
+
+Ran `make ready-full` + `make test-safety` + `make e2e` and fixed every failure:
+- **backend full (2)**: `test_m1_core_library` calls the `list_works` endpoint fn directly, so my new
+  `tag_any/tag_all/tag_none = Query([])` params arrived as Query markers (not lists) → passed `[]`
+  explicitly at those direct call sites.
+- **e2e 22 & 28 (tag regression)**: my new library filter was a `<details><summary>Tags ▾</summary>`,
+  colliding with the paper's `<summary>Tags</summary>` (strict-mode: 2 matches). Renamed the filter
+  control to "Tag filter" so the `hasText:'Tags'` locators match only the paper section.
+- **e2e 41 (recommend)**: pre-existing environment slowness — the dev stack's local_llm + Ollama
+  embedder ran the categorization ranker for ~2.5 min over the large library (embeds every candidate).
+  The journey targets the fast embedding fallback, so it now flips the AI config to baseline
+  (extractive + hash_bow) for the run and restores the owner's real settings after (new
+  `apiGetAiConfig`/`apiSetAiConfig` helpers). Runs in ~4 s.
+- Committed the owner's `make fix` formatting of `test_ai_admin.py` alongside.
+Result: ready-full green (1321 backend), test-safety 161, e2e 38 passed / 1 skipped.
+
 ## Scanned-PDF import: OCR the staging preview too (2026-07-19)
 
 Owner: importing an old scanned PDF (no text layer) failed — GROBID got nothing and there was no OCR

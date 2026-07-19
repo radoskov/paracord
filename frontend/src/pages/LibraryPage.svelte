@@ -838,7 +838,7 @@
           </select>
           <details class="tag-filter">
             <summary title="Filter by one or more tags. Click a tag to cycle: has (any) → must have (all) → excludes. Papers must have ALL 'must have' tags, NONE of the 'excludes' tags, and — if any 'has' tags are set — at least one of them.">
-              Tags{tagCondCount ? ` (${tagCondCount})` : ''} ▾
+              Tag filter{tagCondCount ? ` (${tagCondCount})` : ''} ▾
             </summary>
             <div class="tag-filter-panel">
               <div class="tag-filter-head">
