@@ -9,6 +9,17 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Scanned-PDF import: root cause (GROBID 500) + e2e regression guard (2026-07-19)
+
+Owner still hit `extraction failed: 500 … /api/processFulltextDocument` importing a scanned PDF.
+Confirmed: **GROBID 500s on a raw scanned PDF** (no text layer); it succeeds on the OCR'd copy. The
+OCR pre-step + shared `ocr_and_fetch_tei` (added earlier) fixes it — verified in the worker: OCR runs
+(~3–7 s) → GROBID returns TEI. Added a real regression guard: trimmed the owner's PDF to a 2-page
+scanned fixture (`e2e/fixtures/scanned-sample.pdf`, 86 KB, 0 text chars, raw→GROBID 500) and a new
+**Journey 42** that uploads it via Import → PDF import and asserts the preview EXTRACTS it (real title,
+not "extraction failed"). Forces `ocr_backend=ocrmypdf` for the run (restores after). Full e2e green
+(39 journeys). NOTE: the owner's live failure is likely the unpushed fix not being on their machine.
+
 ## Full test battery green after the recent AI/tag work (2026-07-19)
 
 Ran `make ready-full` + `make test-safety` + `make e2e` and fixed every failure:
