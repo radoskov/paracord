@@ -39,6 +39,11 @@ LLM_PROMPT_VERSION = "local-llm-v2-map-reduce"
 # instead of silently truncating like v1 did.
 LLM_INPUT_CHAR_BUDGET = 11000
 
+# Minimum per-call timeout (seconds) applied when a reasoning model is asked to think — reasoning is
+# slow, so a low configured timeout is floored to this to keep it from prematurely failing over to
+# the extractive fallback. The admin's summary_llm_timeout can raise it, but not below this.
+REASONING_MIN_TIMEOUT_S = 600.0
+
 # A deliberately small English stop-word set; enough to bias scoring toward content words
 # without pulling in an NLP dependency.
 _STOPWORDS = frozenset(
@@ -242,11 +247,13 @@ def _llm_opts_for(ai_cfg, model: str) -> _LlmOpts:
     think: bool | None = None
     if model_supports_thinking(model, ollama_url=ai_cfg.ollama_url):
         think = bool(ai_cfg.summary_reasoning)
-    return _LlmOpts(
-        keep_alive=keep_alive_value(ai_cfg),
-        think=think,
-        timeout=float(ai_cfg.summary_llm_timeout),
-    )
+    timeout = float(ai_cfg.summary_llm_timeout)
+    # Reasoning is inherently slow (a model thinks for seconds→minutes per call); never let a low/
+    # default timeout strangle it and force the extractive fallback. Enforce a generous floor when
+    # thinking is on — the admin can raise it further, but not below what reasoning realistically needs.
+    if think:
+        timeout = max(timeout, REASONING_MIN_TIMEOUT_S)
+    return _LlmOpts(keep_alive=keep_alive_value(ai_cfg), think=think, timeout=timeout)
 
 
 def _ollama_generate(
