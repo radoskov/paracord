@@ -9,6 +9,15 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Citation import: recover year + DOI from "Title (YYYY) doi:…" lines (2026-07-19)
+
+Owner: pasting citations like `SceneGraphFusion: … RGB-D Sequences (2021) doi:10.1109/cvpr46437.2021.00743`
+kept the whole string in the title and left year/DOI empty (GROBID's reference model mis-parses that
+shape). Added `_augment_citation_fields` in batch_import: pulls an explicit DOI and a parenthesized
+year out of the raw line when the parser didn't, and strips those tokens from the title. Applied in
+both grobid paths (parsed + GROBID-unavailable fallback); conservative, so ordinary titles are
+untouched. Verified on the owner's two examples. Batch-import tests pass (+ new case).
+
 ## Scanned-PDF import: root cause (GROBID 500) + e2e regression guard (2026-07-19)
 
 Owner still hit `extraction failed: 500 … /api/processFulltextDocument` importing a scanned PDF.

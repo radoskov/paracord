@@ -210,6 +210,45 @@ def test_preview_grobid_unavailable_degrades_all():
     assert [d.suggested_title for d in preview.drafts] == ["line a", "line b"]
 
 
+def test_preview_grobid_salvages_year_and_doi_from_title_string():
+    """A 'Title (YYYY) doi:10.…' line: the parser stuffs it all in the title, so we recover the
+    year + DOI and strip them out of the title (owner-reported citation-import bug)."""
+    # GROBID returns the whole string as the title with no year/doi (the mis-parse we're fixing).
+    tei = (
+        '<?xml version="1.0"?><TEI xmlns="http://www.tei-c.org/ns/1.0"><text><back><listBibl>'
+        '<biblStruct><analytic><title level="a">'
+        "SceneGraphFusion: Incremental 3D Scene Graph Prediction from RGB-D Sequences (2021) "
+        "doi:10.1109/cvpr46437.2021.00743"
+        "</title></analytic></biblStruct>"
+        "</listBibl></back></text></TEI>"
+    )
+    line = (
+        "SceneGraphFusion: Incremental 3D Scene Graph Prediction from RGB-D Sequences (2021) "
+        "doi:10.1109/cvpr46437.2021.00743"
+    )
+    preview = batch_import.preview_lines(
+        [line], engine="grobid", settings=Settings(), grobid=_FakeGrobid(tei)
+    )
+    d = preview.drafts[0]
+    assert d.suggested_year == 2021
+    assert d.suggested_doi == "10.1109/cvpr46437.2021.00743"
+    assert d.suggested_title == (
+        "SceneGraphFusion: Incremental 3D Scene Graph Prediction from RGB-D Sequences"
+    )
+    assert d.match_status == "matched"
+
+    # Same recovery when GROBID is unavailable (title_only fallback still salvages the DOI/year).
+    down = batch_import.preview_lines(
+        ["Knowledge Graph Embedding via Dynamic Mapping Matrix (2015) doi:10.3115/v1/p15-1067"],
+        engine="grobid",
+        settings=Settings(),
+        grobid=_FakeGrobid(down=True),
+    )
+    d2 = down.drafts[0]
+    assert d2.suggested_year == 2015 and d2.suggested_doi == "10.3115/v1/p15-1067"
+    assert d2.suggested_title == "Knowledge Graph Embedding via Dynamic Mapping Matrix"
+
+
 # --- commit -----------------------------------------------------------------
 
 

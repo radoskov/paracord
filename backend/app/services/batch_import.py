@@ -22,6 +22,7 @@ is given — adds each work to that shelf through the shared ACL-checked helper.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -118,6 +119,42 @@ def clean_lines(lines: list[str], *, settings: Settings) -> list[str]:
     cap = int(getattr(settings, "web_find_batch_max_lines", 200))
     cleaned = [stripped for raw in lines if (stripped := raw.strip())]
     return cleaned[:cap]
+
+
+# A DOI anywhere in the line (optionally prefixed with "doi:"); the captured group is the bare DOI.
+_DOI_IN_TEXT = re.compile(r"(?:doi:\s*)?(10\.\d{4,9}/[^\s,;)\]]+)", re.IGNORECASE)
+# A parenthesized 4-digit year, e.g. "(2021)" — the common "Title (Year)" citation shape.
+_YEAR_PAREN = re.compile(r"\((1[5-9]\d{2}|20\d{2})\)")
+
+
+def _augment_citation_fields(
+    raw_line: str, *, title: str | None, year: int | None, doi: str | None
+) -> tuple[str, int | None, str | None]:
+    """Recover the year + DOI that a citation string carries explicitly (``Title (2021) doi:10.…``)
+    but the reference parser often leaves stuffed in the title.
+
+    Fills ``year``/``doi`` from the raw line only when the parser didn't, then strips a DOI token and
+    a parenthesized year out of the title (a real title has neither) so the title field isn't the
+    whole raw string. Conservative: it only removes what it recognizes, so ordinary titles are
+    untouched.
+    """
+    title = (title or raw_line).strip()
+    if not doi:
+        m = _DOI_IN_TEXT.search(raw_line)
+        if m:
+            doi = m.group(1).rstrip(".,;)]}")
+    if not year:
+        ym = _YEAR_PAREN.search(raw_line)
+        if ym:
+            year = int(ym.group(1))
+    # Tidy the title: drop any DOI token (with/without a "doi:" prefix) and a parenthesized year.
+    cleaned = _DOI_IN_TEXT.sub("", title)
+    cleaned = re.sub(r"\bdoi:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = _YEAR_PAREN.sub("", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .,;–-")
+    if cleaned:
+        title = cleaned
+    return title, year, doi
 
 
 def _candidate_from_web(cand: web_find.WebCandidate) -> DraftCandidate:
@@ -242,59 +279,55 @@ def _preview_grobid(
     try:
         tei_xml = client.process_citation_list_sync(lines)
     except GrobidUnavailableError:
-        # Degrade every line to title_only rather than failing the whole batch.
-        drafts = [
-            ParsedDraft(
-                line_index=index,
-                raw_line=line,
-                engine="grobid",
-                suggested_title=line,
-                suggested_authors=[],
-                suggested_year=None,
-                suggested_doi=None,
-                suggested_venue=None,
-                suggested_abstract=None,
-                match_status="title_only",
-            )
-            for index, line in enumerate(lines)
-        ]
-        return BatchPreview(drafts=drafts, grobid_unavailable=True)
-
-    references = parse_citation_list(tei_xml)
-    drafts = []
-    for index, line in enumerate(lines):
-        ref = references[index] if index < len(references) else None
-        title = (ref.title if ref else None) or None
-        if title:
+        # Degrade every line to title_only rather than failing the whole batch — but still salvage an
+        # explicit DOI/year from the raw line so a "Title (2021) doi:10.…" line isn't wholly a title.
+        drafts = []
+        for index, line in enumerate(lines):
+            title, year, doi = _augment_citation_fields(line, title=None, year=None, doi=None)
             drafts.append(
                 ParsedDraft(
                     line_index=index,
                     raw_line=line,
                     engine="grobid",
                     suggested_title=title,
-                    suggested_authors=list(ref.authors) if ref else [],
-                    suggested_year=ref.year if ref else None,
-                    suggested_doi=ref.doi if ref else None,
-                    suggested_venue=ref.venue if ref else None,
+                    suggested_authors=[],
+                    suggested_year=year,
+                    suggested_doi=doi,
+                    suggested_venue=None,
                     suggested_abstract=None,
-                    match_status="matched",
+                    match_status="matched" if doi else "title_only",
                 )
             )
-        else:
-            drafts.append(
-                ParsedDraft(
-                    line_index=index,
-                    raw_line=line,
-                    engine="grobid",
-                    suggested_title=line,
-                    suggested_authors=list(ref.authors) if ref else [],
-                    suggested_year=ref.year if ref else None,
-                    suggested_doi=ref.doi if ref else None,
-                    suggested_venue=ref.venue if ref else None,
-                    suggested_abstract=None,
-                    match_status="title_only",
-                )
+        return BatchPreview(drafts=drafts, grobid_unavailable=True)
+
+    references = parse_citation_list(tei_xml)
+    drafts = []
+    for index, line in enumerate(lines):
+        ref = references[index] if index < len(references) else None
+        grobid_title = (ref.title if ref else None) or None
+        # Recover a DOI/year the parser left in the raw string and clean them out of the title
+        # (fixes "Title (2021) doi:10.…" landing whole in the title with no year/doi).
+        title, year, doi = _augment_citation_fields(
+            line,
+            title=grobid_title,
+            year=ref.year if ref else None,
+            doi=ref.doi if ref else None,
+        )
+        drafts.append(
+            ParsedDraft(
+                line_index=index,
+                raw_line=line,
+                engine="grobid",
+                suggested_title=title,
+                suggested_authors=list(ref.authors) if ref else [],
+                suggested_year=year,
+                suggested_doi=doi,
+                suggested_venue=ref.venue if ref else None,
+                suggested_abstract=None,
+                # Matched when the parser found a title OR we salvaged a DOI from the raw line.
+                match_status="matched" if (grobid_title or doi) else "title_only",
             )
+        )
     return BatchPreview(drafts=drafts)
 
 
