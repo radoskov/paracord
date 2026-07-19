@@ -149,6 +149,32 @@ def test_llm_opts_reasoning_only_for_capable_models(monkeypatch) -> None:
     assert opts.think is None
 
 
+def test_short_summary_map_reduces_a_long_paper(monkeypatch) -> None:
+    """A paper longer than the per-call budget is summarized in chunks (map-reduce) — several LLM
+    calls, never a single truncated call — so long papers are covered and never overflow the context."""
+    import app.services.summarization as summ
+
+    calls: list[str] = []
+
+    def fake_gen(prompt, *, model, base_url, opts=None):
+        calls.append(prompt[:24])
+        return "A concise digest sentence."
+
+    monkeypatch.setattr(summ, "_ollama_generate", fake_gen)
+
+    short = "Transformers use attention. It replaces recurrence."
+    assert len(short) <= summ.LLM_INPUT_CHAR_BUDGET
+    summ._short_summary_llm(short, model="m", base_url="u")
+    assert len(calls) == 1  # fits the budget → a single call, no map-reduce
+
+    calls.clear()
+    long_text = "Attention replaces recurrence in the transformer model. " * 800
+    assert len(long_text) > summ.LLM_INPUT_CHAR_BUDGET
+    out = summ._short_summary_llm(long_text, model="m", base_url="u")
+    assert out == "A concise digest sentence."
+    assert len(calls) >= 2  # chunked: per-chunk maps + a final condense
+
+
 # --- pure extractive summarizer ---------------------------------------------
 
 

@@ -337,6 +337,84 @@ def _ollama_summarize(
     return _ollama_generate(prompt, model=model, base_url=base_url, opts=opts)
 
 
+# Map step for a long paper's SHORT summary: condense one chunk of the paper into a few sentences.
+_MAP_CHUNK_PROMPT = (
+    "The text below is ONE part of a longer academic paper. In 2-3 sentences, capture its key points "
+    "(problem, method, data, or result). Respond with the summary only." + _MATH_HINT + "\n\n"
+)
+
+
+def _short_summary_llm(
+    text: str,
+    *,
+    model: str,
+    base_url: str,
+    abstract_only: bool = False,
+    opts: _LlmOpts | None = None,
+    progress_cb=None,
+    cancel_cb=None,
+) -> str:
+    """Length-safe SHORT summary. A single call when the source fits the per-call budget; otherwise
+    **map-reduce** — summarize each chunk of the whole paper, then condense the chunk summaries — so
+    an arbitrarily long paper is covered in full and never overflows the model's context (which would
+    return an empty answer and fall back to extractive). Iterates the reduce until the digests fit.
+    """
+    text = (text or "").strip()
+    if len(text) <= LLM_INPUT_CHAR_BUDGET:
+        return _ollama_summarize(
+            text, model=model, base_url=base_url, abstract_only=abstract_only, opts=opts
+        )
+
+    def _cancelled(done: int, of: int) -> None:
+        if cancel_cb is not None and cancel_cb():
+            from app.workers.queue import JobCancelled  # noqa: PLC0415 (cycle guard)
+
+            raise JobCancelled(f"cancelled after {done} of {of} summary chunks")
+
+    # MAP: chunk the paper on paragraph/sentence boundaries and summarize each chunk.
+    chunks = _pack_blocks(_paragraphs(text, LLM_INPUT_CHAR_BUDGET), LLM_INPUT_CHAR_BUDGET)
+    total = len(chunks) + 1  # +1 for the final condense step
+    digests: list[str] = []
+    for idx, chunk in enumerate(chunks):
+        _cancelled(idx, len(chunks))
+        if progress_cb is not None:
+            progress_cb(idx, total)
+        piece = _ollama_generate(
+            _MAP_CHUNK_PROMPT + chunk, model=model, base_url=base_url, opts=opts
+        )
+        if piece.strip():
+            digests.append(piece.strip())
+    if not digests:
+        return ""
+    # REDUCE: collapse the digests until they fit one budget, then write the final short summary.
+    combined = "\n".join(digests)
+    while len(combined) > LLM_INPUT_CHAR_BUDGET:
+        packed = _pack_blocks(digests, LLM_INPUT_CHAR_BUDGET)
+        digests = [
+            p.strip()
+            for p in (
+                _ollama_generate(_MAP_CHUNK_PROMPT + c, model=model, base_url=base_url, opts=opts)
+                for c in packed
+            )
+            if p.strip()
+        ]
+        if not digests:
+            return ""
+        new_combined = "\n".join(digests)
+        if len(new_combined) >= len(combined):  # not shrinking — stop and let the budget clip
+            combined = new_combined
+            break
+        combined = new_combined
+    if progress_cb is not None:
+        progress_cb(total - 1, total)
+    final = _ollama_summarize(
+        combined, model=model, base_url=base_url, abstract_only=abstract_only, opts=opts
+    )
+    if progress_cb is not None:
+        progress_cb(total, total)
+    return final
+
+
 def _detail_chunk_prompt(label: str | None) -> str:
     named = f'the "{label}" section' if label else "this section"
     return (
@@ -884,12 +962,16 @@ def summarize_work(
                         opts=opts,
                     )
                 else:
-                    text = _ollama_summarize(
+                    # Length-safe: a long paper is map-reduced (chunked) rather than truncated, so
+                    # it's covered in full and never overflows the context into an empty answer.
+                    text = _short_summary_llm(
                         source_text,
                         model=stored_model,
                         base_url=ai_cfg.ollama_url,
                         abstract_only=abstract_only,
                         opts=opts,
+                        progress_cb=progress_cb,
+                        cancel_cb=cancel_cb,
                     )
             except Exception as exc:  # noqa: BLE001 - degrade to extractive, never fail the request
                 from app.workers.queue import is_abort_exception  # noqa: PLC0415 (cycle guard)

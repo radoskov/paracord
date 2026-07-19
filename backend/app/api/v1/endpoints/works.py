@@ -2556,10 +2556,26 @@ def create_summary(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This paper has only a title (no abstract or full text) and cannot be summarized.",
             )
-    # A detailed local-LLM summary (any effort level) can fire many LLM calls — run it as a
-    # background job so the request doesn't hang. Short/extractive stay inline (fast). Queue down →
-    # fall through inline.
-    if payload.detail != "short" and summary_type == "local_llm":
+    # A local-LLM summary can fire many/slow LLM calls — run it as a background job so the request
+    # doesn't hang: ALWAYS for a detailed summary (one call per section), and for a short one when it
+    # would be slow (a reasoning model, or a paper long enough to be map-reduced in chunks). A short,
+    # non-reasoning, in-budget summary stays inline (fast). Queue down → fall through inline.
+    background = False
+    if summary_type == "local_llm":
+        if payload.detail != "short":
+            background = True
+        else:
+            from app.services.ai_config import get_ai_config
+            from app.services.model_management import model_supports_thinking
+            from app.services.summarization import LLM_INPUT_CHAR_BUDGET, work_source_text
+
+            cfg = get_ai_config(db)
+            reasoning = bool(cfg.summary_reasoning) and model_supports_thinking(
+                cfg.summary_model, ollama_url=cfg.ollama_url
+            )
+            long_source = len(work_source_text(db, work)) > LLM_INPUT_CHAR_BUDGET
+            background = reasoning or long_source
+    if background:
         from app.services.summarization import stored_summary_type
 
         job_id = enqueue_work_summary(work_id, detail=payload.detail)

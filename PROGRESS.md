@@ -9,6 +9,18 @@
 > migrations are **separate** schema definitions — change a model → write + verify the migration
 > on Postgres (parity + autogenerate-clean tests enforce this).
 
+## Length-safe summaries: map-reduce long papers instead of truncating (2026-07-19)
+
+Owner: an LLM summary should never fail when a paper is too long for the context — chunk it. The short
+path previously truncated the source to 11k chars (silent) and a long paper + reasoning could overflow.
+New `_short_summary_llm` map-reduces: fits-in-budget → one call; else summarize each chunk of the whole
+paper then condense the digests (iterating the reduce until they fit), so an arbitrarily long paper is
+covered in full and never overflows into an empty answer. `create_summary` now backgrounds a short
+local_llm summary when it would be slow (reasoning model, or a long source that map-reduces) — the
+detailed path already backgrounded — so the request never hangs; the frontend already polls queued
+short summaries. Verified live: a 28k-char paper with reasoning summarized to `provider_used=local_llm`
+(no fallback) via chunked map-reduce. Backend 52 pass.
+
 ## Reasoning summaries: fix empty-response fallback (num_ctx) + persisted fallback reasons (2026-07-19)
 
 Owner: reasoning summaries still fell back to extractive — but at *variable* times (short ~38s, detailed
